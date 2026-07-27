@@ -58,6 +58,10 @@ class MainWindow(QMainWindow):
         self._current_fps = 0.0
         self._avg_fps = 0.0
         self._avg_frame_time_ms = 0.0
+        self._max_frame_time_ms = 0.0          # Longest frame processing time
+        self._slow_frame_count = 0             # Frames exceeding 60fps threshold
+        self._total_frame_count = 0            # Total frames processed
+        self._FRAME_TIME_TARGET_MS = 16.67     # Target: 60fps = 1000/60 ms per frame
         
         # Register available synesthesia modes
         self._register_modes()
@@ -146,10 +150,24 @@ class MainWindow(QMainWindow):
         else:
             self._debug_log.clear()
     
-    def _update_performance_display(self):
-        """Update FPS and performance metrics display."""
+    def _update_performance_display(self, frame_time_ms: float):
+        """Update FPS and performance metrics display.
+        
+        Args:
+            frame_time_ms: Processing time of the current frame in milliseconds.
+        """
         now = time.time()
         self._fps_history.append(now)
+        self._frame_times.append(frame_time_ms)
+        self._total_frame_count += 1
+        
+        # Track slow frames (exceeding 60fps target of 16.67ms)
+        if frame_time_ms > self._FRAME_TIME_TARGET_MS:
+            self._slow_frame_count += 1
+        
+        # Track maximum frame time
+        if frame_time_ms > self._max_frame_time_ms:
+            self._max_frame_time_ms = frame_time_ms
         
         # Calculate current FPS from recent history
         if len(self._fps_history) > 1:
@@ -162,18 +180,31 @@ class MainWindow(QMainWindow):
             self._avg_frame_time_ms = sum(self._frame_times) / len(self._frame_times)
             self._avg_fps = 1000.0 / self._avg_frame_time_ms if self._avg_frame_time_ms > 0 else 0
         
+        # Calculate slow frame percentage
+        slow_pct = (self._slow_frame_count / self._total_frame_count * 100) if self._total_frame_count > 0 else 0.0
+        
         # Update labels
         self._fps_label.setText(f"FPS: {self._current_fps:.1f}")
-        self._frame_time_label.setText(f"Frame: {self._avg_frame_time_ms:.1f} ms")
-        self._avg_fps_label.setText(f"Avg FPS: {self._avg_fps:.1f}")
+        self._frame_time_label.setText(f"Frame: {frame_time_ms:.1f} ms")
+        self._avg_fps_label.setText(f"Avg: {self._avg_fps:.1f} fps")
+        self._max_frame_label.setText(f"Max: {self._max_frame_time_ms:.1f} ms")
+        self._slow_frame_label.setText(f"Slow: {self._slow_frame_count} ({slow_pct:.1f}%)")
         
-        # Color code FPS
-        if self._current_fps >= 30:
-            self._fps_label.setStyleSheet("color: #0f0; font-family: monospace; font-size: 11px; padding: 0 8px;")
-        elif self._current_fps >= 15:
-            self._fps_label.setStyleSheet("color: #ff0; font-family: monospace; font-size: 11px; padding: 0 8px;")
+        # Color code FPS label based on current performance
+        if self._current_fps >= 60:
+            self._fps_label.setStyleSheet("color: #9ece6a; font-family: 'Consolas', monospace; font-size: 11px; font-weight: bold; padding: 0 8px;")
+        elif self._current_fps >= 30:
+            self._fps_label.setStyleSheet("color: #e0af68; font-family: 'Consolas', monospace; font-size: 11px; font-weight: bold; padding: 0 8px;")
         else:
-            self._fps_label.setStyleSheet("color: #f00; font-family: monospace; font-size: 11px; padding: 0 8px;")
+            self._fps_label.setStyleSheet("color: #f7768e; font-family: 'Consolas', monospace; font-size: 11px; font-weight: bold; padding: 0 8px;")
+        
+        # Color code slow frame label
+        if slow_pct <= 5:
+            self._slow_frame_label.setStyleSheet("color: #9ece6a; font-family: 'Consolas', monospace; font-size: 11px; font-weight: bold; padding: 0 8px;")
+        elif slow_pct <= 20:
+            self._slow_frame_label.setStyleSheet("color: #e0af68; font-family: 'Consolas', monospace; font-size: 11px; font-weight: bold; padding: 0 8px;")
+        else:
+            self._slow_frame_label.setStyleSheet("color: #f7768e; font-family: 'Consolas', monospace; font-size: 11px; font-weight: bold; padding: 0 8px;")
 
     def _create_left_panel(self) -> QWidget:
         """Create the left panel with video display and visualizer."""
@@ -202,9 +233,19 @@ class MainWindow(QMainWindow):
         debug_controls.addWidget(self._frame_time_label)
         
         # Avg FPS display
-        self._avg_fps_label = QLabel("Avg FPS: --")
-        self._avg_fps_label.setStyleSheet("color: #0ff; font-family: monospace; font-size: 11px; padding: 0 8px;")
+        self._avg_fps_label = QLabel("Avg: -- fps")
+        self._avg_fps_label.setStyleSheet("color: #7dcfff; font-family: 'Consolas', monospace; font-size: 11px; font-weight: bold; padding: 0 8px;")
         debug_controls.addWidget(self._avg_fps_label)
+        
+        # Max frame time display
+        self._max_frame_label = QLabel("Max: -- ms")
+        self._max_frame_label.setStyleSheet("color: #f7768e; font-family: 'Consolas', monospace; font-size: 11px; font-weight: bold; padding: 0 8px;")
+        debug_controls.addWidget(self._max_frame_label)
+        
+        # Slow frame count display
+        self._slow_frame_label = QLabel("Slow: 0 (0.0%)")
+        self._slow_frame_label.setStyleSheet("color: #9ece6a; font-family: 'Consolas', monospace; font-size: 11px; font-weight: bold; padding: 0 8px;")
+        debug_controls.addWidget(self._slow_frame_label)
         
         debug_controls.addStretch()
         debug_layout.addLayout(debug_controls)
@@ -736,8 +777,7 @@ class MainWindow(QMainWindow):
         
         # Track performance
         frame_time = (time.perf_counter() - frame_start) * 1000.0  # ms
-        self._frame_times.append(frame_time)
-        self._update_performance_display()
+        self._update_performance_display(frame_time)
     
     def _send_event(self, event: NoteEvent):
         """Send a note event to MIDI output and/or audio engine."""
