@@ -47,7 +47,8 @@ class NoteVisualizer(QWidget):
             QColor(180, 80, 255),   # A# - purple
             QColor(255, 80, 200),   # B - pink
         ]
-        for note in range(48, 84):  # C3 to C6
+        # Cover full MIDI range (0-127) so no notes fall back to gray
+        for note in range(128):
             chromatic = note % 12
             self._note_colors[note] = note_colors[chromatic]
     
