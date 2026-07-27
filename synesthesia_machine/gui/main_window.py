@@ -430,12 +430,6 @@ class MainWindow(QMainWindow):
         range_layout.addWidget(self._max_note_spin)
         scale_layout.addLayout(range_layout)
         
-        # Scale preview
-        self._scale_preview_label = QLabel()
-        self._scale_preview_label.setStyleSheet("color: #aaa; font-family: monospace; font-size: 12px;")
-        self._scale_preview_label.setWordWrap(True)
-        scale_layout.addWidget(self._scale_preview_label)
-        
         scale_group.setLayout(scale_layout)
         scroll_layout.addWidget(scale_group)
         
@@ -568,15 +562,13 @@ class MainWindow(QMainWindow):
             self._mode_desc_label.setText(self._current_mode.get_description())
     
     def _update_scale_display(self):
-        """Update the scale preview and apply to visualizer."""
+        """Apply scale to visualizer."""
         scale_type = self._scale_combo.currentData()
         root_note = self._root_note_spin.value()
         min_note = self._min_note_spin.value()
         max_note = self._max_note_spin.value()
         
         notes = get_scale_notes(scale_type, root_note, min_note=min_note, max_note=max_note)
-        note_names = [get_note_name(n) for n in notes]
-        self._scale_preview_label.setText("Notes: " + ", ".join(note_names))
         
         # Update visualizer
         self._visualizer.set_scale_notes(notes)
@@ -872,44 +864,44 @@ class MainWindow(QMainWindow):
     def _get_stylesheet(self) -> str:
         return """
             /* =====================================================
-               Futuristic Apple 2076 — Glassmorphism Theme
+               Futuristic Apple 2076 — Dark Glassmorphism Theme
                =====================================================
                Design language:
-               - Frosted glass panels with subtle translucency
+               - Frosted glass panels with dark translucency
                - Ultra-rounded corners (squircle aesthetic)
-               - Soft multi-stop gradients
+               - Soft multi-stop gradients on dark base
                - Floating elements with depth shadows
                - San Francisco–inspired clean typography
                - Vibrant holographic accent gradients
-               - Light mode with airy whitespace
+               - Dark mode for eye comfort
                ===================================================== */
 
             /* === Window & Background === */
             QMainWindow {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #e8eaf0,
-                    stop:0.5 #dfe2ea,
-                    stop:1 #d5d9e4);
+                    stop:0 #1a1b26,
+                    stop:0.5 #181924,
+                    stop:1 #151620);
             }
 
             /* === Group Boxes — Floating Glass Cards === */
             QGroupBox {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(255,255,255,0.82),
-                    stop:1 rgba(255,255,255,0.65));
-                border: 1.5px solid rgba(200, 205, 220, 0.5);
+                    stop:0 rgba(30,32,48,0.85),
+                    stop:1 rgba(24,26,40,0.85));
+                border: 1.5px solid rgba(60, 65, 90, 0.5);
                 border-radius: 18px;
                 margin-top: 16px;
                 padding-top: 22px;
                 font-size: 14px;
                 font-weight: 600;
-                color: #1d1d1f;
+                color: #c0caf5;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 left: 18px;
                 padding: 0 10px 6px 10px;
-                color: #1d1d1f;
+                color: #7aa2f7;
                 font-size: 11px;
                 font-weight: 700;
                 text-transform: uppercase;
@@ -918,7 +910,7 @@ class MainWindow(QMainWindow):
 
             /* === Labels === */
             QLabel {
-                color: #6e6e73;
+                color: #a9b1d6;
                 font-size: 12px;
                 font-weight: 500;
             }
@@ -926,10 +918,10 @@ class MainWindow(QMainWindow):
             /* === Combo Boxes — Pill Dropdowns === */
             QComboBox {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(255,255,255,0.9),
-                    stop:1 rgba(245,245,247,0.9));
-                color: #1d1d1f;
-                border: 1.5px solid rgba(200, 205, 220, 0.4);
+                    stop:0 rgba(21,22,30,0.9),
+                    stop:1 rgba(18,19,27,0.9));
+                color: #c0caf5;
+                border: 1.5px solid rgba(60, 65, 90, 0.4);
                 border-radius: 14px;
                 padding: 8px 14px;
                 min-height: 28px;
@@ -937,10 +929,10 @@ class MainWindow(QMainWindow):
                 font-weight: 500;
             }
             QComboBox:hover {
-                border-color: rgba(100, 130, 220, 0.5);
+                border-color: rgba(122, 162, 247, 0.5);
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(255,255,255,0.95),
-                    stop:1 rgba(248,248,250,0.95));
+                    stop:0 rgba(25,26,36,0.95),
+                    stop:1 rgba(22,23,32,0.95));
             }
             QComboBox:focus {
                 border-color: #6486ff;
@@ -955,23 +947,23 @@ class MainWindow(QMainWindow):
                 image: none;
                 border-left: 5px solid transparent;
                 border-right: 5px solid transparent;
-                border-top: 6px solid #8e8e93;
+                border-top: 6px solid #7aa2f7;
                 margin-right: 6px;
             }
             QComboBox QAbstractItemView {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(255,255,255,0.95),
-                    stop:1 rgba(245,245,247,0.95));
-                border: 1.5px solid rgba(200, 205, 220, 0.5);
+                    stop:0 rgba(30,32,48,0.95),
+                    stop:1 rgba(24,26,40,0.95));
+                border: 1.5px solid rgba(60, 65, 90, 0.5);
                 border-radius: 14px;
-                color: #1d1d1f;
+                color: #c0caf5;
                 selection-background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                     stop:0 #6486ff,
                     stop:1 #a855f7);
                 selection-color: #ffffff;
                 outline: none;
                 padding: 6px;
-                gridline-color: rgba(200, 205, 220, 0.3);
+                gridline-color: rgba(60, 65, 90, 0.3);
             }
             QComboBox QAbstractItemView::item {
                 min-height: 32px;
@@ -986,17 +978,17 @@ class MainWindow(QMainWindow):
                 font-weight: 600;
             }
             QComboBox QAbstractItemView::item:hover {
-                background: rgba(100, 134, 255, 0.15);
-                color: #1d1d1f;
+                background: rgba(122, 162, 247, 0.2);
+                color: #c0caf5;
             }
 
             /* === Spin Boxes — Glass Inputs === */
             QSpinBox, QDoubleSpinBox {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(255,255,255,0.9),
-                    stop:1 rgba(245,245,247,0.9));
-                color: #1d1d1f;
-                border: 1.5px solid rgba(200, 205, 220, 0.4);
+                    stop:0 rgba(21,22,30,0.9),
+                    stop:1 rgba(18,19,27,0.9));
+                color: #c0caf5;
+                border: 1.5px solid rgba(60, 65, 90, 0.4);
                 border-radius: 12px;
                 padding: 6px 10px;
                 min-height: 28px;
@@ -1004,7 +996,7 @@ class MainWindow(QMainWindow):
                 font-weight: 500;
             }
             QSpinBox:hover, QDoubleSpinBox:hover {
-                border-color: rgba(100, 130, 220, 0.5);
+                border-color: rgba(122, 162, 247, 0.5);
             }
             QSpinBox:focus, QDoubleSpinBox:focus {
                 border-color: #6486ff;
@@ -1012,31 +1004,31 @@ class MainWindow(QMainWindow):
             }
             QSpinBox::up-button, QDoubleSpinBox::up-button,
             QSpinBox::down-button, QDoubleSpinBox::down-button {
-                background: rgba(245, 245, 247, 0.6);
+                background: rgba(30, 32, 48, 0.6);
                 border: none;
                 border-radius: 8px;
                 width: 20px;
             }
             QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
             QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
-                background: rgba(100, 134, 255, 0.2);
+                background: rgba(122, 162, 247, 0.25);
             }
             QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
                 border-left: 5px solid transparent;
                 border-right: 5px solid transparent;
-                border-bottom: 6px solid #8e8e93;
+                border-bottom: 6px solid #7aa2f7;
                 margin-bottom: 2px;
             }
             QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
                 border-left: 5px solid transparent;
                 border-right: 5px solid transparent;
-                border-top: 6px solid #8e8e93;
+                border-top: 6px solid #7aa2f7;
                 margin-top: 2px;
             }
 
             /* === Check Boxes — Pill Toggles === */
             QCheckBox {
-                color: #1d1d1f;
+                color: #c0caf5;
                 font-size: 13px;
                 font-weight: 500;
                 spacing: 10px;
@@ -1046,10 +1038,10 @@ class MainWindow(QMainWindow):
                 height: 20px;
                 border-radius: 10px;
                 border: none;
-                background: rgba(142, 142, 147, 0.3);
+                background: rgba(86, 95, 137, 0.3);
             }
             QCheckBox::indicator:hover {
-                background: rgba(142, 142, 147, 0.4);
+                background: rgba(86, 95, 137, 0.45);
             }
             QCheckBox::indicator:checked {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
@@ -1060,10 +1052,10 @@ class MainWindow(QMainWindow):
             /* === Push Buttons — Holographic Pills === */
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(255,255,255,0.85),
-                    stop:1 rgba(245,245,247,0.85));
-                color: #1d1d1f;
-                border: 1.5px solid rgba(200, 205, 220, 0.4);
+                    stop:0 rgba(47,51,72,0.85),
+                    stop:1 rgba(41,46,66,0.85));
+                color: #c0caf5;
+                border: 1.5px solid rgba(60, 65, 90, 0.4);
                 border-radius: 14px;
                 padding: 8px 18px;
                 font-size: 13px;
@@ -1071,19 +1063,19 @@ class MainWindow(QMainWindow):
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 rgba(100,134,255,0.15),
-                    stop:1 rgba(168,85,247,0.15));
-                border-color: rgba(100, 130, 220, 0.5);
+                    stop:0 rgba(100,134,255,0.2),
+                    stop:1 rgba(168,85,247,0.2));
+                border-color: rgba(122, 162, 247, 0.5);
             }
             QPushButton:pressed {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 rgba(100,134,255,0.25),
-                    stop:1 rgba(168,85,247,0.25));
+                    stop:0 rgba(100,134,255,0.3),
+                    stop:1 rgba(168,85,247,0.3));
             }
             QPushButton:disabled {
-                background: rgba(245, 245, 247, 0.4);
-                color: rgba(142, 142, 147, 0.6);
-                border-color: rgba(200, 205, 220, 0.2);
+                background: rgba(30, 32, 48, 0.5);
+                color: rgba(86, 95, 137, 0.6);
+                border-color: rgba(60, 65, 90, 0.2);
             }
 
             /* === Sliders — Liquid Track === */
@@ -1117,9 +1109,9 @@ class MainWindow(QMainWindow):
 
             /* === Status Bar === */
             QStatusBar {
-                color: #8e8e93;
+                color: #565f89;
                 background: transparent;
-                border-top: 1px solid rgba(200, 205, 220, 0.3);
+                border-top: 1px solid rgba(60, 65, 90, 0.3);
                 font-size: 12px;
                 font-weight: 500;
             }
@@ -1152,11 +1144,9 @@ class MainWindow(QMainWindow):
 
             /* === Text Edit (debug log) === */
             QTextEdit {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(250,250,252,0.9),
-                    stop:1 rgba(242,242,245,0.9));
-                color: #1d1d1f;
-                border: 1.5px solid rgba(200, 205, 220, 0.4);
+                background: rgba(17, 17, 27, 0.9);
+                color: #a9b1d6;
+                border: 1.5px solid rgba(60, 65, 90, 0.4);
                 border-radius: 12px;
                 padding: 6px;
                 selection-background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
