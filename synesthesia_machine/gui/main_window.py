@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QComboBox, QFileDialog,
     QGroupBox, QSpinBox, QDoubleSpinBox, QCheckBox,
     QStatusBar, QMessageBox, QScrollArea, QTextEdit,
-    QSlider
+    QSlider, QSplitter
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QImage, QPixmap, QFont
@@ -86,16 +86,34 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QHBoxLayout(central)
-        main_layout.setSpacing(6)
+        main_layout.setSpacing(0)
         main_layout.setContentsMargins(6, 6, 6, 6)
+        
+        # Splitter for resizable panels
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(6)
+        splitter.setStyleSheet("""
+            QSplitter::handle {
+                background: transparent;
+            }
+            QSplitter::handle:hover {
+                background: rgba(100, 134, 255, 0.4);
+            }
+        """)
         
         # Left panel - Video + Visualizer
         left_panel = self._create_left_panel()
-        main_layout.addWidget(left_panel, stretch=3)
+        splitter.addWidget(left_panel)
         
         # Right panel - Controls
         right_panel = self._create_right_panel()
-        main_layout.addWidget(right_panel, stretch=1)
+        splitter.addWidget(right_panel)
+        
+        # Set initial sizes (left ~75%, right ~25%)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 1)
+        
+        main_layout.addWidget(splitter)
         
         # Status bar
         self._status_bar = QStatusBar()
@@ -325,7 +343,7 @@ class MainWindow(QMainWindow):
     def _create_right_panel(self) -> QWidget:
         """Create the right panel with all controls."""
         panel = QWidget()
-        panel.setMaximumWidth(300)
+        panel.setMinimumWidth(200)
         layout = QVBoxLayout(panel)
         layout.setSpacing(6)
         
