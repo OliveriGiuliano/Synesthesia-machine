@@ -86,8 +86,8 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QHBoxLayout(central)
-        main_layout.setSpacing(10)
-        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(6)
+        main_layout.setContentsMargins(6, 6, 6, 6)
         
         # Left panel - Video + Visualizer
         left_panel = self._create_left_panel()
@@ -210,7 +210,7 @@ class MainWindow(QMainWindow):
         """Create the left panel with video display and visualizer."""
         panel = QWidget()
         layout = QVBoxLayout(panel)
-        layout.setSpacing(10)
+        layout.setSpacing(6)
         
         # Debug panel (collapsible)
         debug_group = QGroupBox("Debug Panel")
@@ -283,7 +283,7 @@ class MainWindow(QMainWindow):
         # Buttons use global stylesheet
         for btn in [self._btn_load_file, self._btn_camera,
                      self._btn_play, self._btn_pause, self._btn_stop]:
-            btn.setMaximumHeight(32)
+            btn.setMaximumHeight(28)
         
         controls_layout.addWidget(self._btn_load_file)
         controls_layout.addWidget(self._btn_camera)
@@ -325,9 +325,9 @@ class MainWindow(QMainWindow):
     def _create_right_panel(self) -> QWidget:
         """Create the right panel with all controls."""
         panel = QWidget()
-        panel.setMaximumWidth(350)
+        panel.setMaximumWidth(300)
         layout = QVBoxLayout(panel)
-        layout.setSpacing(10)
+        layout.setSpacing(6)
         
         # Scroll area for controls
         scroll = QScrollArea()
@@ -336,7 +336,7 @@ class MainWindow(QMainWindow):
         
         scroll_content = QWidget()
         scroll_layout = QVBoxLayout(scroll_content)
-        scroll_layout.setSpacing(12)
+        scroll_layout.setSpacing(8)
         
         # Synesthesia Mode Selection
         mode_group = QGroupBox("Synesthesia Mode")
@@ -874,6 +874,7 @@ class MainWindow(QMainWindow):
                - San Francisco–inspired clean typography
                - Vibrant holographic accent gradients
                - Dark mode for eye comfort
+               - Compact layout
                ===================================================== */
 
             /* === Window & Background === */
@@ -890,22 +891,23 @@ class MainWindow(QMainWindow):
                     stop:0 rgba(30,32,48,0.85),
                     stop:1 rgba(24,26,40,0.85));
                 border: 1.5px solid rgba(60, 65, 90, 0.5);
-                border-radius: 18px;
-                margin-top: 16px;
-                padding-top: 22px;
-                font-size: 14px;
+                border-radius: 12px;
+                margin-top: 8px;
+                padding-top: 16px;
+                padding-bottom: 8px;
+                font-size: 13px;
                 font-weight: 600;
                 color: #c0caf5;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 18px;
-                padding: 0 10px 6px 10px;
+                left: 12px;
+                padding: 0 6px 4px 6px;
                 color: #7aa2f7;
-                font-size: 11px;
+                font-size: 10px;
                 font-weight: 700;
                 text-transform: uppercase;
-                letter-spacing: 1.5px;
+                letter-spacing: 1.2px;
             }
 
             /* === Labels === */
@@ -922,10 +924,10 @@ class MainWindow(QMainWindow):
                     stop:1 rgba(18,19,27,0.9));
                 color: #c0caf5;
                 border: 1.5px solid rgba(60, 65, 90, 0.4);
-                border-radius: 14px;
-                padding: 8px 14px;
-                min-height: 28px;
-                font-size: 13px;
+                border-radius: 10px;
+                padding: 5px 10px;
+                min-height: 24px;
+                font-size: 12px;
                 font-weight: 500;
             }
             QComboBox:hover {
@@ -982,17 +984,17 @@ class MainWindow(QMainWindow):
                 color: #c0caf5;
             }
 
-            /* === Spin Boxes — Glass Inputs === */
+            /* === Spin Boxes — Glass Inputs (no arrows) === */
             QSpinBox, QDoubleSpinBox {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(21,22,30,0.9),
                     stop:1 rgba(18,19,27,0.9));
                 color: #c0caf5;
                 border: 1.5px solid rgba(60, 65, 90, 0.4);
-                border-radius: 12px;
-                padding: 6px 10px;
-                min-height: 28px;
-                font-size: 13px;
+                border-radius: 10px;
+                padding: 4px 8px;
+                min-height: 24px;
+                font-size: 12px;
                 font-weight: 500;
             }
             QSpinBox:hover, QDoubleSpinBox:hover {
@@ -1004,34 +1006,22 @@ class MainWindow(QMainWindow):
             }
             QSpinBox::up-button, QDoubleSpinBox::up-button,
             QSpinBox::down-button, QDoubleSpinBox::down-button {
-                background: rgba(30, 32, 48, 0.6);
+                width: 0;
+                height: 0;
                 border: none;
-                border-radius: 8px;
-                width: 20px;
+                background: none;
             }
-            QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
-            QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
-                background: rgba(122, 162, 247, 0.25);
-            }
-            QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-bottom: 6px solid #7aa2f7;
-                margin-bottom: 2px;
-            }
+            QSpinBox::up-arrow, QDoubleSpinBox::up-arrow,
             QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 6px solid #7aa2f7;
-                margin-top: 2px;
+                image: none;
             }
 
             /* === Check Boxes — Pill Toggles === */
             QCheckBox {
                 color: #c0caf5;
-                font-size: 13px;
+                font-size: 12px;
                 font-weight: 500;
-                spacing: 10px;
+                spacing: 6px;
             }
             QCheckBox::indicator {
                 width: 36px;
@@ -1056,9 +1046,9 @@ class MainWindow(QMainWindow):
                     stop:1 rgba(41,46,66,0.85));
                 color: #c0caf5;
                 border: 1.5px solid rgba(60, 65, 90, 0.4);
-                border-radius: 14px;
-                padding: 8px 18px;
-                font-size: 13px;
+                border-radius: 10px;
+                padding: 5px 12px;
+                font-size: 12px;
                 font-weight: 600;
             }
             QPushButton:hover {
