@@ -953,24 +953,28 @@ class MainWindow(QMainWindow):
                 margin-right: 6px;
             }
             QComboBox QAbstractItemView {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(30,32,48,0.95),
-                    stop:1 rgba(24,26,40,0.95));
+                background: #1a1b26;
                 border: 1.5px solid rgba(60, 65, 90, 0.5);
-                border-radius: 14px;
+                border-radius: 10px;
                 color: #c0caf5;
                 selection-background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                     stop:0 #6486ff,
                     stop:1 #a855f7);
                 selection-color: #ffffff;
                 outline: none;
-                padding: 6px;
+                padding: 4px;
                 gridline-color: rgba(60, 65, 90, 0.3);
             }
             QComboBox QAbstractItemView::item {
-                min-height: 32px;
-                padding: 6px 12px;
-                border-radius: 10px;
+                min-height: 28px;
+                padding: 4px 10px;
+                border-radius: 6px;
+                background: #1a1b26;
+                color: #c0caf5;
+                border-bottom: 1px solid rgba(60, 65, 90, 0.2);
+            }
+            QComboBox QAbstractItemView::item:last {
+                border-bottom: none;
             }
             QComboBox QAbstractItemView::item:selected {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
@@ -980,7 +984,7 @@ class MainWindow(QMainWindow):
                 font-weight: 600;
             }
             QComboBox QAbstractItemView::item:hover {
-                background: rgba(122, 162, 247, 0.2);
+                background: rgba(122, 162, 247, 0.15);
                 color: #c0caf5;
             }
 
