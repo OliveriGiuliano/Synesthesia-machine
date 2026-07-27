@@ -329,6 +329,11 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(panel)
         layout.setSpacing(6)
         
+        # Container group box for controls
+        controls_group = QGroupBox("Controls")
+        controls_layout = QVBoxLayout()
+        controls_layout.setSpacing(6)
+        
         # Scroll area for controls
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -390,7 +395,7 @@ class MainWindow(QMainWindow):
         scroll_layout.addWidget(general_group)
         
         # Musical Scale
-        scale_group = QGroupBox("Musical Scale")
+        scale_group = QGroupBox("")
         scale_layout = QVBoxLayout()
         
         # Scale type
@@ -452,7 +457,9 @@ class MainWindow(QMainWindow):
         
         scroll_layout.addStretch()
         scroll.setWidget(scroll_content)
-        layout.addWidget(scroll)
+        controls_layout.addWidget(scroll)
+        controls_group.setLayout(controls_layout)
+        layout.addWidget(controls_group)
         
         return panel
     
