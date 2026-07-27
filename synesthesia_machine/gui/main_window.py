@@ -952,8 +952,18 @@ class MainWindow(QMainWindow):
                 border-top: 6px solid #7aa2f7;
                 margin-right: 6px;
             }
-            QComboBox QAbstractItemView {
+            QComboBox::popup {
                 background: #1a1b26;
+                border: 1.5px solid rgba(60, 65, 90, 0.5);
+                border-radius: 10px;
+            }
+            QFrame {
+                background: #1a1b26;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #1a1b26;
+                background: #1a1b26;
+                background-attachment: fixed;
                 border: 1.5px solid rgba(60, 65, 90, 0.5);
                 border-radius: 10px;
                 color: #c0caf5;
@@ -969,6 +979,7 @@ class MainWindow(QMainWindow):
                 min-height: 28px;
                 padding: 4px 10px;
                 border-radius: 6px;
+                background-color: #1a1b26;
                 background: #1a1b26;
                 color: #c0caf5;
                 border-bottom: 1px solid rgba(60, 65, 90, 0.2);
@@ -977,6 +988,7 @@ class MainWindow(QMainWindow):
                 border-bottom: none;
             }
             QComboBox QAbstractItemView::item:selected {
+                background-color: #6486ff;
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                     stop:0 #6486ff,
                     stop:1 #a855f7);
@@ -984,7 +996,30 @@ class MainWindow(QMainWindow):
                 font-weight: 600;
             }
             QComboBox QAbstractItemView::item:hover {
+                background-color: rgba(122, 162, 247, 0.15);
                 background: rgba(122, 162, 247, 0.15);
+                color: #c0caf5;
+            }
+            QListView {
+                background-color: #1a1b26;
+                background: #1a1b26;
+                color: #c0caf5;
+                selection-background-color: #6486ff;
+                selection-color: #ffffff;
+                outline: none;
+                border: 1.5px solid rgba(60, 65, 90, 0.5);
+                border-radius: 10px;
+            }
+            QListView::item {
+                background-color: #1a1b26;
+                color: #c0caf5;
+            }
+            QListView::item:selected {
+                background-color: #6486ff;
+                color: #ffffff;
+            }
+            QListView::item:hover {
+                background-color: rgba(122, 162, 247, 0.15);
                 color: #c0caf5;
             }
 
