@@ -359,6 +359,7 @@ class MainWindow(QMainWindow):
         # Mode parameters (populated when mode changes)
         self._mode_params_widget = QWidget()
         self._mode_params_layout = QVBoxLayout(self._mode_params_widget)
+        self._mode_params_layout.setSpacing(4)
         mode_layout.addWidget(self._mode_params_widget)
         
         mode_group.setLayout(mode_layout)
@@ -402,33 +403,32 @@ class MainWindow(QMainWindow):
         scale_type_layout.addWidget(self._scale_combo)
         scale_layout.addLayout(scale_type_layout)
         
-        # Root note
-        root_layout = QHBoxLayout()
-        root_layout.addWidget(QLabel("Root Note:"))
+        # Root note + Note range on same row
+        root_range_layout = QHBoxLayout()
+        root_range_layout.setSpacing(6)
+        
+        root_range_layout.addWidget(QLabel("Root:"))
         self._root_note_spin = QSpinBox()
         self._root_note_spin.setMinimum(0)
         self._root_note_spin.setMaximum(127)
         self._root_note_spin.setValue(60)  # C5
-        self._root_note_spin.setSuffix(" (MIDI)")
-        root_layout.addWidget(self._root_note_spin)
-        scale_layout.addLayout(root_layout)
+        self._root_note_spin.setSuffix(" MIDI")
+        root_range_layout.addWidget(self._root_note_spin, stretch=1)
         
-        # Note range
-        range_layout = QHBoxLayout()
-        range_layout.addWidget(QLabel("Note Range:"))
+        root_range_layout.addWidget(QLabel("Range:"))
         self._min_note_spin = QSpinBox()
         self._min_note_spin.setMinimum(0)
         self._min_note_spin.setMaximum(127)
         self._min_note_spin.setValue(24)  # C1
-        self._min_note_spin.setSuffix(" Min")
+        self._min_note_spin.setFixedWidth(60)
         self._max_note_spin = QSpinBox()
         self._max_note_spin.setMinimum(0)
         self._max_note_spin.setMaximum(127)
         self._max_note_spin.setValue(96)  # C8
-        self._max_note_spin.setSuffix(" Max")
-        range_layout.addWidget(self._min_note_spin)
-        range_layout.addWidget(self._max_note_spin)
-        scale_layout.addLayout(range_layout)
+        self._max_note_spin.setFixedWidth(60)
+        root_range_layout.addWidget(self._min_note_spin)
+        root_range_layout.addWidget(self._max_note_spin)
+        scale_layout.addLayout(root_range_layout)
         
         scale_group.setLayout(scale_layout)
         scroll_layout.addWidget(scale_group)
@@ -516,9 +516,14 @@ class MainWindow(QMainWindow):
         
         params = self._current_mode.get_parameters()
         for param_name, param_value in params.items():
-            label = QLabel(param_name.replace("_", " ").title())
+            # Horizontal row: label on left, spinner on right
+            row = QHBoxLayout()
+            row.setSpacing(6)
+            
+            label = QLabel(param_name.replace("_", " ").title() + ":")
             label.setStyleSheet("color: #bbb; font-size: 11px;")
-            self._mode_params_layout.addWidget(label)
+            label.setMinimumWidth(100)
+            row.addWidget(label)
             
             if param_name == "activation_threshold":
                 # Percentage 0-100, float
@@ -533,7 +538,7 @@ class MainWindow(QMainWindow):
                 spinner.valueChanged.connect(
                     lambda v, n=param_name: self._on_mode_param_changed(n, v)
                 )
-                self._mode_params_layout.addWidget(spinner)
+                row.addWidget(spinner)
             elif isinstance(param_value, int):
                 spinner = QSpinBox()
                 spinner.setMinimum(0)
@@ -543,7 +548,7 @@ class MainWindow(QMainWindow):
                 spinner.valueChanged.connect(
                     lambda v, n=param_name: self._on_mode_param_changed(n, v)
                 )
-                self._mode_params_layout.addWidget(spinner)
+                row.addWidget(spinner)
             elif isinstance(param_value, float):
                 spinner = QDoubleSpinBox()
                 spinner.setMinimum(0.1)
@@ -554,7 +559,9 @@ class MainWindow(QMainWindow):
                 spinner.valueChanged.connect(
                     lambda v, n=param_name: self._on_mode_param_changed(n, v)
                 )
-                self._mode_params_layout.addWidget(spinner)
+                row.addWidget(spinner)
+            
+            self._mode_params_layout.addLayout(row)
     
     def _update_mode_description(self):
         """Update the mode description label."""
