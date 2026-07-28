@@ -27,7 +27,6 @@ class BrightnessToPitchMode(SynesthesiaMode):
         # Parameters
         self._activation_threshold = 5.0      # Min percentage (0-100) of max bin pixels to trigger note
         self._velocity_scaling = 1.0          # Velocity multiplier
-        self._saturation_min = 10             # Min saturation to filter near-grayscale pixels (0-255)
         self._min_brightness = 0              # Ignore pixels darker than this (0-255)
         self._max_brightness = 255            # Ignore pixels brighter than this (0-255)
     
@@ -47,8 +46,6 @@ class BrightnessToPitchMode(SynesthesiaMode):
             self._activation_threshold = max(0.0, min(100.0, float(params['activation_threshold'])))
         if 'velocity_scaling' in params:
             self._velocity_scaling = max(0.1, min(5.0, float(params['velocity_scaling'])))
-        if 'saturation_min' in params:
-            self._saturation_min = max(0, min(255, int(params['saturation_min'])))
         if 'min_brightness' in params:
             self._min_brightness = max(0, min(255, int(params['min_brightness'])))
         if 'max_brightness' in params:
@@ -58,7 +55,6 @@ class BrightnessToPitchMode(SynesthesiaMode):
         return {
             'activation_threshold': self._activation_threshold,
             'velocity_scaling': self._velocity_scaling,
-            'saturation_min': self._saturation_min,
             'min_brightness': self._min_brightness,
             'max_brightness': self._max_brightness,
         }
@@ -84,11 +80,10 @@ class BrightnessToPitchMode(SynesthesiaMode):
         frame_hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
         
         # Extract channels
-        s = frame_hsv[:, :, 1]  # Saturation (0-255)
         v = frame_hsv[:, :, 2]  # Value/Brightness (0-255)
         
-        # Mask: only consider pixels with enough saturation and in brightness range
-        mask = (s >= self._saturation_min) & (v >= self._min_brightness) & (v <= self._max_brightness)
+        # Mask: only consider pixels in brightness range
+        mask = (v >= self._min_brightness) & (v <= self._max_brightness)
         masked_brightness = v[mask]
         
         if masked_brightness.size == 0:

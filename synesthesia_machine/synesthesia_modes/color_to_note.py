@@ -34,7 +34,7 @@ class ColorToNoteMode(SynesthesiaMode):
         return "color_to_note"
     
     def get_name(self) -> str:
-        return "Color → Note"
+        return "Color → Pitch"
     
     def get_description(self) -> str:
         return ("Maps colors to musical notes. Each hue range is assigned "
