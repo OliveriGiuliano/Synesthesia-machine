@@ -3,29 +3,38 @@ Video source module - handles video file playback and webcam input.
 """
 
 import cv2
+import logging
 import numpy as np
 import threading
 import time
 from typing import Optional
 from PyQt6.QtCore import QObject, pyqtSignal
 
+logger = logging.getLogger(__name__)
+
 
 class VideoSource(QObject):
     """
     Video source that can read from a file or camera device.
     Uses a background thread for non-blocking frame capture.
+
+    Includes auto-reconnect for camera devices: when the camera is
+    disconnected mid-stream the capture loop will retry up to
+    _MAX_RECONNECT_ATTEMPTS times before giving up.
     
     Signals:
         frame_ready: Emitted when a new frame is available (numpy array RGB)
         position_changed: Emitted when playback position changes (frame index, total frames)
         playback_ended: Emitted when playback reaches the end
         error_occurred: Emitted when an error occurs (error message)
+        camera_reconnecting: Emitted when auto-reconnect is in progress (attempt, max)
     """
     
     frame_ready = pyqtSignal(object)  # numpy array
     position_changed = pyqtSignal(int, int)  # current_frame, total_frames
     playback_ended = pyqtSignal()
     error_occurred = pyqtSignal(str)
+    camera_reconnecting = pyqtSignal(int, int)  # attempt, max_attempts
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -35,6 +44,10 @@ class VideoSource(QObject):
         self._fps: float = 24.0
         self._thread: Optional[threading.Thread] = None
         self._thread_lock = threading.Lock()
+        # Camera reconnect settings
+        self._camera_index: int = 0
+        self._MAX_RECONNECT_ATTEMPTS = 5
+        self._RECONNECT_DELAY = 2.0  # seconds between attempts
     
     def open_file(self, file_path: str) -> bool:
         """Open a video file for playback."""
@@ -55,10 +68,18 @@ class VideoSource(QObject):
         self.position_changed.emit(0, total_frames)
         return True
     
-    def open_camera(self, index: int = 0) -> bool:
-        """Open a camera device for live capture."""
+    def open_camera(self, index: int = 0, max_reconnect_attempts: int = 0) -> bool:
+        """Open a camera device for live capture.
+        
+        Args:
+            index: Camera device index.
+            max_reconnect_attempts: Override default reconnect attempts (0 = use default).
+        """
         self._cleanup()
         self._source_type = "camera"
+        self._camera_index = index
+        if max_reconnect_attempts > 0:
+            self._MAX_RECONNECT_ATTEMPTS = max_reconnect_attempts
         
         self._capture = cv2.VideoCapture(index)
         if not self._capture.isOpened():
@@ -222,9 +243,31 @@ class VideoSource(QObject):
                     self._is_playing = False
                     break
                 else:
-                    # Camera glitch, wait and retry
-                    time.sleep(0.05)
-                    if not self._is_playing:
+                    # Camera glitch – try to reconnect up to _MAX_RECONNECT_ATTEMPTS times
+                    logger.warning("Camera frame read failed, attempting reconnect...")
+                    self._capture.release()
+                    self._capture = None
+
+                    for attempt in range(1, self._MAX_RECONNECT_ATTEMPTS + 1):
+                        if not self._is_playing:
+                            break
+                        self.camera_reconnecting.emit(attempt, self._MAX_RECONNECT_ATTEMPTS)
+                        logger.info("Camera reconnect attempt %d/%d", attempt, self._MAX_RECONNECT_ATTEMPTS)
+                        time.sleep(self._RECONNECT_DELAY)
+
+                        self._capture = cv2.VideoCapture(self._camera_index)
+                        if self._capture.isOpened():
+                            logger.info("Camera reconnected on attempt %d", attempt)
+                            break  # success
+                    else:
+                        # Exhausted all attempts
+                        self.error_occurred.emit(
+                            f"Camera disconnected – reconnection failed after "
+                            f"{self._MAX_RECONNECT_ATTEMPTS} attempts"
+                        )
+                        break
+
+                    if not self._capture or not self._capture.isOpened():
                         break
                     continue
             
@@ -246,8 +289,10 @@ class VideoSource(QObject):
             
             # Accurate frame timing using perf_counter
             # Sleep until it's time for the next frame, accounting for processing time
-            time.sleep(frame_interval)
-            next_frame_time = time.perf_counter() + frame_interval
+            sleep_time = next_frame_time - time.perf_counter()
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+            next_frame_time += frame_interval
         
         self._is_playing = False
     

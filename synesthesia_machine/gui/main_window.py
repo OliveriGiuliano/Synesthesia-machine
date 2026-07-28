@@ -1,5 +1,9 @@
 """
 Main application window for the Synesthesia Machine.
+
+This class is a pure view - it handles UI construction, user interactions,
+and visual feedback. All business logic (video capture, frame processing,
+MIDI routing, audio synthesis) is delegated to SynesthesiaEngine.
 """
 
 import os
@@ -15,71 +19,88 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QComboBox, QFileDialog,
     QGroupBox, QSpinBox, QDoubleSpinBox, QCheckBox,
     QStatusBar, QMessageBox, QScrollArea, QTextEdit,
-    QSlider, QSplitter
+    QSlider, QSplitter, QFrame
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QImage, QPixmap, QFont
 
-from synesthesia_machine.core.video_source import VideoSource
-from synesthesia_machine.core.midi_output import MidiOutput
-from synesthesia_machine.core.audio_engine import AudioEngine
-from synesthesia_machine.synesthesia_modes.base_mode import SynesthesiaMode, NoteEvent
+from synesthesia_machine.core.engine import SynesthesiaEngine
 from synesthesia_machine.synesthesia_modes.color_to_note import ColorToNoteMode
 from synesthesia_machine.gui.visualizer import NoteVisualizer
 from synesthesia_machine.utils.musical_scales import (
-    get_scale_notes, get_available_scales, get_note_name
+    get_available_scales, get_note_name
 )
-from synesthesia_machine.utils.color_analysis import downscale_frame
 from synesthesia_machine.config.settings import AppSettings
 
 
 class MainWindow(QMainWindow):
-    """Main application window."""
+    """Main application window - pure view layer."""
     
     def __init__(self):
         super().__init__()
-        self._settings = AppSettings()
-        self._video_source = VideoSource()
-        self._midi_output = MidiOutput()
-        self._audio_engine = AudioEngine()
-        self._current_mode: Optional[SynesthesiaMode] = None
-        self._available_modes: Dict[str, type] = {}
-        self._current_frame: Optional[np.ndarray] = None
-        self._processing_timer = QTimer()
-        self._processing_timer.setInterval(16)  # ~60fps processing cap
-        self._processing_timer.timeout.connect(self._process_frame)
-        self._is_running = False
+
+        # Load persisted settings (or use defaults)
+        self._settings = AppSettings.load_from_file()
+
+        # Create and configure the engine (owns all core components)
+        self._engine = SynesthesiaEngine(settings=self._settings)
+        self._register_modes()
         
-        # Performance tracking
+        # Performance tracking for UI display
         self._debug_enabled = False
-        self._fps_history = deque(maxlen=60)  # Last 60 frame timestamps
-        self._frame_times = deque(maxlen=60)  # Frame processing times in ms
-        self._last_frame_time = 0.0
+        self._fps_history = deque(maxlen=60)
+        self._frame_times = deque(maxlen=60)
         self._current_fps = 0.0
         self._avg_fps = 0.0
         self._avg_frame_time_ms = 0.0
-        self._max_frame_time_ms = 0.0          # Longest frame processing time
-        self._slow_frame_count = 0             # Frames exceeding 60fps threshold
-        self._total_frame_count = 0            # Total frames processed
-        self._FRAME_TIME_TARGET_MS = 16.67     # Target: 60fps = 1000/60 ms per frame
+        self._max_frame_time_ms = 0.0
+        self._slow_frame_count = 0
+        self._total_frame_count = 0
+        self._FRAME_TIME_TARGET_MS = 16.67
         
-        # Register available synesthesia modes
-        self._register_modes()
         self._init_ui()
         self._connect_signals()
+        self._apply_settings_to_ui()
         self._initialize_mode()
         self._update_scale_display()
+
+    def _apply_settings_to_ui(self):
+        """Restore UI controls from loaded settings."""
+        # Volume
+        volume_percent = int(self._settings.audio.volume * 100)
+        self._volume_slider.setValue(volume_percent)
+        self._volume_label.setText(f"{volume_percent}%")
+        self._engine.set_volume(self._settings.audio.volume)
+
+        # Mute
+        self._mute_checkbox.setChecked(self._settings.audio.muted)
+        self._engine.set_muted(self._settings.audio.muted)
+
+        # Scale type
+        scale_index = self._scale_combo.findData(self._settings.scale.scale_type)
+        if scale_index >= 0:
+            self._scale_combo.setCurrentIndex(scale_index)
+
+        # MIDI output type
+        midi_index = self._midi_type_combo.findData(self._settings.midi.output_type)
+        if midi_index >= 0:
+            self._midi_type_combo.setCurrentIndex(midi_index)
+        self._engine.set_midi_output_type(self._settings.midi.output_type)
+
+        # Mode
+        mode_index = self._mode_combo.findData(self._settings.synesthesia.active_mode)
+        if mode_index >= 0:
+            self._mode_combo.setCurrentIndex(mode_index)
     
     def _register_modes(self):
-        """Register all available synesthesia modes."""
-        self._available_modes = {
-            "color_to_note": ColorToNoteMode,
-        }
+        """Register all available synesthesia modes with the engine."""
+        self._engine.register_mode("color_to_note", ColorToNoteMode)
     
     def _init_ui(self):
         """Initialize the user interface."""
         self.setWindowTitle("Synesthesia Machine")
         self.setMinimumSize(1200, 800)
+        self.resize(1500, 900)
         self.setStyleSheet(self._get_stylesheet())
         
         # Central widget
@@ -149,12 +170,10 @@ class MainWindow(QMainWindow):
         # Keep only last 50 lines by rebuilding content
         doc = self._debug_log.document()
         if doc.blockCount() > 50:
-            # Get all text, keep only last 50 lines
             text = self._debug_log.toPlainText()
             lines = text.split('\n')
             lines = lines[-50:]
             self._debug_log.setPlainText('\n'.join(lines))
-            # Scroll to bottom
             scrollbar = self._debug_log.verticalScrollBar()
             if scrollbar:
                 scrollbar.setValue(scrollbar.maximum())
@@ -179,36 +198,30 @@ class MainWindow(QMainWindow):
         self._frame_times.append(frame_time_ms)
         self._total_frame_count += 1
         
-        # Track slow frames (exceeding 60fps target of 16.67ms)
         if frame_time_ms > self._FRAME_TIME_TARGET_MS:
             self._slow_frame_count += 1
         
-        # Track maximum frame time
         if frame_time_ms > self._max_frame_time_ms:
             self._max_frame_time_ms = frame_time_ms
         
-        # Calculate current FPS from recent history
         if len(self._fps_history) > 1:
             time_span = self._fps_history[-1] - self._fps_history[0]
             if time_span > 0:
                 self._current_fps = len(self._fps_history) / time_span
         
-        # Calculate average FPS from history
         if self._frame_times:
             self._avg_frame_time_ms = sum(self._frame_times) / len(self._frame_times)
             self._avg_fps = 1000.0 / self._avg_frame_time_ms if self._avg_frame_time_ms > 0 else 0
         
-        # Calculate slow frame percentage
         slow_pct = (self._slow_frame_count / self._total_frame_count * 100) if self._total_frame_count > 0 else 0.0
         
-        # Update labels
         self._fps_label.setText(f"FPS: {self._current_fps:.1f}")
         self._frame_time_label.setText(f"Frame: {frame_time_ms:.1f} ms")
         self._avg_fps_label.setText(f"Avg: {self._avg_fps:.1f} fps")
         self._max_frame_label.setText(f"Max: {self._max_frame_time_ms:.1f} ms")
         self._slow_frame_label.setText(f"Slow: {self._slow_frame_count} ({slow_pct:.1f}%)")
         
-        # Color code FPS label based on current performance
+        # Color code FPS label
         if self._current_fps >= 60:
             self._fps_label.setStyleSheet("color: #9ece6a; font-family: 'Consolas', monospace; font-size: 11px; font-weight: bold; padding: 0 8px;")
         elif self._current_fps >= 30:
@@ -231,7 +244,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(6)
         
         # Debug panel (collapsible)
-        debug_group = QGroupBox("Debug Panel")
+        debug_group = QGroupBox("")
         debug_layout = QVBoxLayout()
         
         # Debug controls row
@@ -277,7 +290,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(debug_group, stretch=0)
         
         # Video display
-        video_group = QGroupBox("Video Input")
+        video_group = QGroupBox("")
         video_layout = QVBoxLayout()
         
         self._video_label = QLabel("No video source")
@@ -298,7 +311,6 @@ class MainWindow(QMainWindow):
         self._btn_pause = QPushButton("⏸ Pause")
         self._btn_stop = QPushButton("⏹ Stop")
         
-        # Buttons use global stylesheet
         for btn in [self._btn_load_file, self._btn_camera,
                      self._btn_play, self._btn_pause, self._btn_stop]:
             btn.setMaximumHeight(28)
@@ -316,7 +328,6 @@ class MainWindow(QMainWindow):
         self._seek_slider.setMaximum(1000)
         self._seek_slider.setValue(0)
         self._seek_slider.setEnabled(False)
-        # Seek slider uses global stylesheet
         video_layout.addWidget(self._seek_slider)
         
         # Time display
@@ -330,7 +341,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(video_group, stretch=2)
         
         # Visualizer
-        viz_group = QGroupBox("Note Visualizer")
+        viz_group = QGroupBox("")
         viz_layout = QVBoxLayout()
         
         self._visualizer = NoteVisualizer()
@@ -343,12 +354,12 @@ class MainWindow(QMainWindow):
     def _create_right_panel(self) -> QWidget:
         """Create the right panel with all controls."""
         panel = QWidget()
-        panel.setMinimumWidth(200)
+        panel.setMinimumWidth(300)
         layout = QVBoxLayout(panel)
         layout.setSpacing(6)
         
         # Container group box for controls
-        controls_group = QGroupBox("Controls")
+        controls_group = QGroupBox("")
         controls_layout = QVBoxLayout()
         controls_layout.setSpacing(6)
         
@@ -362,16 +373,52 @@ class MainWindow(QMainWindow):
         scroll_layout.setSpacing(8)
         
         # Synesthesia Mode Selection
-        mode_group = QGroupBox("Synesthesia Mode")
+        mode_group = QGroupBox("")
         mode_layout = QVBoxLayout()
         
+        mode_header = QLabel("🎨  Synesthesia Mode")
+        mode_header.setStyleSheet("color: #7aa2f7; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; padding: 2px 0;")
+        mode_header.setToolTip("Select how colors are mapped to musical notes")
+        mode_layout.addWidget(mode_header)
+        
+        # Wrap combo box in a bordered frame for reliable border rendering
+        mode_combo_frame = QFrame()
+        mode_combo_frame.setObjectName("mode_combo_frame")
+        mode_combo_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        mode_combo_frame.setStyleSheet("""
+            #mode_combo_frame {
+                background-color: #151620;
+                border: 2px solid #445588;
+                border-radius: 8px;
+                padding: 2px 4px;
+            }
+            #mode_combo_frame:hover {
+                border: 2px solid #7aa2f7;
+            }
+        """)
+        mode_combo_layout = QHBoxLayout(mode_combo_frame)
+        mode_combo_layout.setContentsMargins(4, 2, 4, 2)
+        mode_combo_layout.setSpacing(0)
+        
         self._mode_combo = QComboBox()
-        for mode_id in self._available_modes:
-            mode_class = self._available_modes[mode_id]
+        self._mode_combo.setToolTip("Click to choose a synesthesia mode")
+        self._mode_combo.setObjectName("mode_combo")
+        self._mode_combo.setFrame(False)
+        self._mode_combo.setStyleSheet("""
+            #mode_combo {
+                background: transparent;
+                border: none;
+                color: #c0caf5;
+                font-size: 12px;
+                font-weight: 500;
+            }
+        """)
+        for mode_id, mode_class in self._engine.get_available_modes().items():
             temp = mode_class()
             self._mode_combo.addItem(temp.get_name(), mode_id)
             temp.deleteLater()
-        mode_layout.addWidget(self._mode_combo)
+        mode_combo_layout.addWidget(self._mode_combo)
+        mode_layout.addWidget(mode_combo_frame)
         
         # Mode description label
         self._mode_desc_label = QLabel()
@@ -389,7 +436,7 @@ class MainWindow(QMainWindow):
         scroll_layout.addWidget(mode_group)
         
         # General Controls
-        general_group = QGroupBox("General Controls")
+        general_group = QGroupBox("")
         general_layout = QVBoxLayout()
         
         # Volume
@@ -419,51 +466,169 @@ class MainWindow(QMainWindow):
         # Scale type
         scale_type_layout = QHBoxLayout()
         scale_type_layout.addWidget(QLabel("Scale:"))
+        # Wrap combo box in a bordered frame
+        scale_combo_frame = QFrame()
+        scale_combo_frame.setObjectName("scale_combo_frame")
+        scale_combo_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        scale_combo_frame.setStyleSheet("""
+            #scale_combo_frame {
+                background-color: #151620;
+                border: 2px solid #445588;
+                border-radius: 8px;
+                padding: 2px 4px;
+            }
+            #scale_combo_frame:hover {
+                border: 2px solid #7aa2f7;
+            }
+        """)
+        scale_combo_layout = QHBoxLayout(scale_combo_frame)
+        scale_combo_layout.setContentsMargins(4, 2, 4, 2)
+        scale_combo_layout.setSpacing(0)
+        
         self._scale_combo = QComboBox()
+        self._scale_combo.setToolTip("Click to choose a musical scale")
+        self._scale_combo.setObjectName("scale_combo")
+        self._scale_combo.setFrame(False)
+        self._scale_combo.setStyleSheet("""
+            #scale_combo {
+                background: transparent;
+                border: none;
+                color: #c0caf5;
+                font-size: 12px;
+                font-weight: 500;
+            }
+        """)
         for scale_name in get_available_scales():
             display = scale_name.replace("_", " ").title()
             self._scale_combo.addItem(display, scale_name)
-        scale_type_layout.addWidget(self._scale_combo)
+        scale_combo_layout.addWidget(self._scale_combo)
+        scale_type_layout.addWidget(scale_combo_frame)
         scale_layout.addLayout(scale_type_layout)
         
-        # Root note + Note range on same row
-        root_range_layout = QHBoxLayout()
-        root_range_layout.setSpacing(6)
+        # Note range
+        range_layout = QHBoxLayout()
+        range_layout.setSpacing(6)
         
-        root_range_layout.addWidget(QLabel("Root:"))
-        self._root_note_spin = QSpinBox()
-        self._root_note_spin.setMinimum(0)
-        self._root_note_spin.setMaximum(127)
-        self._root_note_spin.setValue(60)  # C5
-        self._root_note_spin.setSuffix(" MIDI")
-        root_range_layout.addWidget(self._root_note_spin, stretch=1)
+        range_layout.addWidget(QLabel("Range:"))
         
-        root_range_layout.addWidget(QLabel("Range:"))
+        # Wrap spin boxes in bordered frames
+        min_frame = QFrame()
+        min_frame.setObjectName("min_note_frame")
+        min_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        min_frame.setStyleSheet("""
+            #min_note_frame {
+                background-color: #151620;
+                border: 2px solid #6644aa;
+                border-radius: 8px;
+                padding: 2px 4px;
+            }
+            #min_note_frame:hover {
+                border: 2px solid #a855f7;
+            }
+        """)
+        min_frame_layout = QHBoxLayout(min_frame)
+        min_frame_layout.setContentsMargins(4, 2, 4, 2)
+        min_frame_layout.setSpacing(0)
+        
         self._min_note_spin = QSpinBox()
         self._min_note_spin.setMinimum(0)
         self._min_note_spin.setMaximum(127)
         self._min_note_spin.setValue(24)  # C1
-        self._min_note_spin.setFixedWidth(60)
+        self._min_note_spin.setFixedWidth(44)
+        self._min_note_spin.setStyleSheet("""
+            background: transparent;
+            border: none;
+            color: #c0caf5;
+            font-size: 12px;
+            font-weight: 500;
+            text-align: center;
+        """)
+        min_frame_layout.addWidget(self._min_note_spin)
+        
+        max_frame = QFrame()
+        max_frame.setObjectName("max_note_frame")
+        max_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        max_frame.setStyleSheet("""
+            #max_note_frame {
+                background-color: #151620;
+                border: 2px solid #6644aa;
+                border-radius: 8px;
+                padding: 2px 4px;
+            }
+            #max_note_frame:hover {
+                border: 2px solid #a855f7;
+            }
+        """)
+        max_frame_layout = QHBoxLayout(max_frame)
+        max_frame_layout.setContentsMargins(4, 2, 4, 2)
+        max_frame_layout.setSpacing(0)
+        
         self._max_note_spin = QSpinBox()
         self._max_note_spin.setMinimum(0)
         self._max_note_spin.setMaximum(127)
         self._max_note_spin.setValue(96)  # C8
-        self._max_note_spin.setFixedWidth(60)
-        root_range_layout.addWidget(self._min_note_spin)
-        root_range_layout.addWidget(self._max_note_spin)
-        scale_layout.addLayout(root_range_layout)
+        self._max_note_spin.setFixedWidth(44)
+        self._max_note_spin.setStyleSheet("""
+            background: transparent;
+            border: none;
+            color: #c0caf5;
+            font-size: 12px;
+            font-weight: 500;
+            text-align: center;
+        """)
+        max_frame_layout.addWidget(self._max_note_spin)
+        
+        range_layout.addWidget(min_frame)
+        range_layout.addWidget(max_frame)
+        scale_layout.addLayout(range_layout)
         
         scale_group.setLayout(scale_layout)
         scroll_layout.addWidget(scale_group)
         
         # MIDI Output
-        midi_group = QGroupBox("MIDI Output")
+        midi_group = QGroupBox("")
         midi_layout = QVBoxLayout()
         
-        # Output type
+        midi_header = QLabel("🎹  MIDI Output")
+        midi_header.setStyleSheet("color: #7aa2f7; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; padding: 2px 0;")
+        midi_header.setToolTip("Select MIDI output device")
+        midi_layout.addWidget(midi_header)
+        
+        # Wrap combo box in a bordered frame
+        midi_combo_frame = QFrame()
+        midi_combo_frame.setObjectName("midi_combo_frame")
+        midi_combo_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        midi_combo_frame.setStyleSheet("""
+            #midi_combo_frame {
+                background-color: #151620;
+                border: 2px solid #445588;
+                border-radius: 8px;
+                padding: 2px 4px;
+            }
+            #midi_combo_frame:hover {
+                border: 2px solid #7aa2f7;
+            }
+        """)
+        midi_combo_layout = QHBoxLayout(midi_combo_frame)
+        midi_combo_layout.setContentsMargins(4, 2, 4, 2)
+        midi_combo_layout.setSpacing(0)
+        
         self._midi_type_combo = QComboBox()
+        self._midi_type_combo.setToolTip("Click to choose MIDI output device")
+        self._midi_type_combo.setObjectName("midi_combo")
+        self._midi_type_combo.setFrame(False)
+        self._midi_type_combo.setStyleSheet("""
+            #midi_combo {
+                background: transparent;
+                border: none;
+                color: #c0caf5;
+                font-size: 12px;
+                font-weight: 500;
+            }
+        """)
         self._midi_type_combo.addItem("Internal (PyGame)", "internal")
-        midi_layout.addWidget(self._midi_type_combo)
+        midi_combo_layout.addWidget(self._midi_type_combo)
+        midi_layout.addWidget(midi_combo_frame)
         
         # Refresh button
         self._btn_refresh_midi = QPushButton("🔄 Refresh Devices")
@@ -482,7 +647,7 @@ class MainWindow(QMainWindow):
         return panel
     
     def _connect_signals(self):
-        """Connect all UI signals."""
+        """Connect all UI signals and engine signals."""
         # Video controls
         self._btn_load_file.clicked.connect(self._load_video_file)
         self._btn_camera.clicked.connect(self._connect_camera)
@@ -491,25 +656,29 @@ class MainWindow(QMainWindow):
         self._btn_stop.clicked.connect(self._stop_playback)
         self._seek_slider.sliderReleased.connect(self._seek_released)
         
-        # Video source signals
-        self._video_source.frame_ready.connect(self._on_frame_ready)
-        self._video_source.position_changed.connect(self._on_position_changed)
-        self._video_source.playback_ended.connect(self._on_playback_ended)
-        self._video_source.error_occurred.connect(self._on_video_error)
+        # Video source signals (via engine)
+        self._engine.video_source.frame_ready.connect(self._on_frame_ready)
+        self._engine.video_source.position_changed.connect(self._on_position_changed)
+        self._engine.video_source.playback_ended.connect(self._on_playback_ended)
+        self._engine.video_source.error_occurred.connect(self._on_video_error)
         
-        # MIDI signals
-        self._midi_output.devices_updated.connect(self._on_midi_devices_updated)
-        self._midi_output.error_occurred.connect(self._on_midi_error)
+        # Engine signals
+        self._engine.active_notes_changed.connect(self._on_active_notes_changed)
+        self._engine.frame_processed.connect(self._update_performance_display)
+        self._engine.error_occurred.connect(self._on_engine_error)
         
-        # Audio engine signals
-        self._audio_engine.notes_changed.connect(self._on_audio_notes_changed)
+        # MIDI signals (via engine)
+        self._engine.midi_output.devices_updated.connect(self._on_midi_devices_updated)
+        self._engine.midi_output.error_occurred.connect(self._on_midi_error)
+        
+        # Audio engine signals (via engine)
+        self._engine.audio_engine.notes_changed.connect(self._on_audio_notes_changed)
         
         # Mode selection
         self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         
         # Scale
         self._scale_combo.currentIndexChanged.connect(self._update_scale_display)
-        self._root_note_spin.valueChanged.connect(self._update_scale_display)
         self._min_note_spin.valueChanged.connect(self._update_scale_display)
         self._max_note_spin.valueChanged.connect(self._update_scale_display)
         
@@ -522,12 +691,37 @@ class MainWindow(QMainWindow):
     
     def _initialize_mode(self):
         """Initialize the first synesthesia mode."""
-        if self._available_modes:
-            first_id = list(self._available_modes.keys())[0]
-            self._current_mode = self._available_modes[first_id]()
+        available = self._engine.get_available_modes()
+        if available:
+            first_id = list(available.keys())[0]
+            self._engine.initialize_mode(first_id)
             self._populate_mode_parameters()
             self._update_mode_description()
     
+    def _create_bordered_spin_frame(self, spinner):
+        """Wrap a spin box in a QFrame for reliable border rendering."""
+        frame = QFrame()
+        frame.setFrameShape(QFrame.Shape.StyledPanel)
+        frame.setStyleSheet("""
+            background-color: #151620;
+            border: 2px solid #6644aa;
+            border-radius: 8px;
+            padding: 2px 4px;
+        """)
+        frame_layout = QHBoxLayout(frame)
+        frame_layout.setContentsMargins(4, 2, 4, 2)
+        frame_layout.setSpacing(0)
+        spinner.setStyleSheet("""
+            background: transparent;
+            border: none;
+            color: #c0caf5;
+            font-size: 12px;
+            font-weight: 500;
+            text-align: center;
+        """)
+        frame_layout.addWidget(spinner)
+        return frame
+
     def _populate_mode_parameters(self):
         """Populate the mode-specific parameters UI."""
         # Clear existing
@@ -536,12 +730,12 @@ class MainWindow(QMainWindow):
             if child.widget():
                 child.widget().deleteLater()
         
-        if self._current_mode is None:
+        mode = self._engine.current_mode
+        if mode is None:
             return
         
-        params = self._current_mode.get_parameters()
+        params = mode.get_parameters()
         for param_name, param_value in params.items():
-            # Horizontal row: label on left, spinner on right
             row = QHBoxLayout()
             row.setSpacing(6)
             
@@ -551,7 +745,6 @@ class MainWindow(QMainWindow):
             row.addWidget(label)
             
             if param_name == "activation_threshold":
-                # Percentage 0-100, float
                 spinner = QDoubleSpinBox()
                 spinner.setMinimum(0.0)
                 spinner.setMaximum(100.0)
@@ -563,7 +756,7 @@ class MainWindow(QMainWindow):
                 spinner.valueChanged.connect(
                     lambda v, n=param_name: self._on_mode_param_changed(n, v)
                 )
-                row.addWidget(spinner)
+                row.addWidget(self._create_bordered_spin_frame(spinner))
             elif isinstance(param_value, int):
                 spinner = QSpinBox()
                 spinner.setMinimum(0)
@@ -573,7 +766,7 @@ class MainWindow(QMainWindow):
                 spinner.valueChanged.connect(
                     lambda v, n=param_name: self._on_mode_param_changed(n, v)
                 )
-                row.addWidget(spinner)
+                row.addWidget(self._create_bordered_spin_frame(spinner))
             elif isinstance(param_value, float):
                 spinner = QDoubleSpinBox()
                 spinner.setMinimum(0.1)
@@ -584,60 +777,29 @@ class MainWindow(QMainWindow):
                 spinner.valueChanged.connect(
                     lambda v, n=param_name: self._on_mode_param_changed(n, v)
                 )
-                row.addWidget(spinner)
+                row.addWidget(self._create_bordered_spin_frame(spinner))
             
             self._mode_params_layout.addLayout(row)
     
     def _update_mode_description(self):
         """Update the mode description label."""
-        if self._current_mode:
-            self._mode_desc_label.setText(self._current_mode.get_description())
+        mode = self._engine.current_mode
+        if mode:
+            self._mode_desc_label.setText(mode.get_description())
     
     def _update_scale_display(self):
-        """Apply scale to visualizer."""
+        """Apply scale to visualizer and engine."""
         scale_type = self._scale_combo.currentData()
-        root_note = self._root_note_spin.value()
+        root_note = 60  # C5 default
         min_note = self._min_note_spin.value()
         max_note = self._max_note_spin.value()
         
-        notes = get_scale_notes(scale_type, root_note, min_note=min_note, max_note=max_note)
+        notes = self._engine.get_scale_notes()
+        self._engine.set_scale(scale_type, root_note, min_note, max_note)
         
-        # Update visualizer
+        # Recompute notes after engine scale update
+        notes = self._engine.get_scale_notes()
         self._visualizer.set_scale_notes(notes)
-        
-        # Force-reprocess current frame so notes outside new range are released
-        # This fixes the bug where changing scale params while paused leaves notes stuck
-        if self._current_frame is not None and self._current_mode is not None:
-            self._force_process_frame()
-    
-    def _force_process_frame(self):
-        """Process current frame immediately (used when parameters change)."""
-        if self._current_frame is None or self._current_mode is None:
-            return
-        
-        try:
-            from synesthesia_machine.utils.color_analysis import downscale_frame
-            proc_w = self._settings.video.processing_width
-            proc_h = self._settings.video.processing_height
-            small_frame = downscale_frame(self._current_frame, proc_w, proc_h)
-            
-            scale_type = self._scale_combo.currentData()
-            root_note = self._root_note_spin.value()
-            min_note = self._min_note_spin.value()
-            max_note = self._max_note_spin.value()
-            scale_notes = get_scale_notes(scale_type, root_note, min_note=min_note, max_note=max_note)
-            
-            # Clear active notes first to ensure a clean slate
-            # This prevents stuck notes when the same note gets a different MIDI number
-            # or when scale changes cause note reassignment
-            for event in self._current_mode.clear_active_notes():
-                self._send_event(event)
-            
-            events = self._current_mode.process_frame(small_frame, scale_notes)
-            for event in events:
-                self._send_event(event)
-        except Exception as e:
-            self._status_bar.showMessage(f"Force process error: {e}")
     
     # --- Video handling ---
     
@@ -650,15 +812,13 @@ class MainWindow(QMainWindow):
             "Video Files (*.mp4 *.avi *.mov *.mkv *.webm *.flv *.wmv);;All Files (*.*)"
         )
         if file_path:
-            if self._video_source.open_file(file_path):
-                self._settings.video.file_path = file_path
-                self._settings.video.source_type = "file"
+            if self._engine.video_source.open_file(file_path):
+                self._engine.settings.video.file_path = file_path
+                self._engine.settings.video.source_type = "file"
                 self._status_bar.showMessage(f"Loaded: {os.path.basename(file_path)}")
                 self._seek_slider.setEnabled(True)
-                # Show first frame
-                self._video_source.start()
-                self._is_running = True
-                self._processing_timer.start()
+                self._engine.video_source.start()
+                self._engine.start_processing()
             else:
                 QMessageBox.warning(self, "Error", "Failed to open video file.")
     
@@ -666,37 +826,31 @@ class MainWindow(QMainWindow):
         """Connect to a camera device."""
         indices = [0, 1, 2]
         for idx in indices:
-            if self._video_source.open_camera(idx):
-                self._settings.video.source_type = "camera"
-                self._settings.video.camera_index = idx
+            if self._engine.video_source.open_camera(idx):
+                self._engine.settings.video.source_type = "camera"
+                self._engine.settings.video.camera_index = idx
                 self._status_bar.showMessage(f"Camera {idx} connected")
                 self._seek_slider.setEnabled(False)
-                self._video_source.start()
-                self._is_running = True
-                self._processing_timer.start()
+                self._engine.video_source.start()
+                self._engine.start_processing()
                 return
         QMessageBox.warning(self, "Error", "No camera device found.")
     
     def _start_playback(self):
-        if not self._video_source.is_playing:
-            if self._is_running:
-                self._video_source.resume()
+        if not self._engine.video_source.is_playing:
+            if self._engine.is_running:
+                self._engine.video_source.resume()
                 self._status_bar.showMessage("Playing")
             else:
                 self._status_bar.showMessage("No video source loaded")
     
     def _pause_playback(self):
-        self._video_source.pause()
+        self._engine.video_source.pause()
         self._status_bar.showMessage("Paused")
     
     def _stop_playback(self):
-        self._video_source.stop()
-        self._is_running = False
-        self._processing_timer.stop()
-        if self._current_mode:
-            for event in self._current_mode.clear_active_notes():
-                self._send_event(event)
-        self._audio_engine.stop_all()
+        self._engine.video_source.stop()
+        self._engine.stop_processing()
         self._visualizer.clear()
         self._video_label.clear()
         self._video_label.setText("No video source")
@@ -709,19 +863,15 @@ class MainWindow(QMainWindow):
     
     def _seek_released(self):
         """Actually perform the seek when user releases the slider."""
-        if self._video_source.source_type == "file":
-            total = self._video_source.get_total_frames()
+        if self._engine.video_source.source_type == "file":
+            total = self._engine.video_source.get_total_frames()
             if total > 0:
                 value = self._seek_slider.value()
-                frame = value
-                self._video_source.seek_to_frame(frame)
+                self._engine.video_source.seek_to_frame(value)
     
     def _on_frame_ready(self, frame_rgb: np.ndarray):
         """Called when a new frame is available from the video source."""
         try:
-            # Make a copy to ensure we own the data
-            self._current_frame = frame_rgb.copy()
-            
             # Display the frame
             h, w, ch = frame_rgb.shape
             q_image = QImage(frame_rgb.data, w, h, ch * w, QImage.Format.Format_RGB888)
@@ -742,7 +892,7 @@ class MainWindow(QMainWindow):
             self._seek_slider.setMaximum(total)
             self._seek_slider.setValue(current)
             
-            fps = self._video_source.get_fps()
+            fps = self._engine.video_source.get_fps()
             current_time = current / fps if fps > 0 else 0
             total_time = total / fps if fps > 0 else 0
             self._time_label.setText(
@@ -759,105 +909,44 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage(f"Video error: {message}")
         QMessageBox.warning(self, "Video Error", message)
     
+    def _on_engine_error(self, message: str):
+        """Handle engine errors."""
+        self._status_bar.showMessage(message)
+    
     def _format_time(self, seconds: float) -> str:
         """Format seconds as MM:SS."""
         mins = int(seconds // 60)
         secs = int(seconds % 60)
         return f"{mins:02d}:{secs:02d}"
     
-    # --- Frame processing ---
+    # --- Engine signal handlers ---
     
-    def _process_frame(self):
-        """Process the current frame through the synesthesia mode."""
-        if self._current_frame is None or self._current_mode is None:
-            return
-        
-        if not self._video_source.is_playing:
-            return
-        
-        frame_start = time.perf_counter()
-        
-        try:
-            # Downscale for processing
-            proc_w = self._settings.video.processing_width
-            proc_h = self._settings.video.processing_height
-            small_frame = downscale_frame(self._current_frame, proc_w, proc_h)
-            
-            # Get current scale notes
-            scale_type = self._scale_combo.currentData()
-            root_note = self._root_note_spin.value()
-            min_note = self._min_note_spin.value()
-            max_note = self._max_note_spin.value()
-            scale_notes = get_scale_notes(scale_type, root_note, min_note=min_note, max_note=max_note)
-            
-            # Process through current mode
-            events = self._current_mode.process_frame(small_frame, scale_notes)
-            
-            # Send events
-            for event in events:
-                self._send_event(event)
-        except Exception as e:
-            self._status_bar.showMessage(f"Processing error: {e}")
-        
-        # Track performance
-        frame_time = (time.perf_counter() - frame_start) * 1000.0  # ms
-        self._update_performance_display(frame_time)
+    def _on_active_notes_changed(self, active_notes: Dict[int, int]):
+        """Update visualizer when engine reports active notes change."""
+        self._visualizer.update_active_notes(active_notes)
     
-    def _send_event(self, event: NoteEvent):
-        """Send a note event to MIDI output and/or audio engine."""
-        midi_type = self._midi_type_combo.currentData()
-        
-        # Debug output
-        state = "ON" if event.is_on else "OFF"
-        vel_str = f" vel={event.velocity}" if event.is_on else ""
-        self._debug_print(f"NOTE {state} ch=1 note={event.note} ({self._get_note_name(event.note)}){vel_str} | active: {sorted(self._audio_engine.active_notes)}")
-        
-        if event.is_on:
-            self._midi_output.send_note_on(event.note, event.velocity)
-            if midi_type == "internal":
-                self._audio_engine.play_note(event.note, event.velocity)
-        else:
-            self._midi_output.send_note_off(event.note)
-            if midi_type == "internal":
-                self._audio_engine.stop_note(event.note)
-        
-        # Update visualizer from mode's active notes
-        if self._current_mode:
-            self._visualizer.update_active_notes(self._current_mode.active_notes)
-    
-    def _get_note_name(self, midi_note: int) -> str:
-        """Get note name for a MIDI note number."""
-        notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-        octave = (midi_note // 12) - 1
-        name = notes[midi_note % 12]
-        return f"{name}{octave}"
+    def _on_audio_notes_changed(self, active_notes):
+        """Called when audio engine active notes change (note ended naturally)."""
+        notes_list = sorted(active_notes) if active_notes else []
+        self._debug_print(f"AUDIO active notes changed: {notes_list}")
     
     # --- Mode handling ---
     
     def _on_mode_changed(self, index: int):
         """Handle synesthesia mode selection change."""
         mode_id = self._mode_combo.itemData(index)
-        
-        # Clear previous mode notes
-        if self._current_mode:
-            for event in self._current_mode.clear_active_notes():
-                self._send_event(event)
-        
-        # Create new mode instance
-        mode_class = self._available_modes.get(mode_id)
-        if mode_class:
-            self._current_mode = mode_class()
-            self._populate_mode_parameters()
-            self._update_mode_description()
-            self._status_bar.showMessage(f"Mode: {self._current_mode.get_name()}")
+        self._settings.synesthesia.active_mode = mode_id
+        self._engine.switch_mode(mode_id)
+        self._populate_mode_parameters()
+        self._update_mode_description()
+        mode = self._engine.current_mode
+        if mode:
+            self._status_bar.showMessage(f"Mode: {mode.get_name()}")
     
     def _on_mode_param_changed(self, param_name: str, value):
         """Handle mode parameter change."""
-        if self._current_mode:
-            self._current_mode.update_parameters({param_name: value})
-        # Force-reprocess so parameter changes take effect immediately
-        # (e.g., raising threshold releases notes even when paused)
-        self._force_process_frame()
+        setattr(self._settings.synesthesia, param_name, value)
+        self._engine.update_mode_parameter(param_name, value)
     
     # --- MIDI handling ---
     
@@ -873,23 +962,31 @@ class MainWindow(QMainWindow):
     def _on_midi_error(self, message: str):
         self._status_bar.showMessage(f"MIDI error: {message}")
     
-    def _on_audio_notes_changed(self, active_notes):
-        """Called when audio engine active notes change (note ended naturally)."""
-        notes_list = sorted(active_notes) if active_notes else []
-        self._debug_print(f"AUDIO active notes changed: {notes_list}")
-    
     def _refresh_midi_devices(self):
-        self._midi_output.refresh_devices()
+        self._engine.refresh_midi_devices()
     
     # --- Audio handling ---
     
     def _on_volume_changed(self, value: int):
         volume = value / 100.0
         self._volume_label.setText(f"{value}%")
-        self._audio_engine.set_volume(volume)
+        self._settings.audio.volume = volume
+        self._engine.set_volume(volume)
     
     def _on_mute_toggled(self, muted: bool):
-        self._audio_engine.set_muted(muted)
+        self._settings.audio.muted = muted
+        self._engine.set_muted(muted)
+    
+    # --- Debug ---
+    
+    def _send_event_debug(self, event):
+        """Debug logging for note events."""
+        state = "ON" if event.is_on else "OFF"
+        vel_str = f" vel={event.velocity}" if event.is_on else ""
+        self._debug_print(
+            f"NOTE {state} ch=1 note={event.note} ({get_note_name(event.note)})"
+            f"{vel_str} | active: {sorted(self._engine.audio_engine.active_notes)}"
+        )
     
     # --- Styling ---
     
@@ -955,22 +1052,40 @@ class MainWindow(QMainWindow):
                     stop:0 rgba(21,22,30,0.9),
                     stop:1 rgba(18,19,27,0.9));
                 color: #c0caf5;
-                border: 1.5px solid rgba(60, 65, 90, 0.4);
+                border: 2px solid #6486ff;
                 border-radius: 10px;
                 padding: 5px 10px;
                 min-height: 24px;
                 font-size: 12px;
                 font-weight: 500;
             }
+
+            /* Named combo boxes (mode, scale, midi) — setFrame(False) needs explicit border */
+            QComboBox#mode_combo,
+            QComboBox#scale_combo,
+            QComboBox#midi_combo {
+                background-color: #151620;
+                border: 2px solid #445588;
+                border-radius: 8px;
+            }
+            QComboBox#mode_combo:hover,
+            QComboBox#scale_combo:hover,
+            QComboBox#midi_combo:hover {
+                border: 2px solid #7aa2f7;
+            }
+            QComboBox#mode_combo:focus,
+            QComboBox#scale_combo:focus,
+            QComboBox#midi_combo:focus {
+                border: 2.5px solid #6486ff;
+            }
             QComboBox:hover {
-                border-color: rgba(122, 162, 247, 0.5);
+                border: 2px solid #7aa2f7;
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(25,26,36,0.95),
                     stop:1 rgba(22,23,32,0.95));
             }
             QComboBox:focus {
-                border-color: #6486ff;
-                border-width: 2px;
+                border: 2.5px solid #6486ff;
             }
             QComboBox::drop-down {
                 border: none;
@@ -988,9 +1103,6 @@ class MainWindow(QMainWindow):
                 background: #1a1b26;
                 border: 1.5px solid rgba(60, 65, 90, 0.5);
                 border-radius: 10px;
-            }
-            QFrame {
-                background: #1a1b26;
             }
             QComboBox QAbstractItemView {
                 background-color: #1a1b26;
@@ -1061,19 +1173,34 @@ class MainWindow(QMainWindow):
                     stop:0 rgba(21,22,30,0.9),
                     stop:1 rgba(18,19,27,0.9));
                 color: #c0caf5;
-                border: 1.5px solid rgba(60, 65, 90, 0.4);
+                border: 2px solid #a855f7;
                 border-radius: 10px;
                 padding: 4px 8px;
                 min-height: 24px;
                 font-size: 12px;
                 font-weight: 500;
             }
+
+            /* Named spin boxes (min/max note) — explicit solid border */
+            QSpinBox#min_note_spin,
+            QSpinBox#max_note_spin {
+                background-color: #151620;
+                border: 2px solid #6644aa;
+                border-radius: 8px;
+            }
+            QSpinBox#min_note_spin:hover,
+            QSpinBox#max_note_spin:hover {
+                border: 2px solid #a855f7;
+            }
+            QSpinBox#min_note_spin:focus,
+            QSpinBox#max_note_spin:focus {
+                border: 2.5px solid #a855f7;
+            }
             QSpinBox:hover, QDoubleSpinBox:hover {
-                border-color: rgba(122, 162, 247, 0.5);
+                border: 2px solid #a855f7;
             }
             QSpinBox:focus, QDoubleSpinBox:focus {
-                border-color: #6486ff;
-                border-width: 2px;
+                border: 2.5px solid #a855f7;
             }
             QSpinBox::up-button, QDoubleSpinBox::up-button,
             QSpinBox::down-button, QDoubleSpinBox::down-button {
@@ -1222,11 +1349,10 @@ class MainWindow(QMainWindow):
         """
     
     def closeEvent(self, event):
-        """Cleanup on window close."""
-        self._stop_playback()
-        self._video_source.stop()
-        self._midi_output.close()
-        self._audio_engine.cleanup()
+        """Save settings and cleanup on window close."""
+        # Persist settings before exiting
+        self._settings.save_to_file()
+        self._engine.cleanup()
         event.accept()
 
 

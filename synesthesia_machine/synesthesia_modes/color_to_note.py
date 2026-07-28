@@ -101,7 +101,7 @@ class ColorToNoteMode(SynesthesiaMode):
         threshold_pixels = (self._activation_threshold / 100.0) * max_pixels
         desired_notes: Dict[int, int] = {}
         for i, pixel_count in enumerate(histogram):
-            if pixel_count >= threshold_pixels:
+            if pixel_count > threshold_pixels:
                 note = scale_notes[i % num_notes]
                 # Velocity: scale pixel count relative to max bin (percentage of dominant color)
                 # Use logarithmic scaling for more natural response

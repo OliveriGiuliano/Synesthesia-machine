@@ -133,12 +133,9 @@ class SynesthesiaMode(QObject):
             velocity = max(1, min(127, desired_notes[note]))
             events.append(NoteEvent(note, velocity, True))
         
-        # Velocity changes for still-active notes: silently update
-        # Do NOT send OFF+ON - this would re-trigger the sound every frame
-        for note in current & desired:
-            if desired_notes[note] != self._active_notes[note]:
-                # Just update the stored velocity, no event generated
-                pass
+        # Note: velocity changes for still-active notes are silently absorbed
+        # by the assignment below. We intentionally do NOT send OFF+ON events
+        # for velocity changes, as that would re-trigger the sound every frame.
         
         self._active_notes = desired_notes.copy()
         self.active_notes_changed.emit(self._active_notes.copy())

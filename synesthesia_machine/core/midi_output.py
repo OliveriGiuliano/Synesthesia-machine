@@ -2,9 +2,12 @@
 MIDI output module - handles MIDI device output and internal playback.
 """
 
+import logging
 from typing import Optional, List, Tuple
 from PyQt6.QtCore import QObject, pyqtSignal
 import rtmidi
+
+logger = logging.getLogger(__name__)
 
 
 class MidiOutput(QObject):
@@ -28,6 +31,7 @@ class MidiOutput(QObject):
         self._active: bool = True
         self._channel: int = 0
         self._device_list: List[Tuple[int, str]] = []
+        self._port_open: bool = False
         self._discover_devices()
     
     def _discover_devices(self):
@@ -35,11 +39,15 @@ class MidiOutput(QObject):
         self._device_list = []
         try:
             midi = rtmidi.MidiOut()
-            count = midi.get_port_count()
-            for i in range(count):
-                name = midi.get_port_name(i)
-                self._device_list.append((i, name))
-            midi.close_port()
+            try:
+                count = midi.get_port_count()
+                for i in range(count):
+                    name = midi.get_port_name(i)
+                    self._device_list.append((i, name))
+            finally:
+                # Don't call close_port() since no port was opened —
+                # just let the object be garbage collected
+                del midi
         except Exception as e:
             self.error_occurred.emit(f"Error discovering MIDI devices: {e}")
         
@@ -55,8 +63,9 @@ class MidiOutput(QObject):
         
         try:
             self._midi_out = rtmidi.MidiOut()
-            if device_index < self._midi_out.get_port_count():
+            if self._midi_out.get_port_count() > 0 and device_index < self._midi_out.get_port_count():
                 self._midi_out.open_port(device_index)
+                self._port_open = True
                 self._active = True
                 return True
             else:
@@ -74,10 +83,12 @@ class MidiOutput(QObject):
         """Internal close method."""
         self._active = False
         if self._midi_out is not None:
-            try:
-                self._midi_out.close_port()
-            except:
-                pass
+            if self._port_open:
+                try:
+                    self._midi_out.close_port()
+                except Exception as e:
+                    logger.debug("Error closing MIDI port: %s", e)
+            self._port_open = False
             self._midi_out = None
     
     def set_channel(self, channel: int):

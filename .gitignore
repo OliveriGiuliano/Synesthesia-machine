@@ -26,3 +26,6 @@ Thumbs.db
 # Environment variables
 .env
 .env.local
+
+# Application settings (user-specific, stored in ~/.synesthesia_machine/)
+.synesthesia_machine/

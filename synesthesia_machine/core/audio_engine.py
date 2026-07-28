@@ -13,14 +13,26 @@ _sample_rate = 48000
 
 
 def _init_sd():
+    """Initialize sounddevice with graceful fallback.
+    
+    Tries to query the default output device for sample rate.
+    Falls back to 48000 Hz if the device is unavailable or query fails.
+    """
     global _sd, _sample_rate
     if _sd is not None:
         return True
     try:
         import sounddevice as sd
         _sd = sd
-        default_out = sd.query_devices(sd.default.device[1], 'output')
-        _sample_rate = int(default_out['default_samplerate']) or 48000
+        # Try to get sample rate from default output device
+        try:
+            default_device_index = sd.default.device[1]
+            if default_device_index is not None:
+                default_out = sd.query_devices(default_device_index, 'output')
+                _sample_rate = int(default_out['default_samplerate']) or 48000
+        except Exception:
+            # query_devices can fail if default device was disconnected
+            _sample_rate = 48000
         return True
     except Exception as e:
         print(f"Warning: sounddevice not available: {e}")
@@ -28,13 +40,14 @@ def _init_sd():
 
 
 class Voice:
-    """Simple oscillator voice with phase tracking."""
-    __slots__ = ['freq', 'velocity', 'phase']
+    """Simple oscillator voice with phase tracking and release state."""
+    __slots__ = ['freq', 'velocity', 'phase', 'releasing']
 
     def __init__(self, freq: float, velocity: float):
         self.freq = freq
         self.velocity = velocity
         self.phase = 0.0
+        self.releasing = False
 
 
 class AudioEngine(QObject):
@@ -55,8 +68,9 @@ class AudioEngine(QObject):
         self._lock = threading.Lock()
         self._attack_remaining: Dict[int, int] = {}
         self._release_remaining: Dict[int, int] = {}
-        self._attack_samples = 60
-        self._release_samples = 120
+        # Envelope lengths in samples (at 48kHz: 10ms attack, 80ms release)
+        self._attack_samples = 480
+        self._release_samples = 3840
 
     def _ensure_stream(self) -> bool:
         if not _init_sd():
@@ -83,7 +97,12 @@ class AudioEngine(QObject):
 
     def _audio_callback(self, outdata, frames,
                         time_info, status):
-        """Synthesize and mix all active voices into outdata."""
+        """Synthesize and mix all active voices into outdata.
+
+        Voices in release mode are faded out and removed once the release
+        envelope finishes, so stop_note() produces a smooth fade instead of
+        an abrupt cutoff.
+        """
         with self._lock:
             voices_list = list(self._voices.items())
             vol = self._volume if not self._muted else 0.0
@@ -93,6 +112,9 @@ class AudioEngine(QObject):
         # Zero output buffer (outdata shape: (frames, 1))
         out = outdata[:, 0]
         out[:] = 0.0
+
+        # Track which releasing voices have finished so we can remove them.
+        done_release_notes = []
 
         for midi_note, voice in voices_list:
             a_rem = attack_rem.get(midi_note, 0)
@@ -130,6 +152,8 @@ class AudioEngine(QObject):
                 attack_rem[midi_note] = max(0, a_rem - frames)
             elif r_rem > 0:
                 release_rem[midi_note] = max(0, r_rem - frames)
+                if release_rem[midi_note] == 0:
+                    done_release_notes.append(midi_note)
 
         # Soft clipping
         np.clip(out, -1.0, 1.0, out=out)
@@ -137,6 +161,10 @@ class AudioEngine(QObject):
         with self._lock:
             self._attack_remaining = attack_rem
             self._release_remaining = release_rem
+            # Remove voices whose release envelope has finished
+            for note in done_release_notes:
+                self._voices.pop(note, None)
+                self._release_remaining.pop(note, None)
 
     def play_note(self, midi_note: int, velocity: int = 64):
         with self._lock:
@@ -158,13 +186,21 @@ class AudioEngine(QObject):
 
     def stop_note(self, midi_note: int):
         with self._lock:
-            self._voices.pop(midi_note, None)
+            voice = self._voices.pop(midi_note, None)
             self._attack_remaining.pop(midi_note, None)
             self._release_remaining.pop(midi_note, None)
 
-        active = sorted(self._voices.keys())
-        self.notes_changed.emit(active)
-        print("[AUDIO] stop_note(note=%d) -> active: %s" % (midi_note, active))
+            if voice is not None:
+                # Mark voice as releasing and put it back so the audio
+                # callback can fade it out instead of cutting it off.
+                voice.releasing = True
+                self._voices[midi_note] = voice
+                self._release_remaining[midi_note] = self._release_samples
+
+        # Note: we intentionally do NOT emit notes_changed here.
+        # The voice is still "active" during the release envelope and
+        # will be removed by the audio callback when the fade finishes.
+        print("[AUDIO] stop_note(note=%d) -> releasing" % midi_note)
 
     def stop_all(self):
         with self._lock:

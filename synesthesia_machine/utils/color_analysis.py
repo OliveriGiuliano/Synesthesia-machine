@@ -2,6 +2,7 @@
 Color analysis utilities for synesthesia processing.
 """
 
+import cv2
 import numpy as np
 from typing import Tuple, List
 
@@ -18,7 +19,6 @@ def rgb_to_hsv_frame(frame: np.ndarray) -> np.ndarray:
         H: 0-180 (OpenCV convention), S: 0-255, V: 0-255
     """
     # OpenCV expects BGR for cvtColor, so convert RGB -> BGR -> HSV
-    import cv2
     bgr_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
     hsv_frame = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2HSV)
     return hsv_frame
@@ -80,7 +80,6 @@ def get_hue_bin_colors(num_bins: int) -> List[Tuple[int, int, int]]:
         # Center hue of this bin (0-180 range)
         bin_center = (i + 0.5) * (180.0 / num_bins)
         # Convert HSV (h, 255, 255) to RGB
-        import cv2
         hsv = np.uint8([[[int(bin_center), 255, 255]]])
         bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
         r, g, b = bgr[0][0][2], bgr[0][0][1], bgr[0][0][0]
@@ -100,5 +99,4 @@ def downscale_frame(frame: np.ndarray, width: int, height: int) -> np.ndarray:
     Returns:
         Downscaled frame of shape (height, width, 3)
     """
-    import cv2
     return cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
