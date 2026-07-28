@@ -723,13 +723,23 @@ class MainWindow(QMainWindow):
         self._framerate_spin.valueChanged.connect(self._on_framerate_changed)
     
     def _initialize_mode(self):
-        """Initialize the first synesthesia mode."""
+        """Initialize the synesthesia mode. Use the currently selected combo
+        index (which may have been restored from saved settings), falling back
+        to the first available mode if nothing is selected."""
         available = self._engine.get_available_modes()
-        if available:
-            first_id = list(available.keys())[0]
-            self._engine.initialize_mode(first_id)
-            self._populate_mode_parameters()
-            self._update_mode_description()
+        if not available:
+            return
+        
+        # Use the mode currently selected in the combo box (set by _apply_settings_to_ui),
+        # or fall back to the first available mode
+        mode_id = self._mode_combo.itemData(self._mode_combo.currentIndex())
+        if mode_id is None or mode_id not in available:
+            mode_id = list(available.keys())[0]
+            self._mode_combo.setCurrentIndex(self._mode_combo.findData(mode_id))
+        
+        self._engine.initialize_mode(mode_id)
+        self._populate_mode_parameters()
+        self._update_mode_description()
     
     def _create_bordered_spin_frame(self, spinner):
         """Wrap a spin box in a QFrame for reliable border rendering."""
