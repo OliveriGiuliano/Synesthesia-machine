@@ -102,77 +102,97 @@ class AudioEngine(QObject):
         Voices in release mode are faded out and removed once the release
         envelope finishes, so stop_note() produces a smooth fade instead of
         an abrupt cutoff.
+
+        IMPORTANT: The entire callback runs under self._lock to prevent a race
+        condition where stop_note() or play_note() modify _release_remaining
+        or _attack_remaining between the callback's read and write-back phases.
+        The previous two-phase-lock pattern (copy→process→overwrite) caused
+        stop_note's release state to be silently lost.
         """
+        # Hold lock for the entire callback to prevent write-back from
+        # overwriting concurrent stop_note/play_note changes.
+        # With max ~12-24 voices and numpy operations, this is fast enough
+        # that audio dropouts won't occur.
+        done_release_notes = []
+
         with self._lock:
             voices_list = list(self._voices.items())
             vol = self._volume if not self._muted else 0.0
-            attack_rem = dict(self._attack_remaining)
-            release_rem = dict(self._release_remaining)
 
-        # Zero output buffer (outdata shape: (frames, 1))
-        out = outdata[:, 0]
-        out[:] = 0.0
+            # Zero output buffer (outdata shape: (frames, 1))
+            out = outdata[:, 0]
+            out[:] = 0.0
 
-        # Track which releasing voices have finished so we can remove them.
-        done_release_notes = []
+            for midi_note, voice in voices_list:
+                a_rem = self._attack_remaining.get(midi_note, 0)
+                r_rem = self._release_remaining.get(midi_note, 0)
 
-        for midi_note, voice in voices_list:
-            a_rem = attack_rem.get(midi_note, 0)
-            r_rem = release_rem.get(midi_note, 0)
+                if a_rem > 0:
+                    start_env = 1.0 - min(1.0, a_rem / self._attack_samples)
+                    end_env = 1.0 - max(0, (a_rem - frames) / self._attack_samples)
+                elif r_rem > 0:
+                    start_env = min(1.0, r_rem / self._release_samples)
+                    end_env = max(0, (r_rem - frames) / self._release_samples)
+                else:
+                    start_env = 1.0
+                    end_env = 1.0
 
-            if a_rem > 0:
-                start_env = 1.0 - min(1.0, a_rem / self._attack_samples)
-                end_env = 1.0 - max(0, (a_rem - frames) / self._attack_samples)
-            elif r_rem > 0:
-                start_env = min(1.0, r_rem / self._release_samples)
-                end_env = max(0, (r_rem - frames) / self._release_samples)
-            else:
-                start_env = 1.0
-                end_env = 1.0
+                # Generate sine wave samples
+                phase_start = voice.phase
+                phase_end = phase_start + voice.freq * frames / _sample_rate
+                phases = np.linspace(phase_start, phase_end, frames, endpoint=False)
+                voice.phase = phase_end % 1.0
 
-            # Generate sine wave samples
-            phase_start = voice.phase
-            phase_end = phase_start + voice.freq * frames / _sample_rate
-            phases = np.linspace(phase_start, phase_end, frames, endpoint=False)
-            voice.phase = phase_end % 1.0
+                samples = np.sin(2 * np.pi * phases)
 
-            samples = np.sin(2 * np.pi * phases)
+                # Apply envelope ramp
+                if a_rem > 0 or r_rem > 0:
+                    env_ramp = np.linspace(start_env, end_env, frames)
+                else:
+                    env_ramp = np.ones(frames)
 
-            # Apply envelope ramp
-            if a_rem > 0 or r_rem > 0:
-                env_ramp = np.linspace(start_env, end_env, frames)
-            else:
-                env_ramp = np.ones(frames)
+                gain = voice.velocity * vol * 0.3
+                out += samples * env_ramp * gain
 
-            gain = voice.velocity * vol * 0.3
-            out += samples * env_ramp * gain
+                # Update attack/release counters directly on the live dict
+                if a_rem > 0:
+                    self._attack_remaining[midi_note] = max(0, a_rem - frames)
+                elif r_rem > 0:
+                    self._release_remaining[midi_note] = max(0, r_rem - frames)
+                    if self._release_remaining[midi_note] == 0:
+                        done_release_notes.append(midi_note)
 
-            # Update attack/release counters
-            if a_rem > 0:
-                attack_rem[midi_note] = max(0, a_rem - frames)
-            elif r_rem > 0:
-                release_rem[midi_note] = max(0, r_rem - frames)
-                if release_rem[midi_note] == 0:
-                    done_release_notes.append(midi_note)
+            # Soft clipping
+            np.clip(out, -1.0, 1.0, out=out)
 
-        # Soft clipping
-        np.clip(out, -1.0, 1.0, out=out)
-
-        with self._lock:
-            self._attack_remaining = attack_rem
-            self._release_remaining = release_rem
             # Remove voices whose release envelope has finished
             for note in done_release_notes:
                 self._voices.pop(note, None)
                 self._release_remaining.pop(note, None)
 
+        # Emit signal outside the lock to avoid blocking the audio callback
+        if done_release_notes:
+            active = sorted(self._voices.keys())
+            self.notes_changed.emit(active)
+
     def play_note(self, midi_note: int, velocity: int = 64):
         with self._lock:
             if midi_note in self._voices:
-                self._voices[midi_note].velocity = velocity / 127.0
-                self._attack_remaining.pop(midi_note, None)
-                self._release_remaining.pop(midi_note, None)
-                return
+                voice = self._voices[midi_note]
+                if voice.releasing:
+                    # Note is in release envelope from a recent stop_note().
+                    # Re-trigger it: cancel the release and restart normal playing.
+                    voice.releasing = False
+                    voice.velocity = velocity / 127.0
+                    self._attack_remaining.pop(midi_note, None)
+                    self._release_remaining.pop(midi_note, None)
+                    return
+                else:
+                    # Note already playing, just update velocity
+                    voice.velocity = velocity / 127.0
+                    self._attack_remaining.pop(midi_note, None)
+                    self._release_remaining.pop(midi_note, None)
+                    return
 
             freq = 440.0 * (2 ** ((midi_note - 69) / 12.0))
             self._voices[midi_note] = Voice(freq, velocity / 127.0)
