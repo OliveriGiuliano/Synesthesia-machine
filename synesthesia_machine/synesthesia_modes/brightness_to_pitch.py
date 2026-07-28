@@ -25,10 +25,7 @@ class BrightnessToPitchMode(SynesthesiaMode):
         super().__init__(parent)
         
         # Parameters
-        self._activation_threshold = 5.0      # Min percentage (0-100) of max bin pixels to trigger note
         self._velocity_scaling = 1.0          # Velocity multiplier
-        self._min_brightness = 0              # Ignore pixels darker than this (0-255)
-        self._max_brightness = 255            # Ignore pixels brighter than this (0-255)
     
     def get_id(self) -> str:
         return "brightness_to_pitch"
@@ -42,21 +39,12 @@ class BrightnessToPitchMode(SynesthesiaMode):
     
     def update_parameters(self, params: Dict[str, any]):
         super().update_parameters(params)
-        if 'activation_threshold' in params:
-            self._activation_threshold = max(0.0, min(100.0, float(params['activation_threshold'])))
         if 'velocity_scaling' in params:
             self._velocity_scaling = max(0.1, min(5.0, float(params['velocity_scaling'])))
-        if 'min_brightness' in params:
-            self._min_brightness = max(0, min(255, int(params['min_brightness'])))
-        if 'max_brightness' in params:
-            self._max_brightness = max(0, min(255, int(params['max_brightness'])))
     
     def get_parameters(self) -> Dict[str, any]:
         return {
-            'activation_threshold': self._activation_threshold,
             'velocity_scaling': self._velocity_scaling,
-            'min_brightness': self._min_brightness,
-            'max_brightness': self._max_brightness,
         }
     
     def process_frame(self, frame_rgb: np.ndarray, scale_notes: List[int]) -> List[NoteEvent]:
@@ -82,29 +70,20 @@ class BrightnessToPitchMode(SynesthesiaMode):
         # Extract channels
         v = frame_hsv[:, :, 2]  # Value/Brightness (0-255)
         
-        # Mask: only consider pixels in brightness range
-        mask = (v >= self._min_brightness) & (v <= self._max_brightness)
-        masked_brightness = v[mask]
-        
-        if masked_brightness.size == 0:
-            return self._update_active_notes({})
-        
         # Compute brightness histogram across num_notes bins
-        # Each bin covers (max_brightness - min_brightness) / num_notes range
-        brightness_range = self._max_brightness - self._min_brightness + 1
-        bin_width = brightness_range / num_notes
-        bin_indices = ((masked_brightness - self._min_brightness) / bin_width).astype(np.int32)
+        # Full 0-255 range divided evenly
+        bin_width = 256.0 / num_notes
+        bin_indices = (v.flatten() / bin_width).astype(np.int32)
         bin_indices = np.clip(bin_indices, 0, num_notes - 1)
         histogram = np.bincount(bin_indices, minlength=num_notes)[:num_notes]
         
-        # Map histogram to desired notes (low brightness = low notes, high = high)
+        # Map histogram to notes: any bin with pixels triggers a note
+        # Velocity proportional to pixel count (logarithmic scaling)
         max_pixels = max(histogram) if max(histogram) > 0 else 1
-        threshold_pixels = (self._activation_threshold / 100.0) * max_pixels
         desired_notes: Dict[int, int] = {}
         for i, pixel_count in enumerate(histogram):
-            if pixel_count > threshold_pixels:
+            if pixel_count > 0:
                 note = scale_notes[i % num_notes]
-                # Velocity: scale pixel count relative to max bin
                 ratio = pixel_count / max_pixels
                 velocity = min(127, int(20 + 107 * np.log1p(ratio * self._velocity_scaling) / np.log1p(1.0)))
                 desired_notes[note] = velocity
