@@ -26,6 +26,7 @@ from PyQt6.QtGui import QImage, QPixmap, QFont
 
 from synesthesia_machine.core.engine import SynesthesiaEngine
 from synesthesia_machine.synesthesia_modes.color_to_note import ColorToNoteMode
+from synesthesia_machine.synesthesia_modes.brightness_to_pitch import BrightnessToPitchMode
 from synesthesia_machine.gui.visualizer import NoteVisualizer
 from synesthesia_machine.utils.musical_scales import (
     get_available_scales, get_note_name
@@ -95,6 +96,7 @@ class MainWindow(QMainWindow):
     def _register_modes(self):
         """Register all available synesthesia modes with the engine."""
         self._engine.register_mode("color_to_note", ColorToNoteMode)
+        self._engine.register_mode("brightness_to_pitch", BrightnessToPitchMode)
     
     def _init_ui(self):
         """Initialize the user interface."""
