@@ -609,6 +609,63 @@ class MainWindow(QMainWindow):
         self._btn_refresh_midi.setMaximumHeight(28)
         general_layout.addWidget(self._btn_refresh_midi)
         
+        # Frame Rate — compact "1 / N" display
+        framerate_header = QLabel("⏱  Frame Rate")
+        framerate_header.setStyleSheet("color: #7aa2f7; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; padding: 2px 0;")
+        general_layout.addWidget(framerate_header)
+        
+        framerate_layout = QHBoxLayout()
+        framerate_layout.addWidget(QLabel("1 /"))
+        
+        framerate_spin_frame = QFrame()
+        framerate_spin_frame.setObjectName("framerate_spin_frame")
+        framerate_spin_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        framerate_spin_frame.setStyleSheet("""
+            #framerate_spin_frame {
+                background-color: #151620;
+                border: 2px solid #6644aa;
+                border-radius: 8px;
+                padding: 1px 3px;
+            }
+            #framerate_spin_frame:hover {
+                border: 2px solid #a855f7;
+            }
+        """)
+        framerate_spin_layout = QHBoxLayout(framerate_spin_frame)
+        framerate_spin_layout.setContentsMargins(3, 1, 3, 1)
+        framerate_spin_layout.setSpacing(0)
+        
+        self._framerate_spin = QSpinBox()
+        self._framerate_spin.setToolTip("Process 1 out of N frames (1 = all frames)")
+        self._framerate_spin.setMinimum(1)
+        self._framerate_spin.setMaximum(100)
+        self._framerate_spin.setValue(1)
+        self._framerate_spin.setFixedWidth(40)
+        self._framerate_spin.setStyleSheet("""
+            QSpinBox {
+                background: transparent;
+                border: none;
+                color: #c0caf5;
+                font-size: 12px;
+                font-weight: 500;
+                text-align: center;
+                padding: 0px;
+            }
+            QSpinBox::up-button, QSpinBox::down-button {
+                width: 0;
+                height: 0;
+                border: none;
+                background: none;
+            }
+            QSpinBox::up-arrow, QSpinBox::down-arrow {
+                image: none;
+            }
+        """)
+        framerate_spin_layout.addWidget(self._framerate_spin)
+        framerate_layout.addWidget(framerate_spin_frame)
+        framerate_layout.addStretch()
+        general_layout.addLayout(framerate_layout)
+        
         general_layout.addStretch()
         layout.addWidget(general_group, stretch=1)
         
@@ -659,6 +716,9 @@ class MainWindow(QMainWindow):
         
         # MIDI refresh
         self._btn_refresh_midi.clicked.connect(self._refresh_midi_devices)
+        
+        # Frame rate
+        self._framerate_spin.valueChanged.connect(self._on_framerate_changed)
     
     def _initialize_mode(self):
         """Initialize the first synesthesia mode."""
@@ -941,6 +1001,14 @@ class MainWindow(QMainWindow):
         output_type = self._midi_type_combo.itemData(index)
         self._settings.midi.output_type = output_type
         self._engine.set_midi_output_type(output_type)
+    
+    def _on_framerate_changed(self, value: int):
+        """Handle frame rate (frame skip) change.
+        
+        Spin value of N means process 1 out of N frames.
+        Frame skip = N - 1 (so value 1 = skip 0 = all frames).
+        """
+        self._engine.set_frame_skip(value - 1)
     
     # --- Audio handling ---
     
@@ -1320,13 +1388,13 @@ class MainWindow(QMainWindow):
         from PyQt6.QtCore import Qt
         key = event.key()
         
-        if key == Qt.Key.Space:
+        if key == Qt.Key.Key_Space:
             if self._engine.is_playing():
                 self._pause_playback()
             elif self._engine.video_source.is_loaded:
                 self._start_playback()
             event.accept()
-        elif key == Qt.Key.Escape:
+        elif key == Qt.Key.Key_Escape:
             if self._engine.is_running or self._engine.video_source.is_playing:
                 self._stop_playback()
             event.accept()
