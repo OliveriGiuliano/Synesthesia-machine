@@ -352,36 +352,19 @@ class MainWindow(QMainWindow):
         return panel
     
     def _create_right_panel(self) -> QWidget:
-        """Create the right panel with all controls."""
+        """Create the right panel with two distinct group-box panels: mode controls (top) and general controls (bottom)."""
         panel = QWidget()
         panel.setMinimumWidth(300)
         layout = QVBoxLayout(panel)
         layout.setSpacing(6)
         
-        # Container group box for controls
-        controls_group = QGroupBox("")
-        controls_layout = QVBoxLayout()
-        controls_layout.setSpacing(6)
+        # --- TOP PANEL: Synesthesia Mode Controls ---
+        mode_group = QGroupBox("🎨  Synesthesia Mode")
+        mode_group.setObjectName("mode_panel")
+        mode_layout = QVBoxLayout(mode_group)
+        mode_layout.setSpacing(6)
         
-        # Scroll area for controls
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("border: none; background: transparent;")
-        
-        scroll_content = QWidget()
-        scroll_layout = QVBoxLayout(scroll_content)
-        scroll_layout.setSpacing(8)
-        
-        # Synesthesia Mode Selection
-        mode_group = QGroupBox("")
-        mode_layout = QVBoxLayout()
-        
-        mode_header = QLabel("🎨  Synesthesia Mode")
-        mode_header.setStyleSheet("color: #7aa2f7; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; padding: 2px 0;")
-        mode_header.setToolTip("Select how colors are mapped to musical notes")
-        mode_layout.addWidget(mode_header)
-        
-        # Wrap combo box in a bordered frame for reliable border rendering
+        # Mode combo
         mode_combo_frame = QFrame()
         mode_combo_frame.setObjectName("mode_combo_frame")
         mode_combo_frame.setFrameShape(QFrame.Shape.StyledPanel)
@@ -420,26 +403,31 @@ class MainWindow(QMainWindow):
         mode_combo_layout.addWidget(self._mode_combo)
         mode_layout.addWidget(mode_combo_frame)
         
-        # Mode description label
+        # Mode description
         self._mode_desc_label = QLabel()
         self._mode_desc_label.setStyleSheet("color: #999; font-size: 11px;")
         self._mode_desc_label.setWordWrap(True)
         mode_layout.addWidget(self._mode_desc_label)
         
-        # Mode parameters (populated when mode changes)
+        # Mode parameters
         self._mode_params_widget = QWidget()
         self._mode_params_layout = QVBoxLayout(self._mode_params_widget)
         self._mode_params_layout.setSpacing(4)
         mode_layout.addWidget(self._mode_params_widget)
         
-        mode_group.setLayout(mode_layout)
-        scroll_layout.addWidget(mode_group)
+        layout.addWidget(mode_group, stretch=0)
         
-        # General Controls
-        general_group = QGroupBox("")
-        general_layout = QVBoxLayout()
+        # --- BOTTOM PANEL: General Controls ---
+        general_group = QGroupBox("⚙  General Controls")
+        general_group.setObjectName("general_panel")
+        general_layout = QVBoxLayout(general_group)
+        general_layout.setSpacing(8)
         
-        # Volume
+        # Volume & Mute
+        vol_header = QLabel("🔊  Audio")
+        vol_header.setStyleSheet("color: #7aa2f7; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; padding: 2px 0;")
+        general_layout.addWidget(vol_header)
+        
         vol_layout = QHBoxLayout()
         vol_layout.addWidget(QLabel("Volume:"))
         self._volume_slider = QSlider(Qt.Orientation.Horizontal)
@@ -452,21 +440,17 @@ class MainWindow(QMainWindow):
         vol_layout.addWidget(self._volume_label)
         general_layout.addLayout(vol_layout)
         
-        # Mute
         self._mute_checkbox = QCheckBox("Mute")
         general_layout.addWidget(self._mute_checkbox)
         
-        general_group.setLayout(general_layout)
-        scroll_layout.addWidget(general_group)
-        
         # Musical Scale
-        scale_group = QGroupBox("")
-        scale_layout = QVBoxLayout()
+        scale_header = QLabel("🎵  Musical Scale")
+        scale_header.setStyleSheet("color: #7aa2f7; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; padding: 2px 0;")
+        general_layout.addWidget(scale_header)
         
-        # Scale type
         scale_type_layout = QHBoxLayout()
         scale_type_layout.addWidget(QLabel("Scale:"))
-        # Wrap combo box in a bordered frame
+        
         scale_combo_frame = QFrame()
         scale_combo_frame.setObjectName("scale_combo_frame")
         scale_combo_frame.setFrameShape(QFrame.Shape.StyledPanel)
@@ -503,15 +487,13 @@ class MainWindow(QMainWindow):
             self._scale_combo.addItem(display, scale_name)
         scale_combo_layout.addWidget(self._scale_combo)
         scale_type_layout.addWidget(scale_combo_frame)
-        scale_layout.addLayout(scale_type_layout)
+        general_layout.addLayout(scale_type_layout)
         
         # Note range
         range_layout = QHBoxLayout()
         range_layout.setSpacing(6)
-        
         range_layout.addWidget(QLabel("Range:"))
         
-        # Wrap spin boxes in bordered frames
         min_frame = QFrame()
         min_frame.setObjectName("min_note_frame")
         min_frame.setFrameShape(QFrame.Shape.StyledPanel)
@@ -533,7 +515,7 @@ class MainWindow(QMainWindow):
         self._min_note_spin = QSpinBox()
         self._min_note_spin.setMinimum(0)
         self._min_note_spin.setMaximum(127)
-        self._min_note_spin.setValue(24)  # C1
+        self._min_note_spin.setValue(24)
         self._min_note_spin.setFixedWidth(44)
         self._min_note_spin.setStyleSheet("""
             background: transparent;
@@ -566,7 +548,7 @@ class MainWindow(QMainWindow):
         self._max_note_spin = QSpinBox()
         self._max_note_spin.setMinimum(0)
         self._max_note_spin.setMaximum(127)
-        self._max_note_spin.setValue(96)  # C8
+        self._max_note_spin.setValue(96)
         self._max_note_spin.setFixedWidth(44)
         self._max_note_spin.setStyleSheet("""
             background: transparent;
@@ -580,21 +562,14 @@ class MainWindow(QMainWindow):
         
         range_layout.addWidget(min_frame)
         range_layout.addWidget(max_frame)
-        scale_layout.addLayout(range_layout)
-        
-        scale_group.setLayout(scale_layout)
-        scroll_layout.addWidget(scale_group)
+        general_layout.addLayout(range_layout)
         
         # MIDI Output
-        midi_group = QGroupBox("")
-        midi_layout = QVBoxLayout()
-        
         midi_header = QLabel("🎹  MIDI Output")
         midi_header.setStyleSheet("color: #7aa2f7; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; padding: 2px 0;")
         midi_header.setToolTip("Select MIDI output device")
-        midi_layout.addWidget(midi_header)
+        general_layout.addWidget(midi_header)
         
-        # Wrap combo box in a bordered frame
         midi_combo_frame = QFrame()
         midi_combo_frame.setObjectName("midi_combo_frame")
         midi_combo_frame.setFrameShape(QFrame.Shape.StyledPanel)
@@ -628,21 +603,14 @@ class MainWindow(QMainWindow):
         """)
         self._midi_type_combo.addItem("Internal (PyGame)", "internal")
         midi_combo_layout.addWidget(self._midi_type_combo)
-        midi_layout.addWidget(midi_combo_frame)
+        general_layout.addWidget(midi_combo_frame)
         
-        # Refresh button
         self._btn_refresh_midi = QPushButton("🔄 Refresh Devices")
         self._btn_refresh_midi.setMaximumHeight(28)
-        midi_layout.addWidget(self._btn_refresh_midi)
+        general_layout.addWidget(self._btn_refresh_midi)
         
-        midi_group.setLayout(midi_layout)
-        scroll_layout.addWidget(midi_group)
-        
-        scroll_layout.addStretch()
-        scroll.setWidget(scroll_content)
-        controls_layout.addWidget(scroll)
-        controls_group.setLayout(controls_layout)
-        layout.addWidget(controls_group)
+        general_layout.addStretch()
+        layout.addWidget(general_group, stretch=1)
         
         return panel
     
@@ -685,6 +653,9 @@ class MainWindow(QMainWindow):
         # Audio
         self._volume_slider.valueChanged.connect(self._on_volume_changed)
         self._mute_checkbox.toggled.connect(self._on_mute_toggled)
+        
+        # MIDI output type
+        self._midi_type_combo.currentIndexChanged.connect(self._on_midi_type_changed)
         
         # MIDI refresh
         self._btn_refresh_midi.clicked.connect(self._refresh_midi_devices)
@@ -965,6 +936,12 @@ class MainWindow(QMainWindow):
     def _refresh_midi_devices(self):
         self._engine.refresh_midi_devices()
     
+    def _on_midi_type_changed(self, index: int):
+        """Handle MIDI output type change."""
+        output_type = self._midi_type_combo.itemData(index)
+        self._settings.midi.output_type = output_type
+        self._engine.set_midi_output_type(output_type)
+    
     # --- Audio handling ---
     
     def _on_volume_changed(self, value: int):
@@ -992,20 +969,6 @@ class MainWindow(QMainWindow):
     
     def _get_stylesheet(self) -> str:
         return """
-            /* =====================================================
-               Futuristic Apple 2076 — Dark Glassmorphism Theme
-               =====================================================
-               Design language:
-               - Frosted glass panels with dark translucency
-               - Ultra-rounded corners (squircle aesthetic)
-               - Soft multi-stop gradients on dark base
-               - Floating elements with depth shadows
-               - San Francisco–inspired clean typography
-               - Vibrant holographic accent gradients
-               - Dark mode for eye comfort
-               - Compact layout
-               ===================================================== */
-
             /* === Window & Background === */
             QMainWindow {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
@@ -1348,6 +1311,28 @@ class MainWindow(QMainWindow):
             }
         """
     
+    def keyPressEvent(self, event):
+        """Handle keyboard shortcuts.
+        
+        - Space: Play/Pause toggle
+        - Escape: Stop playback and release all notes
+        """
+        from PyQt6.QtCore import Qt
+        key = event.key()
+        
+        if key == Qt.Key.Space:
+            if self._engine.is_playing():
+                self._pause_playback()
+            elif self._engine.video_source.is_loaded:
+                self._start_playback()
+            event.accept()
+        elif key == Qt.Key.Escape:
+            if self._engine.is_running or self._engine.video_source.is_playing:
+                self._stop_playback()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
     def closeEvent(self, event):
         """Save settings and cleanup on window close."""
         # Persist settings before exiting

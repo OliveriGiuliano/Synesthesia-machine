@@ -216,6 +216,11 @@ class VideoSource(QObject):
         return self._is_playing
     
     @property
+    def is_loaded(self) -> bool:
+        """Return True when a capture source (file or camera) is opened."""
+        return self._capture is not None and self._capture.isOpened()
+    
+    @property
     def source_type(self) -> str:
         return self._source_type
     

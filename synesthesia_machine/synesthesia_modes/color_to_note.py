@@ -110,9 +110,8 @@ class ColorToNoteMode(SynesthesiaMode):
                 desired_notes[note] = velocity
         
         # Generate events from state change
-        events = self._update_active_notes(desired_notes)
-        
-        if events:
-            self.events_ready.emit(events)
-        
-        return events
+        # Return events to the engine; do NOT emit events_ready here,
+        # since the engine already processes the returned list. Emitting
+        # the signal would cause the engine's _on_mode_events handler to
+        # send each event a second time (duplicate note-on / note-off).
+        return self._update_active_notes(desired_notes)

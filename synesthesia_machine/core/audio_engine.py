@@ -182,7 +182,6 @@ class AudioEngine(QObject):
         self._ensure_stream()
         active = sorted(self._voices.keys())
         self.notes_changed.emit(active)
-        print("[AUDIO] play_note(note=%d, vel=%d) -> active: %s" % (midi_note, velocity, active))
 
     def stop_note(self, midi_note: int):
         with self._lock:
@@ -200,7 +199,6 @@ class AudioEngine(QObject):
         # Note: we intentionally do NOT emit notes_changed here.
         # The voice is still "active" during the release envelope and
         # will be removed by the audio callback when the fade finishes.
-        print("[AUDIO] stop_note(note=%d) -> releasing" % midi_note)
 
     def stop_all(self):
         with self._lock:
@@ -208,7 +206,6 @@ class AudioEngine(QObject):
             self._attack_remaining.clear()
             self._release_remaining.clear()
         self.notes_changed.emit([])
-        print("[AUDIO] stop_all()")
 
     def set_volume(self, volume: float):
         self._volume = max(0.0, min(1.0, volume))

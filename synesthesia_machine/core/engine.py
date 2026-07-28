@@ -96,9 +96,6 @@ class SynesthesiaEngine(QObject):
         
         # Connect video source signals for internal tracking
         self._video_source.frame_ready.connect(self._on_frame_ready)
-        
-        # Internal frame storage signal
-        self._internal_frame_ready = None
     
     # --- Properties ---
     
@@ -213,6 +210,27 @@ class SynesthesiaEngine(QObject):
         self._root_note = root_note
         self._min_note = min_note
         self._max_note = max_note
+
+        # Stop any notes that are now outside the new range BEFORE reprocessing.
+        # This prevents notes from getting stuck in the audio engine when the
+        # range shrinks: a note that was valid in the old range but outside the
+        # new range would never appear in the new scale_notes, so the mode's
+        # process_frame would not generate an OFF event for it.
+        if self._current_mode:
+            new_scale_notes = set(self.get_scale_notes())
+            notes_to_stop = []
+            for note in self._current_mode.active_notes:
+                if note not in new_scale_notes:
+                    notes_to_stop.append(note)
+            for note in notes_to_stop:
+                self._send_event(NoteEvent(note, 0, False))
+            # Also remove them from the mode's internal state so
+            # _update_active_notes doesn't re-emit OFF later
+            self._current_mode._active_notes = {
+                n: v for n, v in self._current_mode.active_notes.items()
+                if n not in notes_to_stop
+            }
+
         # Reprocess current frame with new scale
         self._force_process_frame()
     
@@ -272,9 +290,6 @@ class SynesthesiaEngine(QObject):
     def _on_frame_ready(self, frame_rgb: np.ndarray):
         """Called when a new frame is available. Store for processing."""
         self._current_frame = frame_rgb.copy()
-        # Emit the frame for UI display
-        if hasattr(self, '_frame_for_display'):
-            self._frame_for_display.emit(frame_rgb)
     
     def _process_frame(self):
         """
