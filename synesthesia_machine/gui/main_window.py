@@ -757,11 +757,19 @@ class MainWindow(QMainWindow):
 
     def _populate_mode_parameters(self):
         """Populate the mode-specific parameters UI."""
-        # Clear existing
+        # Clear existing - handle both widgets and nested layouts
         while self._mode_params_layout.count():
             child = self._mode_params_layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
+            elif child.layout():
+                # Recursively delete widgets in nested layout (our QHBoxLayout rows)
+                nested = child.layout()
+                while nested.count():
+                    nested_child = nested.takeAt(0)
+                    if nested_child.widget():
+                        nested_child.widget().deleteLater()
+                nested.deleteLater()
         
         mode = self._engine.current_mode
         if mode is None:
