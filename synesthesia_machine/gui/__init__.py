@@ -1,1 +1,0 @@
-# GUI modules - main window and panels
