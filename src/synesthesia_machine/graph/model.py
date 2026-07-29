@@ -94,6 +94,40 @@ class GraphDocument:
     def connections(self) -> tuple[ConnectionModel, ...]:
         return tuple(self._connections[key] for key in sorted(self._connections, key=str))
 
+    def node(self, node_id: UUID) -> NodeModel | None:
+        """Return one immutable node value without exposing mutable storage."""
+
+        return self._nodes.get(node_id)
+
+    def connection(self, connection_id: UUID) -> ConnectionModel | None:
+        """Return one immutable connection value without exposing mutable storage."""
+
+        return self._connections.get(connection_id)
+
+    def incoming_connection(self, node_id: UUID, port_id: str) -> ConnectionModel | None:
+        """Return the single connection occupying an input, if any."""
+
+        return next(
+            (
+                connection
+                for connection in self.connections
+                if connection.destination_node_id == node_id
+                and connection.destination_port_id == port_id
+            ),
+            None,
+        )
+
+    def incident_connections(
+        self, node_ids: set[UUID] | frozenset[UUID]
+    ) -> tuple[ConnectionModel, ...]:
+        """Return connections touching any of the supplied nodes."""
+
+        return tuple(
+            connection
+            for connection in self.connections
+            if connection.source_node_id in node_ids or connection.destination_node_id in node_ids
+        )
+
     def add_node(
         self,
         type_id: str,
@@ -116,6 +150,18 @@ class GraphDocument:
         )
         self._touch()
         return identifier
+
+    def restore_node(self, node: NodeModel, *, replace_existing: bool = False) -> None:
+        """Restore a complete immutable node value for persistence/undo adapters."""
+
+        existing = self._nodes.get(node.id)
+        if existing is not None and not replace_existing:
+            msg = f"Node already exists: {node.id}"
+            raise ValueError(msg)
+        if existing == node:
+            return
+        self._nodes[node.id] = node
+        self._touch()
 
     def remove_node(self, node_id: UUID) -> None:
         if node_id not in self._nodes:
@@ -179,6 +225,34 @@ class GraphDocument:
         )
         self._touch()
         return identifier
+
+    def restore_connection(
+        self,
+        connection: ConnectionModel,
+        *,
+        replace_existing_input: bool = False,
+    ) -> None:
+        """Restore a complete immutable connection value for persistence/undo adapters."""
+
+        self._require_node(connection.source_node_id)
+        self._require_node(connection.destination_node_id)
+        existing = self._connections.get(connection.id)
+        if existing is not None and existing != connection:
+            msg = f"Connection already exists: {connection.id}"
+            raise ValueError(msg)
+        if existing == connection:
+            return
+        if replace_existing_input:
+            self._connections = {
+                identifier: current
+                for identifier, current in self._connections.items()
+                if not (
+                    current.destination_node_id == connection.destination_node_id
+                    and current.destination_port_id == connection.destination_port_id
+                )
+            }
+        self._connections[connection.id] = connection
+        self._touch()
 
     def remove_connection(self, connection_id: UUID) -> None:
         if connection_id not in self._connections:

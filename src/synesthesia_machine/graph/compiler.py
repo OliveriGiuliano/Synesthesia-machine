@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
-from uuid import UUID
+from dataclasses import dataclass, replace
+from uuid import UUID, uuid5
 
 from synesthesia_machine.contracts.runtime_values import ParameterValue, PortType
 from synesthesia_machine.graph.model import ConnectionModel, GraphSnapshot, NodeModel
@@ -29,6 +29,14 @@ from synesthesia_machine.runtime.execution_plan import (
 class CompilationResult:
     report: ValidationReport
     plan: ExecutionPlan | None
+
+
+@dataclass(frozen=True, slots=True)
+class ConnectionCompatibility:
+    """Result of validating one prospective authoring connection."""
+
+    accepted: bool
+    issues: tuple[ValidationIssue, ...] = ()
 
 
 class _TypeGroups:
@@ -124,6 +132,51 @@ class GraphCompiler:
                 demand_roots=frozenset(roots),
             ),
         )
+
+    def connection_compatibility(
+        self,
+        snapshot: GraphSnapshot,
+        source_node_id: UUID,
+        source_port_id: str,
+        destination_node_id: UUID,
+        destination_port_id: str,
+    ) -> ConnectionCompatibility:
+        """Validate a prospective edge while tolerating unrelated authoring errors.
+
+        Occupancy replacement is modeled before comparison. New compiler errors caused by
+        the candidate are returned; pre-existing incomplete-graph diagnostics do not make an
+        otherwise compatible authoring connection impossible.
+        """
+
+        retained = tuple(
+            connection
+            for connection in snapshot.connections
+            if not (
+                connection.destination_node_id == destination_node_id
+                and connection.destination_port_id == destination_port_id
+            )
+        )
+        base = replace(snapshot, connections=retained)
+        candidate_id = uuid5(
+            snapshot.document_id,
+            f"connection-query:{source_node_id}:{source_port_id}:"
+            f"{destination_node_id}:{destination_port_id}",
+        )
+        candidate = ConnectionModel(
+            id=candidate_id,
+            source_node_id=source_node_id,
+            source_port_id=source_port_id,
+            destination_node_id=destination_node_id,
+            destination_port_id=destination_port_id,
+        )
+        baseline_issues = set(self.compile(base).report.issues)
+        prospective = replace(base, connections=(*retained, candidate))
+        new_errors = tuple(
+            issue
+            for issue in self.compile(prospective).report.errors
+            if issue not in baseline_issues
+        )
+        return ConnectionCompatibility(accepted=not new_errors, issues=new_errors)
 
     @staticmethod
     def _unique_nodes(
@@ -226,7 +279,7 @@ class GraphCompiler:
                     )
                 )
                 continue
-            if destination_definition.input(connection.destination_port_id) is None:
+            if connection.destination_port_id not in _input_socket_ids(destination_definition):
                 issues.append(
                     _error(
                         "unknown_input_port",
@@ -278,6 +331,10 @@ class GraphCompiler:
                 expressions[(node_id, port.id, False)] = expression
                 if isinstance(expression, TypeVariable):
                     groups.add((node_id, expression.name))
+            for parameter in definition.parameters:
+                if not parameter.connectable or parameter.connected_port_type is None:
+                    continue
+                expressions[(node_id, parameter.id, False)] = parameter.connected_port_type
             for port in definition.outputs:
                 expression = definition.port_type(
                     port.id, is_output=True, parameters=node_parameters
@@ -513,7 +570,8 @@ class GraphCompiler:
                 conversion=conversion,
             )
         input_types = {
-            port.id: resolved_types[(node.id, port.id, False)] for port in definition.inputs
+            port_id: resolved_types[(node.id, port_id, False)]
+            for port_id in _input_socket_ids(definition)
         }
         output_types = {
             port.id: resolved_types[(node.id, port.id, True)] for port in definition.outputs
@@ -534,6 +592,13 @@ class GraphCompiler:
 
 def types_compatible(source: PortType, destination: PortType) -> bool:
     return source is destination or (source is PortType.INT and destination is PortType.FLOAT)
+
+
+def _input_socket_ids(definition: NodeDefinition) -> tuple[str, ...]:
+    return (
+        *(port.id for port in definition.inputs),
+        *(parameter.id for parameter in definition.parameters if parameter.connectable),
+    )
 
 
 def _variable_key(node_id: UUID, expression: PortType | TypeVariable) -> tuple[UUID, str] | None:
