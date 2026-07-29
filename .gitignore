@@ -170,6 +170,11 @@ poetry.toml
 # ruff
 .ruff_cache/
 
+# Synesthesia Machine local runtime artifacts
+logs/
+diagnostics/
+*.synmachine.autosave.json
+
 # LSP config files
 pyrightconfig.json
 
