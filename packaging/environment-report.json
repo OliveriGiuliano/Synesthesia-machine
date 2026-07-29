@@ -1,0 +1,26 @@
+{
+  "generated_at_utc": "2026-07-29T12:08:48.197127+00:00",
+  "python_version": "3.12.13",
+  "python_executable": "C:\\MY_FILES\\SORTING_THINGS\\_code\\synesthesia_machine\\.venv\\Scripts\\python.exe",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "machine": "AMD64",
+  "cpu_physical": 24,
+  "cpu_logical": 32,
+  "memory_total_bytes": 102834245632,
+  "memory_available_bytes": 84602261504,
+  "process_id": 8356,
+  "process_rss_bytes": 27553792,
+  "dependencies": {
+    "av": "18.0.0",
+    "mido": "1.3.3",
+    "numpy": "2.5.1",
+    "opencv-python": "4.13.0.92",
+    "psutil": "7.2.2",
+    "pyside6": "6.10.3",
+    "python-rtmidi": "1.5.8",
+    "sounddevice": "0.5.5",
+    "pyright": "1.1.411",
+    "pytest": "9.1.1",
+    "ruff": "0.14.14"
+  }
+}
