@@ -10,7 +10,13 @@ from types import MappingProxyType
 from uuid import UUID
 
 from synesthesia_machine.contracts.runtime_values import FrameContext, NoData, RuntimeValue
-from synesthesia_machine.nodes.base import ExpectedNodeError, NodeExecutionError, NodeRuntime
+from synesthesia_machine.nodes.base import (
+    ExecutionKind,
+    ExpectedNodeError,
+    NodeExecutionError,
+    NodeRuntime,
+    ResetReason,
+)
 from synesthesia_machine.runtime.execution_plan import ExecutionPlan, PortKey, ScalarConversion
 
 type TimingHook = Callable[[UUID, int], None]
@@ -108,6 +114,24 @@ class Scheduler:
                     key = PortKey(node.node_id, port_id)
                     self._static_cache[key] = values[key]
         return TickResult(values, tuple(errors), invocations)
+
+    def reset_source(self, clock_id: UUID, reason: ResetReason) -> None:
+        """Reset state-owning runtimes in one compiled source component."""
+
+        state_owners = {
+            ExecutionKind.SOURCE,
+            ExecutionKind.STATEFUL,
+            ExecutionKind.SINK,
+            ExecutionKind.VISUALIZER,
+        }
+        for node in self.plan.nodes:
+            if node.clock_id == clock_id and node.definition.execution_kind in state_owners:
+                self._runtimes[node.node_id].reset(reason)
+
+    def reset_all(self, reason: ResetReason) -> None:
+        for runtime in self._runtimes.values():
+            runtime.reset(reason)
+        self._static_cache.clear()
 
     def close(self) -> None:
         for runtime in self._runtimes.values():

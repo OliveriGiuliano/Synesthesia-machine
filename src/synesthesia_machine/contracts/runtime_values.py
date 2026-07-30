@@ -27,8 +27,11 @@ class PortType(StrEnum):
 class ColorSpace(StrEnum):
     LINEAR_RGB = "LINEAR_RGB"
     SRGB = "SRGB"
+    RGBA = "RGBA"
     HSV = "HSV"
+    HSL = "HSL"
     LAB = "LAB"
+    YCRCB = "YCRCB"
 
 
 class AlphaMode(StrEnum):
@@ -47,6 +50,11 @@ class ChannelSemantic(StrEnum):
     HUE = "HUE"
     SATURATION = "SATURATION"
     VALUE = "VALUE"
+    LIGHTNESS = "LIGHTNESS"
+    LAB_A = "LAB_A"
+    LAB_B = "LAB_B"
+    CHROMA_RED = "CHROMA_RED"
+    CHROMA_BLUE = "CHROMA_BLUE"
 
 
 @dataclass(frozen=True, slots=True)

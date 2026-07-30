@@ -6,6 +6,7 @@ from uuid import UUID
 from synesthesia_machine.contracts.runtime_values import FrameContext, RuntimeValue
 from synesthesia_machine.graph.compiler import CompilationResult, GraphCompiler
 from synesthesia_machine.graph.model import GraphSnapshot
+from synesthesia_machine.nodes.base import ResetReason
 from synesthesia_machine.nodes.registry import NodeRegistry
 from synesthesia_machine.runtime.execution_plan import ExecutionPlan, PortKey
 from synesthesia_machine.runtime.scheduler import Scheduler, TickResult
@@ -41,6 +42,14 @@ class EngineFacade:
         if self._scheduler is None:
             raise RuntimeError("No valid graph plan is active")
         return self._scheduler.execute_tick(context, source_values=source_values)
+
+    def reset_source(self, source_node_id: UUID, reason: ResetReason) -> None:
+        if self._scheduler is not None:
+            self._scheduler.reset_source(source_node_id, reason)
+
+    def reset_all(self, reason: ResetReason) -> None:
+        if self._scheduler is not None:
+            self._scheduler.reset_all(reason)
 
     def close(self) -> None:
         if self._scheduler is not None:
