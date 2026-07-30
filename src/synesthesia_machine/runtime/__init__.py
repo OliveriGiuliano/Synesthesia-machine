@@ -13,12 +13,18 @@ from synesthesia_machine.runtime.scheduler import Scheduler, TickResult
 
 if TYPE_CHECKING:
     from synesthesia_machine.runtime.engine_facade import EngineFacade
+    from synesthesia_machine.runtime.in_process_engine import (
+        InProcessEngineClient,
+        LatestFrameGraphWorker,
+    )
 
 __all__ = [
     "CompiledNode",
     "EngineFacade",
     "ExecutionPlan",
+    "InProcessEngineClient",
     "InputBinding",
+    "LatestFrameGraphWorker",
     "PortKey",
     "ScalarConversion",
     "Scheduler",
@@ -33,4 +39,14 @@ def __getattr__(name: str) -> object:
         from synesthesia_machine.runtime.engine_facade import EngineFacade
 
         return EngineFacade
+    if name in {"InProcessEngineClient", "LatestFrameGraphWorker"}:
+        from synesthesia_machine.runtime.in_process_engine import (
+            InProcessEngineClient,
+            LatestFrameGraphWorker,
+        )
+
+        return {
+            "InProcessEngineClient": InProcessEngineClient,
+            "LatestFrameGraphWorker": LatestFrameGraphWorker,
+        }[name]
     raise AttributeError(name)

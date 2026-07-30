@@ -2,6 +2,7 @@
 
 import argparse
 from fractions import Fraction
+from itertools import pairwise
 from pathlib import Path
 
 import av
@@ -56,6 +57,53 @@ def generate_test_video(
             )
             frame.pts = index
             frame.time_base = Fraction(1, fps)
+            for packet in stream.encode(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+                frame
+            ):
+                container.mux(packet)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+
+        for packet in stream.encode():  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            container.mux(packet)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+
+    return output_path
+
+
+def generate_vfr_test_video(
+    output_path: Path,
+    *,
+    pts_milliseconds: tuple[int, ...] = (0, 40, 120, 150, 300),
+    width: int = DEFAULT_WIDTH,
+    height: int = DEFAULT_HEIGHT,
+) -> Path:
+    """Create a deterministic MPEG-4 fixture with explicit variable PTS intervals."""
+
+    if width <= 0 or height <= 0 or not pts_milliseconds:
+        msg = "width, height, and pts_milliseconds must be non-empty and positive"
+        raise ValueError(msg)
+    if pts_milliseconds[0] < 0 or any(
+        current <= previous for previous, current in pairwise(pts_milliseconds)
+    ):
+        msg = "pts_milliseconds must be non-negative and strictly increasing"
+        raise ValueError(msg)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    time_base = Fraction(1, 1000)
+    with av.open(str(output_path), mode="w") as container:
+        stream = container.add_stream(  # pyright: ignore[reportUnknownMemberType]
+            "mpeg4", rate=25
+        )
+        stream.width = width
+        stream.height = height
+        stream.pix_fmt = "yuv420p"
+        stream.time_base = time_base
+        stream.codec_context.time_base = time_base
+
+        for index, pts in enumerate(pts_milliseconds):
+            frame = av.VideoFrame.from_ndarray(
+                frame_pixels(index, width=width, height=height), format="rgb24"
+            )
+            frame.pts = pts
+            frame.time_base = time_base
             for packet in stream.encode(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
                 frame
             ):

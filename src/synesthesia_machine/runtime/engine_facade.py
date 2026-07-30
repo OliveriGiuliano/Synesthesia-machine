@@ -9,12 +9,13 @@ from synesthesia_machine.graph.model import GraphSnapshot
 from synesthesia_machine.nodes.base import ResetReason
 from synesthesia_machine.nodes.registry import NodeRegistry
 from synesthesia_machine.runtime.execution_plan import ExecutionPlan, PortKey
-from synesthesia_machine.runtime.scheduler import Scheduler, TickResult
+from synesthesia_machine.runtime.scheduler import Scheduler, TickResult, TimingHook
 
 
 class EngineFacade:
-    def __init__(self, registry: NodeRegistry) -> None:
+    def __init__(self, registry: NodeRegistry, *, timing_hook: TimingHook | None = None) -> None:
         self._compiler = GraphCompiler(registry)
+        self._timing_hook = timing_hook
         self._plan: ExecutionPlan | None = None
         self._scheduler: Scheduler | None = None
 
@@ -28,7 +29,7 @@ class EngineFacade:
         result = self._compiler.compile(snapshot, demand_roots=demand_roots)
         if result.plan is None:
             return result
-        replacement = Scheduler(result.plan)
+        replacement = Scheduler(result.plan, timing_hook=self._timing_hook)
         previous = self._scheduler
         self._plan = result.plan
         self._scheduler = replacement

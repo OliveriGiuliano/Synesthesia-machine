@@ -8,8 +8,8 @@ from PySide6.QtCore import QTimer
 
 from synesthesia_machine.app.application import MainWindow, create_application
 from synesthesia_machine.app.logging_setup import UI_LOGGER_NAME, configure_logging
+from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.app.settings import ApplicationPaths
-from synesthesia_machine.nodes.utility import create_utility_registry
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -26,7 +26,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     logger.info("Starting UI", extra={"session_id": session.session_id})
 
     application = create_application(qt_arguments)
-    registry = create_utility_registry()
+    registry = create_application_registry()
     window = MainWindow(registry, paths, offer_recovery=not smoke_test)
     window.show()
 
