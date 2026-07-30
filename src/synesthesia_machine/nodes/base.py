@@ -156,6 +156,7 @@ class NodeDefinition:
     handles_no_data: bool = False
     port_type_resolver: PortTypeResolver | None = None
     required_input_resolver: RequiredInputResolver | None = None
+    aliases: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not _TYPE_ID.fullmatch(self.type_id):
@@ -167,6 +168,10 @@ class NodeDefinition:
         _ensure_unique((port.id for port in self.inputs), "input port")
         _ensure_unique((port.id for port in self.outputs), "output port")
         _ensure_unique((parameter.id for parameter in self.parameters), "parameter")
+        if any(not alias.strip() for alias in self.aliases):
+            msg = "Node aliases must not be empty"
+            raise ValueError(msg)
+        _ensure_unique((alias.casefold() for alias in self.aliases), "node alias")
 
     def input(self, port_id: str) -> InputPortSpec | None:
         return next((port for port in self.inputs if port.id == port_id), None)

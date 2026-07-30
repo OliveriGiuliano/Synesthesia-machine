@@ -1,0 +1,324 @@
+"""Registry-backed node discovery and snapshot-backed inspector widgets."""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from dataclasses import dataclass
+from functools import partial
+from uuid import UUID
+
+from PySide6.QtCore import QByteArray, QMimeData, Qt, Signal, Slot
+from PySide6.QtGui import QDrag, QKeyEvent
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QScrollArea,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+
+from synesthesia_machine.graph import LiteralValue
+from synesthesia_machine.nodes import NodeDefinition, NodeRegistry
+from synesthesia_machine.ui.canvas import NODE_MIME_TYPE
+from synesthesia_machine.ui.parameter_editors import create_parameter_editor
+from synesthesia_machine.ui.session import DocumentSession
+from synesthesia_machine.ui.view_models import ConnectionViewModel, NodeViewModel
+
+_TYPE_ROLE = int(Qt.ItemDataRole.UserRole)
+_INDEX_ROLE = _TYPE_ROLE + 1
+
+
+class NodeTreeWidget(QTreeWidget):
+    """Tree that exports stable node type IDs through the editor MIME contract."""
+
+    def startDrag(self, supported_actions: Qt.DropAction) -> None:
+        del supported_actions
+        selected = self.selectedItems()
+        if not selected:
+            return
+        item = selected[0]
+        value = item.data(0, _TYPE_ROLE)
+        if not isinstance(value, str):
+            return
+        mime_data = QMimeData()
+        mime_data.setData(NODE_MIME_TYPE, QByteArray(value.encode("utf-8")))
+        mime_data.setText(value)
+        drag = QDrag(self)
+        drag.setMimeData(mime_data)
+        drag.exec(Qt.DropAction.CopyAction)
+
+
+class NodeLibrary(QWidget):
+    """Searchable and category-grouped projection of NodeRegistry definitions."""
+
+    nodeActivated = Signal(str)
+
+    def __init__(self, registry: NodeRegistry, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.registry = registry
+        self.search = QLineEdit(self)
+        self.search.setObjectName("node_library_search")
+        self.search.setAccessibleName("Search node library")
+        self.search.setPlaceholderText("Search nodes…")
+        self.tree = NodeTreeWidget(self)
+        self.tree.setObjectName("node_library_tree")
+        self.tree.setAccessibleName("Node library")
+        self.tree.setHeaderHidden(True)
+        self.tree.setDragEnabled(True)
+        self.tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.addWidget(self.search)
+        layout.addWidget(self.tree)
+        self.search.textChanged.connect(self._populate)
+        self.tree.itemDoubleClicked.connect(self._activate_item)
+        self.tree.itemActivated.connect(self._activate_item)
+        self._populate("")
+
+    @Slot(str)
+    def _populate(self, query: str) -> None:
+        selected = self.selected_type_id()
+        self.tree.clear()
+        groups: dict[str, QTreeWidgetItem] = {}
+        normalized = query.strip().casefold()
+        for definition in self.registry.definitions():
+            haystack = _definition_search_text(definition)
+            if normalized and not all(token in haystack for token in normalized.split()):
+                continue
+            group = groups.get(definition.category)
+            if group is None:
+                group = QTreeWidgetItem(self.tree, [definition.category])
+                group.setFlags(group.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
+                groups[definition.category] = group
+            item = QTreeWidgetItem(group, [definition.display_name])
+            item.setData(0, _TYPE_ROLE, definition.type_id)
+            item.setToolTip(0, definition.description)
+            item.setStatusTip(0, definition.description)
+            if definition.type_id == selected:
+                self.tree.setCurrentItem(item)
+        self.tree.expandAll()
+
+    @Slot(QTreeWidgetItem, int)
+    def _activate_item(self, item: QTreeWidgetItem, column: int) -> None:
+        del column
+        value = item.data(0, _TYPE_ROLE)
+        if isinstance(value, str):
+            self.nodeActivated.emit(value)
+
+    def selected_type_id(self) -> str | None:
+        selected = self.tree.selectedItems()
+        if not selected:
+            return None
+        item = selected[0]
+        value = item.data(0, _TYPE_ROLE)
+        return value if isinstance(value, str) else None
+
+
+@dataclass(frozen=True, slots=True)
+class SearchCandidate:
+    definition: NodeDefinition
+    port_id: str | None = None
+
+
+class NodeSearchDialog(QDialog):
+    """Keyboard-first fuzzy-ish search over a pre-filtered candidate set."""
+
+    def __init__(
+        self,
+        candidates: Iterable[SearchCandidate],
+        parent: QWidget | None = None,
+        *,
+        title: str = "Add Node",
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setModal(True)
+        self.resize(480, 420)
+        self._candidates = tuple(candidates)
+        self.search = QLineEdit(self)
+        self.search.setObjectName("graph_search_field")
+        self.search.setAccessibleName("Search graph nodes")
+        self.search.setPlaceholderText("Type a node name, category, or keyword…")
+        self.results = QListWidget(self)
+        self.results.setObjectName("graph_search_results")
+        self.results.setAccessibleName("Graph search results")
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=self,
+        )
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.search)
+        layout.addWidget(self.results)
+        layout.addWidget(buttons)
+        self.search.textChanged.connect(self._populate)
+        self.results.itemDoubleClicked.connect(self._accept_item)
+        buttons.accepted.connect(self._accept_current)
+        buttons.rejected.connect(self.reject)
+        self._populate("")
+        self.search.setFocus()
+
+    @Slot(str)
+    def _populate(self, query: str) -> None:
+        self.results.clear()
+        normalized = query.strip().casefold()
+        for index, candidate in enumerate(self._candidates):
+            definition = candidate.definition
+            haystack = _definition_search_text(definition)
+            if normalized and not all(token in haystack for token in normalized.split()):
+                continue
+            suffix = f"  ·  {candidate.port_id}" if candidate.port_id is not None else ""
+            item = QListWidgetItem(f"{definition.display_name}  —  {definition.category}{suffix}")
+            item.setData(_INDEX_ROLE, index)
+            item.setToolTip(definition.description)
+            self.results.addItem(item)
+        if self.results.count():
+            self.results.setCurrentRow(0)
+
+    @Slot(QListWidgetItem)
+    def _accept_item(self, item: QListWidgetItem) -> None:
+        self.results.setCurrentItem(item)
+        self._accept_current()
+
+    @Slot()
+    def _accept_current(self) -> None:
+        if self.results.selectedItems():
+            self.accept()
+
+    def selected_candidate(self) -> SearchCandidate | None:
+        selected = self.results.selectedItems()
+        if not selected:
+            return None
+        item = selected[0]
+        index = item.data(_INDEX_ROLE)
+        return self._candidates[index] if isinstance(index, int) else None
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self._accept_current()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
+class InspectorPanel(QWidget):
+    """Render selection metadata, scalar editors, and compiler diagnostics."""
+
+    def __init__(self, session: DocumentSession, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.session = session
+        self._node_ids: set[UUID] = set()
+        self._connection_ids: set[UUID] = set()
+        self.title = QLabel("Nothing selected", self)
+        title_font = self.title.font()
+        title_font.setBold(True)
+        self.title.setFont(title_font)
+        self.description = QLabel("Select a node or cable to inspect it.", self)
+        self.description.setWordWrap(True)
+        self.scroll_area = QScrollArea(self)
+        self.scroll_area.setWidgetResizable(True)
+        self.form_container = QWidget(self.scroll_area)
+        self.form = QFormLayout(self.form_container)
+        self.scroll_area.setWidget(self.form_container)
+        self.validation_title = QLabel("Validation", self)
+        self.validation = QListWidget(self)
+        self.validation.setAccessibleName("Validation issues")
+        self.validation.setMinimumHeight(110)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.addWidget(self.title)
+        layout.addWidget(self.description)
+        layout.addWidget(self.scroll_area, 1)
+        layout.addWidget(self.validation_title)
+        layout.addWidget(self.validation)
+        session.changed.connect(self.refresh)
+        self.refresh()
+
+    def set_selection(self, node_ids: set[UUID], connection_ids: set[UUID]) -> None:
+        self._node_ids = set(node_ids)
+        self._connection_ids = set(connection_ids)
+        self.refresh()
+
+    @Slot()
+    def refresh(self) -> None:
+        self._clear_form()
+        view_model = self.session.view_model
+        nodes = tuple(node for node in view_model.nodes if node.node_id in self._node_ids)
+        connections = tuple(
+            connection
+            for connection in view_model.connections
+            if connection.connection_id in self._connection_ids
+        )
+        if len(nodes) == 1 and not connections:
+            self._show_node(nodes[0])
+        elif len(connections) == 1 and not nodes:
+            self._show_connection(connections[0])
+        elif nodes or connections:
+            self.title.setText("Multiple selection")
+            self.description.setText(
+                f"{len(nodes)} node(s) and {len(connections)} cable(s) selected."
+            )
+            self._show_issues(())
+        else:
+            self.title.setText("Nothing selected")
+            self.description.setText("Select a node or cable to inspect it.")
+            self._show_issues(self.session.report.issues)
+
+    def _show_node(self, node: NodeViewModel) -> None:
+        self.title.setText(node.title)
+        self.description.setText(node.description)
+        self.form.addRow("Type", QLabel(node.type_id, self.form_container))
+        self.form.addRow("Category", QLabel(node.category, self.form_container))
+        for parameter in node.parameters:
+            callback = partial(self._set_parameter, node.node_id, parameter.spec.id)
+            editor = create_parameter_editor(parameter, callback)
+            self.form.addRow(parameter.spec.label, editor)
+        self._show_issues(node.issues)
+
+    def _show_connection(self, connection: ConnectionViewModel) -> None:
+        self.title.setText("Connection")
+        self.description.setText(f"{connection.source_port_id} → {connection.destination_port_id}")
+        self.form.addRow("Resolved type", QLabel(connection.type_name, self.form_container))
+        self.form.addRow("Source node", QLabel(str(connection.source_node_id), self.form_container))
+        self.form.addRow(
+            "Destination node", QLabel(str(connection.destination_node_id), self.form_container)
+        )
+        self._show_issues(connection.issues)
+
+    def _show_issues(self, issues: Iterable[object]) -> None:
+        self.validation.clear()
+        count = 0
+        for issue in issues:
+            severity = getattr(issue, "severity", "ISSUE")
+            message = getattr(issue, "message", str(issue))
+            code = getattr(issue, "code", "")
+            self.validation.addItem(f"{severity}: {message} ({code})")
+            count += 1
+        if count == 0:
+            self.validation.addItem("No validation issues")
+
+    def _set_parameter(self, node_id: UUID, parameter_id: str, value: LiteralValue) -> None:
+        self.session.set_parameter(node_id, parameter_id, value)
+
+    def _clear_form(self) -> None:
+        while self.form.rowCount():
+            self.form.removeRow(0)
+
+
+def _definition_search_text(definition: NodeDefinition) -> str:
+    return " ".join(
+        (
+            definition.display_name,
+            definition.category,
+            definition.description,
+            definition.type_id,
+            *definition.aliases,
+        )
+    ).casefold()

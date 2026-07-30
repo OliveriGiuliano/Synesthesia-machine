@@ -212,6 +212,7 @@ def create_utility_registry() -> NodeRegistry:
             NumberRuntime,
             cache_policy=CachePolicy.STATIC,
             port_type_resolver=_number_port_type,
+            aliases=("constant", "literal", "scalar"),
         ),
         NodeDefinition(
             "synmachine.utility.pass_through",
@@ -224,6 +225,7 @@ def create_utility_registry() -> NodeRegistry:
             (),
             ExecutionKind.STATELESS,
             PassThroughRuntime,
+            aliases=("identity", "passthrough", "relay"),
         ),
         NodeDefinition(
             "synmachine.utility.conditional",
@@ -240,6 +242,7 @@ def create_utility_registry() -> NodeRegistry:
             (),
             ExecutionKind.STATELESS,
             ConditionalRuntime,
+            aliases=("if", "select", "switch"),
         ),
         NodeDefinition(
             "synmachine.utility.compare",
@@ -266,6 +269,7 @@ def create_utility_registry() -> NodeRegistry:
             ),
             ExecutionKind.STATELESS,
             CompareRuntime,
+            aliases=("comparison", "equals", "relational"),
         ),
         NodeDefinition(
             "synmachine.utility.logic",
@@ -286,6 +290,7 @@ def create_utility_registry() -> NodeRegistry:
             ),
             ExecutionKind.STATELESS,
             LogicRuntime,
+            aliases=("boolean", "and", "or", "xor"),
         ),
         NodeDefinition(
             "synmachine.utility.math",
@@ -327,6 +332,7 @@ def create_utility_registry() -> NodeRegistry:
             ExecutionKind.STATELESS,
             MathRuntime,
             required_input_resolver=_math_required,
+            aliases=("arithmetic", "calculator", "add", "subtract", "multiply", "divide"),
         ),
     )
     return NodeRegistry(definitions)
