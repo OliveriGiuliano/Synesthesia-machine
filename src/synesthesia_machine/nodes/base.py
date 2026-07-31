@@ -137,6 +137,7 @@ class NodeRuntime(Protocol):
 type RuntimeFactory = Callable[[UUID], NodeRuntime]
 type PortTypeResolver = Callable[[str, bool, Mapping[str, ParameterValue]], PortTypeExpression]
 type RequiredInputResolver = Callable[[Mapping[str, ParameterValue]], Sequence[str]]
+type ParameterValidator = Callable[[Mapping[str, ParameterValue]], Sequence[str]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +158,7 @@ class NodeDefinition:
     port_type_resolver: PortTypeResolver | None = None
     required_input_resolver: RequiredInputResolver | None = None
     aliases: tuple[str, ...] = ()
+    parameter_validator: ParameterValidator | None = None
 
     def __post_init__(self) -> None:
         if not _TYPE_ID.fullmatch(self.type_id):
@@ -200,6 +202,8 @@ class NodeDefinition:
                 values[parameter.id] = parameter.default
                 continue
             values[parameter.id] = _as_parameter_value(value)
+        if not errors and self.parameter_validator is not None:
+            errors.extend(self.parameter_validator(values))
         return values, errors
 
     def port_type(
