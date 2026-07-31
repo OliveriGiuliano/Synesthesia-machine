@@ -6,6 +6,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Iterable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -26,14 +27,13 @@ from synesthesia_machine.contracts import (
     SourceState,
     SourceStatus,
 )
-from synesthesia_machine.graph.compiler import GraphCompiler
 from synesthesia_machine.graph.model import GraphSnapshot
 from synesthesia_machine.media.video_source import PresentedVideoFrame, VideoSourceService
 from synesthesia_machine.nodes.base import ResetReason
 from synesthesia_machine.nodes.input import LOAD_VIDEO_TYPE_ID
 from synesthesia_machine.nodes.registry import NodeRegistry
 from synesthesia_machine.runtime.engine_facade import EngineFacade
-from synesthesia_machine.runtime.execution_plan import CompiledNode, PortKey
+from synesthesia_machine.runtime.execution_plan import CompiledNode, ExecutionPlan, PortKey
 from synesthesia_machine.runtime.previews import PreviewBroker
 from synesthesia_machine.runtime.scheduler import TickResult
 
@@ -187,6 +187,17 @@ class LatestFrameGraphWorker:
                 self._condition.wait(remaining)
             return True
 
+    def reset_plan_metrics(self) -> None:
+        """Clear plan-scoped diagnostics after an atomic swap has committed."""
+
+        with self._condition:
+            self._processed_ticks = 0
+            self._dropped_by_source.clear()
+            self._last_result = None
+            self._last_error = None
+            self._started_ns = None
+            self._last_tick_ns = None
+
     def close(self) -> None:
         with self._condition:
             if self._closed:
@@ -302,7 +313,6 @@ class InProcessEngineClient:
     ) -> None:
         self._lock = threading.RLock()
         self._timing_lock = threading.Lock()
-        self._compiler = GraphCompiler(registry)
         self._node_times_ns: deque[int] = deque(maxlen=20_000)
         self._facade = EngineFacade(registry, timing_hook=self._record_node_time)
         self._video_source_factory = video_source_factory or VideoSourceService
@@ -315,37 +325,97 @@ class InProcessEngineClient:
         self._latest_demand_roots: tuple[UUID, ...] | None = None
 
     def activate(
-        self, snapshot: GraphSnapshot, *, demand_roots: Iterable[UUID] | None = None
+        self,
+        snapshot: GraphSnapshot,
+        *,
+        demand_roots: Iterable[UUID] | None = None,
+        reset_reason: ResetReason = ResetReason.PLAN_REPLACED,
     ) -> EngineActivation:
         with self._lock:
             self._ensure_open()
-            preflight = self._compiler.compile(snapshot, demand_roots=demand_roots)
-            if preflight.plan is None:
-                return EngineActivation(snapshot.revision, preflight.report, False)
+            roots = None if demand_roots is None else tuple(sorted(demand_roots, key=str))
+            prepared = self._facade.prepare(
+                snapshot,
+                demand_roots=roots,
+                reset_reason=reset_reason,
+            )
+            plan = prepared.plan
+            if plan is None:
+                return EngineActivation(snapshot.revision, prepared.result.report, False)
+            try:
+                preview_configuration = self._preview_broker.prepare(plan)
+            except Exception:
+                prepared.close()
+                raise
 
-            self._close_runtime()
-            activated = self._facade.activate(snapshot, demand_roots=demand_roots)
-            if activated.plan is None:
-                return EngineActivation(snapshot.revision, activated.report, False)
-
-            self._preview_broker.configure(activated.plan)
-            worker = LatestFrameGraphWorker(self._facade, preview_broker=self._preview_broker)
+            worker = self._worker
+            worker_created = worker is None
+            if worker is None:
+                worker = LatestFrameGraphWorker(self._facade, preview_broker=self._preview_broker)
+            old_plan = self._facade.active_plan
+            reusable_sources = self._reusable_source_ids(old_plan, plan, reset_reason)
             sources: dict[UUID, SourceController] = {}
-            for node in activated.plan.nodes:
-                if node.definition.type_id != LOAD_VIDEO_TYPE_ID:
-                    continue
-                sources[node.node_id] = self._create_video_source(node, worker)
+            try:
+                for node in plan.nodes:
+                    if node.definition.type_id != LOAD_VIDEO_TYPE_ID:
+                        continue
+                    existing = self._sources.get(node.node_id)
+                    sources[node.node_id] = (
+                        existing
+                        if existing is not None and node.node_id in reusable_sources
+                        else self._create_video_source(node, worker)
+                    )
+            except Exception:
+                self._dispose_candidate_sources(sources, reusable_sources)
+                if worker_created:
+                    worker.close()
+                prepared.close()
+                raise
+
+            old_states = {
+                node_id: source.status().state for node_id, source in self._sources.items()
+            }
+            paused_for_swap: list[SourceController] = []
+            try:
+                for node_id, source in self._sources.items():
+                    if old_states[node_id] is SourceState.PLAYING:
+                        source.pause()
+                        paused_for_swap.append(source)
+                if self._worker is not None and not self._worker.wait_until_idle(5.0):
+                    raise TimeoutError("Active graph did not reach a safe plan-swap boundary")
+                self._facade.commit(prepared, reset_reason=reset_reason)
+            except Exception:
+                for source in paused_for_swap:
+                    with suppress(Exception):
+                        source.resume()
+                self._dispose_candidate_sources(sources, reusable_sources)
+                if worker_created:
+                    worker.close()
+                prepared.close()
+                raise
+
+            previous_sources = self._sources
+            previous_state = self._state
             self._worker = worker
             self._sources = sources
+            self._preview_broker.apply(preview_configuration)
+            worker.reset_plan_metrics()
             self._graph_revision = snapshot.revision
             self._latest_valid_snapshot = snapshot
-            self._latest_demand_roots = (
-                None if demand_roots is None else tuple(sorted(demand_roots, key=str))
-            )
-            self._state = EngineState.STOPPED
+            self._latest_demand_roots = roots
+            self._state = previous_state if old_plan is not None else EngineState.STOPPED
             with self._timing_lock:
                 self._node_times_ns.clear()
-            return EngineActivation(snapshot.revision, activated.report, True)
+            for node_id, source in previous_sources.items():
+                if node_id not in reusable_sources:
+                    with suppress(Exception):
+                        source.close()
+            if previous_state is EngineState.RUNNING:
+                for node_id, source in sources.items():
+                    if old_states.get(node_id) is SourceState.PLAYING:
+                        with suppress(Exception):
+                            source.resume() if node_id in reusable_sources else source.play()
+            return EngineActivation(snapshot.revision, prepared.result.report, True)
 
     def play(self, source_node_id: UUID | None = None) -> None:
         with self._lock:
@@ -470,7 +540,11 @@ class InProcessEngineClient:
             demand_roots = self._latest_demand_roots
         if snapshot is None:
             return None
-        return self.activate(snapshot, demand_roots=demand_roots)
+        return self.activate(
+            snapshot,
+            demand_roots=demand_roots,
+            reset_reason=ResetReason.ENGINE_RESTARTED,
+        )
 
     def close(self) -> None:
         with self._lock:
@@ -496,6 +570,36 @@ class InProcessEngineClient:
             )
         except Exception as error:
             return _FailedVideoSource(node.node_id, file_path, error)
+
+    @staticmethod
+    def _reusable_source_ids(
+        old_plan: ExecutionPlan | None,
+        new_plan: ExecutionPlan,
+        reset_reason: ResetReason,
+    ) -> frozenset[UUID]:
+        if reset_reason is not ResetReason.PLAN_REPLACED or old_plan is None:
+            return frozenset()
+        old_sources = {
+            node.node_id: node
+            for node in old_plan.nodes
+            if node.definition.type_id == LOAD_VIDEO_TYPE_ID
+        }
+        return frozenset(
+            node.node_id
+            for node in new_plan.nodes
+            if node.definition.type_id == LOAD_VIDEO_TYPE_ID
+            and (old := old_sources.get(node.node_id)) is not None
+            and old.state_retention_key == node.state_retention_key
+        )
+
+    @staticmethod
+    def _dispose_candidate_sources(
+        sources: Mapping[UUID, SourceController], reusable_source_ids: frozenset[UUID]
+    ) -> None:
+        for node_id, source in sources.items():
+            if node_id not in reusable_source_ids:
+                with suppress(Exception):
+                    source.close()
 
     def _selected_sources(self, source_node_id: UUID | None) -> tuple[SourceController, ...]:
         self._ensure_open()

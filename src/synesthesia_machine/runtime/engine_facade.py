@@ -1,6 +1,9 @@
-"""In-process facade used until the process-based engine client is introduced."""
+"""Compile-prepare-commit facade for one child-owned runtime scheduler."""
+
+from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from uuid import UUID
 
 from synesthesia_machine.contracts.runtime_values import FrameContext, RuntimeValue
@@ -10,6 +13,24 @@ from synesthesia_machine.nodes.base import ResetReason
 from synesthesia_machine.nodes.registry import NodeRegistry
 from synesthesia_machine.runtime.execution_plan import ExecutionPlan, PortKey
 from synesthesia_machine.runtime.scheduler import Scheduler, TickResult, TimingHook
+
+
+@dataclass(slots=True)
+class PreparedEngineActivation:
+    """A compiled scheduler candidate that has not replaced the active plan yet."""
+
+    result: CompilationResult
+    scheduler: Scheduler | None
+    committed: bool = False
+
+    @property
+    def plan(self) -> ExecutionPlan | None:
+        return self.result.plan
+
+    def close(self) -> None:
+        if not self.committed and self.scheduler is not None:
+            self.scheduler.cancel_prepared()
+            self.scheduler = None
 
 
 class EngineFacade:
@@ -24,18 +45,57 @@ class EngineFacade:
         return self._plan
 
     def activate(
-        self, snapshot: GraphSnapshot, *, demand_roots: Iterable[UUID] | None = None
+        self,
+        snapshot: GraphSnapshot,
+        *,
+        demand_roots: Iterable[UUID] | None = None,
+        reset_reason: ResetReason = ResetReason.PLAN_REPLACED,
     ) -> CompilationResult:
+        prepared = self.prepare(
+            snapshot,
+            demand_roots=demand_roots,
+            reset_reason=reset_reason,
+        )
+        if prepared.plan is not None:
+            self.commit(prepared, reset_reason=reset_reason)
+        return prepared.result
+
+    def prepare(
+        self,
+        snapshot: GraphSnapshot,
+        *,
+        demand_roots: Iterable[UUID] | None = None,
+        reset_reason: ResetReason = ResetReason.PLAN_REPLACED,
+    ) -> PreparedEngineActivation:
         result = self._compiler.compile(snapshot, demand_roots=demand_roots)
         if result.plan is None:
-            return result
-        replacement = Scheduler(result.plan, timing_hook=self._timing_hook)
+            return PreparedEngineActivation(result, None)
+        replacement = Scheduler.prepare_replacement(
+            result.plan,
+            self._scheduler,
+            timing_hook=self._timing_hook,
+            preserve_state=reset_reason is ResetReason.PLAN_REPLACED,
+        )
+        return PreparedEngineActivation(result, replacement)
+
+    def commit(
+        self,
+        prepared: PreparedEngineActivation,
+        *,
+        reset_reason: ResetReason = ResetReason.PLAN_REPLACED,
+    ) -> None:
+        replacement = prepared.scheduler
+        if prepared.committed or replacement is None or prepared.plan is None:
+            raise RuntimeError("Engine activation candidate is not available for commit")
         previous = self._scheduler
-        self._plan = result.plan
-        self._scheduler = replacement
         if previous is not None:
-            previous.close()
-        return result
+            replacement.claim_borrowed_runtimes(previous)
+        self._plan = prepared.plan
+        self._scheduler = replacement
+        prepared.committed = True
+        prepared.scheduler = None
+        if previous is not None:
+            previous.close(reset_reason)
 
     def tick(
         self, context: FrameContext, *, source_values: Mapping[PortKey, RuntimeValue] | None = None
@@ -61,3 +121,6 @@ class EngineFacade:
             self._scheduler.close()
         self._scheduler = None
         self._plan = None
+
+
+__all__ = ["EngineFacade", "PreparedEngineActivation"]

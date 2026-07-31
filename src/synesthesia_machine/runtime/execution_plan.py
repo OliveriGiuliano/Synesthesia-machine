@@ -7,7 +7,7 @@ from types import MappingProxyType
 from uuid import UUID
 
 from synesthesia_machine.contracts.runtime_values import ParameterValue, PortType
-from synesthesia_machine.nodes.base import NodeDefinition
+from synesthesia_machine.nodes.base import NodeDefinition, ParameterUpdateMode
 
 
 class ScalarConversion(StrEnum):
@@ -55,6 +55,22 @@ class CompiledNode:
         object.__setattr__(self, "input_bindings", MappingProxyType(dict(self.input_bindings)))
         object.__setattr__(self, "input_types", MappingProxyType(dict(self.input_types)))
         object.__setattr__(self, "output_types", MappingProxyType(dict(self.output_types)))
+
+    @property
+    def state_retention_key(self) -> tuple[object, ...]:
+        """Describe when this node's runtime state is safe to retain across plans."""
+
+        state_parameters = tuple(
+            (parameter.id, self.parameters[parameter.id])
+            for parameter in self.definition.parameters
+            if parameter.update_mode is not ParameterUpdateMode.LIVE
+        )
+        return (
+            self.definition.type_id,
+            self.definition.implementation_version,
+            self.clock_id,
+            state_parameters,
+        )
 
 
 @dataclass(frozen=True, slots=True)

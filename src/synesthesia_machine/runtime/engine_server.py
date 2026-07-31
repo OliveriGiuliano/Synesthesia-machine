@@ -351,6 +351,7 @@ class EngineServer:
             activation = self._engine.activate(
                 command.snapshot.to_snapshot(),
                 demand_roots=command.demand_roots,
+                reset_reason=command.reset_reason,
             )
             if activation.activated:
                 self._graph_revision = activation.graph_revision

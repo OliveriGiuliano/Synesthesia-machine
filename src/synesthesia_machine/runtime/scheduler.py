@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 import traceback
 from collections.abc import Callable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from types import MappingProxyType
 from uuid import UUID
@@ -37,13 +38,66 @@ class TickResult:
 
 
 class Scheduler:
-    def __init__(self, plan: ExecutionPlan, *, timing_hook: TimingHook | None = None) -> None:
+    def __init__(
+        self,
+        plan: ExecutionPlan,
+        *,
+        timing_hook: TimingHook | None = None,
+        reusable_runtimes: Mapping[UUID, NodeRuntime] | None = None,
+    ) -> None:
         self.plan = plan
         self._timing_hook = timing_hook
-        self._runtimes: dict[UUID, NodeRuntime] = {
-            node.node_id: node.definition.runtime_factory(node.node_id) for node in plan.nodes
-        }
+        reusable = reusable_runtimes or {}
+        self._runtimes: dict[UUID, NodeRuntime] = {}
+        self._borrowed_runtime_ids: set[UUID] = set()
         self._static_cache: dict[PortKey, RuntimeValue] = {}
+        try:
+            for node in plan.nodes:
+                runtime = reusable.get(node.node_id)
+                if runtime is None:
+                    runtime = node.definition.runtime_factory(node.node_id)
+                else:
+                    self._borrowed_runtime_ids.add(node.node_id)
+                self._runtimes[node.node_id] = runtime
+        except Exception:
+            self.cancel_prepared()
+            raise
+
+    @classmethod
+    def prepare_replacement(
+        cls,
+        plan: ExecutionPlan,
+        previous: Scheduler | None,
+        *,
+        timing_hook: TimingHook | None = None,
+        preserve_state: bool = True,
+    ) -> Scheduler:
+        reusable: dict[UUID, NodeRuntime] = {}
+        if previous is not None and preserve_state:
+            previous_nodes = {node.node_id: node for node in previous.plan.nodes}
+            invalidated_clocks = {
+                node.clock_id
+                for node in plan.nodes
+                if node.definition.execution_kind is ExecutionKind.SOURCE
+                and (
+                    (old := previous_nodes.get(node.node_id)) is None
+                    or old.state_retention_key != node.state_retention_key
+                )
+            }
+            for node in plan.nodes:
+                old = previous_nodes.get(node.node_id)
+                if (
+                    old is not None
+                    and old.state_retention_key == node.state_retention_key
+                    and node.clock_id not in invalidated_clocks
+                    and node.node_id in previous._runtimes
+                ):
+                    reusable[node.node_id] = previous._runtimes[node.node_id]
+        return cls(plan, timing_hook=timing_hook, reusable_runtimes=reusable)
+
+    @property
+    def borrowed_runtime_ids(self) -> frozenset[UUID]:
+        return frozenset(self._borrowed_runtime_ids)
 
     def execute_tick(
         self, context: FrameContext, *, source_values: Mapping[PortKey, RuntimeValue] | None = None
@@ -139,8 +193,35 @@ class Scheduler:
             if isinstance(runtime, PanicCapableRuntime):
                 runtime.panic()
 
-    def close(self) -> None:
-        for runtime in self._runtimes.values():
-            runtime.close()
+    def claim_borrowed_runtimes(self, previous: Scheduler) -> None:
+        """Transfer prepared shared runtimes after reaching the atomic swap boundary."""
+
+        for node_id in self._borrowed_runtime_ids:
+            runtime = previous._runtimes.get(node_id)
+            if runtime is not self._runtimes[node_id]:
+                raise RuntimeError(f"Prepared runtime {node_id} no longer matches the active plan")
+        for node_id in self._borrowed_runtime_ids:
+            previous._runtimes.pop(node_id)
+        self._borrowed_runtime_ids.clear()
+
+    def cancel_prepared(self) -> None:
+        """Dispose candidate-owned runtimes without touching borrowed active instances."""
+
+        for node_id, runtime in tuple(self._runtimes.items()):
+            if node_id not in self._borrowed_runtime_ids:
+                with suppress(Exception):
+                    runtime.close()
         self._runtimes.clear()
+        self._borrowed_runtime_ids.clear()
+        self._static_cache.clear()
+
+    def close(self, reason: ResetReason | None = None) -> None:
+        for runtime in self._runtimes.values():
+            if reason is not None:
+                with suppress(Exception):
+                    runtime.reset(reason)
+            with suppress(Exception):
+                runtime.close()
+        self._runtimes.clear()
+        self._borrowed_runtime_ids.clear()
         self._static_cache.clear()

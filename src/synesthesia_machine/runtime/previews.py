@@ -49,6 +49,12 @@ class _NoteTarget:
     interval_s: float = 1.0 / _NOTE_PREVIEW_FPS
 
 
+@dataclass(frozen=True, slots=True)
+class _PreviewConfiguration:
+    image_targets: tuple[_ImageTarget, ...]
+    note_targets: tuple[_NoteTarget, ...]
+
+
 class PreviewBroker:
     """Publish immutable latest previews without waiting for UI consumption."""
 
@@ -74,6 +80,12 @@ class PreviewBroker:
     def configure(self, plan: ExecutionPlan) -> None:
         """Replace targets and clear all payloads from the previous graph activation."""
 
+        self.apply(self.prepare(plan))
+
+    @staticmethod
+    def prepare(plan: ExecutionPlan) -> _PreviewConfiguration:
+        """Validate and materialize preview targets before a plan is committed."""
+
         image_targets: list[_ImageTarget] = []
         note_targets: list[_NoteTarget] = []
         for node in plan.nodes:
@@ -95,10 +107,18 @@ class PreviewBroker:
                 binding = node.input_bindings.get("midi")
                 if binding is not None:
                     note_targets.append(_NoteTarget(node.node_id, binding.source))
+        return _PreviewConfiguration(
+            tuple(sorted(image_targets, key=lambda item: str(item.node_id))),
+            tuple(sorted(note_targets, key=lambda item: str(item.node_id))),
+        )
+
+    def apply(self, configuration: _PreviewConfiguration) -> None:
+        """Atomically install already-prepared targets at the safe swap boundary."""
+
         with self._lock:
             self._generation += 1
-            self._image_targets = tuple(sorted(image_targets, key=lambda item: str(item.node_id)))
-            self._note_targets = tuple(sorted(note_targets, key=lambda item: str(item.node_id)))
+            self._image_targets = configuration.image_targets
+            self._note_targets = configuration.note_targets
             self._clear_locked()
 
     def clear(self) -> None:

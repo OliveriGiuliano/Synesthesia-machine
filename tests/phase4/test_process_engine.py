@@ -9,10 +9,18 @@ from concurrent.futures import ThreadPoolExecutor
 import psutil
 import pytest
 
-from synesthesia_machine.contracts import EngineConnectionState, EngineState
-from synesthesia_machine.contracts.engine_messages import ENGINE_PROTOCOL_VERSION
+from synesthesia_machine.contracts import EngineActivation, EngineConnectionState, EngineState
+from synesthesia_machine.contracts.engine_messages import (
+    ENGINE_PROTOCOL_VERSION,
+    ActivateGraph,
+    GraphActivationAcknowledged,
+    GraphSnapshotPayload,
+)
 from synesthesia_machine.graph import GraphDocument
+from synesthesia_machine.graph.validation import ValidationReport
+from synesthesia_machine.nodes import ResetReason
 from synesthesia_machine.runtime import EngineProtocolError, ProcessEngineClient
+from synesthesia_machine.runtime.engine_server import EngineServer
 
 
 def _wait_until(predicate: Callable[[], bool], *, timeout_s: float = 3.0) -> bool:
@@ -149,3 +157,41 @@ def test_forced_crash_fails_boundedly_and_restart_rebuilds_latest_valid_graph(
     assert restarted.restart_count == 1
     assert restarted.child_process_id is not None
     assert restarted.child_process_id != original_process_id
+
+
+def test_server_forwards_activate_reset_reason_to_child_engine() -> None:
+    snapshot = _scalar_document().snapshot()
+    reset_reasons: list[ResetReason] = []
+
+    class EngineProbe:
+        def activate(
+            self,
+            snapshot_arg: object,
+            *,
+            demand_roots: object,
+            reset_reason: ResetReason,
+        ) -> EngineActivation:
+            del snapshot_arg, demand_roots
+            reset_reasons.append(reset_reason)
+            return EngineActivation(snapshot.revision, ValidationReport(), True)
+
+    class EventsProbe:
+        def graph_activated(self, graph_revision: int) -> None:
+            assert graph_revision == snapshot.revision
+
+    server = object.__new__(EngineServer)
+    server._engine = EngineProbe()  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue]
+    server._events = EventsProbe()  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue]
+    server._graph_revision = None  # pyright: ignore[reportPrivateUsage]
+    command = ActivateGraph(
+        "request",
+        snapshot.revision,
+        GraphSnapshotPayload.from_snapshot(snapshot),
+        reset_reason=ResetReason.ENGINE_RESTARTED,
+    )
+
+    response = server._handle(command)  # pyright: ignore[reportPrivateUsage]
+
+    assert isinstance(response, GraphActivationAcknowledged)
+    assert response.activation.activated
+    assert reset_reasons == [ResetReason.ENGINE_RESTARTED]
