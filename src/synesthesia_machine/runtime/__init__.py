@@ -12,22 +12,31 @@ from synesthesia_machine.runtime.execution_plan import (
 from synesthesia_machine.runtime.scheduler import Scheduler, TickResult
 
 if TYPE_CHECKING:
+    from synesthesia_machine.runtime.engine_client import EngineProtocolError, ProcessEngineClient
     from synesthesia_machine.runtime.engine_facade import EngineFacade
     from synesthesia_machine.runtime.in_process_engine import (
         InProcessEngineClient,
         LatestFrameGraphWorker,
     )
     from synesthesia_machine.runtime.previews import PreviewBroker
+    from synesthesia_machine.runtime.shared_previews import (
+        AttachedPreviewSlot,
+        OwnedPreviewSlot,
+    )
 
 __all__ = [
+    "AttachedPreviewSlot",
     "CompiledNode",
     "EngineFacade",
+    "EngineProtocolError",
     "ExecutionPlan",
     "InProcessEngineClient",
     "InputBinding",
     "LatestFrameGraphWorker",
+    "OwnedPreviewSlot",
     "PortKey",
     "PreviewBroker",
+    "ProcessEngineClient",
     "ScalarConversion",
     "Scheduler",
     "TickResult",
@@ -41,6 +50,16 @@ def __getattr__(name: str) -> object:
         from synesthesia_machine.runtime.engine_facade import EngineFacade
 
         return EngineFacade
+    if name in {"EngineProtocolError", "ProcessEngineClient"}:
+        from synesthesia_machine.runtime.engine_client import (
+            EngineProtocolError,
+            ProcessEngineClient,
+        )
+
+        return {
+            "EngineProtocolError": EngineProtocolError,
+            "ProcessEngineClient": ProcessEngineClient,
+        }[name]
     if name in {"InProcessEngineClient", "LatestFrameGraphWorker"}:
         from synesthesia_machine.runtime.in_process_engine import (
             InProcessEngineClient,
@@ -55,4 +74,14 @@ def __getattr__(name: str) -> object:
         from synesthesia_machine.runtime.previews import PreviewBroker
 
         return PreviewBroker
+    if name in {"AttachedPreviewSlot", "OwnedPreviewSlot"}:
+        from synesthesia_machine.runtime.shared_previews import (
+            AttachedPreviewSlot,
+            OwnedPreviewSlot,
+        )
+
+        return {
+            "AttachedPreviewSlot": AttachedPreviewSlot,
+            "OwnedPreviewSlot": OwnedPreviewSlot,
+        }[name]
     raise AttributeError(name)

@@ -30,6 +30,15 @@ class EngineState(StrEnum):
     CLOSED = "CLOSED"
 
 
+class EngineConnectionState(StrEnum):
+    STARTING = "STARTING"
+    CONNECTED = "CONNECTED"
+    UNRESPONSIVE = "UNRESPONSIVE"
+    CRASHED = "CRASHED"
+    RESTARTING = "RESTARTING"
+    CLOSED = "CLOSED"
+
+
 class SourceState(StrEnum):
     CLOSED = "CLOSED"
     READY = "READY"
@@ -51,7 +60,7 @@ class EngineActivation:
 class SourceStatus:
     node_id: UUID
     state: SourceState
-    file_path: str
+    file_path: str = ""
     width: int | None = None
     height: int | None = None
     duration_s: float | None = None
@@ -61,6 +70,14 @@ class SourceStatus:
     dropped_before_processing: int = 0
     warnings: int = 0
     last_error: str | None = None
+    source_kind: str = "video"
+    display_name: str = ""
+    device_id: str | None = None
+    backend: str | None = None
+    negotiated_fps: float | None = None
+    reconnect_attempts: int = 0
+    mailbox_occupancy: int = 0
+    frame_age_ms: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +90,27 @@ class EngineMetrics:
     dropped_before_processing: int = 0
     skipped_by_selection: int = 0
     memory_bytes: int = 0
+    cpu_percent: float = 0.0
+    system_memory_bytes: int = 0
+    uptime_s: float = 0.0
+    restart_count: int = 0
+    child_process_id: int | None = None
+    heartbeat_age_s: float = 0.0
+    mailbox_occupancy: int = 0
+    mailbox_capacity: int = 0
+    preview_fps: float = 0.0
+    frame_age_ms: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class EngineStatus:
+    connection_state: EngineConnectionState
+    child_process_id: int | None = None
+    graph_revision: int | None = None
+    last_heartbeat_monotonic_ns: int | None = None
+    restart_count: int = 0
+    exit_code: int | None = None
+    last_error: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +199,10 @@ class EngineClient(Protocol):
     ) -> tuple[NotePreview, ...]: ...
 
     def wait_until_idle(self, timeout_s: float = 5.0) -> bool: ...
+
+    def status(self) -> EngineStatus: ...
+
+    def restart(self) -> EngineActivation | None: ...
 
     def close(self) -> None: ...
 

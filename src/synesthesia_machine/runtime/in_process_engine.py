@@ -17,8 +17,10 @@ import psutil
 
 from synesthesia_machine.contracts import (
     EngineActivation,
+    EngineConnectionState,
     EngineMetrics,
     EngineState,
+    EngineStatus,
     ImagePreview,
     NotePreview,
     SourceState,
@@ -309,6 +311,8 @@ class InProcessEngineClient:
         self._sources: dict[UUID, SourceController] = {}
         self._state = EngineState.STOPPED
         self._graph_revision: int | None = None
+        self._latest_valid_snapshot: GraphSnapshot | None = None
+        self._latest_demand_roots: tuple[UUID, ...] | None = None
 
     def activate(
         self, snapshot: GraphSnapshot, *, demand_roots: Iterable[UUID] | None = None
@@ -334,6 +338,10 @@ class InProcessEngineClient:
             self._worker = worker
             self._sources = sources
             self._graph_revision = snapshot.revision
+            self._latest_valid_snapshot = snapshot
+            self._latest_demand_roots = (
+                None if demand_roots is None else tuple(sorted(demand_roots, key=str))
+            )
             self._state = EngineState.STOPPED
             with self._timing_lock:
                 self._node_times_ns.clear()
@@ -445,6 +453,24 @@ class InProcessEngineClient:
         if worker is None:
             return True
         return worker.wait_until_idle(max(0.0, deadline - time.monotonic()))
+
+    def status(self) -> EngineStatus:
+        with self._lock:
+            connection_state = (
+                EngineConnectionState.CLOSED
+                if self._state is EngineState.CLOSED
+                else EngineConnectionState.CONNECTED
+            )
+            return EngineStatus(connection_state, graph_revision=self._graph_revision)
+
+    def restart(self) -> EngineActivation | None:
+        with self._lock:
+            self._ensure_open()
+            snapshot = self._latest_valid_snapshot
+            demand_roots = self._latest_demand_roots
+        if snapshot is None:
+            return None
+        return self.activate(snapshot, demand_roots=demand_roots)
 
     def close(self) -> None:
         with self._lock:
