@@ -7,8 +7,8 @@ import math
 import os
 import shutil
 import tempfile
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
 from uuid import UUID
@@ -16,6 +16,7 @@ from uuid import UUID
 from synesthesia_machine.contracts import ColorValue
 from synesthesia_machine.graph import ConnectionModel, GraphSnapshot, LiteralValue, NodeModel
 from synesthesia_machine.nodes import NodeRegistry
+from synesthesia_machine.nodes.input import LOAD_VIDEO_TYPE_ID
 from synesthesia_machine.persistence.schemas import (
     GRAPH_SCHEMA_VERSION,
     ConnectionSchemaV1,
@@ -135,9 +136,9 @@ def graph_from_json(text: str, registry: NodeRegistry) -> GraphSnapshot:
 def save_graph(path: str | Path, snapshot: GraphSnapshot) -> None:
     """Atomically save a graph and retain one backup of the previous file."""
 
-    destination = Path(path)
+    destination = Path(path).expanduser().resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
-    content = graph_to_json(snapshot)
+    content = graph_to_json(_with_persisted_media_paths(snapshot, destination.parent))
     temporary_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -165,7 +166,69 @@ def save_graph(path: str | Path, snapshot: GraphSnapshot) -> None:
 def load_graph(path: str | Path, registry: NodeRegistry) -> GraphSnapshot:
     """Load a UTF-8 graph file through the validated schema boundary."""
 
-    return graph_from_json(Path(path).read_text(encoding="utf-8"), registry)
+    source = Path(path).expanduser().resolve()
+    snapshot = graph_from_json(source.read_text(encoding="utf-8"), registry)
+    return _with_resolved_media_paths(snapshot, source.parent)
+
+
+def _with_resolved_media_paths(snapshot: GraphSnapshot, graph_directory: Path) -> GraphSnapshot:
+    """Resolve persisted relative media paths against the graph file's directory."""
+
+    return replace(
+        snapshot,
+        nodes=tuple(
+            _replace_video_path(node, _resolve_media_path, graph_directory)
+            for node in snapshot.nodes
+        ),
+    )
+
+
+def _with_persisted_media_paths(snapshot: GraphSnapshot, graph_directory: Path) -> GraphSnapshot:
+    """Prefer graph-relative media paths for files contained by the graph directory."""
+
+    return replace(
+        snapshot,
+        nodes=tuple(
+            _replace_video_path(node, _persisted_media_path, graph_directory)
+            for node in snapshot.nodes
+        ),
+    )
+
+
+def _replace_video_path(
+    node: NodeModel,
+    transform: Callable[[str, Path], str],
+    graph_directory: Path,
+) -> NodeModel:
+    if node.type_id != LOAD_VIDEO_TYPE_ID:
+        return node
+    value = node.parameters.get("file_path")
+    if not isinstance(value, str) or not value:
+        return node
+    transformed = transform(value, graph_directory)
+    if transformed == value:
+        return node
+    parameters = dict(node.parameters)
+    parameters["file_path"] = transformed
+    return replace(node, parameters=parameters)
+
+
+def _resolve_media_path(value: str, graph_directory: Path) -> str:
+    candidate = Path(value).expanduser()
+    if not candidate.is_absolute():
+        candidate = graph_directory / candidate
+    return str(candidate.resolve())
+
+
+def _persisted_media_path(value: str, graph_directory: Path) -> str:
+    candidate = Path(value).expanduser()
+    if not candidate.is_absolute():
+        return str(candidate)
+    resolved = candidate.resolve()
+    try:
+        return str(resolved.relative_to(graph_directory))
+    except ValueError:
+        return str(resolved)
 
 
 def _node_to_data(node: NodeModel) -> NodeSchemaV1:

@@ -1,6 +1,8 @@
 """Generate a tiny deterministic CFR MP4 fixture with PyAV."""
 
 import argparse
+import colorsys
+from collections.abc import Callable
 from fractions import Fraction
 from itertools import pairwise
 from pathlib import Path
@@ -13,6 +15,9 @@ DEFAULT_WIDTH = 64
 DEFAULT_HEIGHT = 48
 DEFAULT_FRAME_COUNT = 6
 DEFAULT_FPS = 12
+HUE_FRAME_COUNT = 7
+
+type FramePixelFactory = Callable[[int], NDArray[np.uint8]]
 
 
 def frame_pixels(index: int, *, width: int, height: int) -> NDArray[np.uint8]:
@@ -39,6 +44,62 @@ def generate_test_video(
         msg = "width, height, frame_count, and fps must be positive"
         raise ValueError(msg)
 
+    return _generate_cfr_video(
+        output_path,
+        width=width,
+        height=height,
+        frame_count=frame_count,
+        fps=fps,
+        pixels=lambda index: frame_pixels(index, width=width, height=height),
+    )
+
+
+def hue_frame_pixels(index: int, *, width: int, height: int) -> NDArray[np.uint8]:
+    """Return a solid colour centered in one of seven equal hue bins."""
+
+    hue = ((index % HUE_FRAME_COUNT) + 0.5) / HUE_FRAME_COUNT
+    red, green, blue = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
+    colour = np.asarray(
+        (round(red * 255.0), round(green * 255.0), round(blue * 255.0)),
+        dtype=np.uint8,
+    )
+    image = np.empty((height, width, 3), dtype=np.uint8)
+    image[...] = colour
+    return image
+
+
+def generate_hue_test_video(
+    output_path: Path,
+    *,
+    width: int = DEFAULT_WIDTH,
+    height: int = DEFAULT_HEIGHT,
+    frame_count: int = HUE_FRAME_COUNT,
+    fps: int = DEFAULT_FPS,
+) -> Path:
+    """Create a CFR hue sequence with one deterministic scale-bin colour per frame."""
+
+    if width <= 0 or height <= 0 or frame_count <= 0 or fps <= 0:
+        msg = "width, height, frame_count, and fps must be positive"
+        raise ValueError(msg)
+    return _generate_cfr_video(
+        output_path,
+        width=width,
+        height=height,
+        frame_count=frame_count,
+        fps=fps,
+        pixels=lambda index: hue_frame_pixels(index, width=width, height=height),
+    )
+
+
+def _generate_cfr_video(
+    output_path: Path,
+    *,
+    width: int,
+    height: int,
+    frame_count: int,
+    fps: int,
+    pixels: FramePixelFactory,
+) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with av.open(str(output_path), mode="w") as container:
         # PyAV's overload includes dynamically selected stream types. The literal codec fixes the
@@ -52,9 +113,7 @@ def generate_test_video(
         stream.time_base = Fraction(1, fps)
 
         for index in range(frame_count):
-            frame = av.VideoFrame.from_ndarray(
-                frame_pixels(index, width=width, height=height), format="rgb24"
-            )
+            frame = av.VideoFrame.from_ndarray(pixels(index), format="rgb24")
             frame.pts = index
             frame.time_base = Fraction(1, fps)
             for packet in stream.encode(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
