@@ -10,6 +10,7 @@ from synesthesia_machine.app.application import MainWindow, create_application
 from synesthesia_machine.app.logging_setup import UI_LOGGER_NAME, configure_logging
 from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.app.settings import ApplicationPaths
+from synesthesia_machine.runtime import InProcessEngineClient
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -27,13 +28,17 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     application = create_application(qt_arguments)
     registry = create_application_registry()
-    window = MainWindow(registry, paths, offer_recovery=not smoke_test)
+    engine_client = InProcessEngineClient(registry)
+    window = MainWindow(registry, paths, engine_client, offer_recovery=not smoke_test)
     window.show()
 
     if smoke_test:
         QTimer.singleShot(100, application.quit)
 
-    exit_code = application.exec()
+    try:
+        exit_code = application.exec()
+    finally:
+        engine_client.close()
     logger.info("UI stopped", extra={"exit_code": exit_code})
     return exit_code
 

@@ -17,6 +17,7 @@ if TYPE_CHECKING:
         InProcessEngineClient,
         LatestFrameGraphWorker,
     )
+    from synesthesia_machine.runtime.previews import PreviewBroker
 
 __all__ = [
     "CompiledNode",
@@ -26,6 +27,7 @@ __all__ = [
     "InputBinding",
     "LatestFrameGraphWorker",
     "PortKey",
+    "PreviewBroker",
     "ScalarConversion",
     "Scheduler",
     "TickResult",
@@ -49,4 +51,8 @@ def __getattr__(name: str) -> object:
             "InProcessEngineClient": InProcessEngineClient,
             "LatestFrameGraphWorker": LatestFrameGraphWorker,
         }[name]
+    if name == "PreviewBroker":
+        from synesthesia_machine.runtime.previews import PreviewBroker
+
+        return PreviewBroker
     raise AttributeError(name)

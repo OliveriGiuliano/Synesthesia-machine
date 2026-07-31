@@ -19,13 +19,16 @@ from PySide6.QtWidgets import QApplication
 
 from synesthesia_machine.app.settings import ApplicationPaths
 from synesthesia_machine.nodes.utility import create_utility_registry
+from synesthesia_machine.runtime import InProcessEngineClient
 from synesthesia_machine.ui.main_window import MainWindow
 
 root = Path(os.environ["SYNMACHINE_SCALE_TEST_ROOT"])
 app = QApplication([])
+registry = create_utility_registry()
 window = MainWindow(
-    create_utility_registry(),
+    registry,
     ApplicationPaths(root, root / "logs", root / "recovery"),
+    InProcessEngineClient(registry),
     settings=QSettings(str(root / "settings.ini"), QSettings.Format.IniFormat),
     offer_recovery=False,
 )

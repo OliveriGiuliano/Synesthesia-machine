@@ -1,4 +1,4 @@
-"""Phase 2 main-window shell and document-lifecycle orchestration."""
+"""Graph editor, EngineClient transport controls, and runtime preview orchestration."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from enum import Enum, auto
 from functools import partial
 from pathlib import Path
 from typing import cast
+from uuid import UUID
 
 from PySide6.QtCore import QByteArray, QMimeData, QPointF, QSettings, Qt, QTimer, Slot
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
@@ -19,11 +20,13 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QToolBar,
 )
 
 from synesthesia_machine import __version__
 from synesthesia_machine.app.settings import ApplicationPaths
-from synesthesia_machine.nodes import NodeRegistry
+from synesthesia_machine.contracts import EngineClient, SourceState
+from synesthesia_machine.nodes import ExecutionKind, NodeRegistry
 from synesthesia_machine.persistence import (
     GraphPersistenceError,
     fragment_from_json,
@@ -33,6 +36,7 @@ from synesthesia_machine.persistence import (
 from synesthesia_machine.persistence.autosave import AutosaveStore, RecoveryRecord
 from synesthesia_machine.ui.actions import ActionRegistry, ActionSpec
 from synesthesia_machine.ui.canvas import GraphScene, GraphView
+from synesthesia_machine.ui.previews import RuntimePreviewPanel
 from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.theme import DEFAULT_THEME, Theme
 from synesthesia_machine.ui.view_models import PortViewModel
@@ -67,6 +71,7 @@ class MainWindow(QMainWindow):
         self,
         registry: NodeRegistry,
         paths: ApplicationPaths,
+        engine_client: EngineClient,
         *,
         theme: Theme = DEFAULT_THEME,
         settings: QSettings | None = None,
@@ -75,6 +80,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.registry = registry
         self.paths = paths
+        self.engine_client = engine_client
         self.theme = theme
         self.settings = settings or QSettings("Synesthesia Machine", "Synesthesia Machine")
         self.session = DocumentSession(registry, self)
@@ -84,13 +90,25 @@ class MainWindow(QMainWindow):
         self.view = GraphView(self.scene, theme)
         self.library = NodeLibrary(registry, self)
         self.inspector = InspectorPanel(self.session, self)
+        self.preview_panel = RuntimePreviewPanel(self)
         self.recent_menu = QMenu("Open &Recent", self)
         self._recent_paths = self._load_recent_paths()
+        self._image_sequences: dict[UUID, int] = {}
+        self._note_sequences: dict[UUID, int] = {}
+        self._engine_closed = False
         self._autosave_timer = QTimer(self)
         self._autosave_timer.setSingleShot(True)
         self._autosave_timer.setInterval(60_000)
+        self._activation_timer = QTimer(self)
+        self._activation_timer.setSingleShot(True)
+        self._activation_timer.setInterval(100)
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setInterval(16)
+        self._metrics_timer = QTimer(self)
+        self._metrics_timer.setInterval(100)
         self._node_count = QLabel(self)
         self._validation_status = QLabel(self)
+        self._engine_status = QLabel(self)
 
         self.setObjectName("main_window")
         self.setAccessibleName("Synesthesia Machine graph editor")
@@ -102,6 +120,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.view)
         self._create_docks()
         self._create_actions()
+        self._create_toolbar()
         self._create_menus()
         self._create_status_bar()
         self._connect_signals()
@@ -109,6 +128,8 @@ class MainWindow(QMainWindow):
         self._refresh_recent_menu()
         self._refresh_document_ui()
         self._refresh_selection_ui()
+        self._preview_timer.start()
+        self._metrics_timer.start()
         if offer_recovery:
             QTimer.singleShot(0, self._offer_recovery)
 
@@ -128,6 +149,16 @@ class MainWindow(QMainWindow):
         )
         self.inspector_dock.setWidget(self.inspector)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.inspector_dock)
+
+        self.preview_dock = QDockWidget("Runtime Previews", self)
+        self.preview_dock.setObjectName("runtime_preview_dock")
+        self.preview_dock.setAllowedAreas(
+            Qt.DockWidgetArea.BottomDockWidgetArea
+            | Qt.DockWidgetArea.LeftDockWidgetArea
+            | Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        self.preview_dock.setWidget(self.preview_panel)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.preview_dock)
 
     def _create_actions(self) -> None:
         create = self.action_registry.create
@@ -194,6 +225,15 @@ class MainWindow(QMainWindow):
             ActionSpec("add_node", "&Add Node…", "Search for a node to add", "Ctrl+Space"),
             self.search_at_center,
         )
+        create(ActionSpec("play", "&Play", "Play or resume the targeted source", "F5"), self.play)
+        create(ActionSpec("pause", "P&ause", "Pause the targeted source", "F6"), self.pause)
+        create(ActionSpec("stop", "&Stop", "Stop the targeted source", "F7"), self.stop)
+        create(ActionSpec("reload", "&Reload", "Reload the targeted source", "F8"), self.reload)
+        create(
+            ActionSpec("panic", "&Panic", "Immediately silence debug audio", "Ctrl+Shift+Escape"),
+            self.panic,
+        )
+        create(ActionSpec("about", "&About", "About Synesthesia Machine"), self._show_about)
         self.action_registry.register(
             "toggle_library",
             self.library_dock.toggleViewAction(),
@@ -204,6 +244,23 @@ class MainWindow(QMainWindow):
             self.inspector_dock.toggleViewAction(),
             status_tip="Show or hide the inspector",
         )
+        self.action_registry.register(
+            "toggle_previews",
+            self.preview_dock.toggleViewAction(),
+            status_tip="Show or hide runtime previews",
+        )
+
+    def _create_toolbar(self) -> None:
+        toolbar = QToolBar("Transport", self)
+        toolbar.setObjectName("transport_toolbar")
+        toolbar.setAccessibleName("Source transport and panic")
+        toolbar.setMovable(False)
+        for key in ("play", "pause", "stop", "reload"):
+            toolbar.addAction(self.action_registry.require(key))
+        toolbar.addSeparator()
+        toolbar.addAction(self.action_registry.require("panic"))
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
+        self.transport_toolbar = toolbar
 
     def _create_menus(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
@@ -233,18 +290,32 @@ class MainWindow(QMainWindow):
         view_menu.addSeparator()
         view_menu.addAction(self.action_registry.require("toggle_library"))
         view_menu.addAction(self.action_registry.require("toggle_inspector"))
+        view_menu.addAction(self.action_registry.require("toggle_previews"))
 
         graph_menu = self.menuBar().addMenu("&Graph")
         graph_menu.addAction(self.action_registry.require("add_node"))
+        graph_menu.addSeparator()
+        for key in ("play", "pause", "stop", "reload"):
+            graph_menu.addAction(self.action_registry.require(key))
+
+        midi_menu = self.menuBar().addMenu("&MIDI")
+        midi_menu.addAction(self.action_registry.require("panic"))
+
+        help_menu = self.menuBar().addMenu("&Help")
+        help_menu.addAction(self.action_registry.require("about"))
 
     def _create_status_bar(self) -> None:
-        self.statusBar().showMessage("Engine stopped")
+        self.statusBar().showMessage("Ready")
+        self._engine_status.setText("Engine STOPPED · 0 ticks")
+        self._engine_status.setAccessibleName("Engine runtime status")
+        self.statusBar().addPermanentWidget(self._engine_status, 1)
         self.statusBar().addPermanentWidget(self._validation_status)
         self.statusBar().addPermanentWidget(self._node_count)
 
     def _connect_signals(self) -> None:
         self.session.changed.connect(self._refresh_document_ui)
         self.session.changed.connect(self._schedule_autosave)
+        self.session.changed.connect(self._schedule_engine_activation)
         self.session.pathChanged.connect(self._refresh_document_ui)
         self.session.dirtyChanged.connect(self._on_dirty_changed)
         self.scene.selectionChanged.connect(self._refresh_selection_ui)
@@ -252,7 +323,78 @@ class MainWindow(QMainWindow):
         self.view.requestSearch.connect(self._search_nodes)
         self.library.nodeActivated.connect(self._add_library_node)
         self._autosave_timer.timeout.connect(self._autosave)
+        self._activation_timer.timeout.connect(self._activate_graph)
+        self._preview_timer.timeout.connect(self._poll_previews)
+        self._metrics_timer.timeout.connect(self._refresh_engine_status)
         QApplication.clipboard().dataChanged.connect(self._refresh_action_states)
+
+    @Slot()
+    def play(self) -> None:
+        target = self._transport_target()
+        if target is None:
+            return
+        try:
+            status = self.engine_client.source_status(target)[0]
+            if status.state is SourceState.PAUSED:
+                self.engine_client.resume(target)
+                verb = "Resumed"
+            else:
+                self.engine_client.play(target)
+                verb = "Playing"
+        except (KeyError, RuntimeError, IndexError) as error:
+            self.statusBar().showMessage(f"Could not play source: {error}", 5000)
+            return
+        self.statusBar().showMessage(f"{verb} source {str(target)[:8]}", 3000)
+
+    @Slot()
+    def pause(self) -> None:
+        self._invoke_transport(self.engine_client.pause, "Paused")
+
+    @Slot()
+    def stop(self) -> None:
+        self._invoke_transport(self.engine_client.stop, "Stopped")
+
+    @Slot()
+    def reload(self) -> None:
+        self._invoke_transport(self.engine_client.reload, "Reloaded")
+
+    @Slot()
+    def panic(self) -> None:
+        self.engine_client.panic()
+        self.statusBar().showMessage("Panic sent", 3000)
+
+    def _invoke_transport(self, operation: Callable[[UUID | None], None], past_tense: str) -> None:
+        target = self._transport_target()
+        if target is None:
+            return
+        try:
+            operation(target)
+        except (KeyError, RuntimeError) as error:
+            self.statusBar().showMessage(f"Could not control source: {error}", 5000)
+            return
+        self.statusBar().showMessage(f"{past_tense} source {str(target)[:8]}", 3000)
+
+    def _transport_target(self) -> UUID | None:
+        sources = tuple(
+            node.id
+            for node in self.session.document.nodes
+            if (definition := self.registry.get(node.type_id)) is not None
+            and definition.execution_kind is ExecutionKind.SOURCE
+        )
+        selected = self.scene.selected_node_ids()
+        selected_sources = tuple(node_id for node_id in sources if node_id in selected)
+        if len(selected_sources) == 1:
+            return selected_sources[0]
+        if len(selected_sources) > 1:
+            self.statusBar().showMessage("Select exactly one source for transport", 4000)
+            return None
+        if len(sources) == 1:
+            return sources[0]
+        if not sources:
+            self.statusBar().showMessage("Add a source node before using transport", 4000)
+        else:
+            self.statusBar().showMessage("Select one source node for transport", 4000)
+        return None
 
     @Slot()
     def new_document(self) -> None:
@@ -449,6 +591,77 @@ class MainWindow(QMainWindow):
         )
         self.action_registry.require("frame_selection").setEnabled(has_selection)
 
+    @Slot()
+    def _schedule_engine_activation(self) -> None:
+        if not self._engine_closed:
+            self._activation_timer.start()
+
+    @Slot()
+    def _activate_graph(self) -> None:
+        if self._engine_closed:
+            return
+        snapshot = self.session.document.snapshot()
+        try:
+            activation = self.engine_client.activate(snapshot)
+        except RuntimeError as error:
+            self.statusBar().showMessage(f"Engine activation failed: {error}", 5000)
+            return
+        if activation.activated:
+            self._image_sequences.clear()
+            self._note_sequences.clear()
+            self.statusBar().showMessage(
+                f"Activated graph revision {activation.graph_revision}", 3000
+            )
+            return
+        count = len(activation.report.errors)
+        self.statusBar().showMessage(
+            f"Graph has {count} error(s); previous valid runtime remains active",
+            5000,
+        )
+
+    @Slot()
+    def _poll_previews(self) -> None:
+        if self._engine_closed or not self.preview_dock.isVisible():
+            return
+        try:
+            image_previews = self.engine_client.poll_image_previews(self._image_sequences)
+            note_previews = self.engine_client.poll_note_previews(self._note_sequences)
+        except RuntimeError:
+            return
+        for preview in image_previews:
+            self._image_sequences[preview.node_id] = preview.sequence
+            self.preview_panel.show_image_preview(preview)
+        for preview in note_previews:
+            self._note_sequences[preview.node_id] = preview.sequence
+            self.preview_panel.show_note_preview(preview)
+
+    @Slot()
+    def _refresh_engine_status(self) -> None:
+        if self._engine_closed:
+            return
+        try:
+            metrics = self.engine_client.metrics()
+            sources = self.engine_client.source_status()
+        except RuntimeError:
+            return
+        source_text = ", ".join(status.state.value for status in sources) or "no source"
+        memory_mib = metrics.memory_bytes / (1024 * 1024)
+        self._engine_status.setText(
+            f"Engine {metrics.state.value} · source {source_text} · "
+            f"{metrics.processed_ticks} ticks @ {metrics.processed_fps:.1f} FPS · "
+            f"p95 {metrics.p95_node_time_ms:.2f} ms · "
+            f"drops {metrics.dropped_before_processing} · RAM {memory_mib:.1f} MiB"
+        )
+
+    @Slot()
+    def _show_about(self) -> None:
+        QMessageBox.about(
+            self,
+            "About Synesthesia Machine",
+            f"Synesthesia Machine {__version__}\n\n"
+            "Video and image processing mapped to visualized MIDI state.",
+        )
+
     @Slot(bool)
     def _on_dirty_changed(self, dirty: bool) -> None:
         self.setWindowModified(dirty)
@@ -585,6 +798,12 @@ class MainWindow(QMainWindow):
         if decision is not _ReplacementDecision.CANCEL:
             if decision is _ReplacementDecision.DISCARD:
                 self.autosave_store.discard(self.session.document.document_id)
+            self._activation_timer.stop()
+            self._preview_timer.stop()
+            self._metrics_timer.stop()
+            if not self._engine_closed:
+                self.engine_client.close()
+                self._engine_closed = True
             self._save_window_state()
             event.accept()
             return

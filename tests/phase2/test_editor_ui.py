@@ -35,6 +35,7 @@ from synesthesia_machine.nodes import (
 )
 from synesthesia_machine.nodes.utility import create_utility_registry
 from synesthesia_machine.persistence import save_graph
+from synesthesia_machine.runtime import InProcessEngineClient
 from synesthesia_machine.ui.graphics import NodeGraphicsItem
 from synesthesia_machine.ui.main_window import MainWindow
 from synesthesia_machine.ui.parameter_editors import create_parameter_editor
@@ -74,9 +75,11 @@ def settings_for(root: Path) -> QSettings:
 @pytest.fixture
 def window(qapp: QApplication, tmp_path: Path) -> Iterator[MainWindow]:
     del qapp
+    registry = create_utility_registry()
     result = MainWindow(
-        create_utility_registry(),
+        registry,
         paths_for(tmp_path),
+        InProcessEngineClient(registry),
         settings=settings_for(tmp_path),
         offer_recovery=False,
     )
@@ -87,7 +90,7 @@ def window(qapp: QApplication, tmp_path: Path) -> Iterator[MainWindow]:
 
 def test_shell_has_fixed_structure_actions_and_accessible_controls(window: MainWindow) -> None:
     menus = tuple(action.text().replace("&", "") for action in window.menuBar().actions())
-    assert menus == ("File", "Edit", "View", "Graph")
+    assert menus == ("File", "Edit", "View", "Graph", "MIDI", "Help")
     assert window.centralWidget() is window.view
     assert window.library_dock.widget() is window.library
     assert window.inspector_dock.widget() is window.inspector
@@ -278,6 +281,7 @@ def test_connectable_parameter_keeps_disabled_literal_fallback_while_connected(
     editor_window = MainWindow(
         registry,
         paths_for(tmp_path),
+        InProcessEngineClient(registry),
         settings=settings_for(tmp_path),
         offer_recovery=False,
     )

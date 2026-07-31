@@ -25,7 +25,9 @@ def test_client_activates_real_video_and_drives_graph_through_final_api(tmp_path
         "synmachine.image.resize",
         parameters={"width": 32, "height": 24},
     )
+    preview_id = document.add_node("synmachine.visualization.display_image_data")
     document.add_connection(source_id, "image", resize_id, "image")
+    document.add_connection(resize_id, "image", preview_id, "image")
     client = InProcessEngineClient(registry)
     try:
         activation = client.activate(document.snapshot())
@@ -42,6 +44,11 @@ def test_client_activates_real_video_and_drives_graph_through_final_api(tmp_path
         assert metrics.state is EngineState.STOPPED
         assert metrics.processed_ticks == DEFAULT_FRAME_COUNT
         assert metrics.memory_bytes > 0
+        previews = client.poll_image_previews()
+        assert len(previews) == 1
+        assert previews[0].node_id == preview_id
+        assert (previews[0].width, previews[0].height) == (32, 24)
+        assert client.poll_image_previews({preview_id: previews[0].sequence}) == ()
     finally:
         client.close()
 

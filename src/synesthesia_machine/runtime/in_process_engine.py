@@ -32,6 +32,7 @@ from synesthesia_machine.nodes.input import LOAD_VIDEO_TYPE_ID
 from synesthesia_machine.nodes.registry import NodeRegistry
 from synesthesia_machine.runtime.engine_facade import EngineFacade
 from synesthesia_machine.runtime.execution_plan import CompiledNode, PortKey
+from synesthesia_machine.runtime.previews import PreviewBroker
 from synesthesia_machine.runtime.scheduler import TickResult
 
 
@@ -89,8 +90,11 @@ type _GraphCommand = _TickCommand | _ResetCommand
 class LatestFrameGraphWorker:
     """Serialize scheduler access while retaining at most one pending tick per source."""
 
-    def __init__(self, facade: EngineFacade) -> None:
+    def __init__(
+        self, facade: EngineFacade, *, preview_broker: PreviewBroker | None = None
+    ) -> None:
         self._facade = facade
+        self._preview_broker = preview_broker
         self._condition = threading.Condition()
         self._commands: deque[_GraphCommand] = deque()
         self._busy = False
@@ -216,6 +220,8 @@ class LatestFrameGraphWorker:
                             ),
                         },
                     )
+                    if self._preview_broker is not None:
+                        self._preview_broker.publish(result)
                     completed_ns = time.perf_counter_ns()
                     with self._condition:
                         if self._started_ns is None:
@@ -298,6 +304,7 @@ class InProcessEngineClient:
         self._node_times_ns: deque[int] = deque(maxlen=20_000)
         self._facade = EngineFacade(registry, timing_hook=self._record_node_time)
         self._video_source_factory = video_source_factory or VideoSourceService
+        self._preview_broker = PreviewBroker()
         self._worker: LatestFrameGraphWorker | None = None
         self._sources: dict[UUID, SourceController] = {}
         self._state = EngineState.STOPPED
@@ -317,7 +324,8 @@ class InProcessEngineClient:
             if activated.plan is None:
                 return EngineActivation(snapshot.revision, activated.report, False)
 
-            worker = LatestFrameGraphWorker(self._facade)
+            self._preview_broker.configure(activated.plan)
+            worker = LatestFrameGraphWorker(self._facade, preview_broker=self._preview_broker)
             sources: dict[UUID, SourceController] = {}
             for node in activated.plan.nodes:
                 if node.definition.type_id != LOAD_VIDEO_TYPE_ID:
@@ -416,14 +424,12 @@ class InProcessEngineClient:
     def poll_image_previews(
         self, after_sequences: Mapping[UUID, int] | None = None
     ) -> tuple[ImagePreview, ...]:
-        del after_sequences
-        return ()
+        return self._preview_broker.poll_images(after_sequences)
 
     def poll_note_previews(
         self, after_sequences: Mapping[UUID, int] | None = None
     ) -> tuple[NotePreview, ...]:
-        del after_sequences
-        return ()
+        return self._preview_broker.poll_notes(after_sequences)
 
     def wait_until_idle(self, timeout_s: float = 5.0) -> bool:
         deadline = time.monotonic() + max(0.0, timeout_s)
@@ -480,6 +486,7 @@ class InProcessEngineClient:
         if self._worker is not None:
             self._worker.close()
             self._worker = None
+        self._preview_broker.clear()
 
     def _record_node_time(self, node_id: UUID, elapsed_ns: int) -> None:
         del node_id
