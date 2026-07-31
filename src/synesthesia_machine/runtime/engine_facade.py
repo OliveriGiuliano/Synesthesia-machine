@@ -52,6 +52,10 @@ class EngineFacade:
         if self._scheduler is not None:
             self._scheduler.reset_all(reason)
 
+    def panic(self) -> None:
+        if self._scheduler is not None:
+            self._scheduler.panic()
+
     def close(self) -> None:
         if self._scheduler is not None:
             self._scheduler.close()

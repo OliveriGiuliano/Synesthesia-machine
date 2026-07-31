@@ -379,7 +379,9 @@ class InProcessEngineClient:
             self._selected_sources(source_node_id)[0].seek(source_time_s)
 
     def panic(self) -> None:
-        """Generate Audio registers panic handling in the audio phase; currently a safe no-op."""
+        with self._lock:
+            self._ensure_open()
+            self._facade.panic()
 
     def source_status(self, source_node_id: UUID | None = None) -> tuple[SourceStatus, ...]:
         with self._lock:

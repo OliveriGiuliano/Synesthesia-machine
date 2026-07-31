@@ -15,6 +15,7 @@ from synesthesia_machine.nodes.base import (
     ExpectedNodeError,
     NodeExecutionError,
     NodeRuntime,
+    PanicCapableRuntime,
     ResetReason,
 )
 from synesthesia_machine.runtime.execution_plan import ExecutionPlan, PortKey, ScalarConversion
@@ -132,6 +133,11 @@ class Scheduler:
         for runtime in self._runtimes.values():
             runtime.reset(reason)
         self._static_cache.clear()
+
+    def panic(self) -> None:
+        for runtime in self._runtimes.values():
+            if isinstance(runtime, PanicCapableRuntime):
+                runtime.panic()
 
     def close(self) -> None:
         for runtime in self._runtimes.values():

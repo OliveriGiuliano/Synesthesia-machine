@@ -6,7 +6,7 @@ import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 from synesthesia_machine.contracts.runtime_values import (
@@ -132,6 +132,11 @@ class NodeRuntime(Protocol):
     def reset(self, reason: ResetReason) -> None: ...
 
     def close(self) -> None: ...
+
+
+@runtime_checkable
+class PanicCapableRuntime(Protocol):
+    def panic(self) -> None: ...
 
 
 type RuntimeFactory = Callable[[UUID], NodeRuntime]
