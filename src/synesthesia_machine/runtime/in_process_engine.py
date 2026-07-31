@@ -5,9 +5,9 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from typing import Protocol
@@ -88,21 +88,42 @@ class _ResetCommand:
 
 type _GraphCommand = _TickCommand | _ResetCommand
 
+_SOURCE_MAILBOX_CAPACITY = 2
+
+
+@dataclass(frozen=True, slots=True)
+class SourceMailboxMetrics:
+    """Current bounded-mailbox state and latest completed-frame timing for one source."""
+
+    occupancy: int
+    capacity: int
+    dropped_before_processing: int
+    processing_latency_ms: float
+    frame_age_ms: float
+
 
 class LatestFrameGraphWorker:
     """Serialize scheduler access while retaining at most one pending tick per source."""
 
     def __init__(
-        self, facade: EngineFacade, *, preview_broker: PreviewBroker | None = None
+        self,
+        facade: EngineFacade,
+        *,
+        preview_broker: PreviewBroker | None = None,
+        monotonic_ns: Callable[[], int] = time.perf_counter_ns,
     ) -> None:
         self._facade = facade
         self._preview_broker = preview_broker
+        self._monotonic_ns = monotonic_ns
         self._condition = threading.Condition()
         self._commands: deque[_GraphCommand] = deque()
         self._busy = False
+        self._active_tick_source_id: UUID | None = None
         self._closed = False
         self._processed_ticks = 0
         self._dropped_by_source: dict[UUID, int] = {}
+        self._last_completed_received_ns: dict[UUID, int] = {}
+        self._last_processing_latency_ms: dict[UUID, float] = {}
         self._last_result: TickResult | None = None
         self._last_error: str | None = None
         self._started_ns: int | None = None
@@ -177,6 +198,28 @@ class LatestFrameGraphWorker:
         with self._condition:
             return sum(self._dropped_by_source.values())
 
+    def mailbox_metrics(self, source_node_id: UUID) -> SourceMailboxMetrics:
+        """Return an atomic snapshot of one source's two-slot latest-frame mailbox."""
+
+        with self._condition:
+            occupancy = int(self._active_tick_source_id == source_node_id) + sum(
+                isinstance(command, _TickCommand) and command.source_node_id == source_node_id
+                for command in self._commands
+            )
+            received_ns = self._last_completed_received_ns.get(source_node_id)
+            frame_age_ms = (
+                max(0.0, (self._monotonic_ns() - received_ns) / 1_000_000)
+                if received_ns is not None
+                else 0.0
+            )
+            return SourceMailboxMetrics(
+                occupancy=occupancy,
+                capacity=_SOURCE_MAILBOX_CAPACITY,
+                dropped_before_processing=self._dropped_by_source.get(source_node_id, 0),
+                processing_latency_ms=self._last_processing_latency_ms.get(source_node_id, 0.0),
+                frame_age_ms=frame_age_ms,
+            )
+
     def wait_until_idle(self, timeout_s: float = 5.0) -> bool:
         deadline = time.monotonic() + max(0.0, timeout_s)
         with self._condition:
@@ -193,6 +236,8 @@ class LatestFrameGraphWorker:
         with self._condition:
             self._processed_ticks = 0
             self._dropped_by_source.clear()
+            self._last_completed_received_ns.clear()
+            self._last_processing_latency_ms.clear()
             self._last_result = None
             self._last_error = None
             self._started_ns = None
@@ -219,6 +264,9 @@ class LatestFrameGraphWorker:
                     return
                 command = self._commands.popleft()
                 self._busy = True
+                self._active_tick_source_id = (
+                    command.source_node_id if isinstance(command, _TickCommand) else None
+                )
             try:
                 if isinstance(command, _ResetCommand):
                     self._facade.reset_source(command.source_node_id, command.reason)
@@ -235,19 +283,25 @@ class LatestFrameGraphWorker:
                     )
                     if self._preview_broker is not None:
                         self._preview_broker.publish(result)
-                    completed_ns = time.perf_counter_ns()
+                    completed_ns = self._monotonic_ns()
                     with self._condition:
                         if self._started_ns is None:
                             self._started_ns = completed_ns
                         self._last_tick_ns = completed_ns
                         self._processed_ticks += 1
                         self._last_result = result
+                        received_ns = frame.image.context.received_monotonic_ns
+                        self._last_completed_received_ns[command.source_node_id] = received_ns
+                        self._last_processing_latency_ms[command.source_node_id] = max(
+                            0.0, (completed_ns - received_ns) / 1_000_000
+                        )
             except Exception as error:
                 with self._condition:
                     self._last_error = str(error)
             finally:
                 with self._condition:
                     self._busy = False
+                    self._active_tick_source_id = None
                     self._condition.notify_all()
 
     def _ensure_open(self) -> None:
@@ -310,12 +364,14 @@ class InProcessEngineClient:
         registry: NodeRegistry,
         *,
         video_source_factory: VideoSourceFactory | None = None,
+        worker_clock: Callable[[], int] = time.perf_counter_ns,
     ) -> None:
         self._lock = threading.RLock()
         self._timing_lock = threading.Lock()
         self._node_times_ns: deque[int] = deque(maxlen=20_000)
         self._facade = EngineFacade(registry, timing_hook=self._record_node_time)
         self._video_source_factory = video_source_factory or VideoSourceService
+        self._worker_clock = worker_clock
         self._preview_broker = PreviewBroker()
         self._worker: LatestFrameGraphWorker | None = None
         self._sources: dict[UUID, SourceController] = {}
@@ -351,7 +407,11 @@ class InProcessEngineClient:
             worker = self._worker
             worker_created = worker is None
             if worker is None:
-                worker = LatestFrameGraphWorker(self._facade, preview_broker=self._preview_broker)
+                worker = LatestFrameGraphWorker(
+                    self._facade,
+                    preview_broker=self._preview_broker,
+                    monotonic_ns=self._worker_clock,
+                )
             old_plan = self._facade.active_plan
             reusable_sources = self._reusable_source_ids(old_plan, plan, reset_reason)
             sources: dict[UUID, SourceController] = {}
@@ -464,14 +524,21 @@ class InProcessEngineClient:
     def source_status(self, source_node_id: UUID | None = None) -> tuple[SourceStatus, ...]:
         with self._lock:
             worker = self._worker
-            return tuple(
-                source.status(
-                    dropped_before_processing=(
-                        worker.dropped_for(source.node_id) if worker is not None else 0
+            statuses: list[SourceStatus] = []
+            for source in self._selected_sources(source_node_id):
+                status = source.status()
+                if worker is not None:
+                    mailbox = worker.mailbox_metrics(source.node_id)
+                    status = replace(
+                        status,
+                        dropped_before_processing=mailbox.dropped_before_processing,
+                        mailbox_occupancy=mailbox.occupancy,
+                        frame_age_ms=mailbox.frame_age_ms,
+                        mailbox_capacity=mailbox.capacity,
+                        processing_latency_ms=mailbox.processing_latency_ms,
                     )
-                )
-                for source in self._selected_sources(source_node_id)
-            )
+                statuses.append(status)
+            return tuple(statuses)
 
     def metrics(self) -> EngineMetrics:
         with self._lock:
@@ -499,6 +566,12 @@ class InProcessEngineClient:
                 dropped_before_processing=(worker.total_dropped() if worker is not None else 0),
                 skipped_by_selection=sum(status.skipped_by_selection for status in statuses),
                 memory_bytes=psutil.Process().memory_info().rss,
+                mailbox_occupancy=sum(status.mailbox_occupancy for status in statuses),
+                mailbox_capacity=sum(status.mailbox_capacity for status in statuses),
+                frame_age_ms=max((status.frame_age_ms for status in statuses), default=0.0),
+                processing_latency_ms=max(
+                    (status.processing_latency_ms for status in statuses), default=0.0
+                ),
             )
 
     def poll_image_previews(
@@ -668,5 +741,6 @@ __all__ = [
     "InProcessEngineClient",
     "LatestFrameGraphWorker",
     "SourceController",
+    "SourceMailboxMetrics",
     "VideoSourceFactory",
 ]

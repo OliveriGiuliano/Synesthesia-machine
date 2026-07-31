@@ -78,6 +78,8 @@ class SourceStatus:
     reconnect_attempts: int = 0
     mailbox_occupancy: int = 0
     frame_age_ms: float = 0.0
+    mailbox_capacity: int = 0
+    processing_latency_ms: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +102,7 @@ class EngineMetrics:
     mailbox_capacity: int = 0
     preview_fps: float = 0.0
     frame_age_ms: float = 0.0
+    processing_latency_ms: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
