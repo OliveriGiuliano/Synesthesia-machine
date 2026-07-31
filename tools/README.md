@@ -22,6 +22,9 @@ uv run python -m tools.process_ipc_probe
 
 # Write the dependency/system report required by Phase 0
 uv run python -m tools.environment_report --output packaging/environment-report.json
+
+# Run the canonical Phase 3 graph in the UI for 60 seconds and capture evidence
+uv run python -m tools.phase3_performance
 ```
 
 Automated tests never access physical devices. Camera behavior is tested through injected capture

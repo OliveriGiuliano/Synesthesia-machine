@@ -1,0 +1,559 @@
+{
+  "generated_at_utc": "2026-07-31T08:30:07.622275+00:00",
+  "git_commit": "75f595b63b28d7cc8bda96aea5f60b585cdcd5e9",
+  "canonical_graph_path": "C:\\MY_FILES\\SORTING_THINGS\\_code\\synesthesia_machine\\examples\\phase3\\hue_chord.synmachine.json",
+  "run_duration_requested_s": 60.0,
+  "run_duration_observed_s": 60.0000546,
+  "qt_platform": "windows",
+  "environment": {
+    "generated_at_utc": "2026-07-31T08:29:07.306449+00:00",
+    "python_version": "3.12.13",
+    "python_executable": "C:\\MY_FILES\\SORTING_THINGS\\_code\\synesthesia_machine\\.venv\\Scripts\\python.exe",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "machine": "AMD64",
+    "cpu_physical": 24,
+    "cpu_logical": 32,
+    "memory_total_bytes": 102834245632,
+    "memory_available_bytes": 84586450944,
+    "process_id": 23852,
+    "process_rss_bytes": 125849600,
+    "dependencies": {
+      "av": "18.0.0",
+      "mido": "1.3.3",
+      "numpy": "2.5.1",
+      "opencv-python": "4.13.0.92",
+      "psutil": "7.2.2",
+      "pyside6": "6.10.3",
+      "python-rtmidi": "1.5.8",
+      "sounddevice": "0.5.5",
+      "pyright": "1.1.411",
+      "pytest": "9.1.1",
+      "ruff": "0.14.14"
+    }
+  },
+  "source_fixture": {
+    "generated_width": 500,
+    "generated_height": 500,
+    "generated_fps": 60,
+    "generated_frame_count": 600,
+    "generated_duration_s": 10,
+    "codec": "mpeg4/yuv420p"
+  },
+  "engine": {
+    "state": "RUNNING",
+    "processed_ticks": 3600,
+    "processed_fps": 60.01796227577984,
+    "p95_node_time_ms": 2.071705,
+    "dropped_before_processing": 0,
+    "skipped_by_selection": 0,
+    "final_memory_bytes": 163274752,
+    "peak_sampled_memory_bytes": 182235136
+  },
+  "source": {
+    "state": "PLAYING",
+    "width": 500,
+    "height": 500,
+    "duration_s": 10.0,
+    "processed_index": 6,
+    "dropped_before_processing": 0,
+    "warnings": 0,
+    "last_error": null
+  },
+  "ui": {
+    "target_interval_ms": 50.0,
+    "callback_count": 1199,
+    "expected_callback_count": 1200,
+    "callback_ratio": 0.9991666666666666,
+    "p50_interval_ms": 50.0144,
+    "p95_interval_ms": 50.89382,
+    "maximum_interval_ms": 56.6453,
+    "responsive": true,
+    "criterion": "callback ratio >= 0.90, p95 heartbeat interval <= 100 ms, and maximum interval <= 250 ms",
+    "image_preview_visible": true,
+    "note_preview_visible": true,
+    "status_text": "Engine RUNNING \u00b7 source PLAYING \u00b7 3600 ticks @ 60.0 FPS \u00b7 p95 2.07 ms \u00b7 drops 0 \u00b7 RAM 155.7 MiB"
+  },
+  "screenshot_path": "C:\\MY_FILES\\SORTING_THINGS\\_code\\synesthesia_machine\\docs\\phase-3-ui.png",
+  "samples": [
+    {
+      "elapsed_s": 1.002,
+      "processed_ticks": 60,
+      "processed_fps": 61.21339642938178,
+      "p95_node_time_ms": 2.439994999999998,
+      "dropped_before_processing": 0,
+      "memory_bytes": 161677312
+    },
+    {
+      "elapsed_s": 2.001,
+      "processed_ticks": 120,
+      "processed_fps": 60.596411086658776,
+      "p95_node_time_ms": 2.421205,
+      "dropped_before_processing": 0,
+      "memory_bytes": 160993280
+    },
+    {
+      "elapsed_s": 3.001,
+      "processed_ticks": 180,
+      "processed_fps": 60.49370322723489,
+      "p95_node_time_ms": 2.38698,
+      "dropped_before_processing": 0,
+      "memory_bytes": 159576064
+    },
+    {
+      "elapsed_s": 4.002,
+      "processed_ticks": 240,
+      "processed_fps": 60.36465381902264,
+      "p95_node_time_ms": 2.3664399999999994,
+      "dropped_before_processing": 0,
+      "memory_bytes": 163246080
+    },
+    {
+      "elapsed_s": 5.001,
+      "processed_ticks": 300,
+      "processed_fps": 60.301651776815305,
+      "p95_node_time_ms": 2.328315,
+      "dropped_before_processing": 0,
+      "memory_bytes": 164814848
+    },
+    {
+      "elapsed_s": 6.001,
+      "processed_ticks": 360,
+      "processed_fps": 60.24386919061257,
+      "p95_node_time_ms": 2.3111649999999986,
+      "dropped_before_processing": 0,
+      "memory_bytes": 163373056
+    },
+    {
+      "elapsed_s": 7.001,
+      "processed_ticks": 420,
+      "processed_fps": 60.21495103112297,
+      "p95_node_time_ms": 2.2895799999999995,
+      "dropped_before_processing": 0,
+      "memory_bytes": 166670336
+    },
+    {
+      "elapsed_s": 8.002,
+      "processed_ticks": 480,
+      "processed_fps": 60.17262850175082,
+      "p95_node_time_ms": 2.2820249999999995,
+      "dropped_before_processing": 0,
+      "memory_bytes": 162205696
+    },
+    {
+      "elapsed_s": 9.001,
+      "processed_ticks": 540,
+      "processed_fps": 60.163019053383024,
+      "p95_node_time_ms": 2.26253,
+      "dropped_before_processing": 0,
+      "memory_bytes": 165515264
+    },
+    {
+      "elapsed_s": 10.001,
+      "processed_ticks": 600,
+      "processed_fps": 60.136894423728286,
+      "p95_node_time_ms": 2.2538899999999997,
+      "dropped_before_processing": 0,
+      "memory_bytes": 165666816
+    },
+    {
+      "elapsed_s": 11.001,
+      "processed_ticks": 660,
+      "processed_fps": 60.12326307422943,
+      "p95_node_time_ms": 2.2329850000000007,
+      "dropped_before_processing": 0,
+      "memory_bytes": 165703680
+    },
+    {
+      "elapsed_s": 12.001,
+      "processed_ticks": 720,
+      "processed_fps": 60.10748520683829,
+      "p95_node_time_ms": 2.22643,
+      "dropped_before_processing": 0,
+      "memory_bytes": 164638720
+    },
+    {
+      "elapsed_s": 13.001,
+      "processed_ticks": 780,
+      "processed_fps": 60.104241560179744,
+      "p95_node_time_ms": 2.21692,
+      "dropped_before_processing": 0,
+      "memory_bytes": 165789696
+    },
+    {
+      "elapsed_s": 14.001,
+      "processed_ticks": 840,
+      "processed_fps": 60.0941791683485,
+      "p95_node_time_ms": 2.210315,
+      "dropped_before_processing": 0,
+      "memory_bytes": 164642816
+    },
+    {
+      "elapsed_s": 15.001,
+      "processed_ticks": 900,
+      "processed_fps": 60.090557271014845,
+      "p95_node_time_ms": 2.2054399999999994,
+      "dropped_before_processing": 0,
+      "memory_bytes": 165965824
+    },
+    {
+      "elapsed_s": 16.002,
+      "processed_ticks": 960,
+      "processed_fps": 60.0835736222522,
+      "p95_node_time_ms": 2.201679999999999,
+      "dropped_before_processing": 0,
+      "memory_bytes": 165941248
+    },
+    {
+      "elapsed_s": 17.001,
+      "processed_ticks": 1020,
+      "processed_fps": 60.08215704839689,
+      "p95_node_time_ms": 2.197169999999999,
+      "dropped_before_processing": 0,
+      "memory_bytes": 165908480
+    },
+    {
+      "elapsed_s": 18.001,
+      "processed_ticks": 1080,
+      "processed_fps": 60.06379074896494,
+      "p95_node_time_ms": 2.192115,
+      "dropped_before_processing": 0,
+      "memory_bytes": 165978112
+    },
+    {
+      "elapsed_s": 19.002,
+      "processed_ticks": 1140,
+      "processed_fps": 60.072154561859655,
+      "p95_node_time_ms": 2.179969999999999,
+      "dropped_before_processing": 0,
+      "memory_bytes": 166023168
+    },
+    {
+      "elapsed_s": 20.002,
+      "processed_ticks": 1200,
+      "processed_fps": 60.0649788948182,
+      "p95_node_time_ms": 2.181369999999999,
+      "dropped_before_processing": 0,
+      "memory_bytes": 166146048
+    },
+    {
+      "elapsed_s": 21.001,
+      "processed_ticks": 1260,
+      "processed_fps": 60.06248729571139,
+      "p95_node_time_ms": 2.1761249999999994,
+      "dropped_before_processing": 0,
+      "memory_bytes": 166129664
+    },
+    {
+      "elapsed_s": 22.001,
+      "processed_ticks": 1320,
+      "processed_fps": 60.05855217448858,
+      "p95_node_time_ms": 2.170749999999999,
+      "dropped_before_processing": 0,
+      "memory_bytes": 166178816
+    },
+    {
+      "elapsed_s": 23.001,
+      "processed_ticks": 1380,
+      "processed_fps": 60.05753067535211,
+      "p95_node_time_ms": 2.1623,
+      "dropped_before_processing": 0,
+      "memory_bytes": 164155392
+    },
+    {
+      "elapsed_s": 24.002,
+      "processed_ticks": 1440,
+      "processed_fps": 60.05557092116263,
+      "p95_node_time_ms": 2.1606199999999993,
+      "dropped_before_processing": 0,
+      "memory_bytes": 165257216
+    },
+    {
+      "elapsed_s": 25.001,
+      "processed_ticks": 1500,
+      "processed_fps": 60.04482201856113,
+      "p95_node_time_ms": 2.1581199999999994,
+      "dropped_before_processing": 0,
+      "memory_bytes": 166281216
+    },
+    {
+      "elapsed_s": 26.002,
+      "processed_ticks": 1560,
+      "processed_fps": 60.0418526352398,
+      "p95_node_time_ms": 2.154049999999999,
+      "dropped_before_processing": 0,
+      "memory_bytes": 166178816
+    },
+    {
+      "elapsed_s": 27.001,
+      "processed_ticks": 1620,
+      "processed_fps": 60.04124410957869,
+      "p95_node_time_ms": 2.15351,
+      "dropped_before_processing": 0,
+      "memory_bytes": 166248448
+    },
+    {
+      "elapsed_s": 28.001,
+      "processed_ticks": 1680,
+      "processed_fps": 60.04446442701982,
+      "p95_node_time_ms": 2.153215,
+      "dropped_before_processing": 0,
+      "memory_bytes": 167227392
+    },
+    {
+      "elapsed_s": 29.001,
+      "processed_ticks": 1740,
+      "processed_fps": 60.038147410752416,
+      "p95_node_time_ms": 2.1496199999999996,
+      "dropped_before_processing": 0,
+      "memory_bytes": 166199296
+    },
+    {
+      "elapsed_s": 30.002,
+      "processed_ticks": 1800,
+      "processed_fps": 60.04100500436773,
+      "p95_node_time_ms": 2.1496199999999996,
+      "dropped_before_processing": 0,
+      "memory_bytes": 165257216
+    },
+    {
+      "elapsed_s": 31.001,
+      "processed_ticks": 1860,
+      "processed_fps": 60.03720660628118,
+      "p95_node_time_ms": 2.145415,
+      "dropped_before_processing": 0,
+      "memory_bytes": 165269504
+    },
+    {
+      "elapsed_s": 32.001,
+      "processed_ticks": 1920,
+      "processed_fps": 60.03718365446399,
+      "p95_node_time_ms": 2.141149999999999,
+      "dropped_before_processing": 0,
+      "memory_bytes": 166326272
+    },
+    {
+      "elapsed_s": 33.001,
+      "processed_ticks": 1980,
+      "processed_fps": 60.034573000976515,
+      "p95_node_time_ms": 2.1400249999999996,
+      "dropped_before_processing": 0,
+      "memory_bytes": 165474304
+    },
+    {
+      "elapsed_s": 34.001,
+      "processed_ticks": 2040,
+      "processed_fps": 60.03743775695894,
+      "p95_node_time_ms": 2.1400249999999996,
+      "dropped_before_processing": 0,
+      "memory_bytes": 166379520
+    },
+    {
+      "elapsed_s": 35.001,
+      "processed_ticks": 2100,
+      "processed_fps": 60.03454301841647,
+      "p95_node_time_ms": 2.1373849999999988,
+      "dropped_before_processing": 0,
+      "memory_bytes": 165396480
+    },
+    {
+      "elapsed_s": 36.001,
+      "processed_ticks": 2160,
+      "processed_fps": 60.03466468243948,
+      "p95_node_time_ms": 2.139905,
+      "dropped_before_processing": 0,
+      "memory_bytes": 165388288
+    },
+    {
+      "elapsed_s": 37.001,
+      "processed_ticks": 2219,
+      "processed_fps": 60.03199107239074,
+      "p95_node_time_ms": 2.1421299999999994,
+      "dropped_before_processing": 0,
+      "memory_bytes": 166367232
+    },
+    {
+      "elapsed_s": 38.001,
+      "processed_ticks": 2280,
+      "processed_fps": 60.03098436067267,
+      "p95_node_time_ms": 2.144505,
+      "dropped_before_processing": 0,
+      "memory_bytes": 166375424
+    },
+    {
+      "elapsed_s": 39.001,
+      "processed_ticks": 2340,
+      "processed_fps": 60.030035335525874,
+      "p95_node_time_ms": 2.142105,
+      "dropped_before_processing": 0,
+      "memory_bytes": 166404096
+    },
+    {
+      "elapsed_s": 40.001,
+      "processed_ticks": 2400,
+      "processed_fps": 60.02893184413626,
+      "p95_node_time_ms": 2.139905,
+      "dropped_before_processing": 0,
+      "memory_bytes": 161497088
+    },
+    {
+      "elapsed_s": 41.002,
+      "processed_ticks": 2460,
+      "processed_fps": 60.025180123853325,
+      "p95_node_time_ms": 2.137015,
+      "dropped_before_processing": 0,
+      "memory_bytes": 162369536
+    },
+    {
+      "elapsed_s": 42.001,
+      "processed_ticks": 2520,
+      "processed_fps": 60.026485829350975,
+      "p95_node_time_ms": 2.142705,
+      "dropped_before_processing": 0,
+      "memory_bytes": 166576128
+    },
+    {
+      "elapsed_s": 43.001,
+      "processed_ticks": 2580,
+      "processed_fps": 60.02537733359764,
+      "p95_node_time_ms": 2.1428249999999993,
+      "dropped_before_processing": 0,
+      "memory_bytes": 165568512
+    },
+    {
+      "elapsed_s": 44.001,
+      "processed_ticks": 2639,
+      "processed_fps": 60.02662880426209,
+      "p95_node_time_ms": 2.140505,
+      "dropped_before_processing": 0,
+      "memory_bytes": 181575680
+    },
+    {
+      "elapsed_s": 45.002,
+      "processed_ticks": 2699,
+      "processed_fps": 60.025431567729854,
+      "p95_node_time_ms": 2.137015,
+      "dropped_before_processing": 0,
+      "memory_bytes": 178733056
+    },
+    {
+      "elapsed_s": 46.001,
+      "processed_ticks": 2760,
+      "processed_fps": 60.0250925765263,
+      "p95_node_time_ms": 2.136805,
+      "dropped_before_processing": 0,
+      "memory_bytes": 165666816
+    },
+    {
+      "elapsed_s": 47.001,
+      "processed_ticks": 2819,
+      "processed_fps": 60.025876795629436,
+      "p95_node_time_ms": 2.13101,
+      "dropped_before_processing": 0,
+      "memory_bytes": 182235136
+    },
+    {
+      "elapsed_s": 48.001,
+      "processed_ticks": 2879,
+      "processed_fps": 60.02357585956106,
+      "p95_node_time_ms": 2.1208549999999993,
+      "dropped_before_processing": 0,
+      "memory_bytes": 166703104
+    },
+    {
+      "elapsed_s": 49.002,
+      "processed_ticks": 2940,
+      "processed_fps": 60.02405261786851,
+      "p95_node_time_ms": 2.108905,
+      "dropped_before_processing": 0,
+      "memory_bytes": 166699008
+    },
+    {
+      "elapsed_s": 50.002,
+      "processed_ticks": 3000,
+      "processed_fps": 60.021980289269855,
+      "p95_node_time_ms": 2.098615,
+      "dropped_before_processing": 0,
+      "memory_bytes": 166699008
+    },
+    {
+      "elapsed_s": 51.001,
+      "processed_ticks": 3060,
+      "processed_fps": 60.02093494904591,
+      "p95_node_time_ms": 2.0922249999999996,
+      "dropped_before_processing": 0,
+      "memory_bytes": 165732352
+    },
+    {
+      "elapsed_s": 52.001,
+      "processed_ticks": 3120,
+      "processed_fps": 60.02050427392449,
+      "p95_node_time_ms": 2.0891249999999997,
+      "dropped_before_processing": 0,
+      "memory_bytes": 166727680
+    },
+    {
+      "elapsed_s": 53.002,
+      "processed_ticks": 3179,
+      "processed_fps": 60.02027877348328,
+      "p95_node_time_ms": 2.0876249999999996,
+      "dropped_before_processing": 0,
+      "memory_bytes": 181735424
+    },
+    {
+      "elapsed_s": 54.001,
+      "processed_ticks": 3240,
+      "processed_fps": 60.021053940771125,
+      "p95_node_time_ms": 2.0853349999999997,
+      "dropped_before_processing": 0,
+      "memory_bytes": 166723584
+    },
+    {
+      "elapsed_s": 55.001,
+      "processed_ticks": 3300,
+      "processed_fps": 60.01990740288739,
+      "p95_node_time_ms": 2.083505,
+      "dropped_before_processing": 0,
+      "memory_bytes": 165736448
+    },
+    {
+      "elapsed_s": 56.001,
+      "processed_ticks": 3360,
+      "processed_fps": 60.02023024732079,
+      "p95_node_time_ms": 2.0789099999999996,
+      "dropped_before_processing": 0,
+      "memory_bytes": 166727680
+    },
+    {
+      "elapsed_s": 57.002,
+      "processed_ticks": 3420,
+      "processed_fps": 60.01848674687394,
+      "p95_node_time_ms": 2.07691,
+      "dropped_before_processing": 0,
+      "memory_bytes": 162549760
+    },
+    {
+      "elapsed_s": 58.002,
+      "processed_ticks": 3480,
+      "processed_fps": 60.01893162672974,
+      "p95_node_time_ms": 2.0758,
+      "dropped_before_processing": 0,
+      "memory_bytes": 166739968
+    },
+    {
+      "elapsed_s": 59.002,
+      "processed_ticks": 3540,
+      "processed_fps": 60.017530103296906,
+      "p95_node_time_ms": 2.0755149999999998,
+      "dropped_before_processing": 0,
+      "memory_bytes": 166662144
+    },
+    {
+      "elapsed_s": 60.0,
+      "processed_ticks": 3600,
+      "processed_fps": 60.01796227577984,
+      "p95_node_time_ms": 2.071705,
+      "dropped_before_processing": 0,
+      "memory_bytes": 163274752
+    }
+  ]
+}
