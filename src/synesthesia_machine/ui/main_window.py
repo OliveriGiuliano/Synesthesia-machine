@@ -25,7 +25,12 @@ from PySide6.QtWidgets import (
 
 from synesthesia_machine import __version__
 from synesthesia_machine.app.settings import ApplicationPaths
-from synesthesia_machine.contracts import EngineClient, SourceState
+from synesthesia_machine.contracts import (
+    EngineClient,
+    EngineConnectionState,
+    EngineStatus,
+    SourceState,
+)
 from synesthesia_machine.nodes import ExecutionKind, NodeRegistry
 from synesthesia_machine.persistence import (
     GraphPersistenceError,
@@ -96,6 +101,7 @@ class MainWindow(QMainWindow):
         self._image_sequences: dict[UUID, int] = {}
         self._note_sequences: dict[UUID, int] = {}
         self._engine_closed = False
+        self._engine_failure_signature: tuple[object, ...] | None = None
         self._autosave_timer = QTimer(self)
         self._autosave_timer.setSingleShot(True)
         self._autosave_timer.setInterval(60_000)
@@ -233,6 +239,16 @@ class MainWindow(QMainWindow):
             ActionSpec("panic", "&Panic", "Immediately silence debug audio", "Ctrl+Shift+Escape"),
             self.panic,
         )
+        restart_engine = create(
+            ActionSpec(
+                "restart_engine",
+                "Restart &Engine",
+                "Restart the child engine and rebuild the latest valid runtime",
+                "Ctrl+Shift+R",
+            ),
+            self.restart_engine,
+        )
+        restart_engine.setEnabled(False)
         create(ActionSpec("about", "&About", "About Synesthesia Machine"), self._show_about)
         self.action_registry.register(
             "toggle_library",
@@ -297,6 +313,8 @@ class MainWindow(QMainWindow):
         graph_menu.addSeparator()
         for key in ("play", "pause", "stop", "reload"):
             graph_menu.addAction(self.action_registry.require(key))
+        graph_menu.addSeparator()
+        graph_menu.addAction(self.action_registry.require("restart_engine"))
 
         midi_menu = self.menuBar().addMenu("&MIDI")
         midi_menu.addAction(self.action_registry.require("panic"))
@@ -341,7 +359,7 @@ class MainWindow(QMainWindow):
             else:
                 self.engine_client.play(target)
                 verb = "Playing"
-        except (KeyError, RuntimeError, IndexError) as error:
+        except (KeyError, RuntimeError, TimeoutError, IndexError) as error:
             self.statusBar().showMessage(f"Could not play source: {error}", 5000)
             return
         self.statusBar().showMessage(f"{verb} source {str(target)[:8]}", 3000)
@@ -360,8 +378,49 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def panic(self) -> None:
-        self.engine_client.panic()
+        try:
+            self.engine_client.panic()
+        except (RuntimeError, TimeoutError) as error:
+            self.statusBar().showMessage(f"Could not send panic: {error}", 5000)
+            return
         self.statusBar().showMessage("Panic sent", 3000)
+
+    @Slot()
+    def restart_engine(self) -> None:
+        if self._engine_closed:
+            return
+        self.action_registry.require("restart_engine").setEnabled(False)
+        self.statusBar().showMessage("Restarting engine…")
+        QApplication.processEvents()
+        try:
+            activation = self.engine_client.restart()
+        except (RuntimeError, TimeoutError) as error:
+            self.statusBar().showMessage(f"Engine restart failed: {error}", 8000)
+            self._refresh_engine_status()
+            return
+        self._image_sequences.clear()
+        self._note_sequences.clear()
+        self._engine_failure_signature = None
+        if activation is None:
+            snapshot = self.session.document.snapshot()
+            if snapshot.nodes:
+                try:
+                    activation = self.engine_client.activate(snapshot)
+                except (RuntimeError, TimeoutError) as error:
+                    self.statusBar().showMessage(
+                        f"Engine restarted but graph rebuild failed: {error}",
+                        8000,
+                    )
+                    self._refresh_engine_status()
+                    return
+        if activation is not None and not activation.activated:
+            self.statusBar().showMessage(
+                "Engine restarted; current invalid graph was not activated",
+                8000,
+            )
+        else:
+            self.statusBar().showMessage("Engine restarted", 5000)
+        self._refresh_engine_status()
 
     def _invoke_transport(self, operation: Callable[[UUID | None], None], past_tense: str) -> None:
         target = self._transport_target()
@@ -369,7 +428,7 @@ class MainWindow(QMainWindow):
             return
         try:
             operation(target)
-        except (KeyError, RuntimeError) as error:
+        except (KeyError, RuntimeError, TimeoutError) as error:
             self.statusBar().showMessage(f"Could not control source: {error}", 5000)
             return
         self.statusBar().showMessage(f"{past_tense} source {str(target)[:8]}", 3000)
@@ -603,7 +662,7 @@ class MainWindow(QMainWindow):
         snapshot = self.session.document.snapshot()
         try:
             activation = self.engine_client.activate(snapshot)
-        except RuntimeError as error:
+        except (RuntimeError, TimeoutError) as error:
             self.statusBar().showMessage(f"Engine activation failed: {error}", 5000)
             return
         if activation.activated:
@@ -626,7 +685,7 @@ class MainWindow(QMainWindow):
         try:
             image_previews = self.engine_client.poll_image_previews(self._image_sequences)
             note_previews = self.engine_client.poll_note_previews(self._note_sequences)
-        except RuntimeError:
+        except (RuntimeError, TimeoutError):
             return
         for preview in image_previews:
             self._image_sequences[preview.node_id] = preview.sequence
@@ -640,9 +699,26 @@ class MainWindow(QMainWindow):
         if self._engine_closed:
             return
         try:
+            engine_status = self.engine_client.status()
+        except (RuntimeError, TimeoutError):
+            return
+        restart = self.action_registry.require("restart_engine")
+        failed = engine_status.connection_state in {
+            EngineConnectionState.CRASHED,
+            EngineConnectionState.UNRESPONSIVE,
+        }
+        restart.setEnabled(failed)
+        if failed:
+            self._show_engine_failure(engine_status)
+            return
+        self._engine_failure_signature = None
+        if engine_status.connection_state is EngineConnectionState.RESTARTING:
+            self._engine_status.setText("Engine RESTARTING")
+            return
+        try:
             metrics = self.engine_client.metrics()
             sources = self.engine_client.source_status()
-        except RuntimeError:
+        except (RuntimeError, TimeoutError):
             return
         source_text = ", ".join(status.state.value for status in sources) or "no source"
         memory_mib = metrics.memory_bytes / (1024 * 1024)
@@ -652,6 +728,37 @@ class MainWindow(QMainWindow):
             f"p95 {metrics.p95_node_time_ms:.2f} ms · "
             f"drops {metrics.dropped_before_processing} · RAM {memory_mib:.1f} MiB"
         )
+
+    def _show_engine_failure(self, status: EngineStatus) -> None:
+        state = status.connection_state.value
+        exit_text = "" if status.exit_code is None else f" · exit {status.exit_code}"
+        log_text = (
+            "" if status.crash_log_path is None else f" · crash log path {status.crash_log_path}"
+        )
+        self._engine_status.setText(f"Engine {state} · STOPPED{exit_text}{log_text}")
+        detail = status.last_error or "The engine process stopped unexpectedly."
+        self.statusBar().showMessage(f"Engine {state.lower()}: {detail}")
+        signature = (
+            status.connection_state,
+            status.child_process_id,
+            status.exit_code,
+            status.last_error,
+            status.crash_log_path,
+        )
+        if signature == self._engine_failure_signature:
+            return
+        self._engine_failure_signature = signature
+        message = (
+            f"The engine is {state.lower()}. The graph document remains open and editable.\n\n"
+            f"Details: {detail}"
+        )
+        if status.exit_code is not None:
+            message += f"\nExit code: {status.exit_code}"
+        if status.crash_log_path is not None:
+            message += f"\nCrash-log path: {status.crash_log_path}"
+            message += "\nA forced termination may not produce a Python traceback file."
+        message += "\n\nUse Graph → Restart Engine to rebuild the latest valid runtime."
+        QMessageBox.critical(self, "Engine stopped", message)
 
     @Slot()
     def _show_about(self) -> None:

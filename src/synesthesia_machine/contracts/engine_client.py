@@ -150,6 +150,7 @@ class EngineStatus:
     restart_count: int = 0
     exit_code: int | None = None
     last_error: str | None = None
+    crash_log_path: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

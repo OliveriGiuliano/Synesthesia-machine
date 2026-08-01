@@ -12,6 +12,7 @@ from dataclasses import dataclass, field, replace
 from multiprocessing import get_context
 from multiprocessing.context import SpawnContext
 from multiprocessing.process import BaseProcess
+from pathlib import Path
 from typing import Protocol, cast
 from uuid import UUID, uuid4
 
@@ -131,6 +132,7 @@ class ProcessEngineClient:
         activation_timeout_s: float = DEFAULT_ACTIVATION_TIMEOUT_S,
         heartbeat_timeout_s: float = DEFAULT_HEARTBEAT_TIMEOUT_S,
         close_timeout_s: float = DEFAULT_CLOSE_TIMEOUT_S,
+        crash_log_path: str | Path | None = None,
     ) -> None:
         self._context: SpawnContext = get_context("spawn")
         self._protocol_version = protocol_version
@@ -138,6 +140,9 @@ class ProcessEngineClient:
         self._activation_timeout_s = activation_timeout_s
         self._heartbeat_timeout_s = heartbeat_timeout_s
         self._close_timeout_s = close_timeout_s
+        self._crash_log_path = (
+            None if crash_log_path is None else str(Path(crash_log_path).resolve())
+        )
         self._lifecycle_lock = threading.RLock()
         self._send_lock = threading.Lock()
         self._pending_lock = threading.Lock()
@@ -154,6 +159,7 @@ class ProcessEngineClient:
         self._graph_revision: int | None = None
         self._last_heartbeat_monotonic_ns: int | None = None
         self._last_error: str | None = None
+        self._last_exit_code: int | None = None
         self._restart_count = 0
         self._latest_valid_snapshot: GraphSnapshot | None = None
         self._latest_demand_roots: tuple[UUID, ...] | None = None
@@ -175,14 +181,18 @@ class ProcessEngineClient:
             event_queue = cast(EventQueueReader, raw_event_queue)
             process = self._context.Process(
                 target=engine_server_main,
-                args=(child_connection, raw_event_queue),
+                args=(child_connection, raw_event_queue, self._crash_log_path),
                 name="synesthesia-engine",
             )
             self._connection_state = EngineConnectionState.STARTING
             self._child_process_id = None
             self._last_heartbeat_monotonic_ns = None
             self._last_error = None
+            self._last_exit_code = None
             self._reader_stop.clear()
+            if self._crash_log_path is not None:
+                with suppress(OSError):
+                    Path(self._crash_log_path).unlink(missing_ok=True)
             try:
                 process.start()
             except Exception:
@@ -342,8 +352,9 @@ class ProcessEngineClient:
                 self._graph_revision,
                 self._last_heartbeat_monotonic_ns,
                 self._restart_count,
-                self._process.exitcode if self._process is not None else None,
+                self._process.exitcode if self._process is not None else self._last_exit_code,
                 self._last_error,
+                self._crash_log_path,
             )
 
     def restart(self) -> EngineActivation | None:
@@ -630,6 +641,7 @@ class ProcessEngineClient:
         with self._preview_lock:
             self._close_image_slots_locked()
         with self._lifecycle_lock:
+            self._last_exit_code = process.exitcode
             if mark_crashed and not self._closed:
                 self._connection_state = EngineConnectionState.CRASHED
                 self._last_error = f"Engine process exited with code {process.exitcode}"
@@ -660,6 +672,7 @@ class ProcessEngineClient:
             if thread is not None and thread is not current:
                 thread.join(timeout=0.5)
         if process is not None and not process.is_alive():
+            self._last_exit_code = process.exitcode
             process.close()
         self._fail_pending_locked(RuntimeError("Engine process disconnected"))
 
@@ -699,6 +712,7 @@ class ProcessEngineClient:
             and self._connection_state is not EngineConnectionState.RESTARTING
         ):
             self._connection_state = EngineConnectionState.CRASHED
+            self._last_exit_code = process.exitcode
             self._last_error = f"Engine process exited with code {process.exitcode}"
         if (
             self._connection_state is EngineConnectionState.CONNECTED

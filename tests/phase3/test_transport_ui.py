@@ -17,9 +17,12 @@ from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.app.settings import ApplicationPaths
 from synesthesia_machine.contracts import (
     EngineActivation,
+    EngineConnectionState,
     EngineMetrics,
     EngineState,
+    EngineStatus,
     ImagePreview,
+    MidiOutputStatus,
     NoteActivity,
     NotePreview,
     SourceState,
@@ -35,11 +38,23 @@ IMAGE_NODE = UUID("00000000-0000-0000-0000-000000000703")
 NOTE_NODE = UUID("00000000-0000-0000-0000-000000000704")
 
 
+def _snapshot_list() -> list[GraphSnapshot]:
+    return []
+
+
+def _call_list() -> list[tuple[str, UUID | None]]:
+    return []
+
+
+def _status_map() -> dict[UUID, SourceStatus]:
+    return {}
+
+
 @dataclass(slots=True)
 class _RecordingEngineClient:
-    activations: list[GraphSnapshot] = field(default_factory=list)
-    calls: list[tuple[str, UUID | None]] = field(default_factory=list)
-    statuses: dict[UUID, SourceStatus] = field(default_factory=dict)
+    activations: list[GraphSnapshot] = field(default_factory=_snapshot_list)
+    calls: list[tuple[str, UUID | None]] = field(default_factory=_call_list)
+    statuses: dict[UUID, SourceStatus] = field(default_factory=_status_map)
     image_previews: tuple[ImagePreview, ...] = ()
     note_previews: tuple[NotePreview, ...] = ()
     closed: bool = False
@@ -79,6 +94,12 @@ class _RecordingEngineClient:
             return () if status is None else (status,)
         return tuple(self.statuses[key] for key in sorted(self.statuses, key=str))
 
+    def midi_output_status(
+        self, output_node_id: UUID | None = None
+    ) -> tuple[MidiOutputStatus, ...]:
+        del output_node_id
+        return ()
+
     def metrics(self) -> EngineMetrics:
         return EngineMetrics(
             EngineState.RUNNING,
@@ -113,6 +134,15 @@ class _RecordingEngineClient:
     def wait_until_idle(self, timeout_s: float = 5.0) -> bool:
         del timeout_s
         return True
+
+    def status(self) -> EngineStatus:
+        return EngineStatus(EngineConnectionState.CONNECTED, graph_revision=4)
+
+    def restart(self) -> EngineActivation | None:
+        snapshot = self.activations[-1] if self.activations else None
+        if snapshot is None:
+            return None
+        return EngineActivation(snapshot.revision, ValidationReport(), True)
 
     def close(self) -> None:
         self.closed = True

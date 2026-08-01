@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import psutil
 import pytest
@@ -20,6 +21,7 @@ from synesthesia_machine.graph import GraphDocument
 from synesthesia_machine.graph.validation import ValidationReport
 from synesthesia_machine.nodes import ResetReason
 from synesthesia_machine.runtime import EngineProtocolError, ProcessEngineClient
+from synesthesia_machine.runtime import engine_server as engine_server_module
 from synesthesia_machine.runtime.engine_server import EngineServer
 
 
@@ -46,12 +48,13 @@ def _scalar_document() -> GraphDocument:
 
 
 @pytest.fixture
-def process_client() -> Iterator[ProcessEngineClient]:
+def process_client(tmp_path: Path) -> Iterator[ProcessEngineClient]:
     client = ProcessEngineClient(
         request_timeout_s=1.5,
         activation_timeout_s=5.0,
         heartbeat_timeout_s=1.5,
         close_timeout_s=0.5,
+        crash_log_path=tmp_path / "engine-crash.log",
     )
     yield client
     client.close()
@@ -139,7 +142,10 @@ def test_forced_crash_fails_boundedly_and_restart_rebuilds_latest_valid_graph(
 
     crashed = process_client.status()
     assert crashed.connection_state is EngineConnectionState.CRASHED
+    assert crashed.exit_code is not None
     assert crashed.last_error is not None
+    assert crashed.crash_log_path is not None
+    assert not Path(crashed.crash_log_path).exists()
     assert _wait_until(lambda: not psutil.pid_exists(original_process_id))
     started = time.monotonic()
     with pytest.raises(RuntimeError, match=r"not connected|disconnected|exited"):
@@ -155,8 +161,62 @@ def test_forced_crash_fails_boundedly_and_restart_rebuilds_latest_valid_graph(
     assert restarted.connection_state is EngineConnectionState.CONNECTED
     assert restarted.graph_revision == snapshot.revision
     assert restarted.restart_count == 1
+    assert restarted.exit_code is None
+    assert restarted.crash_log_path == crashed.crash_log_path
     assert restarted.child_process_id is not None
     assert restarted.child_process_id != original_process_id
+
+
+def test_start_clears_stale_crash_log_and_reports_configured_path(tmp_path: Path) -> None:
+    crash_log = tmp_path / "logs" / "engine-crash.log"
+    crash_log.parent.mkdir()
+    crash_log.write_text("stale traceback", encoding="utf-8")
+
+    client = ProcessEngineClient(crash_log_path=crash_log, close_timeout_s=0.5)
+    try:
+        status = client.status()
+
+        assert status.connection_state is EngineConnectionState.CONNECTED
+        assert status.crash_log_path == str(crash_log.resolve())
+        assert not crash_log.exists()
+    finally:
+        client.close()
+
+
+def test_child_target_writes_uncaught_exception_to_crash_log(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class _CrashingServer:
+        def __init__(self, connection: object, event_queue: object) -> None:
+            del connection, event_queue
+
+        def run(self) -> None:
+            raise RuntimeError("deliberate child failure")
+
+    class _CloseProbe:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr(engine_server_module, "EngineServer", _CrashingServer)
+    connection = _CloseProbe()
+    event_queue = _CloseProbe()
+    crash_log = tmp_path / "nested" / "engine-crash.log"
+
+    with pytest.raises(RuntimeError, match="deliberate child failure"):
+        engine_server_module.engine_server_main(
+            connection,  # type: ignore[arg-type]
+            event_queue,  # type: ignore[arg-type]
+            str(crash_log),
+        )
+
+    detail = crash_log.read_text(encoding="utf-8")
+    assert "RuntimeError: deliberate child failure" in detail
+    assert connection.closed
+    assert event_queue.closed
 
 
 def test_server_forwards_activate_reset_reason_to_child_engine() -> None:

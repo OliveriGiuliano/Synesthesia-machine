@@ -10,6 +10,7 @@ import traceback
 from contextlib import suppress
 from dataclasses import replace
 from multiprocessing.shared_memory import SharedMemory
+from pathlib import Path
 from typing import Protocol
 from uuid import UUID
 
@@ -453,14 +454,30 @@ class EngineServer:
         )
 
 
-def engine_server_main(connection: DuplexConnection, event_queue: EventQueueWriter) -> None:
+def engine_server_main(
+    connection: DuplexConnection,
+    event_queue: EventQueueWriter,
+    crash_log_path: str | None = None,
+) -> None:
     """Top-level Windows-spawn target; never imports or creates Qt objects."""
 
     try:
         EngineServer(connection, event_queue).run()
+    except BaseException:
+        if crash_log_path is not None:
+            _write_crash_log(Path(crash_log_path), traceback.format_exc())
+        raise
     finally:
         connection.close()
         event_queue.close()
+
+
+def _write_crash_log(path: Path, detail: str) -> None:
+    """Persist one child-failure traceback without depending on UI logging state."""
+
+    with suppress(OSError):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(detail, encoding="utf-8")
 
 
 __all__ = ["EngineServer", "engine_server_main"]

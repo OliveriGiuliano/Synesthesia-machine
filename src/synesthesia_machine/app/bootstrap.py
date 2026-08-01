@@ -3,6 +3,9 @@
 import logging
 import sys
 from collections.abc import Sequence
+from multiprocessing import freeze_support
+from pathlib import Path
+from typing import Protocol
 
 from PySide6.QtCore import QTimer
 
@@ -10,12 +13,20 @@ from synesthesia_machine.app.application import MainWindow, create_application
 from synesthesia_machine.app.logging_setup import UI_LOGGER_NAME, configure_logging
 from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.app.settings import ApplicationPaths
-from synesthesia_machine.runtime import InProcessEngineClient
+from synesthesia_machine.runtime import ProcessEngineClient
+
+
+class ApplicationEngineClientFactory(Protocol):
+    def __call__(self, *, crash_log_path: str | Path | None = None) -> ProcessEngineClient: ...
+
+
+ENGINE_CLIENT_FACTORY: ApplicationEngineClientFactory = ProcessEngineClient
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Start the minimal UI and return its Qt exit code."""
 
+    freeze_support()
     arguments = list(sys.argv if argv is None else argv)
     smoke_test = "--smoke-test" in arguments
     qt_arguments = [argument for argument in arguments if argument != "--smoke-test"]
@@ -28,7 +39,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     application = create_application(qt_arguments)
     registry = create_application_registry()
-    engine_client = InProcessEngineClient(registry)
+    engine_client = ENGINE_CLIENT_FACTORY(crash_log_path=paths.logs / "engine-crash.log")
     window = MainWindow(registry, paths, engine_client, offer_recovery=not smoke_test)
     window.show()
 
