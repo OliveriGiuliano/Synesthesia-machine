@@ -3,10 +3,10 @@
 Synesthesia Machine is a Windows desktop instrument that transforms video and camera data into
 live MIDI note states through a typed visual node graph.
 
-**Phases 0–3 are complete.** The application now includes the typed graph editor and its first
-usable video-to-note instrument path: deterministic PyAV playback, image and channel processing,
-desired MIDI-state generation, live image/note previews, and opt-in debug audio. Camera input,
-real MIDI output, and the process-backed engine transport remain Phase 4 work.
+**Phases 0–4 are complete.** Production UI composition now supervises a spawned engine process for
+runtime execution, bounded shared-memory previews, camera capture, MIDI output, debug audio, and
+profiling. Live camera behavior is covered with deterministic simulation because no physical camera
+was available; an explicitly selected loopMIDI port was exercised separately from automated tests.
 
 ## Requirements
 
@@ -32,6 +32,7 @@ uv run synmachine --smoke-test       # Start and stop the real application shell
 uv run check                         # Ruff format/lint and strict Pyright
 uv run test                          # Complete automated test suite
 uv run python -m tools.phase3_performance  # 60-second Phase 3 diagnostic
+uv run python -m tools.phase4_performance  # Process-backed Phase 4 diagnostic
 ```
 
 Hardware spikes are documented in [`tools/README.md`](tools/README.md). Automated tests use
@@ -46,6 +47,10 @@ Generate Audio node. See the [example instructions](examples/phase3/README.md) a
 [Phase 3 completion report](docs/phase-3-completion-report.md) for behavior, evidence, and measured
 performance.
 
+Phase 4 preserves the same portable graph while running it behind `ProcessEngineClient` and
+`EngineServer`. See the [Phase 4 completion report](docs/phase-4-completion-report.md) for process,
+camera, MIDI, lifecycle, and performance evidence.
+
 ## Architecture
 
 The implementation contract is
@@ -54,11 +59,12 @@ Any deviation from that baseline requires an Architecture Decision Record under 
 
 Current module boundaries include:
 
-- `src/synesthesia_machine/contracts`: immutable runtime values and the final-shaped
-  `EngineClient` API;
-- `src/synesthesia_machine/graph`, `nodes`, and `runtime`: Qt-free graph compilation and execution;
+- `src/synesthesia_machine/contracts`: immutable runtime values, versioned process messages, and the
+  final-shaped `EngineClient` API;
+- `src/synesthesia_machine/graph`, `nodes`, and `runtime`: Qt-free graph compilation, atomic plan
+  replacement, process supervision, bounded source mailboxes, and shared-preview transport;
 - `src/synesthesia_machine/media` and `midi`: deterministic video/image processing, musical
-  mapping, and debug synthesis;
+  mapping, reconnecting camera capture, persistent exact-port MIDI output, and debug synthesis;
 - `src/synesthesia_machine/ui`: the PySide6 editor, transport, status, and preview adapters;
 - `examples/phase3`: the portable Hue Chord graph and generated media fixture;
-- `tests`: hardware-independent Phase 1–3 and smoke acceptance coverage.
+- `tests`: hardware-independent Phase 1–4 and smoke acceptance coverage.
