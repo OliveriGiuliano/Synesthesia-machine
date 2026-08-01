@@ -27,6 +27,7 @@ from synesthesia_machine.contracts import (
     FrameContext,
     FrameProvenance,
     ImageFrame,
+    NoDataType,
     SourceState,
     SourceStatus,
 )
@@ -84,18 +85,35 @@ class DecodedVideoFrame:
             raise ValueError("decoded video frames must be read-only and C-contiguous")
 
 
-@dataclass(frozen=True, slots=True)
-class PresentedVideoFrame:
-    """One source tick ready for insertion into the engine graph mailbox."""
+@dataclass(frozen=True, slots=True, init=False)
+class PresentedSourceFrame:
+    """One image or explicit outage tick ready for the engine source mailbox."""
 
-    image: ImageFrame
+    image: ImageFrame | NoDataType
     processed_index: int
+    context: FrameContext
 
-    def __post_init__(self) -> None:
+    def __init__(
+        self,
+        image: ImageFrame | NoDataType,
+        processed_index: int,
+        context: FrameContext | None = None,
+    ) -> None:
+        resolved_context = image.context if isinstance(image, ImageFrame) else context
+        if resolved_context is None:
+            raise ValueError("NoData source frames require an explicit frame context")
+        object.__setattr__(self, "image", image)
+        object.__setattr__(self, "processed_index", processed_index)
+        object.__setattr__(self, "context", resolved_context)
         if self.processed_index < 1:
             raise ValueError("processed_index must start at 1")
-        if self.image.context.tick_index != self.processed_index:
-            raise ValueError("image tick and processed index must match")
+        if self.context.tick_index != self.processed_index:
+            raise ValueError("source tick and processed index must match")
+        if isinstance(self.image, ImageFrame) and self.image.context != self.context:
+            raise ValueError("image and source-frame contexts must match")
+
+
+PresentedVideoFrame = PresentedSourceFrame
 
 
 class PtsPlaybackTimeline:
@@ -140,7 +158,7 @@ class _QueueSignal(Enum):
 
 
 type _DecodeItem = DecodedVideoFrame | _QueueSignal
-type FrameCallback = Callable[[PresentedVideoFrame], None]
+type FrameCallback = Callable[[PresentedSourceFrame], None]
 type ResetCallback = Callable[[ResetReason], None]
 
 
@@ -551,6 +569,7 @@ def _convert_frame(frame: av.VideoFrame, source_frame_index: int) -> DecodedVide
 __all__ = [
     "DecodedVideoFrame",
     "PlaybackClock",
+    "PresentedSourceFrame",
     "PresentedVideoFrame",
     "PtsPlaybackTimeline",
     "SystemPlaybackClock",

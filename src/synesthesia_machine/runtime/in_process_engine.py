@@ -28,9 +28,10 @@ from synesthesia_machine.contracts import (
     SourceStatus,
 )
 from synesthesia_machine.graph.model import GraphSnapshot
-from synesthesia_machine.media.video_source import PresentedVideoFrame, VideoSourceService
+from synesthesia_machine.media.camera_source import CameraBackendPreference, CameraSourceService
+from synesthesia_machine.media.video_source import PresentedSourceFrame, VideoSourceService
 from synesthesia_machine.nodes.base import ResetReason
-from synesthesia_machine.nodes.input import LOAD_VIDEO_TYPE_ID
+from synesthesia_machine.nodes.input import LOAD_CAMERA_TYPE_ID, LOAD_VIDEO_TYPE_ID
 from synesthesia_machine.nodes.registry import NodeRegistry
 from synesthesia_machine.runtime.engine_facade import EngineFacade
 from synesthesia_machine.runtime.execution_plan import CompiledNode, ExecutionPlan, PortKey
@@ -74,10 +75,27 @@ class VideoSourceFactory(Protocol):
     ) -> SourceController: ...
 
 
+class CameraSourceFactory(Protocol):
+    def __call__(
+        self,
+        node_id: UUID,
+        device_id: str,
+        *,
+        requested_width: int,
+        requested_height: int,
+        requested_fps: float,
+        backend_preference: CameraBackendPreference,
+        process_every_nth_frame: int,
+        reconnect_automatically: bool,
+        on_frame: object,
+        on_reset: object,
+    ) -> SourceController: ...
+
+
 @dataclass(frozen=True, slots=True)
 class _TickCommand:
     source_node_id: UUID
-    frame: PresentedVideoFrame
+    frame: PresentedSourceFrame
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,8 +175,8 @@ class LatestFrameGraphWorker:
                 return 0.0
             return max(0.0, (self._last_tick_ns - self._started_ns) / 1_000_000_000)
 
-    def publish(self, source_node_id: UUID, frame: PresentedVideoFrame) -> None:
-        if frame.image.context.clock_id != source_node_id:
+    def publish(self, source_node_id: UUID, frame: PresentedSourceFrame) -> None:
+        if frame.context.clock_id != source_node_id:
             raise ValueError("presented frame clock does not match its source node")
         command = _TickCommand(source_node_id, frame)
         with self._condition:
@@ -273,7 +291,7 @@ class LatestFrameGraphWorker:
                 else:
                     frame = command.frame
                     result = self._facade.tick(
-                        frame.image.context,
+                        frame.context,
                         source_values={
                             PortKey(command.source_node_id, "image"): frame.image,
                             PortKey(command.source_node_id, "processed_index"): (
@@ -290,7 +308,7 @@ class LatestFrameGraphWorker:
                         self._last_tick_ns = completed_ns
                         self._processed_ticks += 1
                         self._last_result = result
-                        received_ns = frame.image.context.received_monotonic_ns
+                        received_ns = frame.context.received_monotonic_ns
                         self._last_completed_received_ns[command.source_node_id] = received_ns
                         self._last_processing_latency_ms[command.source_node_id] = max(
                             0.0, (completed_ns - received_ns) / 1_000_000
@@ -309,12 +327,22 @@ class LatestFrameGraphWorker:
             raise RuntimeError("Graph worker is closed")
 
 
-class _FailedVideoSource:
-    """Status-preserving source used when metadata opening fails during activation."""
+class _FailedSource:
+    """Status-preserving source used when source preparation fails during activation."""
 
-    def __init__(self, node_id: UUID, file_path: str, error: Exception) -> None:
+    def __init__(
+        self,
+        node_id: UUID,
+        error: Exception,
+        *,
+        source_kind: str,
+        file_path: str = "",
+        device_id: str | None = None,
+    ) -> None:
         self.node_id = node_id
         self._file_path = file_path
+        self._source_kind = source_kind
+        self._device_id = device_id
         self._error = str(error)
         self._state = SourceState.ERROR
 
@@ -336,7 +364,7 @@ class _FailedVideoSource:
 
     def seek(self, source_time_s: float) -> None:
         del source_time_s
-        raise NotImplementedError("Video seeking is reserved for a later phase")
+        raise NotImplementedError(f"{self._source_kind.title()} source cannot seek")
 
     def status(self, *, dropped_before_processing: int = 0) -> SourceStatus:
         return SourceStatus(
@@ -346,6 +374,8 @@ class _FailedVideoSource:
             dropped_before_processing=dropped_before_processing,
             warnings=1,
             last_error=self._error,
+            source_kind=self._source_kind,
+            device_id=self._device_id,
         )
 
     def wait_until_finished(self, timeout_s: float = 5.0) -> bool:
@@ -364,6 +394,7 @@ class InProcessEngineClient:
         registry: NodeRegistry,
         *,
         video_source_factory: VideoSourceFactory | None = None,
+        camera_source_factory: CameraSourceFactory | None = None,
         worker_clock: Callable[[], int] = time.perf_counter_ns,
     ) -> None:
         self._lock = threading.RLock()
@@ -371,6 +402,7 @@ class InProcessEngineClient:
         self._node_times_ns: deque[int] = deque(maxlen=20_000)
         self._facade = EngineFacade(registry, timing_hook=self._record_node_time)
         self._video_source_factory = video_source_factory or VideoSourceService
+        self._camera_source_factory = camera_source_factory or CameraSourceService
         self._worker_clock = worker_clock
         self._preview_broker = PreviewBroker()
         self._worker: LatestFrameGraphWorker | None = None
@@ -417,13 +449,13 @@ class InProcessEngineClient:
             sources: dict[UUID, SourceController] = {}
             try:
                 for node in plan.nodes:
-                    if node.definition.type_id != LOAD_VIDEO_TYPE_ID:
+                    if node.definition.type_id not in {LOAD_CAMERA_TYPE_ID, LOAD_VIDEO_TYPE_ID}:
                         continue
                     existing = self._sources.get(node.node_id)
                     sources[node.node_id] = (
                         existing
                         if existing is not None and node.node_id in reusable_sources
-                        else self._create_video_source(node, worker)
+                        else self._create_source(node, worker)
                     )
             except Exception:
                 self._dispose_candidate_sources(sources, reusable_sources)
@@ -438,7 +470,7 @@ class InProcessEngineClient:
             paused_for_swap: list[SourceController] = []
             try:
                 for node_id, source in self._sources.items():
-                    if old_states[node_id] is SourceState.PLAYING:
+                    if old_states[node_id] in {SourceState.PLAYING, SourceState.RECONNECTING}:
                         source.pause()
                         paused_for_swap.append(source)
                 if self._worker is not None and not self._worker.wait_until_idle(5.0):
@@ -472,7 +504,7 @@ class InProcessEngineClient:
                         source.close()
             if previous_state is EngineState.RUNNING:
                 for node_id, source in sources.items():
-                    if old_states.get(node_id) is SourceState.PLAYING:
+                    if old_states.get(node_id) in {SourceState.PLAYING, SourceState.RECONNECTING}:
                         with suppress(Exception):
                             source.resume() if node_id in reusable_sources else source.play()
             return EngineActivation(snapshot.revision, prepared.result.report, True)
@@ -627,6 +659,13 @@ class InProcessEngineClient:
             self._facade.close()
             self._state = EngineState.CLOSED
 
+    def _create_source(
+        self, node: CompiledNode, worker: LatestFrameGraphWorker
+    ) -> SourceController:
+        if node.definition.type_id == LOAD_CAMERA_TYPE_ID:
+            return self._create_camera_source(node, worker)
+        return self._create_video_source(node, worker)
+
     def _create_video_source(
         self, node: CompiledNode, worker: LatestFrameGraphWorker
     ) -> SourceController:
@@ -642,7 +681,34 @@ class InProcessEngineClient:
                 on_reset=partial(worker.reset_source, node.node_id),
             )
         except Exception as error:
-            return _FailedVideoSource(node.node_id, file_path, error)
+            return _FailedSource(node.node_id, error, source_kind="video", file_path=file_path)
+
+    def _create_camera_source(
+        self, node: CompiledNode, worker: LatestFrameGraphWorker
+    ) -> SourceController:
+        device_id = _text_parameter(node, "device_id")
+        try:
+            return self._camera_source_factory(
+                node.node_id,
+                device_id,
+                requested_width=_int_parameter(node, "requested_width"),
+                requested_height=_int_parameter(node, "requested_height"),
+                requested_fps=_float_parameter(node, "requested_fps"),
+                backend_preference=CameraBackendPreference(
+                    _text_parameter(node, "backend_preference")
+                ),
+                process_every_nth_frame=_int_parameter(node, "process_every_nth_frame"),
+                reconnect_automatically=_bool_parameter(node, "reconnect_automatically"),
+                on_frame=partial(worker.publish, node.node_id),
+                on_reset=partial(worker.reset_source, node.node_id),
+            )
+        except Exception as error:
+            return _FailedSource(
+                node.node_id,
+                error,
+                source_kind="camera",
+                device_id=device_id,
+            )
 
     @staticmethod
     def _reusable_source_ids(
@@ -655,12 +721,12 @@ class InProcessEngineClient:
         old_sources = {
             node.node_id: node
             for node in old_plan.nodes
-            if node.definition.type_id == LOAD_VIDEO_TYPE_ID
+            if node.definition.type_id in {LOAD_CAMERA_TYPE_ID, LOAD_VIDEO_TYPE_ID}
         }
         return frozenset(
             node.node_id
             for node in new_plan.nodes
-            if node.definition.type_id == LOAD_VIDEO_TYPE_ID
+            if node.definition.type_id in {LOAD_CAMERA_TYPE_ID, LOAD_VIDEO_TYPE_ID}
             and (old := old_sources.get(node.node_id)) is not None
             and old.state_retention_key == node.state_retention_key
         )
@@ -730,6 +796,13 @@ def _int_parameter(node: CompiledNode, parameter_id: str) -> int:
     return value
 
 
+def _float_parameter(node: CompiledNode, parameter_id: str) -> float:
+    value = node.parameters[parameter_id]
+    if not isinstance(value, float):
+        raise TypeError(f"Expected float parameter {parameter_id!r}")
+    return value
+
+
 def _bool_parameter(node: CompiledNode, parameter_id: str) -> bool:
     value = node.parameters[parameter_id]
     if not isinstance(value, bool):
@@ -738,6 +811,7 @@ def _bool_parameter(node: CompiledNode, parameter_id: str) -> bool:
 
 
 __all__ = [
+    "CameraSourceFactory",
     "InProcessEngineClient",
     "LatestFrameGraphWorker",
     "SourceController",

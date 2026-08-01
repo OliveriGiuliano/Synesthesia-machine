@@ -46,6 +46,8 @@ class SourceState(StrEnum):
     PAUSED = "PAUSED"
     STOPPED = "STOPPED"
     ENDED = "ENDED"
+    RECONNECTING = "RECONNECTING"
+    UNAVAILABLE = "UNAVAILABLE"
     ERROR = "ERROR"
 
 
@@ -80,6 +82,9 @@ class SourceStatus:
     frame_age_ms: float = 0.0
     mailbox_capacity: int = 0
     processing_latency_ms: float = 0.0
+    requested_width: int | None = None
+    requested_height: int | None = None
+    requested_fps: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
