@@ -6,6 +6,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from uuid import UUID
 
+from synesthesia_machine.contracts.engine_client import MidiOutputStatus
 from synesthesia_machine.contracts.runtime_values import FrameContext, RuntimeValue
 from synesthesia_machine.graph.compiler import CompilationResult, GraphCompiler
 from synesthesia_machine.graph.model import GraphSnapshot
@@ -115,6 +116,13 @@ class EngineFacade:
     def panic(self) -> None:
         if self._scheduler is not None:
             self._scheduler.panic()
+
+    def midi_output_status(
+        self, output_node_id: UUID | None = None
+    ) -> tuple[MidiOutputStatus, ...]:
+        if self._scheduler is None:
+            return ()
+        return self._scheduler.midi_output_status(output_node_id)
 
     def close(self) -> None:
         if self._scheduler is not None:

@@ -1,6 +1,11 @@
 """Headless composition of the built-in node-definition registry."""
 
-from synesthesia_machine.midi import DebugSynth, DebugSynthFactory
+from synesthesia_machine.midi import (
+    DebugSynth,
+    DebugSynthFactory,
+    MidiOutputService,
+    MidiOutputServiceFactory,
+)
 from synesthesia_machine.nodes.image import create_image_definitions
 from synesthesia_machine.nodes.input import create_input_definitions
 from synesthesia_machine.nodes.output import create_output_definitions
@@ -10,7 +15,11 @@ from synesthesia_machine.nodes.utility import create_utility_registry
 from synesthesia_machine.nodes.visualization import create_visualization_definitions
 
 
-def create_builtin_registry(*, synth_factory: DebugSynthFactory = DebugSynth) -> NodeRegistry:
+def create_builtin_registry(
+    *,
+    synth_factory: DebugSynthFactory = DebugSynth,
+    midi_output_service_factory: MidiOutputServiceFactory = MidiOutputService,
+) -> NodeRegistry:
     """Compose all built-in definitions without importing application or UI modules."""
 
     utility = create_utility_registry()
@@ -21,7 +30,10 @@ def create_builtin_registry(*, synth_factory: DebugSynthFactory = DebugSynth) ->
             *create_image_definitions(),
             *create_synesthesia_definitions(),
             *create_visualization_definitions(),
-            *create_output_definitions(synth_factory=synth_factory),
+            *create_output_definitions(
+                synth_factory=synth_factory,
+                midi_output_service_factory=midi_output_service_factory,
+            ),
         )
     )
 

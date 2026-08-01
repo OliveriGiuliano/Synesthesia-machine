@@ -10,6 +10,7 @@ from uuid import UUID
 from synesthesia_machine.contracts.engine_client import (
     EngineActivation,
     EngineMetrics,
+    MidiOutputStatus,
     NotePreview,
     SourceStatus,
 )
@@ -19,7 +20,7 @@ from synesthesia_machine.nodes.base import ResetReason
 if TYPE_CHECKING:
     from synesthesia_machine.graph.model import GraphSnapshot
 
-ENGINE_PROTOCOL_VERSION = 4
+ENGINE_PROTOCOL_VERSION = 5
 
 type SnapshotLiteral = str | int | float | bool | ColorValue | None
 
@@ -206,6 +207,22 @@ class SourceStatusResponse:
 
 
 @dataclass(frozen=True, slots=True)
+class QueryMidiOutputStatus:
+    request_id: str
+    graph_revision: int | None
+    output_node_id: UUID | None = None
+    protocol_version: int = ENGINE_PROTOCOL_VERSION
+
+
+@dataclass(frozen=True, slots=True)
+class MidiOutputStatusResponse:
+    request_id: str
+    graph_revision: int | None
+    statuses: tuple[MidiOutputStatus, ...]
+    protocol_version: int = ENGINE_PROTOCOL_VERSION
+
+
+@dataclass(frozen=True, slots=True)
 class QueryMetrics:
     request_id: str
     graph_revision: int | None
@@ -367,6 +384,7 @@ EngineCommand = (
     | TransportCommand
     | Panic
     | QuerySourceStatus
+    | QueryMidiOutputStatus
     | QueryMetrics
     | WaitUntilIdle
     | ConfigurePreviewSlot
@@ -378,6 +396,7 @@ EngineResponse = (
     | HandshakeAcknowledged
     | GraphActivationAcknowledged
     | SourceStatusResponse
+    | MidiOutputStatusResponse
     | MetricsResponse
     | IdleResponse
     | PreviewSlotConfigured

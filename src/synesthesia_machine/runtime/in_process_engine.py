@@ -23,6 +23,7 @@ from synesthesia_machine.contracts import (
     EngineState,
     EngineStatus,
     ImagePreview,
+    MidiOutputStatus,
     NotePreview,
     SourceState,
     SourceStatus,
@@ -535,6 +536,7 @@ class InProcessEngineClient:
             sources = self._selected_sources(source_node_id)
             for source in sources:
                 source.stop()
+            self._facade.panic()
             self._state = EngineState.STOPPED
 
     def reload(self, source_node_id: UUID | None = None) -> None:
@@ -542,6 +544,7 @@ class InProcessEngineClient:
             sources = self._selected_sources(source_node_id)
             for source in sources:
                 source.reload()
+            self._facade.panic()
             self._state = EngineState.STOPPED
 
     def seek(self, source_node_id: UUID, source_time_s: float) -> None:
@@ -571,6 +574,13 @@ class InProcessEngineClient:
                     )
                 statuses.append(status)
             return tuple(statuses)
+
+    def midi_output_status(
+        self, output_node_id: UUID | None = None
+    ) -> tuple[MidiOutputStatus, ...]:
+        with self._lock:
+            self._ensure_open()
+            return self._facade.midi_output_status(output_node_id)
 
     def metrics(self) -> EngineMetrics:
         with self._lock:

@@ -22,6 +22,7 @@ from synesthesia_machine.contracts.engine_client import (
     EngineState,
     EngineStatus,
     ImagePreview,
+    MidiOutputStatus,
     NotePreview,
     SourceStatus,
 )
@@ -42,12 +43,14 @@ from synesthesia_machine.contracts.engine_messages import (
     Heartbeat,
     IdleResponse,
     MetricsResponse,
+    MidiOutputStatusResponse,
     NotePreviewsPublished,
     Panic,
     PreviewFormatChanged,
     PreviewSlotConfigured,
     ProtocolMismatch,
     QueryMetrics,
+    QueryMidiOutputStatus,
     QuerySourceStatus,
     Shutdown,
     ShutdownAcknowledged,
@@ -98,6 +101,7 @@ _RESPONSE_TYPES = (
     HandshakeAcknowledged,
     GraphActivationAcknowledged,
     SourceStatusResponse,
+    MidiOutputStatusResponse,
     MetricsResponse,
     IdleResponse,
     PreviewSlotConfigured,
@@ -251,6 +255,16 @@ class ProcessEngineClient:
         response = self._request(
             QuerySourceStatus(uuid4().hex, self._graph_revision, source_node_id),
             SourceStatusResponse,
+        )
+        self._accept_revision(response.graph_revision)
+        return response.statuses
+
+    def midi_output_status(
+        self, output_node_id: UUID | None = None
+    ) -> tuple[MidiOutputStatus, ...]:
+        response = self._request(
+            QueryMidiOutputStatus(uuid4().hex, self._graph_revision, output_node_id),
+            MidiOutputStatusResponse,
         )
         self._accept_revision(response.graph_revision)
         return response.statuses

@@ -51,6 +51,15 @@ class SourceState(StrEnum):
     ERROR = "ERROR"
 
 
+class MidiOutputConnectionState(StrEnum):
+    UNSELECTED = "UNSELECTED"
+    CONNECTING = "CONNECTING"
+    CONNECTED = "CONNECTED"
+    UNAVAILABLE = "UNAVAILABLE"
+    ERROR = "ERROR"
+    CLOSED = "CLOSED"
+
+
 @dataclass(frozen=True, slots=True)
 class EngineActivation:
     graph_revision: int
@@ -85,6 +94,28 @@ class SourceStatus:
     requested_width: int | None = None
     requested_height: int | None = None
     requested_fps: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MidiOutputStatus:
+    node_id: UUID
+    connection_state: MidiOutputConnectionState
+    selected_port: str = ""
+    available_ports: tuple[str, ...] = ()
+    active_note_count: int = 0
+    active_channels: tuple[int, ...] = ()
+    dropped_state_updates: int = 0
+    last_error: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.active_note_count < 0 or self.dropped_state_updates < 0:
+            raise ValueError("MIDI output counters cannot be negative")
+        if tuple(sorted(set(self.available_ports))) != tuple(sorted(self.available_ports)):
+            raise ValueError("MIDI output names must be unique")
+        if tuple(sorted(set(self.active_channels))) != self.active_channels:
+            raise ValueError("active MIDI channels must be sorted and unique")
+        if any(not 0 <= channel <= 15 for channel in self.active_channels):
+            raise ValueError("active MIDI channels must be in the range 0..15")
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,6 +226,10 @@ class EngineClient(Protocol):
     def panic(self) -> None: ...
 
     def source_status(self, source_node_id: UUID | None = None) -> tuple[SourceStatus, ...]: ...
+
+    def midi_output_status(
+        self, output_node_id: UUID | None = None
+    ) -> tuple[MidiOutputStatus, ...]: ...
 
     def metrics(self) -> EngineMetrics: ...
 

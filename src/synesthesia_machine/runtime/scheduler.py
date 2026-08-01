@@ -10,10 +10,12 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from uuid import UUID
 
+from synesthesia_machine.contracts.engine_client import MidiOutputStatus
 from synesthesia_machine.contracts.runtime_values import FrameContext, NoData, RuntimeValue
 from synesthesia_machine.nodes.base import (
     ExecutionKind,
     ExpectedNodeError,
+    MidiOutputStatusProvider,
     NodeExecutionError,
     NodeRuntime,
     PanicCapableRuntime,
@@ -192,6 +194,17 @@ class Scheduler:
         for runtime in self._runtimes.values():
             if isinstance(runtime, PanicCapableRuntime):
                 runtime.panic()
+
+    def midi_output_status(
+        self, output_node_id: UUID | None = None
+    ) -> tuple[MidiOutputStatus, ...]:
+        statuses: list[MidiOutputStatus] = []
+        for node_id, runtime in self._runtimes.items():
+            if output_node_id is not None and node_id != output_node_id:
+                continue
+            if isinstance(runtime, MidiOutputStatusProvider):
+                statuses.append(runtime.midi_output_status())
+        return tuple(sorted(statuses, key=lambda status: str(status.node_id)))
 
     def claim_borrowed_runtimes(self, previous: Scheduler) -> None:
         """Transfer prepared shared runtimes after reaching the atomic swap boundary."""
