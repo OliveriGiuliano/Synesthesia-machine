@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from collections import deque
@@ -709,9 +710,12 @@ def test_process_activation_registers_camera_without_opening_hardware() -> None:
     document = _camera_document(requested_fps=25.0)
     try:
         activation = client.activate(document.snapshot())
+        engine_status = client.status()
         statuses = client.source_status(SOURCE_ID)
 
         assert activation.activated
+        assert engine_status.child_process_id is not None
+        assert engine_status.child_process_id != os.getpid()
         assert len(statuses) == 1
         status = statuses[0]
         assert status.state is SourceState.READY

@@ -1,0 +1,346 @@
+{
+  "generated_at_utc": "2026-08-01T17:35:07.911476+00:00",
+  "git_commit": "36c414ff833482ca3caf6da652c4f321f3d4dba9",
+  "canonical_graph_path": "C:\\MY_FILES\\SORTING_THINGS\\_code\\synesthesia_machine\\examples\\phase3\\hue_chord.synmachine.json",
+  "methodology": {
+    "scope": "Process-backed canonical Hue Chord vertical-slice baseline; not the Phase 5 reference graph because Gaussian Blur and Canny are not implemented",
+    "warmup_s": 5.0,
+    "measurement_s": 30.0,
+    "run_count": 1,
+    "preview_policy": "Canonical graph includes image and note preview branches",
+    "windows_power_mode": "Power Scheme GUID: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (High performance)",
+    "limitations": [
+      "Source input FPS is recorded as the generated fixture rate, not a separate runtime counter because EngineClient does not expose one yet.",
+      "Engine IPC currently exposes aggregate p95 node time, not p50/p99 latency.",
+      "Per-node rolling timings are not yet exposed through EngineClient.",
+      "This diagnostic is one evidence run, not the three-run median release gate."
+    ]
+  },
+  "run_duration_observed_s": 30.0010677,
+  "qt_platform": "offscreen",
+  "environment": {
+    "generated_at_utc": "2026-08-01T17:34:32.509034+00:00",
+    "python_version": "3.12.13",
+    "python_executable": "C:\\MY_FILES\\SORTING_THINGS\\_code\\synesthesia_machine\\.venv\\Scripts\\python.exe",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "machine": "AMD64",
+    "cpu_physical": 24,
+    "cpu_logical": 32,
+    "memory_total_bytes": 102834245632,
+    "memory_available_bytes": 82864623616,
+    "process_id": 29588,
+    "process_rss_bytes": 116957184,
+    "dependencies": {
+      "av": "18.0.0",
+      "mido": "1.3.3",
+      "numpy": "2.5.1",
+      "opencv-python": "4.13.0.92",
+      "psutil": "7.2.2",
+      "pyside6": "6.10.3",
+      "python-rtmidi": "1.5.8",
+      "sounddevice": "0.5.5",
+      "pyright": "1.1.411",
+      "pytest": "9.1.1",
+      "ruff": "0.14.14"
+    }
+  },
+  "process": {
+    "parent_process_id": 29588,
+    "child_process_id": 25968,
+    "separate_process": true,
+    "connection_state": "CONNECTED"
+  },
+  "source_fixture": {
+    "generated_width": 500,
+    "generated_height": 500,
+    "generated_fps": 60,
+    "generated_frame_count": 600,
+    "generated_duration_s": 10,
+    "codec": "mpeg4/yuv420p"
+  },
+  "engine": {
+    "state": "RUNNING",
+    "processed_ticks": 2094,
+    "processed_fps": 59.894125720298376,
+    "p95_node_time_ms": 2.28578,
+    "dropped_before_processing": 4,
+    "skipped_by_selection": 0,
+    "final_memory_bytes": 142163968,
+    "peak_sampled_memory_bytes": 142163968
+  },
+  "source": {
+    "state": "PLAYING",
+    "width": 500,
+    "height": 500,
+    "duration_s": 10.0,
+    "processed_index": 302,
+    "dropped_before_processing": 4,
+    "warnings": 0,
+    "last_error": null
+  },
+  "ui": {
+    "target_interval_ms": 50.0,
+    "callback_count": 600,
+    "expected_callback_count": 600,
+    "callback_ratio": 1.0,
+    "p50_interval_ms": 50.01075,
+    "p95_interval_ms": 50.859865,
+    "maximum_interval_ms": 52.4487,
+    "responsive": true,
+    "criterion": "callback ratio >= 0.90, p95 heartbeat interval <= 100 ms, and maximum interval <= 250 ms",
+    "image_preview_visible": true,
+    "note_preview_visible": true,
+    "status_text": "Engine RUNNING \u00b7 source PLAYING \u00b7 2094 ticks @ 59.9 FPS \u00b7 p95 2.29 ms \u00b7 drops 4 \u00b7 RAM 135.6 MiB"
+  },
+  "screenshot_path": "C:\\MY_FILES\\SORTING_THINGS\\_code\\synesthesia_machine\\docs\\phase-4-ui.png",
+  "samples": [
+    {
+      "elapsed_s": 1.0,
+      "processed_ticks": 358,
+      "processed_fps": 59.993858170664936,
+      "p95_node_time_ms": 2.678075,
+      "dropped_before_processing": 1,
+      "memory_bytes": 127426560
+    },
+    {
+      "elapsed_s": 2.0,
+      "processed_ticks": 417,
+      "processed_fps": 59.975393692435304,
+      "p95_node_time_ms": 2.633075,
+      "dropped_before_processing": 1,
+      "memory_bytes": 142028800
+    },
+    {
+      "elapsed_s": 3.0,
+      "processed_ticks": 477,
+      "processed_fps": 60.06035272198618,
+      "p95_node_time_ms": 2.5897,
+      "dropped_before_processing": 1,
+      "memory_bytes": 142016512
+    },
+    {
+      "elapsed_s": 4.0,
+      "processed_ticks": 539,
+      "processed_fps": 60.052627047293214,
+      "p95_node_time_ms": 2.54452,
+      "dropped_before_processing": 1,
+      "memory_bytes": 128552960
+    },
+    {
+      "elapsed_s": 5.0,
+      "processed_ticks": 598,
+      "processed_fps": 60.02128286438745,
+      "p95_node_time_ms": 2.51514,
+      "dropped_before_processing": 1,
+      "memory_bytes": 131145728
+    },
+    {
+      "elapsed_s": 6.0,
+      "processed_ticks": 658,
+      "processed_fps": 59.98678011704442,
+      "p95_node_time_ms": 2.4854599999999993,
+      "dropped_before_processing": 1,
+      "memory_bytes": 131358720
+    },
+    {
+      "elapsed_s": 7.0,
+      "processed_ticks": 718,
+      "processed_fps": 60.010286164231516,
+      "p95_node_time_ms": 2.46412,
+      "dropped_before_processing": 1,
+      "memory_bytes": 133058560
+    },
+    {
+      "elapsed_s": 8.0,
+      "processed_ticks": 777,
+      "processed_fps": 59.92795364232654,
+      "p95_node_time_ms": 2.44934,
+      "dropped_before_processing": 2,
+      "memory_bytes": 132825088
+    },
+    {
+      "elapsed_s": 9.0,
+      "processed_ticks": 837,
+      "processed_fps": 59.889360952684754,
+      "p95_node_time_ms": 2.431879999999999,
+      "dropped_before_processing": 2,
+      "memory_bytes": 128745472
+    },
+    {
+      "elapsed_s": 10.0,
+      "processed_ticks": 897,
+      "processed_fps": 59.90865152858527,
+      "p95_node_time_ms": 2.40904,
+      "dropped_before_processing": 2,
+      "memory_bytes": 127336448
+    },
+    {
+      "elapsed_s": 11.0,
+      "processed_ticks": 957,
+      "processed_fps": 59.89976722211881,
+      "p95_node_time_ms": 2.392629999999999,
+      "dropped_before_processing": 2,
+      "memory_bytes": 128884736
+    },
+    {
+      "elapsed_s": 12.0,
+      "processed_ticks": 1017,
+      "processed_fps": 59.95194259355675,
+      "p95_node_time_ms": 2.3871299999999995,
+      "dropped_before_processing": 2,
+      "memory_bytes": 134074368
+    },
+    {
+      "elapsed_s": 13.001,
+      "processed_ticks": 1077,
+      "processed_fps": 59.95050559734826,
+      "p95_node_time_ms": 2.37248,
+      "dropped_before_processing": 2,
+      "memory_bytes": 138035200
+    },
+    {
+      "elapsed_s": 14.0,
+      "processed_ticks": 1137,
+      "processed_fps": 59.94001443747767,
+      "p95_node_time_ms": 2.3613199999999996,
+      "dropped_before_processing": 2,
+      "memory_bytes": 138387456
+    },
+    {
+      "elapsed_s": 15.0,
+      "processed_ticks": 1197,
+      "processed_fps": 59.94341191680938,
+      "p95_node_time_ms": 2.35352,
+      "dropped_before_processing": 2,
+      "memory_bytes": 127774720
+    },
+    {
+      "elapsed_s": 16.0,
+      "processed_ticks": 1257,
+      "processed_fps": 59.92647750625341,
+      "p95_node_time_ms": 2.3418300000000003,
+      "dropped_before_processing": 2,
+      "memory_bytes": 129224704
+    },
+    {
+      "elapsed_s": 17.0,
+      "processed_ticks": 1317,
+      "processed_fps": 59.927420931296695,
+      "p95_node_time_ms": 2.3296300000000003,
+      "dropped_before_processing": 2,
+      "memory_bytes": 128413696
+    },
+    {
+      "elapsed_s": 18.0,
+      "processed_ticks": 1377,
+      "processed_fps": 59.959804201324694,
+      "p95_node_time_ms": 2.3199,
+      "dropped_before_processing": 2,
+      "memory_bytes": 130564096
+    },
+    {
+      "elapsed_s": 19.0,
+      "processed_ticks": 1437,
+      "processed_fps": 59.95183627176043,
+      "p95_node_time_ms": 2.3170000000000006,
+      "dropped_before_processing": 2,
+      "memory_bytes": 129277952
+    },
+    {
+      "elapsed_s": 20.0,
+      "processed_ticks": 1497,
+      "processed_fps": 59.94313474701348,
+      "p95_node_time_ms": 2.30861,
+      "dropped_before_processing": 2,
+      "memory_bytes": 129314816
+    },
+    {
+      "elapsed_s": 21.0,
+      "processed_ticks": 1557,
+      "processed_fps": 59.953769752110226,
+      "p95_node_time_ms": 2.3037200000000007,
+      "dropped_before_processing": 2,
+      "memory_bytes": 128581632
+    },
+    {
+      "elapsed_s": 22.0,
+      "processed_ticks": 1616,
+      "processed_fps": 59.90557184059117,
+      "p95_node_time_ms": 2.299345,
+      "dropped_before_processing": 3,
+      "memory_bytes": 127188992
+    },
+    {
+      "elapsed_s": 23.0,
+      "processed_ticks": 1675,
+      "processed_fps": 59.90032135932346,
+      "p95_node_time_ms": 2.2981149999999997,
+      "dropped_before_processing": 3,
+      "memory_bytes": 138035200
+    },
+    {
+      "elapsed_s": 24.0,
+      "processed_ticks": 1736,
+      "processed_fps": 59.93611259227999,
+      "p95_node_time_ms": 2.295945,
+      "dropped_before_processing": 3,
+      "memory_bytes": 128548864
+    },
+    {
+      "elapsed_s": 25.0,
+      "processed_ticks": 1795,
+      "processed_fps": 59.91482948439801,
+      "p95_node_time_ms": 2.29616,
+      "dropped_before_processing": 3,
+      "memory_bytes": 128995328
+    },
+    {
+      "elapsed_s": 26.001,
+      "processed_ticks": 1855,
+      "processed_fps": 59.89862279181346,
+      "p95_node_time_ms": 2.29426,
+      "dropped_before_processing": 3,
+      "memory_bytes": 128802816
+    },
+    {
+      "elapsed_s": 27.0,
+      "processed_ticks": 1916,
+      "processed_fps": 59.928043622336084,
+      "p95_node_time_ms": 2.2927249999999995,
+      "dropped_before_processing": 3,
+      "memory_bytes": 128602112
+    },
+    {
+      "elapsed_s": 28.0,
+      "processed_ticks": 1975,
+      "processed_fps": 59.89134000608174,
+      "p95_node_time_ms": 2.290999999999999,
+      "dropped_before_processing": 4,
+      "memory_bytes": 128200704
+    },
+    {
+      "elapsed_s": 29.0,
+      "processed_ticks": 2035,
+      "processed_fps": 59.892645420358456,
+      "p95_node_time_ms": 2.289399999999999,
+      "dropped_before_processing": 4,
+      "memory_bytes": 128692224
+    },
+    {
+      "elapsed_s": 30.0,
+      "processed_ticks": 2094,
+      "processed_fps": 59.894125720298376,
+      "p95_node_time_ms": 2.28578,
+      "dropped_before_processing": 4,
+      "memory_bytes": 140726272
+    },
+    {
+      "elapsed_s": 30.001,
+      "processed_ticks": 2094,
+      "processed_fps": 59.894125720298376,
+      "p95_node_time_ms": 2.28578,
+      "dropped_before_processing": 4,
+      "memory_bytes": 142163968
+    }
+  ]
+}

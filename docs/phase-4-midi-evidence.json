@@ -1,0 +1,85 @@
+{
+  "generated_at_utc": "2026-08-01T19:01:06.706440+00:00",
+  "git_commit": "36c414ff833482ca3caf6da652c4f321f3d4dba9",
+  "backend": "mido.backends.rtmidi via MidiOutputService",
+  "exact_selected_port": "loopMIDI Port 2",
+  "enumerated_before_open": [
+    "Microsoft GS Wavetable Synth 0",
+    "DESKTOP-06R9GT7 1",
+    "loopMIDI Port 2"
+  ],
+  "test_note": 60,
+  "test_velocity": 32,
+  "test_channel_runtime": 0,
+  "hold_s": 1.0,
+  "lifecycle": [
+    "enumerate without opening",
+    "open exact confirmed port on sender thread",
+    "send CC123 open guard",
+    "publish desired note state",
+    "publish empty state for explicit note-off",
+    "panic with CC123",
+    "close persistent port"
+  ],
+  "connected_status": {
+    "connection_state": "CONNECTED",
+    "selected_port": "loopMIDI Port 2",
+    "available_ports": [
+      "Microsoft GS Wavetable Synth 0",
+      "DESKTOP-06R9GT7 1",
+      "loopMIDI Port 2"
+    ],
+    "active_note_count": 1,
+    "active_channels": [
+      0
+    ],
+    "dropped_state_updates": 0,
+    "last_error": null,
+    "sender_thread_id": 30864
+  },
+  "explicit_note_off_status": {
+    "connection_state": "CONNECTED",
+    "selected_port": "loopMIDI Port 2",
+    "available_ports": [
+      "Microsoft GS Wavetable Synth 0",
+      "DESKTOP-06R9GT7 1",
+      "loopMIDI Port 2"
+    ],
+    "active_note_count": 0,
+    "active_channels": [],
+    "dropped_state_updates": 0,
+    "last_error": null,
+    "sender_thread_id": 30864
+  },
+  "panic_status": {
+    "connection_state": "CONNECTED",
+    "selected_port": "loopMIDI Port 2",
+    "available_ports": [
+      "Microsoft GS Wavetable Synth 0",
+      "DESKTOP-06R9GT7 1",
+      "loopMIDI Port 2"
+    ],
+    "active_note_count": 0,
+    "active_channels": [],
+    "dropped_state_updates": 0,
+    "last_error": null,
+    "sender_thread_id": 30864
+  },
+  "closed_status": {
+    "connection_state": "CLOSED",
+    "selected_port": "loopMIDI Port 2",
+    "available_ports": [
+      "Microsoft GS Wavetable Synth 0",
+      "DESKTOP-06R9GT7 1",
+      "loopMIDI Port 2"
+    ],
+    "active_note_count": 0,
+    "active_channels": [],
+    "dropped_state_updates": 0,
+    "last_error": null,
+    "sender_thread_id": 30864
+  },
+  "panic_completed": true,
+  "close_completed": true,
+  "midi_view_observation": "Not machine-observed. Visual receipt in MIDIView requires separate manual confirmation."
+}
