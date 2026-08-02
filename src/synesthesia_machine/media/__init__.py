@@ -21,9 +21,26 @@ from synesthesia_machine.media.colour import (
     ChannelDescriptor,
     ColorSpaceDescriptor,
     color_space_descriptor,
+    color_value_for_space,
     convert_image,
     image_to_display_uint8,
     image_to_luminance,
+)
+from synesthesia_machine.media.dimensions import (
+    CoordinateMode,
+    CropOutOfBounds,
+    FlipMode,
+    crop_image,
+    flip_image,
+    rotate_image,
+)
+from synesthesia_machine.media.image_common import (
+    BorderMode,
+    FiniteReport,
+    alpha_channel_index,
+    finite_report,
+    sanitize_finite,
+    validate_odd_kernel,
 )
 from synesthesia_machine.media.resize import FitMode, Interpolation, resize_image
 from synesthesia_machine.media.video_source import (
@@ -40,6 +57,7 @@ from synesthesia_machine.media.video_source import (
 
 __all__ = [
     "COLOR_SPACE_DESCRIPTORS",
+    "BorderMode",
     "CameraBackend",
     "CameraBackendPreference",
     "CameraCapture",
@@ -51,8 +69,12 @@ __all__ = [
     "CameraUnavailableError",
     "ChannelDescriptor",
     "ColorSpaceDescriptor",
+    "CoordinateMode",
+    "CropOutOfBounds",
     "DecodedVideoFrame",
+    "FiniteReport",
     "FitMode",
+    "FlipMode",
     "Interpolation",
     "OpenedCamera",
     "PlaybackClock",
@@ -63,13 +85,21 @@ __all__ = [
     "SystemPlaybackClock",
     "VideoMetadata",
     "VideoSourceService",
+    "alpha_channel_index",
     "camera_index_from_device_id",
     "color_space_descriptor",
+    "color_value_for_space",
     "convert_image",
+    "crop_image",
     "enumerate_cameras",
+    "finite_report",
+    "flip_image",
     "image_to_display_uint8",
     "image_to_luminance",
     "inspect_video",
     "open_camera",
     "resize_image",
+    "rotate_image",
+    "sanitize_finite",
+    "validate_odd_kernel",
 ]

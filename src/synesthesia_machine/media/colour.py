@@ -14,6 +14,7 @@ from synesthesia_machine.contracts.runtime_values import (
     ChannelFrame,
     ChannelSemantic,
     ColorSpace,
+    ColorValue,
     ImageFrame,
     read_only_float32,
 )
@@ -103,6 +104,19 @@ COLOR_SPACE_DESCRIPTORS = MappingProxyType(
 
 def color_space_descriptor(color_space: ColorSpace) -> ColorSpaceDescriptor:
     return COLOR_SPACE_DESCRIPTORS[color_space]
+
+
+def color_value_for_space(value: ColorValue, target: ColorSpace) -> tuple[float, ...]:
+    """Convert one normalized linear colour into descriptor-ordered constant values."""
+
+    linear = np.array([[[value.r, value.g, value.b]]], dtype=np.float32)
+    if target is ColorSpace.LINEAR_RGB:
+        converted = linear
+    else:
+        srgb = _linear_to_srgb(linear)
+        alpha = np.array([[value.a]], dtype=np.float32)
+        converted = _from_srgb(srgb, alpha, target)
+    return tuple(float(component) for component in converted[0, 0])
 
 
 def convert_image(image: ImageFrame, target: ColorSpace) -> ImageFrame:
