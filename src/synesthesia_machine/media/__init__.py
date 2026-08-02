@@ -52,6 +52,13 @@ from synesthesia_machine.media.dimensions import (
     flip_image,
     rotate_image,
 )
+from synesthesia_machine.media.filters import (
+    NoiseType,
+    add_noise_image,
+    gaussian_blur_image,
+    posterize_image,
+    sharpen_image,
+)
 from synesthesia_machine.media.image_common import (
     BorderMode,
     ChannelSelection,
@@ -98,6 +105,7 @@ __all__ = [
     "FlipMode",
     "Interpolation",
     "NearZeroPolicy",
+    "NoiseType",
     "OpenedCamera",
     "PlaybackClock",
     "PresentedSourceFrame",
@@ -108,6 +116,7 @@ __all__ = [
     "SystemPlaybackClock",
     "VideoMetadata",
     "VideoSourceService",
+    "add_noise_image",
     "add_scalar_image",
     "alpha_channel_index",
     "brightness_image",
@@ -124,6 +133,7 @@ __all__ = [
     "finite_report",
     "flip_image",
     "gamma_image",
+    "gaussian_blur_image",
     "hue_image",
     "image_to_display_uint8",
     "image_to_luminance",
@@ -132,10 +142,12 @@ __all__ = [
     "multiply_scalar_image",
     "opacity_image",
     "open_camera",
+    "posterize_image",
     "resize_image",
     "rotate_image",
     "sanitize_finite",
     "saturation_image",
+    "sharpen_image",
     "stretch_contrast_image",
     "validate_odd_kernel",
 ]

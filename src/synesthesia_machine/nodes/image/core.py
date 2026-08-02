@@ -27,6 +27,7 @@ from synesthesia_machine.nodes.base import (
 )
 from synesthesia_machine.nodes.image.adjustments import create_adjustment_definitions
 from synesthesia_machine.nodes.image.dimensions import create_dimension_definitions
+from synesthesia_machine.nodes.image.filters import create_filter_definitions
 from synesthesia_machine.nodes.image.runtime_support import (
     StatelessImageRuntime,
     image_value,
@@ -95,6 +96,7 @@ def create_image_definitions() -> tuple[NodeDefinition, ...]:
     return (
         *create_dimension_definitions(),
         *create_adjustment_definitions(),
+        *create_filter_definitions(),
         NodeDefinition(
             "synmachine.image.change_colour_space",
             1,
