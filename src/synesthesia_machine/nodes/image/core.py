@@ -25,6 +25,7 @@ from synesthesia_machine.nodes.base import (
     OutputPortSpec,
     ParameterSpec,
 )
+from synesthesia_machine.nodes.image.adjustments import create_adjustment_definitions
 from synesthesia_machine.nodes.image.dimensions import create_dimension_definitions
 from synesthesia_machine.nodes.image.runtime_support import (
     StatelessImageRuntime,
@@ -93,6 +94,7 @@ class ImageToLuminanceRuntime(StatelessImageRuntime):
 def create_image_definitions() -> tuple[NodeDefinition, ...]:
     return (
         *create_dimension_definitions(),
+        *create_adjustment_definitions(),
         NodeDefinition(
             "synmachine.image.change_colour_space",
             1,

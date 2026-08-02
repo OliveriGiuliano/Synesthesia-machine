@@ -41,6 +41,15 @@ class BorderMode(StrEnum):
     WRAP = "WRAP"
 
 
+class ChannelSelection(StrEnum):
+    COLOUR = "COLOUR"
+    ALL = "ALL"
+    CHANNEL_1 = "CHANNEL_1"
+    CHANNEL_2 = "CHANNEL_2"
+    CHANNEL_3 = "CHANNEL_3"
+    CHANNEL_4 = "CHANNEL_4"
+
+
 _CV_INTERPOLATION = {
     Interpolation.NEAREST: cv2.INTER_NEAREST,
     Interpolation.LINEAR: cv2.INTER_LINEAR,
@@ -97,6 +106,30 @@ def alpha_channel_index(color_space: ColorSpace) -> int | None:
         ),
         None,
     )
+
+
+def selected_channel_indices(
+    color_space: ColorSpace,
+    selection: ChannelSelection,
+    *,
+    include_alpha: bool = False,
+) -> tuple[int, ...]:
+    """Resolve a stable channel selector against authoritative descriptor metadata."""
+
+    descriptor = color_space_descriptor(color_space)
+    alpha_index = alpha_channel_index(color_space)
+    if selection is ChannelSelection.COLOUR:
+        indices = tuple(index for index in range(len(descriptor.channels)) if index != alpha_index)
+    elif selection is ChannelSelection.ALL:
+        indices = tuple(range(len(descriptor.channels)))
+    else:
+        index = int(selection.value.rsplit("_", 1)[1]) - 1
+        if index >= len(descriptor.channels):
+            raise ValueError(f"{selection.value} is unavailable for {descriptor.display_name}")
+        indices = (index,)
+    if include_alpha and alpha_index is not None and alpha_index not in indices:
+        indices = (*indices, alpha_index)
+    return indices
 
 
 def split_alpha(
@@ -194,6 +227,7 @@ def cv_interpolation(
 
 __all__ = [
     "BorderMode",
+    "ChannelSelection",
     "FiniteReport",
     "FitMode",
     "Interpolation",
@@ -204,6 +238,7 @@ __all__ = [
     "frame_like",
     "recombine_alpha",
     "sanitize_finite",
+    "selected_channel_indices",
     "split_alpha",
     "validate_odd_kernel",
 ]
