@@ -43,6 +43,13 @@ from synesthesia_machine.media.colour import (
     convert_image,
     image_to_display_uint8,
     image_to_luminance,
+    separate_image_channels,
+)
+from synesthesia_machine.media.compositing import (
+    AlphaPolicy,
+    BlendMode,
+    blend_images,
+    combine_channels,
 )
 from synesthesia_machine.media.dimensions import (
     CoordinateMode,
@@ -93,6 +100,8 @@ from synesthesia_machine.media.video_source import (
 
 __all__ = [
     "COLOR_SPACE_DESCRIPTORS",
+    "AlphaPolicy",
+    "BlendMode",
     "BorderMode",
     "CameraBackend",
     "CameraBackendPreference",
@@ -132,6 +141,7 @@ __all__ = [
     "add_noise_image",
     "add_scalar_image",
     "alpha_channel_index",
+    "blend_images",
     "brightness_image",
     "camera_index_from_device_id",
     "canny_image",
@@ -139,6 +149,7 @@ __all__ = [
     "color_space_descriptor",
     "color_value_for_space",
     "colour_levels_image",
+    "combine_channels",
     "contrast_image",
     "convert_image",
     "convolve_image",
@@ -166,6 +177,7 @@ __all__ = [
     "rotate_image",
     "sanitize_finite",
     "saturation_image",
+    "separate_image_channels",
     "sharpen_image",
     "stretch_contrast_image",
     "threshold_channel",

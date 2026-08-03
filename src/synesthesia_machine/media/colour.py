@@ -140,6 +140,14 @@ def convert_image(image: ImageFrame, target: ColorSpace) -> ImageFrame:
 def image_to_luminance(image: ImageFrame) -> ChannelFrame:
     """Return linear-light CIE-style relative luminance as an immutable channel."""
 
+    descriptor = color_space_descriptor(image.color_space)
+    colour_indices = tuple(
+        index
+        for index, channel in enumerate(descriptor.channels)
+        if channel.semantic is not ChannelSemantic.ALPHA
+    )
+    if not np.isfinite(image.data[..., colour_indices]).all():
+        raise ValueError("Image to Luminance requires finite colour-channel values")
     rgb, _ = _to_srgb(image.data, image.color_space)
     linear = _srgb_to_linear(rgb)
     luminance = (
@@ -149,6 +157,31 @@ def image_to_luminance(image: ImageFrame) -> ChannelFrame:
     )
     data = read_only_float32(np.asarray(luminance, dtype=np.float32))
     return ChannelFrame(data, ChannelSemantic.LUMINANCE, 0.0, 1.0, False, image.context)
+
+
+def separate_image_channels(image: ImageFrame) -> tuple[ChannelFrame | None, ...]:
+    """Expose descriptor-backed immutable channel views, padding absent channels with ``None``."""
+
+    descriptor = color_space_descriptor(image.color_space)
+    outputs: list[ChannelFrame | None] = []
+    for index in range(4):
+        if index >= len(descriptor.channels):
+            outputs.append(None)
+            continue
+        channel = descriptor.channels[index]
+        view = image.data[..., index]
+        view.flags.writeable = False
+        outputs.append(
+            ChannelFrame(
+                view,
+                channel.semantic,
+                channel.nominal_min,
+                channel.nominal_max,
+                channel.cyclic,
+                image.context,
+            )
+        )
+    return tuple(outputs)
 
 
 def image_to_display_uint8(image: ImageFrame) -> NDArray[np.uint8]:

@@ -5,18 +5,14 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from synesthesia_machine.contracts.runtime_values import (
-    ChannelFrame,
     ColorSpace,
     FrameContext,
-    NoData,
     ParameterValue,
     PortType,
     RuntimeValue,
 )
 from synesthesia_machine.media import (
-    color_space_descriptor,
     convert_image,
-    image_to_luminance,
 )
 from synesthesia_machine.nodes.base import (
     ExecutionKind,
@@ -26,6 +22,15 @@ from synesthesia_machine.nodes.base import (
     ParameterSpec,
 )
 from synesthesia_machine.nodes.image.adjustments import create_adjustment_definitions
+from synesthesia_machine.nodes.image.channels import (
+    ImageToLuminanceRuntime as ImageToLuminanceRuntime,
+)
+from synesthesia_machine.nodes.image.channels import (
+    SeparateChannelsRuntime as SeparateChannelsRuntime,
+)
+from synesthesia_machine.nodes.image.channels import (
+    create_channel_definitions,
+)
 from synesthesia_machine.nodes.image.dimensions import create_dimension_definitions
 from synesthesia_machine.nodes.image.filters import create_filter_definitions
 from synesthesia_machine.nodes.image.runtime_support import (
@@ -49,47 +54,6 @@ class ChangeColourSpaceRuntime(StatelessImageRuntime):
                 ColorSpace(text_value(parameters["target_colour_space"])),
             )
         }
-
-
-class SeparateChannelsRuntime(StatelessImageRuntime):
-    def process(
-        self,
-        inputs: Mapping[str, RuntimeValue],
-        parameters: Mapping[str, ParameterValue],
-        context: FrameContext,
-    ) -> Mapping[str, RuntimeValue]:
-        del parameters, context
-        image = image_value(inputs["image"])
-        descriptor = color_space_descriptor(image.color_space)
-        outputs: dict[str, RuntimeValue] = {}
-        for index in range(4):
-            port_id = f"channel_{index + 1}"
-            if index >= len(descriptor.channels):
-                outputs[port_id] = NoData
-                continue
-            channel = descriptor.channels[index]
-            view = image.data[..., index]
-            view.flags.writeable = False
-            outputs[port_id] = ChannelFrame(
-                view,
-                channel.semantic,
-                channel.nominal_min,
-                channel.nominal_max,
-                channel.cyclic,
-                image.context,
-            )
-        return outputs
-
-
-class ImageToLuminanceRuntime(StatelessImageRuntime):
-    def process(
-        self,
-        inputs: Mapping[str, RuntimeValue],
-        parameters: Mapping[str, ParameterValue],
-        context: FrameContext,
-    ) -> Mapping[str, RuntimeValue]:
-        del parameters, context
-        return {"channel": image_to_luminance(image_value(inputs["image"]))}
 
 
 def create_image_definitions() -> tuple[NodeDefinition, ...]:
@@ -118,33 +82,13 @@ def create_image_definitions() -> tuple[NodeDefinition, ...]:
             ChangeColourSpaceRuntime,
             aliases=("convert colour", "convert color", "hsv", "lab", "ycrcb"),
         ),
-        NodeDefinition(
-            "synmachine.image.separate_channels",
-            1,
-            "Separate Channels",
-            "Image / Channel",
-            "Publish up to four descriptor-backed read-only channel views.",
-            (InputPortSpec("image", "Image", PortType.IMAGE),),
-            tuple(
-                OutputPortSpec(f"channel_{index}", f"Channel {index}", PortType.CHANNEL)
-                for index in range(1, 5)
-            ),
-            (),
-            ExecutionKind.STATELESS,
-            SeparateChannelsRuntime,
-            aliases=("split channels", "rgb channels", "hsv channels"),
-        ),
-        NodeDefinition(
-            "synmachine.image.to_luminance",
-            1,
-            "Image to Luminance",
-            "Image / Channel",
-            "Convert an image to one linear-light luminance channel.",
-            (InputPortSpec("image", "Image", PortType.IMAGE),),
-            (OutputPortSpec("channel", "Luminance", PortType.CHANNEL),),
-            (),
-            ExecutionKind.STATELESS,
-            ImageToLuminanceRuntime,
-            aliases=("grayscale", "greyscale", "luma"),
-        ),
+        *create_channel_definitions(),
     )
+
+
+__all__ = [
+    "ChangeColourSpaceRuntime",
+    "ImageToLuminanceRuntime",
+    "SeparateChannelsRuntime",
+    "create_image_definitions",
+]
