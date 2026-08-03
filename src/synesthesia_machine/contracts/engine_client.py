@@ -119,6 +119,31 @@ class MidiOutputStatus:
 
 
 @dataclass(frozen=True, slots=True)
+class NodeMemoryDiagnostic:
+    """Compact node-owned memory estimate safe to publish across the engine boundary."""
+
+    node_id: UUID
+    estimated_retained_bytes: int = 0
+    retained_bytes: int = 0
+    retained_frame_count: int = 0
+    capacity_frame_count: int = 0
+    memory_limit_bytes: int = 0
+
+    def __post_init__(self) -> None:
+        values = (
+            self.estimated_retained_bytes,
+            self.retained_bytes,
+            self.retained_frame_count,
+            self.capacity_frame_count,
+            self.memory_limit_bytes,
+        )
+        if any(value < 0 for value in values):
+            raise ValueError("node memory diagnostics cannot contain negative values")
+        if self.retained_frame_count > self.capacity_frame_count:
+            raise ValueError("retained frame count cannot exceed configured capacity")
+
+
+@dataclass(frozen=True, slots=True)
 class EngineMetrics:
     state: EngineState = EngineState.STOPPED
     graph_revision: int | None = None
@@ -231,6 +256,10 @@ class EngineClient(Protocol):
     def midi_output_status(
         self, output_node_id: UUID | None = None
     ) -> tuple[MidiOutputStatus, ...]: ...
+
+    def node_memory_diagnostics(
+        self, node_id: UUID | None = None
+    ) -> tuple[NodeMemoryDiagnostic, ...]: ...
 
     def metrics(self) -> EngineMetrics: ...
 

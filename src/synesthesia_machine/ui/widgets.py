@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from synesthesia_machine.contracts import NodeMemoryDiagnostic
 from synesthesia_machine.graph import LiteralValue
 from synesthesia_machine.nodes import NodeDefinition, NodeRegistry
 from synesthesia_machine.ui.canvas import NODE_MIME_TYPE
@@ -216,6 +217,7 @@ class InspectorPanel(QWidget):
         self.session = session
         self._node_ids: set[UUID] = set()
         self._connection_ids: set[UUID] = set()
+        self._memory_diagnostic: NodeMemoryDiagnostic | None = None
         self.title = QLabel("Nothing selected", self)
         title_font = self.title.font()
         title_font.setBold(True)
@@ -244,6 +246,14 @@ class InspectorPanel(QWidget):
     def set_selection(self, node_ids: set[UUID], connection_ids: set[UUID]) -> None:
         self._node_ids = set(node_ids)
         self._connection_ids = set(connection_ids)
+        if self._memory_diagnostic is not None and self._memory_diagnostic.node_id not in node_ids:
+            self._memory_diagnostic = None
+        self.refresh()
+
+    def set_memory_diagnostic(self, diagnostic: NodeMemoryDiagnostic | None) -> None:
+        if diagnostic == self._memory_diagnostic:
+            return
+        self._memory_diagnostic = diagnostic
         self.refresh()
 
     @Slot()
@@ -280,6 +290,24 @@ class InspectorPanel(QWidget):
             callback = partial(self._set_parameter, node.node_id, parameter.spec.id)
             editor = create_parameter_editor(parameter, callback)
             self.form.addRow(parameter.spec.label, editor)
+        diagnostic = self._memory_diagnostic
+        if diagnostic is not None and diagnostic.node_id == node.node_id:
+            self.form.addRow(
+                "Estimated retained memory",
+                QLabel(_format_bytes(diagnostic.estimated_retained_bytes), self.form_container),
+            )
+            self.form.addRow(
+                "Current retained memory",
+                QLabel(
+                    f"{_format_bytes(diagnostic.retained_bytes)} "
+                    f"({diagnostic.retained_frame_count}/{diagnostic.capacity_frame_count} frames)",
+                    self.form_container,
+                ),
+            )
+            self.form.addRow(
+                "Memory limit",
+                QLabel(_format_bytes(diagnostic.memory_limit_bytes), self.form_container),
+            )
         self._show_issues(node.issues)
 
     def _show_connection(self, connection: ConnectionViewModel) -> None:
@@ -322,3 +350,7 @@ def _definition_search_text(definition: NodeDefinition) -> str:
             *definition.aliases,
         )
     ).casefold()
+
+
+def _format_bytes(value: int) -> str:
+    return f"{value / (1024 * 1024):.2f} MiB"

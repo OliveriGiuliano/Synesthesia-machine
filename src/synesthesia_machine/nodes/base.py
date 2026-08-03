@@ -9,7 +9,7 @@ from enum import StrEnum
 from typing import Protocol, runtime_checkable
 from uuid import UUID
 
-from synesthesia_machine.contracts.engine_client import MidiOutputStatus
+from synesthesia_machine.contracts.engine_client import MidiOutputStatus, NodeMemoryDiagnostic
 from synesthesia_machine.contracts.runtime_values import (
     ColorValue,
     FrameContext,
@@ -144,6 +144,11 @@ class PanicCapableRuntime(Protocol):
 @runtime_checkable
 class MidiOutputStatusProvider(Protocol):
     def midi_output_status(self) -> MidiOutputStatus: ...
+
+
+@runtime_checkable
+class NodeMemoryDiagnosticProvider(Protocol):
+    def node_memory_diagnostic(self) -> NodeMemoryDiagnostic: ...
 
 
 type RuntimeFactory = Callable[[UUID], NodeRuntime]

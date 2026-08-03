@@ -28,6 +28,7 @@ from synesthesia_machine.contracts import (
     EngineStatus,
     ImagePreview,
     MidiOutputStatus,
+    NodeMemoryDiagnostic,
     NotePreview,
     SourceStatus,
 )
@@ -103,6 +104,12 @@ class _SupervisionClient:
         self, output_node_id: UUID | None = None
     ) -> tuple[MidiOutputStatus, ...]:
         del output_node_id
+        return ()
+
+    def node_memory_diagnostics(
+        self, node_id: UUID | None = None
+    ) -> tuple[NodeMemoryDiagnostic, ...]:
+        del node_id
         return ()
 
     def metrics(self) -> EngineMetrics:

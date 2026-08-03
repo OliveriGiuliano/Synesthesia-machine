@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from PySide6.QtCore import QSettings
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel
 
 from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.app.settings import ApplicationPaths
@@ -23,6 +23,7 @@ from synesthesia_machine.contracts import (
     EngineStatus,
     ImagePreview,
     MidiOutputStatus,
+    NodeMemoryDiagnostic,
     NoteActivity,
     NotePreview,
     SourceState,
@@ -57,6 +58,7 @@ class _RecordingEngineClient:
     statuses: dict[UUID, SourceStatus] = field(default_factory=_status_map)
     image_previews: tuple[ImagePreview, ...] = ()
     note_previews: tuple[NotePreview, ...] = ()
+    memory_diagnostics: tuple[NodeMemoryDiagnostic, ...] = ()
     closed: bool = False
 
     def activate(
@@ -99,6 +101,15 @@ class _RecordingEngineClient:
     ) -> tuple[MidiOutputStatus, ...]:
         del output_node_id
         return ()
+
+    def node_memory_diagnostics(
+        self, node_id: UUID | None = None
+    ) -> tuple[NodeMemoryDiagnostic, ...]:
+        if node_id is None:
+            return self.memory_diagnostics
+        return tuple(
+            diagnostic for diagnostic in self.memory_diagnostics if diagnostic.node_id == node_id
+        )
 
     def metrics(self) -> EngineMetrics:
         return EngineMetrics(
@@ -242,6 +253,31 @@ def test_preview_and_metrics_polling_update_ui_with_sequence_coalescing(
     assert window._note_sequences == {NOTE_NODE: 1}
     assert "42 ticks @ 29.5 FPS" in window._engine_status.text()
     assert "drops 3" in window._engine_status.text()
+
+
+def test_selected_node_memory_diagnostic_is_published_to_inspector(
+    runtime_window: tuple[MainWindow, _RecordingEngineClient],
+) -> None:
+    window, client = runtime_window
+    hold_id = window.session.add_node("synmachine.image.hold_image", (0.0, 0.0))
+    client.memory_diagnostics = (
+        NodeMemoryDiagnostic(
+            hold_id,
+            estimated_retained_bytes=2 * 1024 * 1024,
+            retained_bytes=1024 * 1024,
+            retained_frame_count=1,
+            capacity_frame_count=2,
+            memory_limit_bytes=256 * 1024 * 1024,
+        ),
+    )
+    window.scene.select_node_ids({hold_id})
+
+    window._refresh_engine_status()
+
+    labels = {label.text() for label in window.inspector.findChildren(QLabel)}
+    assert "2.00 MiB" in labels
+    assert "1.00 MiB (1/2 frames)" in labels
+    assert "256.00 MiB" in labels
 
 
 def test_panic_and_accepted_close_are_owned_by_injected_client(

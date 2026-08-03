@@ -24,6 +24,7 @@ from synesthesia_machine.contracts import (
     EngineStatus,
     ImagePreview,
     MidiOutputStatus,
+    NodeMemoryDiagnostic,
     NotePreview,
     SourceState,
     SourceStatus,
@@ -581,6 +582,13 @@ class InProcessEngineClient:
         with self._lock:
             self._ensure_open()
             return self._facade.midi_output_status(output_node_id)
+
+    def node_memory_diagnostics(
+        self, node_id: UUID | None = None
+    ) -> tuple[NodeMemoryDiagnostic, ...]:
+        with self._lock:
+            self._ensure_open()
+            return self._facade.node_memory_diagnostics(node_id)
 
     def metrics(self) -> EngineMetrics:
         with self._lock:

@@ -6,7 +6,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from uuid import UUID
 
-from synesthesia_machine.contracts.engine_client import MidiOutputStatus
+from synesthesia_machine.contracts.engine_client import MidiOutputStatus, NodeMemoryDiagnostic
 from synesthesia_machine.contracts.runtime_values import FrameContext, RuntimeValue
 from synesthesia_machine.graph.compiler import CompilationResult, GraphCompiler
 from synesthesia_machine.graph.model import GraphSnapshot
@@ -123,6 +123,13 @@ class EngineFacade:
         if self._scheduler is None:
             return ()
         return self._scheduler.midi_output_status(output_node_id)
+
+    def node_memory_diagnostics(
+        self, node_id: UUID | None = None
+    ) -> tuple[NodeMemoryDiagnostic, ...]:
+        if self._scheduler is None:
+            return ()
+        return self._scheduler.node_memory_diagnostics(node_id)
 
     def close(self) -> None:
         if self._scheduler is not None:

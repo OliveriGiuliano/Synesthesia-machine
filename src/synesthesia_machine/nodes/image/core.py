@@ -38,6 +38,7 @@ from synesthesia_machine.nodes.image.runtime_support import (
     image_value,
     text_value,
 )
+from synesthesia_machine.nodes.image.temporal import create_temporal_definitions
 
 
 class ChangeColourSpaceRuntime(StatelessImageRuntime):
@@ -83,6 +84,7 @@ def create_image_definitions() -> tuple[NodeDefinition, ...]:
             aliases=("convert colour", "convert color", "hsv", "lab", "ycrcb"),
         ),
         *create_channel_definitions(),
+        *create_temporal_definitions(),
     )
 
 

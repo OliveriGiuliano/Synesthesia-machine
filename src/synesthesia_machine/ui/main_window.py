@@ -718,8 +718,14 @@ class MainWindow(QMainWindow):
         try:
             metrics = self.engine_client.metrics()
             sources = self.engine_client.source_status()
+            selected_nodes = self.scene.selected_node_ids()
+            diagnostic = None
+            if len(selected_nodes) == 1:
+                diagnostics = self.engine_client.node_memory_diagnostics(next(iter(selected_nodes)))
+                diagnostic = diagnostics[0] if diagnostics else None
         except (RuntimeError, TimeoutError):
             return
+        self.inspector.set_memory_diagnostic(diagnostic)
         source_text = ", ".join(status.state.value for status in sources) or "no source"
         memory_mib = metrics.memory_bytes / (1024 * 1024)
         self._engine_status.setText(
