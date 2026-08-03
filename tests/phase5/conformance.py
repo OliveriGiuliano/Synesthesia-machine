@@ -7,8 +7,8 @@ from uuid import UUID, uuid5
 
 import numpy as np
 
-from synesthesia_machine.contracts import ImageFrame, NoData, PortType
-from synesthesia_machine.nodes import NodeDefinition
+from synesthesia_machine.contracts import ChannelFrame, ImageFrame, NoData, PortType
+from synesthesia_machine.nodes import NodeDefinition, TypeVariable
 from synesthesia_machine.runtime import (
     CompiledNode,
     ExecutionPlan,
@@ -49,13 +49,26 @@ def assert_scheduler_propagates_no_data(
     values, errors = definition.parameter_values(parameters)
     assert not errors
     node_id = uuid5(_DOCUMENT, definition.type_id)
-    input_types = {port.id: PortType.IMAGE for port in definition.inputs}
-    output_types = {port.id: PortType.IMAGE for port in definition.outputs}
+    required_input = next(port for port in definition.inputs if port.required)
+    if isinstance(required_input.value_type, TypeVariable):
+        raise AssertionError("conformance helper requires a concrete input type")
+    input_types = {
+        port.id: port.value_type
+        for port in definition.inputs
+        if isinstance(port.value_type, PortType)
+    }
+    output_types = {
+        port.id: port.value_type
+        for port in definition.outputs
+        if isinstance(port.value_type, PortType)
+    }
     compiled = CompiledNode(
         node_id,
         definition,
         parameters=values,
-        input_bindings={"image": InputBinding(PortKey(_EXTERNAL_SOURCE, "image"))},
+        input_bindings={
+            required_input.id: InputBinding(PortKey(_EXTERNAL_SOURCE, required_input.id))
+        },
         input_types=input_types,
         output_types=output_types,
         clock_id=_EXTERNAL_SOURCE,
@@ -70,4 +83,26 @@ def assert_scheduler_propagates_no_data(
     assert all(result.values[PortKey(node_id, port_id)] is NoData for port_id in output_types)
 
 
-__all__ = ["assert_image_conformance", "assert_scheduler_propagates_no_data"]
+def assert_channel_conformance(
+    source: ChannelFrame,
+    output: ChannelFrame,
+    before: np.ndarray[tuple[int, ...], np.dtype[np.float32]],
+) -> None:
+    assert output.data.dtype == np.float32
+    assert output.data.shape == source.data.shape
+    assert output.data.flags.c_contiguous
+    assert not output.data.flags.writeable
+    assert output.context is source.context
+    assert output.semantic is source.semantic
+    assert output.nominal_min == source.nominal_min
+    assert output.nominal_max == source.nominal_max
+    assert output.cyclic is source.cyclic
+    assert np.array_equal(source.data, before, equal_nan=True)
+    assert not source.data.flags.writeable
+
+
+__all__ = [
+    "assert_channel_conformance",
+    "assert_image_conformance",
+    "assert_scheduler_propagates_no_data",
+]

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import cast
 from uuid import UUID
 
-from synesthesia_machine.contracts import ColorValue
+from synesthesia_machine.contracts import ColorValue, NumericMatrix
 from synesthesia_machine.graph import ConnectionModel, GraphSnapshot, LiteralValue, NodeModel
 from synesthesia_machine.nodes import NodeRegistry
 from synesthesia_machine.nodes.input import LOAD_VIDEO_TYPE_ID
@@ -387,7 +387,10 @@ def _expect_pair(value: object, path: str) -> tuple[float, float]:
 def _expect_number(value: object, path: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise GraphPersistenceError("invalid_type", "Expected number", path)
-    result = float(value)
+    try:
+        result = float(value)
+    except OverflowError as error:
+        raise GraphPersistenceError("invalid_number", "Expected finite number", path) from error
     if not math.isfinite(result):
         raise GraphPersistenceError("invalid_number", "Expected finite number", path)
     return result
@@ -403,6 +406,8 @@ def _expect_literal(value: object, path: str) -> LiteralValue:
         return value
     if isinstance(value, float) and math.isfinite(value):
         return value
+    if isinstance(value, list):
+        return _expect_numeric_matrix(cast(object, value), path)
     if isinstance(value, dict):
         data = _expect_object(cast(object, value), path)
         _require_exact_keys(data, {"$type", "r", "g", "b", "a"}, path)
@@ -422,6 +427,23 @@ def _expect_literal(value: object, path: str) -> LiteralValue:
     raise GraphPersistenceError("invalid_literal", "Expected a finite JSON literal", path)
 
 
+def _expect_numeric_matrix(value: object, path: str) -> NumericMatrix:
+    rows = _expect_list(value, path)
+    parsed_rows: list[tuple[float, ...]] = []
+    for row_index, row in enumerate(rows):
+        raw_row = _expect_list(row, f"{path}[{row_index}]")
+        parsed_rows.append(
+            tuple(
+                _expect_number(item, f"{path}[{row_index}][{column_index}]")
+                for column_index, item in enumerate(raw_row)
+            )
+        )
+    try:
+        return NumericMatrix(tuple(parsed_rows))
+    except (TypeError, ValueError) as error:
+        raise GraphPersistenceError("invalid_literal", str(error), path) from error
+
+
 def _literal_mapping_to_data(values: Mapping[str, LiteralValue]) -> dict[str, JsonValue]:
     return {key: _literal_to_data(value) for key, value in sorted(values.items())}
 
@@ -429,6 +451,8 @@ def _literal_mapping_to_data(values: Mapping[str, LiteralValue]) -> dict[str, Js
 def _literal_to_data(value: LiteralValue) -> JsonValue:
     if isinstance(value, ColorValue):
         return {"$type": "COLOR", "r": value.r, "g": value.g, "b": value.b, "a": value.a}
+    if isinstance(value, NumericMatrix):
+        return [list(row) for row in value.rows]
     return value
 
 

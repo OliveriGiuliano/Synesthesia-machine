@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import cast
 from uuid import UUID, uuid4
 
-from synesthesia_machine.contracts import ColorValue
+from synesthesia_machine.contracts import ColorValue, NumericMatrix
 from synesthesia_machine.graph import ConnectionModel, GraphSnapshot, LiteralValue, NodeModel
 
 CLIPBOARD_FRAGMENT_VERSION = 1
@@ -229,6 +229,8 @@ def _connection_from_data(value: object, index: int) -> ConnectionModel:
 def _literal_to_data(value: LiteralValue) -> object:
     if isinstance(value, ColorValue):
         return {"$type": "COLOR", "r": value.r, "g": value.g, "b": value.b, "a": value.a}
+    if isinstance(value, NumericMatrix):
+        return [list(row) for row in value.rows]
     return value
 
 
@@ -237,6 +239,8 @@ def _literal(value: object, path: str) -> LiteralValue:
         return value
     if isinstance(value, float) and math.isfinite(value):
         return value
+    if isinstance(value, list):
+        return _numeric_matrix(cast(object, value), path)
     if isinstance(value, dict):
         data = _object(cast(object, value), path)
         if set(data) != {"$type", "r", "g", "b", "a"} or data.get("$type") != "COLOR":
@@ -248,6 +252,23 @@ def _literal(value: object, path: str) -> LiteralValue:
             _number(data["a"], f"{path}.a"),
         )
     raise ValueError(f"{path} must contain a finite literal")
+
+
+def _numeric_matrix(value: object, path: str) -> NumericMatrix:
+    rows = _list(value, path)
+    parsed_rows: list[tuple[float, ...]] = []
+    for row_index, row in enumerate(rows):
+        raw_row = _list(row, f"{path}[{row_index}]")
+        parsed_rows.append(
+            tuple(
+                _number(item, f"{path}[{row_index}][{column_index}]")
+                for column_index, item in enumerate(raw_row)
+            )
+        )
+    try:
+        return NumericMatrix(tuple(parsed_rows))
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{path} contains an invalid numeric matrix: {error}") from error
 
 
 def _literal_mapping(value: object, path: str) -> Mapping[str, LiteralValue]:
@@ -293,7 +314,10 @@ def _pair(value: object, path: str) -> tuple[float, float]:
 def _number(value: object, path: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{path} must be a number")
-    result = float(value)
+    try:
+        result = float(value)
+    except OverflowError as error:
+        raise ValueError(f"{path} must be finite") from error
     if not math.isfinite(result):
         raise ValueError(f"{path} must be finite")
     return result

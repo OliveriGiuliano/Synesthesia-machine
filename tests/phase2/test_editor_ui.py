@@ -21,6 +21,7 @@ from synesthesia_machine.app.settings import ApplicationPaths
 from synesthesia_machine.contracts import (
     ColorValue,
     FrameContext,
+    NumericMatrix,
     ParameterValue,
     PortType,
     RuntimeValue,
@@ -251,6 +252,36 @@ def test_scalar_editor_factory_supports_all_phase_2_literal_types() -> None:
         )
         assert isinstance(editor, expected_type)
         assert editor.accessibleName() == spec.label
+
+
+def test_matrix_editor_commits_valid_nested_json_and_marks_invalid_input(
+    qapp: QApplication,
+) -> None:
+    del qapp
+    original = NumericMatrix(((1.0,),))
+    changed: list[object] = []
+    spec = ParameterSpec("kernel", "Kernel", PortType.MATRIX, original)
+    editor = create_parameter_editor(
+        ParameterViewModel(spec, original, False),
+        changed.append,
+    )
+    assert isinstance(editor, QLineEdit)
+    assert editor.text() == "[[1.0]]"
+
+    editor.setText("[[0,1,0],[1,-4,1],[0,1,0]]")
+    editor.editingFinished.emit()
+    assert changed == [NumericMatrix(((0.0, 1.0, 0.0), (1.0, -4.0, 1.0), (0.0, 1.0, 0.0)))]
+    assert editor.styleSheet() == ""
+
+    editor.setText("[[1],[2,3]]")
+    editor.editingFinished.emit()
+    assert len(changed) == 1
+    assert "#c44" in editor.styleSheet()
+
+    editor.setText(f"[[{10**1000}]]")
+    editor.editingFinished.emit()
+    assert len(changed) == 1
+    assert "#c44" in editor.styleSheet()
 
 
 def test_connectable_parameter_keeps_disabled_literal_fallback_while_connected(

@@ -14,7 +14,7 @@ from synesthesia_machine.contracts.engine_client import (
     NotePreview,
     SourceStatus,
 )
-from synesthesia_machine.contracts.runtime_values import ColorValue
+from synesthesia_machine.contracts.runtime_values import ColorValue, NumericMatrix
 from synesthesia_machine.nodes.base import ResetReason
 
 if TYPE_CHECKING:
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 ENGINE_PROTOCOL_VERSION = 5
 
-type SnapshotLiteral = str | int | float | bool | ColorValue | None
+type SnapshotLiteral = str | int | float | bool | ColorValue | NumericMatrix | None
 
 
 @dataclass(frozen=True, slots=True)

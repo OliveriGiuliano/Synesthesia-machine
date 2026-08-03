@@ -8,8 +8,9 @@ from uuid import UUID
 
 import pytest
 
-from synesthesia_machine.contracts import ColorValue
+from synesthesia_machine.contracts import ColorValue, NumericMatrix
 from synesthesia_machine.graph import GraphCompiler, GraphDocument
+from synesthesia_machine.nodes.composition import create_builtin_registry
 from synesthesia_machine.nodes.utility import create_utility_registry
 from synesthesia_machine.persistence import (
     GraphPersistenceError,
@@ -50,6 +51,53 @@ def test_json_round_trip_is_deterministic_and_preserves_semantics() -> None:
     assert loaded.nodes == snapshot.nodes
     assert loaded.connections == snapshot.connections
     assert loaded.document_settings == snapshot.document_settings
+
+
+def test_numeric_matrix_round_trips_as_nested_json_arrays() -> None:
+    registry = create_builtin_registry()
+    document = GraphDocument(document_id=DOCUMENT_ID)
+    kernel = NumericMatrix(((0.0, 1.0, 0.0), (1.0, -4.0, 1.0), (0.0, 1.0, 0.0)))
+    document.add_node(
+        "synmachine.image.convolve",
+        node_id=NODE_A,
+        parameters={"kernel": kernel},
+    )
+
+    data = graph_to_data(document.snapshot())
+    assert data["nodes"][0]["parameters"]["kernel"] == [
+        [0.0, 1.0, 0.0],
+        [1.0, -4.0, 1.0],
+        [0.0, 1.0, 0.0],
+    ]
+    loaded = graph_from_json(graph_to_json(document.snapshot()), registry)
+    assert loaded.nodes[0].parameters["kernel"] == kernel
+
+
+@pytest.mark.parametrize(
+    ("matrix", "code", "path_fragment"),
+    [
+        ([], "invalid_literal", "parameters.kernel"),
+        ([[1.0], [2.0, 3.0]], "invalid_literal", "parameters.kernel"),
+        ([[1.0, True]], "invalid_type", "parameters.kernel[0][1]"),
+        ([[1.0, float("inf")]], "invalid_number", "parameters.kernel[0][1]"),
+        ([[10**1000]], "invalid_number", "parameters.kernel[0][0]"),
+        ([1.0, 2.0], "invalid_type", "parameters.kernel[0]"),
+    ],
+)
+def test_loader_rejects_malformed_numeric_matrices(
+    matrix: object,
+    code: str,
+    path_fragment: str,
+) -> None:
+    document = GraphDocument(document_id=DOCUMENT_ID)
+    document.add_node("synmachine.image.convolve", node_id=NODE_A)
+    data = graph_to_data(document.snapshot())
+    data["nodes"][0]["parameters"]["kernel"] = matrix  # type: ignore[typeddict-item]
+
+    with pytest.raises(GraphPersistenceError) as captured:
+        graph_from_data(data, create_builtin_registry())
+    assert captured.value.code == code
+    assert captured.value.path is not None and path_fragment in captured.value.path
 
 
 @pytest.mark.parametrize(

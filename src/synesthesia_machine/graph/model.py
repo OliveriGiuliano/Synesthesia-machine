@@ -7,9 +7,9 @@ from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from uuid import UUID, uuid4
 
-from synesthesia_machine.contracts import ColorValue
+from synesthesia_machine.contracts import ColorValue, NumericMatrix
 
-type LiteralValue = str | int | float | bool | ColorValue | None
+type LiteralValue = str | int | float | bool | ColorValue | NumericMatrix | None
 
 
 def _empty_literals() -> dict[str, LiteralValue]:

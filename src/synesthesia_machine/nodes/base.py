@@ -13,6 +13,7 @@ from synesthesia_machine.contracts.engine_client import MidiOutputStatus
 from synesthesia_machine.contracts.runtime_values import (
     ColorValue,
     FrameContext,
+    NumericMatrix,
     ParameterValue,
     PortType,
     RuntimeValue,
@@ -284,11 +285,13 @@ def _matches_port_type(value: object, value_type: PortType) -> bool:
         return isinstance(value, str)
     if value_type is PortType.COLOR:
         return isinstance(value, ColorValue)
+    if value_type is PortType.MATRIX:
+        return isinstance(value, NumericMatrix)
     return False
 
 
 def _as_parameter_value(value: object) -> ParameterValue:
-    if isinstance(value, (str, bool, ColorValue, float)):
+    if isinstance(value, (str, bool, ColorValue, NumericMatrix, float)):
         return value
     if isinstance(value, int):
         return value

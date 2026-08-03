@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from synesthesia_machine.contracts import ColorValue, ImageFrame
+from synesthesia_machine.contracts import ChannelFrame, ColorValue, ImageFrame, NumericMatrix
 from synesthesia_machine.nodes import ResetReason
 
 
@@ -23,6 +23,12 @@ def image_value(value: object) -> ImageFrame:
     if isinstance(value, ImageFrame):
         return value
     raise TypeError(f"Expected ImageFrame, got {type(value).__name__}")
+
+
+def channel_value(value: object) -> ChannelFrame:
+    if isinstance(value, ChannelFrame):
+        return value
+    raise TypeError(f"Expected ChannelFrame, got {type(value).__name__}")
 
 
 def integer_value(value: object) -> int:
@@ -55,12 +61,20 @@ def color_value(value: object) -> ColorValue:
     raise TypeError(f"Expected ColorValue, got {type(value).__name__}")
 
 
+def matrix_value(value: object) -> NumericMatrix:
+    if isinstance(value, NumericMatrix):
+        return value
+    raise TypeError(f"Expected NumericMatrix, got {type(value).__name__}")
+
+
 __all__ = [
     "StatelessImageRuntime",
     "boolean_value",
+    "channel_value",
     "color_value",
     "image_value",
     "integer_value",
+    "matrix_value",
     "number_value",
     "text_value",
 ]

@@ -12,9 +12,11 @@ from synesthesia_machine.contracts import (
     ImagePreview,
     NoteActivity,
     NotePreview,
+    NumericMatrix,
     PortType,
     freeze_uint8_preview,
 )
+from synesthesia_machine.contracts.engine_messages import GraphSnapshotPayload
 from synesthesia_machine.graph import GraphCompiler, GraphDocument
 from synesthesia_machine.nodes import ExecutionKind, ResetReason
 from synesthesia_machine.nodes.registry import NodeRegistry
@@ -40,6 +42,21 @@ def test_preview_contracts_are_compact_immutable_and_deterministic() -> None:
     assert notes.notes[0].note == 60
     with pytest.raises(ValueError, match="deterministic"):
         NotePreview(node_id, 1, 1, tuple(reversed(notes.notes)))
+
+
+def test_graph_snapshot_payload_round_trips_numeric_matrix_parameters() -> None:
+    document = GraphDocument()
+    kernel = NumericMatrix(((0.0, -1.0, 0.0), (-1.0, 5.0, -1.0), (0.0, -1.0, 0.0)))
+    node_id = document.add_node(
+        "synmachine.image.convolve",
+        parameters={"kernel": kernel},
+    )
+
+    restored = GraphSnapshotPayload.from_snapshot(document.snapshot()).to_snapshot()
+
+    node = restored.node(node_id)
+    assert node is not None
+    assert node.parameters["kernel"] == kernel
 
 
 def test_scheduler_resets_only_state_owners_in_selected_source_component() -> None:

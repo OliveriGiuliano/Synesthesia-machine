@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
+from typing import cast
 
 from PySide6.QtCore import Slot
 from PySide6.QtGui import QColor
@@ -17,7 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from synesthesia_machine.contracts import ColorValue, PortType
+from synesthesia_machine.contracts import ColorValue, NumericMatrix, PortType
 from synesthesia_machine.graph import LiteralValue
 from synesthesia_machine.ui.view_models import ParameterViewModel
 
@@ -45,6 +47,8 @@ def create_parameter_editor(
         editor = StringParameterEditor(parameter, on_changed)
     elif spec.value_type is PortType.COLOR:
         editor = ColorParameterEditor(parameter, on_changed)
+    elif spec.value_type is PortType.MATRIX:
+        editor = MatrixParameterEditor(parameter, on_changed)
     else:
         raise ValueError(f"No scalar editor is available for {spec.value_type.value}")
 
@@ -119,6 +123,47 @@ class StringParameterEditor(QLineEdit):
     @Slot()
     def _commit(self) -> None:
         self._on_changed(self.text())
+
+
+class MatrixParameterEditor(QLineEdit):
+    """Compact JSON nested-array editor for immutable numeric matrices."""
+
+    def __init__(self, parameter: ParameterViewModel, on_changed: ParameterChanged) -> None:
+        super().__init__()
+        self._on_changed = on_changed
+        if isinstance(parameter.value, NumericMatrix):
+            self.setText(json.dumps(parameter.value.rows, separators=(",", ":")))
+        self.editingFinished.connect(self._commit)
+
+    @Slot()
+    def _commit(self) -> None:
+        try:
+            raw = cast(object, json.loads(self.text()))
+            matrix = NumericMatrix(_numeric_matrix_rows(raw))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            self.setStyleSheet("border: 1px solid #c44;")
+            return
+        self.setStyleSheet("")
+        self._on_changed(matrix)
+
+
+def _numeric_matrix_rows(value: object) -> tuple[tuple[float, ...], ...]:
+    if not isinstance(value, list):
+        raise ValueError("matrix must be a nested array")
+    rows: list[tuple[float, ...]] = []
+    for raw_row in cast(list[object], value):
+        if not isinstance(raw_row, list):
+            raise ValueError("matrix rows must be arrays")
+        row: list[float] = []
+        for raw_value in cast(list[object], raw_row):
+            if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
+                raise ValueError("matrix entries must be numbers")
+            try:
+                row.append(float(raw_value))
+            except OverflowError as error:
+                raise ValueError("matrix entries must be finite") from error
+        rows.append(tuple(row))
+    return tuple(rows)
 
 
 class ChoiceParameterEditor(QComboBox):

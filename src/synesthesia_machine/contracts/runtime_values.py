@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
-from typing import ClassVar, Final
+from typing import ClassVar, Final, cast
 from uuid import UUID
 
 import numpy as np
@@ -20,6 +20,7 @@ class PortType(StrEnum):
     INT = "INT"
     BOOL = "BOOL"
     COLOR = "COLOR"
+    MATRIX = "MATRIX"
     MIDI_STATE = "MIDI_STATE"
     STRING = "STRING"
 
@@ -169,6 +170,46 @@ class ColorValue:
             raise ValueError(msg)
 
 
+@dataclass(frozen=True, slots=True)
+class NumericMatrix:
+    """Immutable finite rectangular numeric matrix used by persisted parameters."""
+
+    rows: tuple[tuple[float, ...], ...]
+
+    def __post_init__(self) -> None:
+        if not self.rows:
+            raise ValueError("numeric matrix must contain at least one row")
+        width = len(self.rows[0])
+        if width < 1:
+            raise ValueError("numeric matrix rows must not be empty")
+        normalized: list[tuple[float, ...]] = []
+        for row in self.rows:
+            if len(row) != width:
+                raise ValueError("numeric matrix rows must have equal lengths")
+            normalized_row: list[float] = []
+            for value in row:
+                raw_value = cast(object, value)
+                if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
+                    raise TypeError("numeric matrix entries must be numbers")
+                try:
+                    converted = float(raw_value)
+                except OverflowError as error:
+                    raise ValueError("numeric matrix entries must be finite") from error
+                if not np.isfinite(converted):
+                    raise ValueError("numeric matrix entries must be finite")
+                normalized_row.append(converted)
+            normalized.append(tuple(normalized_row))
+        object.__setattr__(self, "rows", tuple(normalized))
+
+    @property
+    def width(self) -> int:
+        return len(self.rows[0])
+
+    @property
+    def height(self) -> int:
+        return len(self.rows)
+
+
 @dataclass(frozen=True, slots=True, order=True)
 class MidiNoteKey:
     channel: int
@@ -219,7 +260,7 @@ class NoDataType:
 
 NoData: Final = NoDataType()
 
-type ParameterValue = float | int | bool | str | ColorValue
+type ParameterValue = float | int | bool | str | ColorValue | NumericMatrix
 type RuntimeValue = (
     ImageFrame | ChannelFrame | float | int | bool | ColorValue | MidiStateFrame | str | NoDataType
 )

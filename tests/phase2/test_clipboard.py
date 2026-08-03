@@ -1,8 +1,12 @@
 """Pure clipboard fragment, serialization, and remapping tests."""
 
+import json
 from collections.abc import Iterator
 from uuid import UUID
 
+import pytest
+
+from synesthesia_machine.contracts import NumericMatrix
 from synesthesia_machine.graph import GraphDocument
 from synesthesia_machine.persistence import (
     copy_fragment,
@@ -52,3 +56,43 @@ def test_remap_uses_fresh_ids_preserves_internal_edge_and_offsets_positions() ->
     assert remapped.connections[0].id == NEW_CONNECTION
     assert remapped.connections[0].source_node_id == NEW_A
     assert remapped.connections[0].destination_node_id == NEW_B
+
+
+def test_clipboard_numeric_matrix_round_trips_as_nested_arrays() -> None:
+    document = GraphDocument()
+    kernel = NumericMatrix(((1.0, 2.0, 1.0), (0.0, 0.0, 0.0), (-1.0, -2.0, -1.0)))
+    node_id = document.add_node(
+        "synmachine.image.convolve",
+        node_id=NODE_A,
+        parameters={"kernel": kernel},
+    )
+    fragment = copy_fragment(document.snapshot(), {node_id})
+
+    text = fragment_to_json(fragment)
+    raw = json.loads(text)
+    assert raw["nodes"][0]["parameters"]["kernel"] == [
+        [1.0, 2.0, 1.0],
+        [0.0, 0.0, 0.0],
+        [-1.0, -2.0, -1.0],
+    ]
+    assert fragment_from_json(text).nodes[0].parameters["kernel"] == kernel
+
+
+@pytest.mark.parametrize(
+    ("matrix", "message"),
+    [
+        ([], "at least one row"),
+        ([[1.0], [2.0, 3.0]], "equal lengths"),
+        ([[1.0, True]], "must be a number"),
+        ([[10**1000]], "must be finite"),
+        ([1.0, 2.0], "must be an array"),
+    ],
+)
+def test_clipboard_rejects_malformed_numeric_matrices(matrix: object, message: str) -> None:
+    document = GraphDocument()
+    node_id = document.add_node("synmachine.image.convolve", node_id=NODE_A)
+    raw = json.loads(fragment_to_json(copy_fragment(document.snapshot(), {node_id})))
+    raw["nodes"][0]["parameters"]["kernel"] = matrix
+
+    with pytest.raises(ValueError, match=message):
+        fragment_from_json(json.dumps(raw))
