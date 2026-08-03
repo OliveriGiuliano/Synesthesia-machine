@@ -22,6 +22,7 @@ from synesthesia_machine.nodes.base import (
 )
 
 DISPLAY_IMAGE_DATA_TYPE_ID = "synmachine.visualization.display_image_data"
+CHANNEL_DISPLAY_TYPE_ID = "synmachine.visualization.channel_display"
 NOTE_VISUALIZER_TYPE_ID = "synmachine.visualization.note_visualizer"
 
 
@@ -104,6 +105,52 @@ def create_visualization_definitions() -> tuple[NodeDefinition, ...]:
             aliases=("image preview", "view image", "monitor image"),
         ),
         NodeDefinition(
+            CHANNEL_DISPLAY_TYPE_ID,
+            1,
+            "Channel Display",
+            "Visualization",
+            "Publish a bounded nominal-range channel preview for the UI.",
+            (InputPortSpec("channel", "Channel", PortType.CHANNEL),),
+            (),
+            (
+                ParameterSpec(
+                    "preview_fps",
+                    "Preview FPS",
+                    PortType.INT,
+                    30,
+                    minimum=5,
+                    maximum=30,
+                ),
+                ParameterSpec(
+                    "max_dimension",
+                    "Maximum dimension",
+                    PortType.INT,
+                    800,
+                    minimum=64,
+                    maximum=2048,
+                ),
+                ParameterSpec(
+                    "fit_mode",
+                    "Fit mode",
+                    PortType.STRING,
+                    FitMode.CONTAIN.value,
+                    choices=tuple(mode.value for mode in FitMode),
+                ),
+                ParameterSpec(
+                    "value_display_mode",
+                    "Value display",
+                    PortType.STRING,
+                    "NOMINAL_RANGE",
+                    choices=("NOMINAL_RANGE",),
+                ),
+                ParameterSpec("show_histogram", "Show histogram", PortType.BOOL, False),
+            ),
+            ExecutionKind.VISUALIZER,
+            _VisualizerRuntime,
+            cache_policy=CachePolicy.NEVER,
+            aliases=("channel preview", "view channel", "monitor channel"),
+        ),
+        NodeDefinition(
             NOTE_VISUALIZER_TYPE_ID,
             1,
             "Note Visualizer",
@@ -121,6 +168,7 @@ def create_visualization_definitions() -> tuple[NodeDefinition, ...]:
 
 
 __all__ = [
+    "CHANNEL_DISPLAY_TYPE_ID",
     "DISPLAY_IMAGE_DATA_TYPE_ID",
     "NOTE_VISUALIZER_TYPE_ID",
     "create_visualization_definitions",

@@ -13,6 +13,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from synesthesia_machine.contracts import (
+    ChannelFrame,
     ImageFrame,
     ImagePreview,
     MidiStateFrame,
@@ -22,6 +23,7 @@ from synesthesia_machine.contracts import (
 )
 from synesthesia_machine.media import image_to_display_uint8
 from synesthesia_machine.nodes.visualization import (
+    CHANNEL_DISPLAY_TYPE_ID,
     DISPLAY_IMAGE_DATA_TYPE_ID,
     NOTE_VISUALIZER_TYPE_ID,
 )
@@ -30,6 +32,7 @@ from synesthesia_machine.runtime.scheduler import TickResult
 
 type MonotonicClock = Callable[[], float]
 type ImagePreviewConverter = Callable[[ImageFrame, int], NDArray[np.uint8]]
+type ChannelPreviewConverter = Callable[[ChannelFrame, int], NDArray[np.uint8]]
 
 _NOTE_PREVIEW_FPS = 60
 
@@ -40,6 +43,7 @@ class _ImageTarget:
     source: PortKey
     interval_s: float
     max_dimension: int
+    source_kind: str = "IMAGE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,9 +67,11 @@ class PreviewBroker:
         *,
         monotonic: MonotonicClock = time.monotonic,
         image_converter: ImagePreviewConverter | None = None,
+        channel_converter: ChannelPreviewConverter | None = None,
     ) -> None:
         self._monotonic = monotonic
         self._image_converter = image_converter or _preview_image_data
+        self._channel_converter = channel_converter or _preview_channel_data
         self._lock = threading.Lock()
         self._image_targets: tuple[_ImageTarget, ...] = ()
         self._note_targets: tuple[_NoteTarget, ...] = ()
@@ -101,6 +107,19 @@ class PreviewBroker:
                         binding.source,
                         1.0 / _integer_parameter(node.parameters, "preview_fps"),
                         _integer_parameter(node.parameters, "max_dimension"),
+                    )
+                )
+            elif node.definition.type_id == CHANNEL_DISPLAY_TYPE_ID:
+                binding = node.input_bindings.get("channel")
+                if binding is None:
+                    continue
+                image_targets.append(
+                    _ImageTarget(
+                        node.node_id,
+                        binding.source,
+                        1.0 / _integer_parameter(node.parameters, "preview_fps"),
+                        _integer_parameter(node.parameters, "max_dimension"),
+                        "CHANNEL",
                     )
                 )
             elif node.definition.type_id == NOTE_VISUALIZER_TYPE_ID:
@@ -147,12 +166,18 @@ class PreviewBroker:
                 if _is_due(self._note_last_published.get(target.node_id), now, target.interval_s)
             )
 
-        image_publications: list[tuple[_ImageTarget, ImageFrame, NDArray[np.uint8]]] = []
+        image_publications: list[
+            tuple[_ImageTarget, ImageFrame | ChannelFrame, NDArray[np.uint8]]
+        ] = []
         for target in image_targets:
             value = result.values.get(target.source)
-            if isinstance(value, ImageFrame):
+            if target.source_kind == "IMAGE" and isinstance(value, ImageFrame):
                 image_publications.append(
                     (target, value, self._image_converter(value, target.max_dimension))
+                )
+            elif target.source_kind == "CHANNEL" and isinstance(value, ChannelFrame):
+                image_publications.append(
+                    (target, value, self._channel_converter(value, target.max_dimension))
                 )
 
         note_publications: list[tuple[_NoteTarget, MidiStateFrame, tuple[NoteActivity, ...]]] = []
@@ -238,6 +263,19 @@ class PreviewBroker:
 
 def _preview_image_data(image: ImageFrame, max_dimension: int) -> NDArray[np.uint8]:
     display = image_to_display_uint8(image)
+    return _bounded_preview(display, max_dimension)
+
+
+def _preview_channel_data(channel: ChannelFrame, max_dimension: int) -> NDArray[np.uint8]:
+    denominator = np.float32(channel.nominal_max - channel.nominal_min)
+    normalized = (channel.data - np.float32(channel.nominal_min)) / denominator
+    safe = np.nan_to_num(normalized, nan=0.0, posinf=1.0, neginf=0.0)
+    gray = np.rint(np.clip(safe, 0.0, 1.0) * np.float32(255.0)).astype(np.uint8)
+    display = np.repeat(gray[..., None], 3, axis=2)
+    return _bounded_preview(display, max_dimension)
+
+
+def _bounded_preview(display: NDArray[np.uint8], max_dimension: int) -> NDArray[np.uint8]:
     height, width = display.shape[:2]
     largest = max(width, height)
     if largest <= max_dimension:
@@ -262,4 +300,9 @@ def _is_due(previous: float | None, now: float, interval_s: float) -> bool:
     return previous is None or now - previous + 1e-12 >= interval_s
 
 
-__all__ = ["ImagePreviewConverter", "MonotonicClock", "PreviewBroker"]
+__all__ = [
+    "ChannelPreviewConverter",
+    "ImagePreviewConverter",
+    "MonotonicClock",
+    "PreviewBroker",
+]

@@ -24,6 +24,7 @@ from synesthesia_machine.nodes.base import (
     TypeVariable,
 )
 from synesthesia_machine.nodes.registry import NodeRegistry
+from synesthesia_machine.nodes.utility.scalar_bridges import create_scalar_bridge_definitions
 
 T = TypeVariable("T")
 
@@ -191,7 +192,7 @@ def _math_required(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
 
 
 def create_utility_registry() -> NodeRegistry:
-    """Return a registry containing the stable Phase 1 utility catalogue."""
+    """Return a registry containing the stable scalar utility catalogue."""
     definitions = (
         NodeDefinition(
             "synmachine.utility.number",
@@ -334,6 +335,7 @@ def create_utility_registry() -> NodeRegistry:
             required_input_resolver=_math_required,
             aliases=("arithmetic", "calculator", "add", "subtract", "multiply", "divide"),
         ),
+        *create_scalar_bridge_definitions(),
     )
     return NodeRegistry(definitions)
 
