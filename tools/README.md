@@ -54,6 +54,31 @@ The MIDI command writes `docs/phase-4-midi-evidence.json` only after the product
 visual receipt must be recorded as a distinct manual observation rather than inferred from a
 successful send lifecycle.
 
+## Phase 5 bounded-memory evidence
+
+```powershell
+# Execute 108,000 production Scheduler ticks without sleeping: 30 minutes of source-clock
+# duration at 60 FPS. The command writes docs/phase-5-soak.json and exits non-zero if a gate fails.
+uv run python -m tools.phase5_soak
+```
+
+The tool production-compiles Load Video → Hold Image → Display Image Data, injects deterministic
+immutable 64×64 RGB float32 source frames, and simulates a source-loop reset every 600 ticks. It does
+not open the video decoder or any physical device. The pass criteria are:
+
+- no scheduler errors;
+- Hold Image reaches but never exceeds its exact eight-frame capacity;
+- every simulated source-loop reset releases retained frame references; and
+- post-warm-up sampled process-RSS growth and span each remain at or below 32 MiB.
+
+Exact Hold Image capacity is checked immediately before every loop reset. RSS is sampled at comparable
+post-reset lifecycle points, so the growth/span comparison detects memory that remains across loops
+rather than the expected bounded history. RSS is intentionally the sole process-memory criterion and
+includes Python allocator and native-library behavior visible to the OS, so the gate uses a documented
+allowance rather than exact equality. This is accelerated source-clock evidence, not 30 minutes of
+wall-clock operation. Use CLI overrides such as `--ticks`, `--sample-interval`, `--width`, and
+`--height` only for local diagnostics; the no-argument command is canonical.
+
 Automated tests never access physical devices. Camera behavior is tested through injected capture
 factories, MIDI through `MockMidiBackend`, audio by calling the callback with preallocated arrays,
 and PyAV through a generated temporary MP4.

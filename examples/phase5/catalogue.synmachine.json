@@ -1,0 +1,725 @@
+{
+  "application_version": "0.1.0",
+  "connections": [],
+  "document_id": "51000000-0000-0000-0000-000000000000",
+  "document_settings": {},
+  "groups": [],
+  "nodes": [
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000001",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        0.0,
+        0.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.add_noise",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000002",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        300.0,
+        0.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.add_scalar",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000003",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        600.0,
+        0.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.blend_images",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000004",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        900.0,
+        0.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.brightness",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000005",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        1200.0,
+        0.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.canny",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000006",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        1500.0,
+        0.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.change_colour_space",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000007",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        0.0,
+        260.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.clamp",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000008",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        300.0,
+        260.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.colour_levels",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000009",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        600.0,
+        260.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.combine_channels",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000010",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        900.0,
+        260.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.contrast",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000011",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        1200.0,
+        260.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.convolve",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000012",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        1500.0,
+        260.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.crop",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000013",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        0.0,
+        520.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.dilate",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000014",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        300.0,
+        520.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.divide_scalar",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000015",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        600.0,
+        520.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.erode",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000016",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        900.0,
+        520.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.flip",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000017",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        1200.0,
+        520.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.gamma",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000018",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        1500.0,
+        520.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.gaussian_blur",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000019",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        0.0,
+        780.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.high_pass",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000020",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        300.0,
+        780.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.hold_image",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000021",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        600.0,
+        780.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.hue",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000022",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        900.0,
+        780.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.invert_colour",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000023",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        1200.0,
+        780.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.low_pass",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000024",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        1500.0,
+        780.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.multiply_scalar",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000025",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        0.0,
+        1040.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.opacity",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000026",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        300.0,
+        1040.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.posterize",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000027",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        600.0,
+        1040.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.resize",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000028",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        900.0,
+        1040.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.rotate",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000029",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        1200.0,
+        1040.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.saturation",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000030",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        1500.0,
+        1040.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.separate_channels",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000031",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        0.0,
+        1300.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.sharpen",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000032",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        300.0,
+        1300.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.stretch_contrast",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000033",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        600.0,
+        1300.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.threshold",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000034",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        900.0,
+        1300.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.to_luminance",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000035",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        1200.0,
+        1300.0
+      ],
+      "size": null,
+      "type_id": "synmachine.input.load_camera",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000036",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        1500.0,
+        1300.0
+      ],
+      "size": null,
+      "type_id": "synmachine.input.load_video",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000037",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        0.0,
+        1560.0
+      ],
+      "size": null,
+      "type_id": "synmachine.output.generate_audio",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000038",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        300.0,
+        1560.0
+      ],
+      "size": null,
+      "type_id": "synmachine.output.send_midi",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000039",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        600.0,
+        1560.0
+      ],
+      "size": null,
+      "type_id": "synmachine.synesthesia.channel_to_pitch",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000040",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        900.0,
+        1560.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.channel_statistics",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000041",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        1200.0,
+        1560.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.compare",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000042",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        1500.0,
+        1560.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.conditional",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000043",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        0.0,
+        1820.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.float_to_integer",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000044",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        300.0,
+        1820.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.logic",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000045",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        600.0,
+        1820.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.math",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000046",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        900.0,
+        1820.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.number",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000047",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        1200.0,
+        1820.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.pass_through",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000048",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        1500.0,
+        1820.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.remap_number",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000049",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        0.0,
+        2080.0
+      ],
+      "size": null,
+      "type_id": "synmachine.visualization.channel_display",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000050",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        300.0,
+        2080.0
+      ],
+      "size": null,
+      "type_id": "synmachine.visualization.display_image_data",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "51000000-0000-0000-0000-000000000051",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        600.0,
+        2080.0
+      ],
+      "size": null,
+      "type_id": "synmachine.visualization.note_visualizer",
+      "ui_state": {},
+      "user_label": null
+    }
+  ],
+  "schema_version": 1,
+  "ui_state": {}
+}
