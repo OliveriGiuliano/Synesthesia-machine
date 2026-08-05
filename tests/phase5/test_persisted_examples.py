@@ -25,14 +25,14 @@ CANNY_ID = UUID("52000000-0000-0000-0000-000000000008")
 CHANNEL_DISPLAY_ID = UUID("52000000-0000-0000-0000-000000000009")
 
 
-def test_catalogue_loads_every_registry_definition_exactly_once() -> None:
+def test_catalogue_preserves_every_frozen_phase5_definition_exactly_once() -> None:
     registry = create_application_registry()
     snapshot = load_graph(CATALOGUE_PATH, registry)
     expected = tuple(definition.type_id for definition in registry.definitions())
     actual = tuple(node.type_id for node in snapshot.nodes)
 
-    assert actual == expected
     assert len(actual) == len(set(actual)) == 51
+    assert set(actual) <= set(expected)
     assert not snapshot.connections
 
     compilation = GraphCompiler(registry).compile(snapshot)

@@ -24,6 +24,7 @@ from synesthesia_machine.nodes.base import (
     TypeVariable,
 )
 from synesthesia_machine.nodes.registry import NodeRegistry
+from synesthesia_machine.nodes.utility.midi import create_midi_utility_definitions
 from synesthesia_machine.nodes.utility.scalar_bridges import create_scalar_bridge_definitions
 
 T = TypeVariable("T")
@@ -335,6 +336,7 @@ def create_utility_registry() -> NodeRegistry:
             required_input_resolver=_math_required,
             aliases=("arithmetic", "calculator", "add", "subtract", "multiply", "divide"),
         ),
+        *create_midi_utility_definitions(),
         *create_scalar_bridge_definitions(),
     )
     return NodeRegistry(definitions)

@@ -1,5 +1,7 @@
 """Final Phase 5 catalogue architecture and ordering checks."""
 
+from pathlib import Path
+
 from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.nodes.image import create_image_definitions
 from synesthesia_machine.nodes.image.catalogue import (
@@ -15,6 +17,7 @@ from synesthesia_machine.nodes.image.utilities import (
     ChangeColourSpaceRuntime,
     create_utility_definitions,
 )
+from synesthesia_machine.persistence import load_graph
 
 EXPECTED_IMAGE_TYPE_IDS = (
     "synmachine.image.resize",
@@ -52,6 +55,7 @@ EXPECTED_IMAGE_TYPE_IDS = (
     "synmachine.image.to_luminance",
     "synmachine.image.hold_image",
 )
+PHASE5_CATALOGUE_PATH = Path("examples/phase5/catalogue.synmachine.json")
 
 
 def test_image_catalogue_has_exact_stable_order_and_unique_type_ids() -> None:
@@ -72,11 +76,15 @@ def test_phase3_core_facade_preserves_runtime_and_catalogue_imports() -> None:
     )
 
 
-def test_builtin_registry_contains_51_unique_definitions() -> None:
-    definitions = create_application_registry().definitions()
+def test_builtin_registry_preserves_frozen_phase5_catalogue_as_51_definition_subset() -> None:
+    registry = create_application_registry()
+    definitions = registry.definitions()
     type_ids = tuple(definition.type_id for definition in definitions)
+    phase5_ids = {node.type_id for node in load_graph(PHASE5_CATALOGUE_PATH, registry).nodes}
 
-    assert len(type_ids) == len(set(type_ids)) == 51
+    assert len(type_ids) == len(set(type_ids))
+    assert len(phase5_ids) == 51
+    assert phase5_ids <= set(type_ids)
     assert tuple(type_id for type_id in type_ids if type_id.startswith("synmachine.image.")) == (
         tuple(sorted(EXPECTED_IMAGE_TYPE_IDS))
     )

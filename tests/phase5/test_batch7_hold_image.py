@@ -166,7 +166,7 @@ def test_hold_image_metadata_is_exact_and_registered_last() -> None:
     assert all(parameter.update_mode is ParameterUpdateMode.RECOMPILE for parameter in parameters)
     assert create_image_definitions()[-1].type_id == HOLD_IMAGE_TYPE_ID
     registry = create_application_registry()
-    assert len(registry.definitions()) == 51
+    assert len(registry.definitions()) >= 51
     assert registry.require(HOLD_IMAGE_TYPE_ID).type_id == HOLD_IMAGE_TYPE_ID
 
 

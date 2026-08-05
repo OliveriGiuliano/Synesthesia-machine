@@ -38,6 +38,17 @@ BATCH6_IDS = (
     "synmachine.utility.float_to_integer",
     "synmachine.visualization.channel_display",
 )
+PHASE5_UTILITY_IDS = {
+    "synmachine.utility.channel_statistics",
+    "synmachine.utility.compare",
+    "synmachine.utility.conditional",
+    "synmachine.utility.float_to_integer",
+    "synmachine.utility.logic",
+    "synmachine.utility.math",
+    "synmachine.utility.number",
+    "synmachine.utility.pass_through",
+    "synmachine.utility.remap_number",
+}
 STATISTICS = ("MEAN", "MEDIAN", "MINIMUM", "MAXIMUM", "STANDARD_DEVIATION", "PERCENTILE")
 CONVERSION_MODES = ("ROUND", "FLOOR", "CEIL", "TRUNCATE")
 
@@ -393,7 +404,9 @@ def test_batch6_utility_entry_point_remains_phase1_compatible() -> None:
     registry = create_utility_registry()
     assert registry.require("synmachine.utility.number").type_id == "synmachine.utility.number"
     assert registry.require("synmachine.utility.channel_statistics").type_id == BATCH6_IDS[0]
-    assert len(registry.definitions()) == 9
+    current_ids = {definition.type_id for definition in registry.definitions()}
+    assert len(PHASE5_UTILITY_IDS) == 9
+    assert current_ids >= PHASE5_UTILITY_IDS
 
 
 def test_channel_display_ignores_nodata_publications() -> None:
