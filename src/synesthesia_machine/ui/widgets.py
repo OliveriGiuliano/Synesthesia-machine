@@ -29,6 +29,7 @@ from synesthesia_machine.contracts import NodeMemoryDiagnostic
 from synesthesia_machine.graph import LiteralValue
 from synesthesia_machine.nodes import NodeDefinition, NodeRegistry
 from synesthesia_machine.ui.canvas import NODE_MIME_TYPE
+from synesthesia_machine.ui.musical_controls import MusicalParameterEditor
 from synesthesia_machine.ui.parameter_editors import create_parameter_editor
 from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.view_models import ConnectionViewModel, NodeViewModel
@@ -286,7 +287,19 @@ class InspectorPanel(QWidget):
         self.description.setText(node.description)
         self.form.addRow("Type", QLabel(node.type_id, self.form_container))
         self.form.addRow("Category", QLabel(node.category, self.form_container))
+        grouped_parameter_ids = {
+            parameter.spec.id for group in node.parameter_groups for parameter in group.parameters
+        }
+        for group in node.parameter_groups:
+            editor = MusicalParameterEditor(
+                group,
+                partial(self._set_parameter, node.node_id),
+                self.form_container,
+            )
+            self.form.addRow(editor)
         for parameter in node.parameters:
+            if parameter.spec.id in grouped_parameter_ids:
+                continue
             callback = partial(self._set_parameter, node.node_id, parameter.spec.id)
             editor = create_parameter_editor(parameter, callback)
             self.form.addRow(parameter.spec.label, editor)

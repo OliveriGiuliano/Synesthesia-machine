@@ -279,7 +279,10 @@ class GraphCompiler:
                     )
                 )
                 continue
-            if connection.destination_port_id not in _input_socket_ids(destination_definition):
+            destination_parameter = destination_definition.parameter(connection.destination_port_id)
+            if destination_definition.input(connection.destination_port_id) is None and not (
+                destination_parameter is not None and destination_parameter.connectable
+            ):
                 issues.append(
                     _error(
                         "unknown_input_port",
@@ -322,9 +325,12 @@ class GraphCompiler:
     ) -> dict[tuple[UUID, str, bool], PortType]:
         groups = _TypeGroups()
         expressions: dict[tuple[UUID, str, bool], PortType | TypeVariable] = {}
+        connected_inputs: dict[UUID, set[str]] = defaultdict(set)
+        for connection in connections:
+            connected_inputs[connection.destination_node_id].add(connection.destination_port_id)
         for node_id, definition in definitions.items():
             node_parameters = parameters.get(node_id, {})
-            for port in definition.inputs:
+            for port in definition.input_ports(connected_inputs[node_id]):
                 expression = definition.port_type(
                     port.id, is_output=False, parameters=node_parameters
                 )
@@ -555,7 +561,10 @@ class GraphCompiler:
             if connection.destination_node_id == node.id
         }
         bindings: dict[str, InputBinding] = {}
-        for port_id, connection in incoming.items():
+        for port_id in _input_socket_ids(definition, incoming):
+            connection = incoming.get(port_id)
+            if connection is None:
+                continue
             source_type = resolved_types[
                 (connection.source_node_id, connection.source_port_id, True)
             ]
@@ -571,7 +580,7 @@ class GraphCompiler:
             )
         input_types = {
             port_id: resolved_types[(node.id, port_id, False)]
-            for port_id in _input_socket_ids(definition)
+            for port_id in _input_socket_ids(definition, incoming)
         }
         output_types = {
             port.id: resolved_types[(node.id, port.id, True)] for port in definition.outputs
@@ -594,9 +603,11 @@ def types_compatible(source: PortType, destination: PortType) -> bool:
     return source is destination or (source is PortType.INT and destination is PortType.FLOAT)
 
 
-def _input_socket_ids(definition: NodeDefinition) -> tuple[str, ...]:
+def _input_socket_ids(
+    definition: NodeDefinition, connected_port_ids: Iterable[str] = ()
+) -> tuple[str, ...]:
     return (
-        *(port.id for port in definition.inputs),
+        *(port.id for port in definition.input_ports(connected_port_ids)),
         *(parameter.id for parameter in definition.parameters if parameter.connectable),
     )
 

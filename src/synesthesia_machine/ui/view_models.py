@@ -8,7 +8,12 @@ from uuid import UUID
 
 from synesthesia_machine.contracts import ParameterValue, PortType
 from synesthesia_machine.graph import GraphSnapshot, LiteralValue, ValidationIssue, ValidationReport
-from synesthesia_machine.nodes import NodeDefinition, NodeRegistry, ParameterSpec
+from synesthesia_machine.nodes import (
+    NodeDefinition,
+    NodeRegistry,
+    ParameterGroupSpec,
+    ParameterSpec,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +35,12 @@ class ParameterViewModel:
 
 
 @dataclass(frozen=True, slots=True)
+class ParameterGroupViewModel:
+    spec: ParameterGroupSpec
+    parameters: tuple[ParameterViewModel, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class NodeViewModel:
     node_id: UUID
     type_id: str
@@ -40,6 +51,7 @@ class NodeViewModel:
     inputs: tuple[PortViewModel, ...]
     outputs: tuple[PortViewModel, ...]
     parameters: tuple[ParameterViewModel, ...]
+    parameter_groups: tuple[ParameterGroupViewModel, ...]
     issues: tuple[ValidationIssue, ...]
     collapsed: bool
 
@@ -83,6 +95,11 @@ def project_graph(
     for node in snapshot.nodes:
         definition = registry.require(node.type_id)
         parameters, _ = definition.parameter_values(node.parameters)
+        connected_port_ids = {
+            connection.destination_port_id
+            for connection in snapshot.connections
+            if connection.destination_node_id == node.id
+        }
         inputs = tuple(
             PortViewModel(
                 node.id,
@@ -92,7 +109,7 @@ def project_graph(
                 False,
                 connected=(node.id, port.id) in incoming,
             )
-            for port in definition.inputs
+            for port in definition.input_ports(connected_port_ids, include_next_variadic=True)
         )
         connectable = tuple(
             PortViewModel(
@@ -129,6 +146,14 @@ def project_graph(
             )
             for parameter in definition.parameters
         )
+        parameter_by_id = {parameter.spec.id: parameter for parameter in parameter_rows}
+        parameter_groups = tuple(
+            ParameterGroupViewModel(
+                group,
+                tuple(parameter_by_id[parameter_id] for parameter_id in group.parameter_ids),
+            )
+            for group in definition.parameter_groups
+        )
         nodes.append(
             NodeViewModel(
                 node.id,
@@ -140,6 +165,7 @@ def project_graph(
                 (*inputs, *connectable),
                 outputs,
                 parameter_rows,
+                parameter_groups,
                 tuple(node_issues.get(node.id, ())),
                 node.collapsed,
             )

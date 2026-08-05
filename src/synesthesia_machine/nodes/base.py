@@ -48,6 +48,35 @@ class InputPortSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class VariadicInputSpec:
+    """Metadata for an unbounded family of one-connection indexed input sockets."""
+
+    id_prefix: str
+    label: str
+    value_type: PortTypeExpression
+    minimum_count: int = 1
+
+    def __post_init__(self) -> None:
+        _validate_stable_id(self.id_prefix, "variadic input prefix")
+        if self.minimum_count < 1:
+            raise ValueError("Variadic input minimum_count must be at least 1")
+
+    def index(self, port_id: str) -> int | None:
+        match = re.fullmatch(rf"{re.escape(self.id_prefix)}_([1-9][0-9]*)", port_id)
+        return None if match is None else int(match.group(1))
+
+    def port(self, index: int) -> InputPortSpec:
+        if index < 1:
+            raise ValueError("Variadic input index must be at least 1")
+        return InputPortSpec(
+            f"{self.id_prefix}_{index}",
+            f"{self.label} {index}",
+            self.value_type,
+            required=index <= self.minimum_count,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class OutputPortSpec:
     id: str
     label: str
@@ -98,6 +127,23 @@ class ParameterSpec:
             if self.maximum is not None and value > self.maximum:
                 return f"must be at most {self.maximum}"
         return None
+
+
+@dataclass(frozen=True, slots=True)
+class ParameterGroupSpec:
+    """Headless metadata for presenting related parameters as one reusable control."""
+
+    id: str
+    label: str
+    parameter_ids: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        _validate_stable_id(self.id, "parameter group")
+        if not self.parameter_ids:
+            raise ValueError("Parameter group must contain at least one parameter")
+        for parameter_id in self.parameter_ids:
+            _validate_stable_id(parameter_id, "grouped parameter")
+        _ensure_unique(self.parameter_ids, "grouped parameter")
 
 
 class ExecutionKind(StrEnum):
@@ -176,6 +222,8 @@ class NodeDefinition:
     required_input_resolver: RequiredInputResolver | None = None
     aliases: tuple[str, ...] = ()
     parameter_validator: ParameterValidator | None = None
+    variadic_input: VariadicInputSpec | None = None
+    parameter_groups: tuple[ParameterGroupSpec, ...] = ()
 
     def __post_init__(self) -> None:
         if not _TYPE_ID.fullmatch(self.type_id):
@@ -187,13 +235,57 @@ class NodeDefinition:
         _ensure_unique((port.id for port in self.inputs), "input port")
         _ensure_unique((port.id for port in self.outputs), "output port")
         _ensure_unique((parameter.id for parameter in self.parameters), "parameter")
+        _ensure_unique((group.id for group in self.parameter_groups), "parameter group")
+        parameter_ids = {parameter.id for parameter in self.parameters}
+        grouped_parameter_ids = tuple(
+            parameter_id for group in self.parameter_groups for parameter_id in group.parameter_ids
+        )
+        _ensure_unique(grouped_parameter_ids, "grouped parameter")
+        unknown_grouped = set(grouped_parameter_ids) - parameter_ids
+        if unknown_grouped:
+            names = ", ".join(sorted(unknown_grouped))
+            raise ValueError(f"Parameter groups reference unknown parameters: {names}")
+        if self.variadic_input is not None:
+            if any(self.variadic_input.index(port.id) is not None for port in self.inputs):
+                raise ValueError("Fixed input IDs must not overlap the variadic input family")
+            if any(
+                self.variadic_input.index(parameter.id) is not None for parameter in self.parameters
+            ):
+                raise ValueError("Parameter IDs must not overlap the variadic input family")
         if any(not alias.strip() for alias in self.aliases):
             msg = "Node aliases must not be empty"
             raise ValueError(msg)
         _ensure_unique((alias.casefold() for alias in self.aliases), "node alias")
 
     def input(self, port_id: str) -> InputPortSpec | None:
-        return next((port for port in self.inputs if port.id == port_id), None)
+        fixed = next((port for port in self.inputs if port.id == port_id), None)
+        if fixed is not None or self.variadic_input is None:
+            return fixed
+        index = self.variadic_input.index(port_id)
+        return None if index is None else self.variadic_input.port(index)
+
+    def input_ports(
+        self,
+        connected_port_ids: Iterable[str] = (),
+        *,
+        include_next_variadic: bool = False,
+    ) -> tuple[InputPortSpec, ...]:
+        """Return fixed and effective variadic sockets in deterministic numeric order."""
+
+        if self.variadic_input is None:
+            return self.inputs
+        connected_indexes = {
+            index
+            for port_id in connected_port_ids
+            if (index := self.variadic_input.index(port_id)) is not None
+        }
+        indexes = set(range(1, self.variadic_input.minimum_count + 1)) | connected_indexes
+        if include_next_variadic and indexes <= connected_indexes:
+            next_index = 1
+            while next_index in connected_indexes:
+                next_index += 1
+            indexes.add(next_index)
+        return (*self.inputs, *(self.variadic_input.port(index) for index in sorted(indexes)))
 
     def output(self, port_id: str) -> OutputPortSpec | None:
         return next((port for port in self.outputs if port.id == port_id), None)
@@ -240,8 +332,15 @@ class NodeDefinition:
 
     def required_inputs(self, parameters: Mapping[str, ParameterValue]) -> frozenset[str]:
         if self.required_input_resolver is not None:
-            return frozenset(self.required_input_resolver(parameters))
-        return frozenset(port.id for port in self.inputs if port.required)
+            required = set(self.required_input_resolver(parameters))
+        else:
+            required = {port.id for port in self.inputs if port.required}
+        if self.variadic_input is not None:
+            required.update(
+                self.variadic_input.port(index).id
+                for index in range(1, self.variadic_input.minimum_count + 1)
+            )
+        return frozenset(required)
 
 
 @dataclass(frozen=True, slots=True)

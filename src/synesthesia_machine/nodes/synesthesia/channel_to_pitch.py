@@ -15,13 +15,7 @@ from synesthesia_machine.contracts import (
     PortType,
     RuntimeValue,
 )
-from synesthesia_machine.midi import (
-    BUILTIN_SCALE_REGISTRY,
-    PITCH_CLASS_NAMES,
-    MusicalSelector,
-    resolve_musical_selector,
-    select_midi_notes,
-)
+from synesthesia_machine.midi import MusicalSelector, select_midi_notes
 from synesthesia_machine.nodes.base import (
     ExecutionKind,
     ExpectedNodeError,
@@ -30,6 +24,12 @@ from synesthesia_machine.nodes.base import (
     OutputPortSpec,
     ParameterSpec,
     ResetReason,
+)
+from synesthesia_machine.nodes.synesthesia.musical import (
+    COMMON_MUSICAL_PARAMETER_GROUP,
+    common_musical_parameter_specs,
+    resolve_common_musical_settings,
+    validate_common_musical_parameters,
 )
 
 CHANNEL_TO_PITCH_TYPE_ID = "synmachine.synesthesia.channel_to_pitch"
@@ -47,18 +47,12 @@ class ChannelToPitchRuntime:
         context: FrameContext,
     ) -> Mapping[str, RuntimeValue]:
         try:
-            selector = resolve_musical_selector(
-                _text(parameters["root_pitch_class"]),
-                _text(parameters["scale"]),
-                _integer(parameters["midi_minimum"]),
-                _integer(parameters["midi_maximum"]),
-                custom_pitch_class_mask=_text(parameters["custom_scale_mask"]),
-            )
+            musical = resolve_common_musical_settings(parameters)
             midi = channel_histogram_to_midi_state(
                 _channel(inputs["value"]),
                 node_id=self.node_id,
                 context=context,
-                selector=selector,
+                selector=musical.selector,
                 parameter_a=_optional_channel(inputs.get("parameter_a")),
                 parameter_b=_optional_channel(inputs.get("parameter_b")),
                 occupancy_threshold_percent=_number(parameters["occupancy_threshold_percent"]),
@@ -75,10 +69,10 @@ class ChannelToPitchRuntime:
                     else None
                 ),
                 ignore_non_finite=_boolean(parameters["ignore_non_finite"]),
-                midi_channel=_integer(parameters["midi_channel"]) - 1,
-                maximum_polyphony=_integer(parameters["maximum_polyphony"]),
-                minimum_velocity=_integer(parameters["minimum_velocity"]),
-                maximum_velocity=_integer(parameters["maximum_velocity"]),
+                midi_channel=musical.midi_channel,
+                maximum_polyphony=musical.maximum_polyphony,
+                minimum_velocity=musical.minimum_velocity,
+                maximum_velocity=musical.maximum_velocity,
             )
         except ValueError as error:
             raise ExpectedNodeError("invalid_channel_to_pitch", str(error)) from error
@@ -185,55 +179,7 @@ def create_synesthesia_definitions() -> tuple[NodeDefinition, ...]:
             ),
             (OutputPortSpec("midi", "MIDI state", PortType.MIDI_STATE),),
             (
-                ParameterSpec(
-                    "root_pitch_class",
-                    "Root note",
-                    PortType.STRING,
-                    "C",
-                    choices=PITCH_CLASS_NAMES,
-                ),
-                ParameterSpec(
-                    "scale",
-                    "Scale",
-                    PortType.STRING,
-                    "chromatic",
-                    choices=BUILTIN_SCALE_REGISTRY.ids,
-                ),
-                ParameterSpec(
-                    "custom_scale_mask",
-                    "Custom scale mask",
-                    PortType.STRING,
-                    "111111111111",
-                    help_text="Twelve 0/1 values from the selected root pitch class.",
-                ),
-                ParameterSpec(
-                    "midi_minimum", "Minimum MIDI note", PortType.INT, 0, minimum=0, maximum=127
-                ),
-                ParameterSpec(
-                    "midi_maximum", "Maximum MIDI note", PortType.INT, 127, minimum=0, maximum=127
-                ),
-                ParameterSpec(
-                    "midi_channel", "MIDI channel", PortType.INT, 1, minimum=1, maximum=16
-                ),
-                ParameterSpec(
-                    "maximum_polyphony",
-                    "Maximum polyphony",
-                    PortType.INT,
-                    16,
-                    minimum=1,
-                    maximum=128,
-                ),
-                ParameterSpec(
-                    "minimum_velocity", "Minimum velocity", PortType.INT, 1, minimum=1, maximum=127
-                ),
-                ParameterSpec(
-                    "maximum_velocity",
-                    "Maximum velocity",
-                    PortType.INT,
-                    127,
-                    minimum=1,
-                    maximum=127,
-                ),
+                *common_musical_parameter_specs(),
                 ParameterSpec(
                     "occupancy_threshold_percent",
                     "Occupancy threshold (%)",
@@ -289,24 +235,13 @@ def create_synesthesia_definitions() -> tuple[NodeDefinition, ...]:
             ChannelToPitchRuntime,
             aliases=("histogram notes", "channel histogram", "image to midi"),
             parameter_validator=_validate_parameters,
+            parameter_groups=(COMMON_MUSICAL_PARAMETER_GROUP,),
         ),
     )
 
 
 def _validate_parameters(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
-    errors: list[str] = []
-    try:
-        resolve_musical_selector(
-            _text(parameters["root_pitch_class"]),
-            _text(parameters["scale"]),
-            _integer(parameters["midi_minimum"]),
-            _integer(parameters["midi_maximum"]),
-            custom_pitch_class_mask=_text(parameters["custom_scale_mask"]),
-        )
-    except ValueError as error:
-        errors.append(str(error))
-    if _integer(parameters["minimum_velocity"]) > _integer(parameters["maximum_velocity"]):
-        errors.append("Minimum velocity cannot exceed maximum velocity")
+    errors = list(validate_common_musical_parameters(parameters))
     if _boolean(parameters["maximum_a_enabled"]) and _number(parameters["minimum_a"]) > _number(
         parameters["maximum_a"]
     ):
@@ -354,19 +289,7 @@ def _number(value: object) -> float:
     raise TypeError(f"Expected numeric value, got {type(value).__name__}")
 
 
-def _integer(value: object) -> int:
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    raise TypeError(f"Expected integer value, got {type(value).__name__}")
-
-
 def _boolean(value: object) -> bool:
     if isinstance(value, bool):
         return value
     raise TypeError(f"Expected boolean value, got {type(value).__name__}")
-
-
-def _text(value: object) -> str:
-    if isinstance(value, str):
-        return value
-    raise TypeError(f"Expected string value, got {type(value).__name__}")

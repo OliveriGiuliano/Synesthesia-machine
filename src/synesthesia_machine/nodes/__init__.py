@@ -11,10 +11,12 @@ from synesthesia_machine.nodes.base import (
     NodeRuntime,
     OutputPortSpec,
     PanicCapableRuntime,
+    ParameterGroupSpec,
     ParameterSpec,
     ParameterUpdateMode,
     ResetReason,
     TypeVariable,
+    VariadicInputSpec,
 )
 from synesthesia_machine.nodes.registry import NodeRegistry
 
@@ -30,8 +32,10 @@ __all__ = [
     "NodeRuntime",
     "OutputPortSpec",
     "PanicCapableRuntime",
+    "ParameterGroupSpec",
     "ParameterSpec",
     "ParameterUpdateMode",
     "ResetReason",
     "TypeVariable",
+    "VariadicInputSpec",
 ]
