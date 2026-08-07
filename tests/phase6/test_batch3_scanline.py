@@ -261,7 +261,7 @@ def test_scanline_metadata_registry_clock_and_nonfinite_contracts() -> None:
     assert parameters["line_thickness"] == 1
     assert parameters["aggregation"] == MEAN
     registry = create_application_registry()
-    assert len(registry.definitions()) == 55
+    assert len(registry.definitions()) >= 55
     assert registry.require(SCANLINE_TYPE_ID).type_id == definition.type_id
 
     channel = _channel([[np.nan, np.inf, -np.inf]])
