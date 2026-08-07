@@ -1,10 +1,13 @@
 """Image/channel-to-musical-state node definitions."""
 
+from synesthesia_machine.nodes import NodeDefinition
 from synesthesia_machine.nodes.synesthesia.channel_to_pitch import (
     CHANNEL_TO_PITCH_TYPE_ID,
     ChannelToPitchRuntime,
     channel_histogram_to_midi_state,
-    create_synesthesia_definitions,
+)
+from synesthesia_machine.nodes.synesthesia.channel_to_pitch import (
+    create_synesthesia_definitions as create_channel_to_pitch_definitions,
 )
 from synesthesia_machine.nodes.synesthesia.musical import (
     COMMON_MUSICAL_PARAMETER_GROUP,
@@ -15,17 +18,44 @@ from synesthesia_machine.nodes.synesthesia.musical import (
     resolve_common_musical_settings,
     validate_common_musical_parameters,
 )
+from synesthesia_machine.nodes.synesthesia.scanline import (
+    BOTTOM_TO_TOP,
+    MAXIMUM,
+    MEAN,
+    PING_PONG,
+    SCANLINE_TYPE_ID,
+    TOP_TO_BOTTOM,
+    ScanlineRuntime,
+    create_scanline_definitions,
+    scanline_to_midi_state,
+)
+
+
+def create_synesthesia_definitions() -> tuple[NodeDefinition, ...]:
+    """Return the current ordered visual-to-musical node catalogue."""
+
+    return (*create_channel_to_pitch_definitions(), *create_scanline_definitions())
+
 
 __all__ = [
+    "BOTTOM_TO_TOP",
     "CHANNEL_TO_PITCH_TYPE_ID",
     "COMMON_MUSICAL_PARAMETER_GROUP",
     "COMMON_MUSICAL_PARAMETER_IDS",
+    "MAXIMUM",
+    "MEAN",
+    "PING_PONG",
+    "SCANLINE_TYPE_ID",
+    "TOP_TO_BOTTOM",
     "ChannelToPitchRuntime",
     "CommonMusicalSettings",
+    "ScanlineRuntime",
     "channel_histogram_to_midi_state",
     "common_musical_parameter_specs",
+    "create_scanline_definitions",
     "create_synesthesia_definitions",
     "midi_state_from_candidates",
     "resolve_common_musical_settings",
+    "scanline_to_midi_state",
     "validate_common_musical_parameters",
 ]
