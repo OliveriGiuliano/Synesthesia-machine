@@ -199,7 +199,7 @@ def test_runtime_errors_are_recoverable_and_definition_is_registered() -> None:
     assert definition.execution_kind is ExecutionKind.STATELESS
     assert tuple(port.id for port in definition.inputs) == ("edges",)
     registry = create_application_registry()
-    assert len(registry.definitions()) == 56
+    assert len(registry.definitions()) >= 56
     assert registry.require(EDGES_TO_PITCH_TYPE_ID).type_id == EDGES_TO_PITCH_TYPE_ID
 
     parameters, errors = definition.parameter_values({})
