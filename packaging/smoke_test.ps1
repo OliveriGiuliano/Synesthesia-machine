@@ -60,7 +60,7 @@ if ($developmentLeaks) {
 $requiredNativePatterns = @(
     'avcodec*.dll',
     'cv2*.pyd',
-    'rtmidi*.pyd',
+    '*rtmidi*.pyd',
     'libportaudio*.dll'
 )
 foreach ($pattern in $requiredNativePatterns) {

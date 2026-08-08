@@ -154,6 +154,7 @@ def test_build_and_clean_machine_scripts_enforce_release_boundaries() -> None:
     assert "Assert-NativeSuccess -Operation 'static checks'" in build
     assert "libportaudio64bit.dll" in build
     assert "--packaged-smoke-report" in smoke
+    assert "'*rtmidi*.pyd'" in smoke
     assert 'PATH\'] = "$env:SystemRoot\\System32;$env:SystemRoot"' in smoke
     assert "Remove-Item -LiteralPath $portableCopy" in smoke
     assert "documentSentinel" in smoke
