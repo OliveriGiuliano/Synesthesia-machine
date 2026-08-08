@@ -371,6 +371,7 @@ def _run_once(
             raise TimeoutError("reference source did not activate")
         client.play(SOURCE_ID)
         _pump_for(application, warmup_s)
+        client.set_profiling_enabled(True)
         client.reset_profiling()
         started_metrics = client.metrics()
         started_ns = time.perf_counter_ns()

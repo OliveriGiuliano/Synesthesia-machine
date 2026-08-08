@@ -111,6 +111,9 @@ class Scheduler:
     def borrowed_runtime_ids(self) -> frozenset[UUID]:
         return frozenset(self._borrowed_runtime_ids)
 
+    def set_profiling_hook(self, hook: ProfilingHook | None) -> None:
+        self._profiling_hook = hook
+
     def execute_tick(
         self, context: FrameContext, *, source_values: Mapping[PortKey, RuntimeValue] | None = None
     ) -> TickResult:

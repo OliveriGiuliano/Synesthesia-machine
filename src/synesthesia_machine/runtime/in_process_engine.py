@@ -440,7 +440,8 @@ class InProcessEngineClient:
     ) -> None:
         self._lock = threading.RLock()
         self._profiler = RuntimeProfiler()
-        self._facade = EngineFacade(registry, profiling_hook=self._profiler.record)
+        self._facade = EngineFacade(registry)
+        self._profiling_enabled = False
         self._video_source_factory = video_source_factory or VideoSourceService
         self._camera_source_factory = camera_source_factory or CameraSourceService
         self._worker_clock = worker_clock
@@ -629,6 +630,15 @@ class InProcessEngineClient:
 
     def node_profiles(self) -> tuple[NodeProfile, ...]:
         return self._profiler.profiles()
+
+    def set_profiling_enabled(self, enabled: bool) -> None:
+        with self._lock:
+            self._ensure_open()
+            if enabled == self._profiling_enabled:
+                return
+            self._profiling_enabled = enabled
+            self._profiler.reset()
+            self._facade.set_profiling_hook(self._profiler.record if enabled else None)
 
     def reset_profiling(self) -> None:
         self._profiler.reset()

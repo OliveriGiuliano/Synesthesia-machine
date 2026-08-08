@@ -107,6 +107,21 @@ def test_resize_and_luminance_do_not_mutate_shared_input() -> None:
     assert np.array_equal(image.data, before)
 
 
+def test_resize_returns_same_immutable_frame_when_dimensions_already_match() -> None:
+    image = _image(np.zeros((4, 4, 3), dtype=np.float32))
+
+    resized = resize_image(
+        image,
+        4,
+        4,
+        preserve_aspect=False,
+        fit_mode=FitMode.STRETCH,
+        interpolation=Interpolation.AUTO,
+    )
+
+    assert resized is image
+
+
 def test_display_transform_sanitizes_non_finite_values() -> None:
     image = _image(np.array([[[np.nan, np.inf, -np.inf], [0.5, 0.25, 1.5]]], dtype=np.float32))
     preview = image_to_display_uint8(image)

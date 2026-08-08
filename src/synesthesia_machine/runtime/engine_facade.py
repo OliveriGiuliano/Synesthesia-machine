@@ -52,6 +52,11 @@ class EngineFacade:
     def active_plan(self) -> ExecutionPlan | None:
         return self._plan
 
+    def set_profiling_hook(self, hook: ProfilingHook | None) -> None:
+        self._profiling_hook = hook
+        if self._scheduler is not None:
+            self._scheduler.set_profiling_hook(hook)
+
     def activate(
         self,
         snapshot: GraphSnapshot,

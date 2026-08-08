@@ -13,7 +13,6 @@ from synesthesia_machine.contracts import (
     ChannelSemantic,
     ColorSpace,
     ImageFrame,
-    read_only_float32,
 )
 from synesthesia_machine.media.colour import color_space_descriptor
 
@@ -81,11 +80,12 @@ class FiniteReport:
 def frame_like(image: ImageFrame, data: NDArray[np.float32]) -> ImageFrame:
     """Create an immutable image with the source descriptor, clock, and provenance."""
 
-    result = np.asarray(data, dtype=np.float32)
+    result = np.ascontiguousarray(data, dtype=np.float32)
     if result.ndim == 2:
         result = result[..., None]
+    result.flags.writeable = False
     return ImageFrame(
-        read_only_float32(result),
+        result,
         image.color_space,
         image.channel_names,
         image.alpha_mode,

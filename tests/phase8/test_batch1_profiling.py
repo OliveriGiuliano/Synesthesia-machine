@@ -81,7 +81,9 @@ def test_process_profiler_query_and_reset_round_trip(tmp_path: Path) -> None:
     )
     try:
         assert client.node_profiles() == ()
+        client.set_profiling_enabled(True)
         client.reset_profiling()
         assert client.node_profiles() == ()
+        client.set_profiling_enabled(False)
     finally:
         client.close()

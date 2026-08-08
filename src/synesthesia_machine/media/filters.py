@@ -231,9 +231,6 @@ def canny_image(
 ) -> ChannelFrame:
     """Convert an image to luminance and emit a normalized immutable Canny edge mask."""
 
-    colour, _ = split_alpha(image.data, image.color_space)
-    if not np.all(np.isfinite(colour)):
-        raise ValueError("Canny input must contain only finite values")
     _require_normalized_threshold(low_threshold, "Canny low threshold")
     _require_normalized_threshold(high_threshold, "Canny high threshold")
     if high_threshold < low_threshold:
@@ -264,9 +261,11 @@ def canny_image(
         )
     except cv2.error as error:
         raise ValueError(f"Canny edge detection failed: {error}") from error
-    normalized = np.asarray(edges, dtype=np.float32) / np.float32(255.0)
+    normalized = np.ascontiguousarray(edges, dtype=np.float32)
+    normalized *= np.float32(1.0 / 255.0)
+    normalized.flags.writeable = False
     return ChannelFrame(
-        read_only_float32(normalized),
+        normalized,
         ChannelSemantic.LUMINANCE,
         0.0,
         1.0,

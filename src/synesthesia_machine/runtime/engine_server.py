@@ -51,6 +51,7 @@ from synesthesia_machine.contracts.engine_messages import (
     QueryNodeProfiles,
     QuerySourceStatus,
     ResetProfiling,
+    SetProfilingEnabled,
     SharedFrameReady,
     Shutdown,
     ShutdownAcknowledged,
@@ -96,6 +97,7 @@ _COMMAND_TYPES = (
     QueryNodeMemoryDiagnostics,
     QueryNodeProfiles,
     ResetProfiling,
+    SetProfilingEnabled,
     QueryMetrics,
     WaitUntilIdle,
     ConfigurePreviewSlot,
@@ -405,6 +407,9 @@ class EngineServer:
             )
         if isinstance(command, ResetProfiling):
             self._engine.reset_profiling()
+            return CommandAcknowledged(command.request_id, self._graph_revision)
+        if isinstance(command, SetProfilingEnabled):
+            self._engine.set_profiling_enabled(command.enabled)
             return CommandAcknowledged(command.request_id, self._graph_revision)
         if isinstance(command, QueryMetrics):
             metrics = self._engine.metrics()

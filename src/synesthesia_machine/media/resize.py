@@ -26,6 +26,8 @@ def resize_image(
     if not 1 <= width <= 8192 or not 1 <= height <= 8192:
         raise ValueError("resize width and height must be in the range 1..8192")
     source_height, source_width = image.data.shape[:2]
+    if (source_width, source_height) == (width, height):
+        return image
     if not preserve_aspect or fit_mode is FitMode.STRETCH:
         result = _resize(image.data, width, height, interpolation)
     elif fit_mode is FitMode.COVER:

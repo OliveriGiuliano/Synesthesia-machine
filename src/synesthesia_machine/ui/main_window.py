@@ -32,7 +32,13 @@ from synesthesia_machine.contracts import (
     SourceState,
 )
 from synesthesia_machine.diagnostics import create_diagnostic_bundle
-from synesthesia_machine.graph import AlignMode, DistributionAxis, GroupKind, ValidationIssue
+from synesthesia_machine.graph import (
+    AlignMode,
+    DistributionAxis,
+    GraphSnapshot,
+    GroupKind,
+    ValidationIssue,
+)
 from synesthesia_machine.nodes import ExecutionKind, NodeRegistry
 from synesthesia_machine.persistence import (
     GraphPersistenceError,
@@ -487,6 +493,7 @@ class MainWindow(QMainWindow):
         self._autosave_timer.timeout.connect(self._autosave)
         self._activation_timer.timeout.connect(self._activate_graph)
         self._preview_timer.timeout.connect(self._poll_previews)
+        self.preview_dock.visibilityChanged.connect(self._on_preview_visibility_changed)
         self._metrics_timer.timeout.connect(self._refresh_engine_status)
         self._profiler_timer.timeout.connect(self._refresh_profiles)
         self.profiler_dock.visibilityChanged.connect(self._on_profiler_visibility_changed)
@@ -932,7 +939,9 @@ class MainWindow(QMainWindow):
             return
         snapshot = self.session.document.snapshot()
         try:
-            activation = self.engine_client.activate(snapshot)
+            activation = self.engine_client.activate(
+                snapshot, demand_roots=self._runtime_demand_roots(snapshot)
+            )
         except (RuntimeError, TimeoutError) as error:
             self.statusBar().showMessage(f"Engine activation failed: {error}", 5000)
             return
@@ -948,6 +957,25 @@ class MainWindow(QMainWindow):
             f"Graph has {count} error(s); previous valid runtime remains active",
             5000,
         )
+
+    def _runtime_demand_roots(self, snapshot: GraphSnapshot) -> tuple[UUID, ...]:
+        include_visualizers = self.preview_dock.isVisible()
+        roots = (
+            node.id
+            for node in snapshot.nodes
+            if (
+                (kind := self.registry.require(node.type_id).execution_kind) is ExecutionKind.SINK
+                or (include_visualizers and kind is ExecutionKind.VISUALIZER)
+            )
+        )
+        return tuple(sorted(roots, key=str))
+
+    @Slot(bool)
+    def _on_preview_visibility_changed(self, visible: bool) -> None:
+        if not visible:
+            self._image_sequences.clear()
+            self._note_sequences.clear()
+        self._schedule_engine_activation()
 
     @Slot()
     def _poll_previews(self) -> None:
@@ -1008,6 +1036,12 @@ class MainWindow(QMainWindow):
 
     @Slot(bool)
     def _on_profiler_visibility_changed(self, visible: bool) -> None:
+        if not self._engine_closed:
+            try:
+                self.engine_client.set_profiling_enabled(visible)
+            except (RuntimeError, TimeoutError):
+                self.statusBar().showMessage("Could not change runtime profiling state", 3000)
+                return
         if visible and not self._engine_closed:
             self._profiler_timer.start()
             self._refresh_profiles()

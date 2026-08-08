@@ -60,6 +60,7 @@ from synesthesia_machine.contracts.engine_messages import (
     QueryNodeProfiles,
     QuerySourceStatus,
     ResetProfiling,
+    SetProfilingEnabled,
     Shutdown,
     ShutdownAcknowledged,
     SourceStatusResponse,
@@ -309,6 +310,12 @@ class ProcessEngineClient:
     def reset_profiling(self) -> None:
         self._request(
             ResetProfiling(uuid4().hex, self._graph_revision),
+            CommandAcknowledged,
+        )
+
+    def set_profiling_enabled(self, enabled: bool) -> None:
+        self._request(
+            SetProfilingEnabled(uuid4().hex, self._graph_revision, enabled),
             CommandAcknowledged,
         )
 

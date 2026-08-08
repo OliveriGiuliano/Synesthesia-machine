@@ -22,7 +22,7 @@ from synesthesia_machine.nodes.base import ResetReason
 if TYPE_CHECKING:
     from synesthesia_machine.graph.model import GraphSnapshot
 
-ENGINE_PROTOCOL_VERSION = 7
+ENGINE_PROTOCOL_VERSION = 8
 
 type SnapshotLiteral = str | int | float | bool | ColorValue | NumericMatrix | None
 
@@ -263,6 +263,14 @@ class ResetProfiling:
 
 
 @dataclass(frozen=True, slots=True)
+class SetProfilingEnabled:
+    request_id: str
+    graph_revision: int | None
+    enabled: bool
+    protocol_version: int = ENGINE_PROTOCOL_VERSION
+
+
+@dataclass(frozen=True, slots=True)
 class QueryMetrics:
     request_id: str
     graph_revision: int | None
@@ -427,6 +435,7 @@ EngineCommand = (
     | QueryMidiOutputStatus
     | QueryNodeMemoryDiagnostics
     | QueryNodeProfiles
+    | SetProfilingEnabled
     | ResetProfiling
     | QueryMetrics
     | WaitUntilIdle

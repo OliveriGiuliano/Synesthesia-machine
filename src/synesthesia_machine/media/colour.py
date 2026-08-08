@@ -16,7 +16,6 @@ from synesthesia_machine.contracts.runtime_values import (
     ColorSpace,
     ColorValue,
     ImageFrame,
-    read_only_float32,
 )
 
 
@@ -126,9 +125,11 @@ def convert_image(image: ImageFrame, target: ColorSpace) -> ImageFrame:
         return image
     rgb, alpha = _to_srgb(image.data, image.color_space)
     converted = _from_srgb(rgb, alpha, target)
+    converted = np.ascontiguousarray(converted, dtype=np.float32)
+    converted.flags.writeable = False
     descriptor = color_space_descriptor(target)
     return ImageFrame(
-        read_only_float32(converted),
+        converted,
         target,
         descriptor.channel_names,
         descriptor.alpha_mode,
@@ -155,7 +156,8 @@ def image_to_luminance(image: ImageFrame) -> ChannelFrame:
         + linear[..., 1] * np.float32(0.7152)
         + linear[..., 2] * np.float32(0.0722)
     )
-    data = read_only_float32(np.asarray(luminance, dtype=np.float32))
+    data = np.ascontiguousarray(luminance, dtype=np.float32)
+    data.flags.writeable = False
     return ChannelFrame(data, ChannelSemantic.LUMINANCE, 0.0, 1.0, False, image.context)
 
 
