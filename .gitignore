@@ -172,7 +172,7 @@ poetry.toml
 
 # Synesthesia Machine local runtime artifacts
 logs/
-diagnostics/
+/diagnostics/
 *.synmachine.autosave.json
 
 # LSP config files

@@ -31,6 +31,7 @@ from synesthesia_machine.contracts import (
     EngineStatus,
     SourceState,
 )
+from synesthesia_machine.diagnostics import create_diagnostic_bundle
 from synesthesia_machine.graph import AlignMode, DistributionAxis, GroupKind, ValidationIssue
 from synesthesia_machine.nodes import ExecutionKind, NodeRegistry
 from synesthesia_machine.persistence import (
@@ -348,6 +349,14 @@ class MainWindow(QMainWindow):
             self.restart_engine,
         )
         restart_engine.setEnabled(False)
+        create(
+            ActionSpec(
+                "export_diagnostics",
+                "Export &Diagnostic Bundle…",
+                "Export redacted hardware, runtime, graph, dependency, and log diagnostics",
+            ),
+            self.export_diagnostic_bundle,
+        )
         create(ActionSpec("about", "&About", "About Synesthesia Machine"), self._show_about)
         self.action_registry.register(
             "toggle_library",
@@ -451,6 +460,8 @@ class MainWindow(QMainWindow):
         midi_menu.addAction(self.action_registry.require("panic"))
 
         help_menu = self.menuBar().addMenu("&Help")
+        help_menu.addAction(self.action_registry.require("export_diagnostics"))
+        help_menu.addSeparator()
         help_menu.addAction(self.action_registry.require("about"))
 
     def _create_status_bar(self) -> None:
@@ -1063,6 +1074,51 @@ class MainWindow(QMainWindow):
             message += "\nA forced termination may not produce a Python traceback file."
         message += "\n\nUse Graph → Restart Engine to rebuild the latest valid runtime."
         QMessageBox.critical(self, "Engine stopped", message)
+
+    @Slot()
+    def export_diagnostic_bundle(self) -> None:
+        destination, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Diagnostic Bundle",
+            str(self.paths.data / "synmachine-diagnostics.zip"),
+            "ZIP archives (*.zip)",
+        )
+        if not destination:
+            return
+        include_paths = (
+            QMessageBox.question(
+                self,
+                "Include filesystem paths?",
+                "Filesystem paths can contain personal information. "
+                "Include them in this bundle?\n\n"
+                "Choose No for the recommended redacted bundle.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            is QMessageBox.StandardButton.Yes
+        )
+        metrics = None
+        profiles = ()
+        if not self._engine_closed:
+            try:
+                metrics = self.engine_client.metrics()
+                profiles = self.engine_client.node_profiles()
+            except (RuntimeError, TimeoutError):
+                pass
+        try:
+            result = create_diagnostic_bundle(
+                destination,
+                self.session.document.snapshot(),
+                logs_directory=self.paths.logs,
+                engine_metrics=metrics,
+                node_profiles=profiles,
+                include_paths=include_paths,
+            )
+        except OSError as error:
+            self._show_error("Could not export diagnostics", str(error))
+            return
+        privacy = "with paths" if include_paths else "with paths redacted"
+        self.statusBar().showMessage(f"Exported diagnostic bundle {privacy}: {result.path}", 6000)
 
     @Slot()
     def _show_about(self) -> None:
