@@ -74,9 +74,20 @@ class Theme:
             QMainWindow, QDialog {{ background: {colors.window}; color: {colors.text}; }}
             QWidget {{ color: {colors.text}; font-size: {self.body_points}pt; }}
             QDockWidget, QMenuBar, QMenu, QStatusBar {{ background: {colors.panel}; }}
+            QWidget#inspector_panel, QScrollArea#inspector_scroll_area,
+            QWidget#inspector_scroll_viewport, QWidget#inspector_form_container {{
+                background: {colors.panel}; color: {colors.text}; }}
             QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QListWidget, QTreeWidget,
             QPlainTextEdit {{ background: {colors.canvas}; border: 1px solid {colors.border};
                 border-radius: 3px; padding: 4px; selection-background-color: {colors.accent}; }}
+            QComboBox QAbstractItemView {{ background: {colors.canvas}; color: {colors.text};
+                border: 1px solid {colors.border}; selection-background-color: {colors.accent};
+                selection-color: {colors.canvas}; outline: 0; }}
+            QComboBox QAbstractItemView::item {{ min-height: 24px; padding: 3px 6px; }}
+            QComboBox QAbstractItemView::item:selected {{ background: {colors.accent};
+                color: {colors.canvas}; }}
+            QMenu::item {{ padding: 5px 24px 5px 9px; background: transparent; }}
+            QMenu::item:selected {{ background: {colors.accent}; color: {colors.canvas}; }}
             QPushButton {{ background: {colors.node_header}; border: 1px solid {colors.border};
                 border-radius: 3px; padding: 5px 9px; }}
             QPushButton:hover {{ background: {colors.border}; border-color: {colors.accent}; }}

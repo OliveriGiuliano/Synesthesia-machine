@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from functools import partial
 from uuid import UUID
 
-from PySide6.QtCore import QByteArray, QMimeData, Qt, Signal, Slot
+from PySide6.QtCore import QByteArray, QMimeData, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QDrag, QKeyEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -261,6 +261,7 @@ class InspectorPanel(QWidget):
 
     def __init__(self, session: DocumentSession, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setObjectName("inspector_panel")
         self.session = session
         self._node_ids: set[UUID] = set()
         self._connection_ids: set[UUID] = set()
@@ -272,8 +273,11 @@ class InspectorPanel(QWidget):
         self.description = QLabel("Select a node or cable to inspect it.", self)
         self.description.setWordWrap(True)
         self.scroll_area = QScrollArea(self)
+        self.scroll_area.setObjectName("inspector_scroll_area")
+        self.scroll_area.viewport().setObjectName("inspector_scroll_viewport")
         self.scroll_area.setWidgetResizable(True)
         self.form_container = QWidget(self.scroll_area)
+        self.form_container.setObjectName("inspector_form_container")
         self.form = QFormLayout(self.form_container)
         self.scroll_area.setWidget(self.form_container)
         self.validation_title = QLabel("Validation", self)
@@ -287,8 +291,18 @@ class InspectorPanel(QWidget):
         layout.addWidget(self.scroll_area, 1)
         layout.addWidget(self.validation_title)
         layout.addWidget(self.validation)
-        session.changed.connect(self.refresh)
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.setInterval(0)
+        self._refresh_timer.timeout.connect(self.refresh)
+        session.changed.connect(self._schedule_refresh)
         self.refresh()
+
+    @Slot()
+    def _schedule_refresh(self) -> None:
+        """Refresh after the active editor has finished dispatching its Qt signal."""
+
+        self._refresh_timer.start()
 
     def set_selection(self, node_ids: set[UUID], connection_ids: set[UUID]) -> None:
         self._node_ids = set(node_ids)
@@ -305,6 +319,7 @@ class InspectorPanel(QWidget):
 
     @Slot()
     def refresh(self) -> None:
+        self._refresh_timer.stop()
         self._clear_form()
         view_model = self.session.view_model
         nodes = tuple(node for node in view_model.nodes if node.node_id in self._node_ids)

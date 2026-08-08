@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from uuid import UUID
 
-from PySide6.QtCore import QObject, QPoint, QPointF, QRect, QRectF, Qt, Signal
+from PySide6.QtCore import QObject, QPoint, QPointF, QRect, QRectF, QSignalBlocker, Qt, Signal
 from PySide6.QtGui import (
     QBrush,
     QContextMenuEvent,
@@ -72,6 +72,7 @@ class GraphScene(QGraphicsScene):
         selected_nodes = self.selected_node_ids()
         selected_connections = self.selected_connection_ids()
         selected_groups = self.selected_group_ids()
+        selection_blocker = QSignalBlocker(self)
         view_model = self.session.view_model
         large_graph_mode = len(view_model.nodes) >= LARGE_GRAPH_NODE_THRESHOLD
         force_node_rebuild = large_graph_mode != self._large_graph_mode
@@ -120,6 +121,14 @@ class GraphScene(QGraphicsScene):
                 item.setSelected(connection.connection_id in selected_connections)
                 self.connection_items[connection.connection_id] = item
         self.update_connections()
+        selection_changed = (
+            selected_nodes != self.selected_node_ids()
+            or selected_connections != self.selected_connection_ids()
+            or selected_groups != self.selected_group_ids()
+        )
+        del selection_blocker
+        if selection_changed:
+            self.selectionChanged.emit()
 
     @property
     def large_graph_mode(self) -> bool:

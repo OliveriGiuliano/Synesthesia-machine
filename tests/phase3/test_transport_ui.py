@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel, QToolButton
+from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QToolButton
 
 from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.app.settings import ApplicationPaths
@@ -303,6 +303,49 @@ def test_source_error_detail_is_visible_in_status_bar_and_engine_tooltip(
     expected = f"Source {str(source_id)[:8]}: {error}"
     assert window.statusBar().currentMessage() == expected
     assert window._engine_status.toolTip() == expected
+
+
+def test_inspector_choice_commit_waits_for_popup_signal_before_rebuilding_editor(
+    runtime_window: tuple[MainWindow, _RecordingEngineClient],
+) -> None:
+    window, _client = runtime_window
+    audio_id = window.session.add_node("synmachine.output.generate_audio", (0.0, 0.0))
+    window.scene.select_node_ids({audio_id})
+    combo = window.inspector.findChild(QComboBox, "parameter_waveform")
+    assert combo is not None
+
+    square_index = combo.findData("SQUARE")
+    assert square_index >= 0
+    combo.setCurrentIndex(square_index)
+
+    assert window.inspector.findChild(QComboBox, "parameter_waveform") is combo
+    node = window.session.document.node(audio_id)
+    assert node is not None and node.parameters["waveform"] == "SQUARE"
+    assert window.inspector._refresh_timer.isActive()
+
+    QTest.qWait(1)
+
+    node = window.session.document.node(audio_id)
+    assert node is not None and node.parameters["waveform"] == "SQUARE"
+    replacement = window.inspector.findChild(QComboBox, "parameter_waveform")
+    assert replacement is not None and replacement.currentData() == "SQUARE"
+
+
+def test_inspector_and_combo_popup_have_explicit_dark_theme_surfaces(
+    runtime_window: tuple[MainWindow, _RecordingEngineClient],
+) -> None:
+    window, _client = runtime_window
+    audio_id = window.session.add_node("synmachine.output.generate_audio", (0.0, 0.0))
+    window.scene.select_node_ids({audio_id})
+
+    assert window.inspector.objectName() == "inspector_panel"
+    assert window.inspector.scroll_area.objectName() == "inspector_scroll_area"
+    assert window.inspector.scroll_area.viewport().objectName() == "inspector_scroll_viewport"
+    assert window.inspector.form_container.objectName() == "inspector_form_container"
+    style_sheet = window.styleSheet()
+    assert "QWidget#inspector_form_container" in style_sheet
+    assert "QComboBox QAbstractItemView" in style_sheet
+    assert "QComboBox QAbstractItemView::item:selected" in style_sheet
 
 
 def test_selected_node_memory_diagnostic_is_published_to_inspector(
