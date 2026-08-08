@@ -35,6 +35,12 @@ MANIFEST
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+!/pysidedeploy.spec
+
+# Synesthesia Machine deployment intermediates and local release artifacts
+/deployment/
+/packaging/out/
+/packaging/work/
 
 # Installer logs
 pip-log.txt
