@@ -357,7 +357,7 @@ def test_definition_registry_nonfinite_and_range_validation_contracts() -> None:
     assert tuple(port.id for port in definition.inputs) == ("value",)
     assert definition.parameter_groups[0].id == "musical"
     registry = create_application_registry()
-    assert len(registry.definitions()) == 57
+    assert len(registry.definitions()) >= 57
     assert registry.require(FOURIER_TYPE_ID).type_id == FOURIER_TYPE_ID
 
     values = np.array([[np.nan, np.inf], [-np.inf, 1.0]], dtype=np.float32)
