@@ -1029,9 +1029,13 @@ class MainWindow(QMainWindow):
         memory_mib = metrics.memory_bytes / (1024 * 1024)
         self._engine_status.setText(
             f"Engine {metrics.state.value} · source {source_text} · "
-            f"{metrics.processed_ticks} ticks @ {metrics.processed_fps:.1f} FPS · "
+            f"{metrics.processed_ticks} ticks · "
+            f"in/process/preview {metrics.input_fps:.1f}/{metrics.processed_fps:.1f}/"
+            f"{metrics.preview_fps:.1f} FPS · "
             f"graph p95 {metrics.p95_graph_execution_ms:.2f} ms · "
-            f"drops {metrics.dropped_before_processing} · RAM {memory_mib:.1f} MiB"
+            f"queue {metrics.mailbox_occupancy}/{metrics.mailbox_capacity} · "
+            f"age {metrics.frame_age_ms:.1f} ms · drops {metrics.dropped_before_processing} · "
+            f"CPU {metrics.cpu_percent:.1f}% · RAM {memory_mib:.1f} MiB"
         )
 
     @Slot(bool)

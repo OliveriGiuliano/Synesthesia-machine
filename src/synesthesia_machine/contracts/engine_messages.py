@@ -22,7 +22,7 @@ from synesthesia_machine.nodes.base import ResetReason
 if TYPE_CHECKING:
     from synesthesia_machine.graph.model import GraphSnapshot
 
-ENGINE_PROTOCOL_VERSION = 8
+ENGINE_PROTOCOL_VERSION = 9
 
 type SnapshotLiteral = str | int | float | bool | ColorValue | NumericMatrix | None
 

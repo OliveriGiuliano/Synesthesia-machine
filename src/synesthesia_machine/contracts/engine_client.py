@@ -182,6 +182,7 @@ class EngineMetrics:
     state: EngineState = EngineState.STOPPED
     graph_revision: int | None = None
     processed_ticks: int = 0
+    input_fps: float = 0.0
     processed_fps: float = 0.0
     p95_node_time_ms: float = 0.0
     dropped_before_processing: int = 0

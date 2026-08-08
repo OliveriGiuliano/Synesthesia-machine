@@ -251,7 +251,8 @@ def test_preview_and_metrics_polling_update_ui_with_sequence_coalescing(
     assert "sequence 1" in window.preview_panel.image_caption.text()
     assert window._image_sequences == {IMAGE_NODE: 1}
     assert window._note_sequences == {NOTE_NODE: 1}
-    assert "42 ticks @ 29.5 FPS" in window._engine_status.text()
+    assert "42 ticks" in window._engine_status.text()
+    assert "in/process/preview 0.0/29.5/0.0 FPS" in window._engine_status.text()
     assert "drops 3" in window._engine_status.text()
 
 

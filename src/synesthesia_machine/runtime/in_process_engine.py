@@ -112,6 +112,7 @@ type _GraphCommand = _TickCommand | _ResetCommand
 
 _SOURCE_MAILBOX_CAPACITY = 2
 _GRAPH_LATENCY_WINDOW = 240
+_FPS_WINDOW_NS = 1_000_000_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +151,8 @@ class LatestFrameGraphWorker:
         self._last_completed_received_ns: dict[UUID, int] = {}
         self._last_processing_latency_ms: dict[UUID, float] = {}
         self._graph_durations_ns: deque[int] = deque(maxlen=_GRAPH_LATENCY_WINDOW)
+        self._input_times_ns: deque[int] = deque(maxlen=240)
+        self._processed_times_ns: deque[int] = deque(maxlen=240)
         self._last_result: TickResult | None = None
         self._last_error: str | None = None
         self._started_ns: int | None = None
@@ -183,12 +186,23 @@ class LatestFrameGraphWorker:
                 return 0.0
             return max(0.0, (self._last_tick_ns - self._started_ns) / 1_000_000_000)
 
+    @property
+    def input_fps(self) -> float:
+        with self._condition:
+            return _rolling_event_rate(self._input_times_ns, self._monotonic_ns())
+
+    @property
+    def processed_fps(self) -> float:
+        with self._condition:
+            return _rolling_event_rate(self._processed_times_ns, self._monotonic_ns())
+
     def publish(self, source_node_id: UUID, frame: PresentedSourceFrame) -> None:
         if frame.context.clock_id != source_node_id:
             raise ValueError("presented frame clock does not match its source node")
         command = _TickCommand(source_node_id, frame)
         with self._condition:
             self._ensure_open()
+            self._input_times_ns.append(frame.context.received_monotonic_ns)
             for index in range(len(self._commands) - 1, -1, -1):
                 pending = self._commands[index]
                 if isinstance(pending, _ResetCommand) and pending.source_node_id == source_node_id:
@@ -240,6 +254,8 @@ class LatestFrameGraphWorker:
     def reset_graph_execution_metrics(self) -> None:
         with self._condition:
             self._graph_durations_ns.clear()
+            self._input_times_ns.clear()
+            self._processed_times_ns.clear()
 
     def mailbox_metrics(self, source_node_id: UUID) -> SourceMailboxMetrics:
         """Return an atomic snapshot of one source's two-slot latest-frame mailbox."""
@@ -335,6 +351,7 @@ class LatestFrameGraphWorker:
                             self._started_ns = completed_ns
                         self._last_tick_ns = completed_ns
                         self._processed_ticks += 1
+                        self._processed_times_ns.append(completed_ns)
                         self._last_result = result
                         self._graph_durations_ns.append(graph_duration_ns)
                         received_ns = frame.context.received_monotonic_ns
@@ -366,6 +383,13 @@ def _duration_percentile_ms(ordered_ns: tuple[int, ...], percentile: float) -> f
         fraction = position - lower
         value_ns = ordered_ns[lower] * (1.0 - fraction) + ordered_ns[upper] * fraction
     return value_ns / 1_000_000.0
+
+
+def _rolling_event_rate(events_ns: deque[int], now_ns: int) -> float:
+    cutoff_ns = now_ns - _FPS_WINDOW_NS
+    while events_ns and events_ns[0] < cutoff_ns:
+        events_ns.popleft()
+    return float(len(events_ns))
 
 
 class _FailedSource:
@@ -654,8 +678,8 @@ class InProcessEngineClient:
             statuses = self.source_status()
             state = self._effective_state(statuses, worker)
             processed_ticks = worker.processed_ticks if worker is not None else 0
-            elapsed_s = worker.elapsed_s if worker is not None else 0.0
-            processed_fps = processed_ticks / elapsed_s if elapsed_s > 0.0 else 0.0
+            input_fps = worker.input_fps if worker is not None else 0.0
+            processed_fps = worker.processed_fps if worker is not None else 0.0
             p95_ms = self._profiler.global_p95_ms()
             graph_window, graph_p50, graph_p95, graph_p99, graph_max = (
                 worker.graph_execution_metrics() if worker is not None else (0, 0.0, 0.0, 0.0, 0.0)
@@ -664,6 +688,7 @@ class InProcessEngineClient:
                 state=state,
                 graph_revision=self._graph_revision,
                 processed_ticks=processed_ticks,
+                input_fps=input_fps,
                 processed_fps=processed_fps,
                 p95_node_time_ms=p95_ms,
                 dropped_before_processing=(worker.total_dropped() if worker is not None else 0),

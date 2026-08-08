@@ -251,6 +251,8 @@ def test_slow_graph_drops_stale_frames_with_bounded_latency_and_visible_metrics(
         assert busy_metrics.mailbox_occupancy == 2
         assert busy_metrics.mailbox_capacity == 2
         assert busy_metrics.dropped_before_processing == 8
+        assert busy_metrics.input_fps == 10.0
+        assert busy_metrics.processed_fps == 0.0
 
         clock.set_ms(100)
         runtime.release[0].set()
@@ -272,6 +274,8 @@ def test_slow_graph_drops_stale_frames_with_bounded_latency_and_visible_metrics(
         assert status.processing_latency_ms == 30.0
         assert status.frame_age_ms == 30.0
         assert metrics.processed_ticks == 2
+        assert metrics.input_fps == 10.0
+        assert metrics.processed_fps == 2.0
         assert metrics.mailbox_occupancy == 0
         assert metrics.mailbox_capacity == 2
         assert metrics.processing_latency_ms == 30.0

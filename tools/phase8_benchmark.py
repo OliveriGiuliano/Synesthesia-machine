@@ -74,6 +74,7 @@ class BenchmarkRun:
     run_index: int
     observed_measurement_s: float
     input_fps: float
+    input_ticks: int
     processed_fps: float
     preview_fps: float
     processed_ticks: int
@@ -287,7 +288,6 @@ def run_benchmark(
                 run_index=run_index,
                 warmup_s=warmup_s,
                 measurement_s=measurement_s,
-                input_fps=float(source_fps),
             )
             for run_index in range(1, run_count + 1)
         )
@@ -349,7 +349,6 @@ def _run_once(
     run_index: int,
     warmup_s: float,
     measurement_s: float,
-    input_fps: float,
 ) -> BenchmarkRun:
     paths = ApplicationPaths(run_root, run_root / "logs", run_root / "recovery")
     paths.ensure_exists()
@@ -381,6 +380,7 @@ def _run_once(
         client.set_profiling_enabled(True)
         client.reset_profiling()
         started_metrics = client.metrics()
+        started_source = client.source_status(SOURCE_ID)[0]
         started_ns = time.perf_counter_ns()
         heartbeat_ns: list[int] = []
         last_heartbeat_ns: int | None = None
@@ -413,6 +413,7 @@ def _run_once(
         source = client.source_status(SOURCE_ID)[0]
         profiles = client.node_profiles()
         processed_ticks = final_metrics.processed_ticks - started_metrics.processed_ticks
+        input_ticks = source.processed_index - started_source.processed_index
         names = {node.node_id: node.title for node in window.session.view_model.nodes}
         heartbeat_p50 = _percentile_ms(heartbeat_ns, 50.0)
         heartbeat_p95 = _percentile_ms(heartbeat_ns, 95.0)
@@ -420,7 +421,8 @@ def _run_once(
         return BenchmarkRun(
             run_index=run_index,
             observed_measurement_s=observed_s,
-            input_fps=input_fps,
+            input_fps=input_ticks / measurement_s,
+            input_ticks=input_ticks,
             processed_fps=processed_ticks / measurement_s,
             preview_fps=final_metrics.preview_fps,
             processed_ticks=processed_ticks,

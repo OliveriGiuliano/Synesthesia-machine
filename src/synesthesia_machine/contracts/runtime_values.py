@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from types import MappingProxyType
+from types import MappingProxyType, MemberDescriptorType
 from typing import ClassVar, Final, cast
 from uuid import UUID
 
@@ -79,15 +79,21 @@ class FrameContext:
         is_realtime: bool,
     ) -> None:
         # CPython 3.12 on Windows can corrupt sustained calls to the generated
-        # frozen-slotted dataclass initializer. An explicit initializer keeps
-        # the immutable contract while avoiding that long-running interpreter path.
-        object.__setattr__(self, "clock_id", clock_id)
-        object.__setattr__(self, "tick_index", tick_index)
-        object.__setattr__(self, "source_frame_index", source_frame_index)
-        object.__setattr__(self, "source_time_s", source_time_s)
-        object.__setattr__(self, "received_monotonic_ns", received_monotonic_ns)
-        object.__setattr__(self, "deadline_monotonic_ns", deadline_monotonic_ns)
-        object.__setattr__(self, "is_realtime", is_realtime)
+        # frozen-dataclass initializer and object.__setattr__. Direct slot writes
+        # preserve immutability after construction without using that interpreter path.
+        cast(MemberDescriptorType, vars(type(self))["clock_id"]).__set__(self, clock_id)
+        cast(MemberDescriptorType, vars(type(self))["tick_index"]).__set__(self, tick_index)
+        cast(MemberDescriptorType, vars(type(self))["source_frame_index"]).__set__(
+            self, source_frame_index
+        )
+        cast(MemberDescriptorType, vars(type(self))["source_time_s"]).__set__(self, source_time_s)
+        cast(MemberDescriptorType, vars(type(self))["received_monotonic_ns"]).__set__(
+            self, received_monotonic_ns
+        )
+        cast(MemberDescriptorType, vars(type(self))["deadline_monotonic_ns"]).__set__(
+            self, deadline_monotonic_ns
+        )
+        cast(MemberDescriptorType, vars(type(self))["is_realtime"]).__set__(self, is_realtime)
         self.__post_init__()
 
     def __post_init__(self) -> None:
@@ -157,12 +163,12 @@ class ImageFrame:
         context: FrameContext,
         provenance: FrameProvenance,
     ) -> None:
-        object.__setattr__(self, "data", data)
-        object.__setattr__(self, "color_space", color_space)
-        object.__setattr__(self, "channel_names", channel_names)
-        object.__setattr__(self, "alpha_mode", alpha_mode)
-        object.__setattr__(self, "context", context)
-        object.__setattr__(self, "provenance", provenance)
+        cast(MemberDescriptorType, vars(type(self))["data"]).__set__(self, data)
+        cast(MemberDescriptorType, vars(type(self))["color_space"]).__set__(self, color_space)
+        cast(MemberDescriptorType, vars(type(self))["channel_names"]).__set__(self, channel_names)
+        cast(MemberDescriptorType, vars(type(self))["alpha_mode"]).__set__(self, alpha_mode)
+        cast(MemberDescriptorType, vars(type(self))["context"]).__set__(self, context)
+        cast(MemberDescriptorType, vars(type(self))["provenance"]).__set__(self, provenance)
         self.__post_init__()
 
     def __post_init__(self) -> None:
@@ -196,12 +202,12 @@ class ChannelFrame:
         cyclic: bool,
         context: FrameContext,
     ) -> None:
-        object.__setattr__(self, "data", data)
-        object.__setattr__(self, "semantic", semantic)
-        object.__setattr__(self, "nominal_min", nominal_min)
-        object.__setattr__(self, "nominal_max", nominal_max)
-        object.__setattr__(self, "cyclic", cyclic)
-        object.__setattr__(self, "context", context)
+        cast(MemberDescriptorType, vars(type(self))["data"]).__set__(self, data)
+        cast(MemberDescriptorType, vars(type(self))["semantic"]).__set__(self, semantic)
+        cast(MemberDescriptorType, vars(type(self))["nominal_min"]).__set__(self, nominal_min)
+        cast(MemberDescriptorType, vars(type(self))["nominal_max"]).__set__(self, nominal_max)
+        cast(MemberDescriptorType, vars(type(self))["cyclic"]).__set__(self, cyclic)
+        cast(MemberDescriptorType, vars(type(self))["context"]).__set__(self, context)
         self.__post_init__()
 
     def __post_init__(self) -> None:
