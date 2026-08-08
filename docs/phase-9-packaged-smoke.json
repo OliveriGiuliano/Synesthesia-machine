@@ -1,0 +1,47 @@
+{
+  "application_paths": {
+    "data": "C:\\Users\\olive\\AppData\\Local\\Temp\\synmachine-smoke-729b4adb-6368-47c0-8738-60b98b3ea63e\\LocalAppData\\SynesthesiaMachine",
+    "logs": "C:\\Users\\olive\\AppData\\Local\\Temp\\synmachine-smoke-729b4adb-6368-47c0-8738-60b98b3ea63e\\LocalAppData\\SynesthesiaMachine\\logs",
+    "recovery": "C:\\Users\\olive\\AppData\\Local\\Temp\\synmachine-smoke-729b4adb-6368-47c0-8738-60b98b3ea63e\\LocalAppData\\SynesthesiaMachine\\recovery"
+  },
+  "application_version": "0.1.0",
+  "checks": [
+    {
+      "detail": "saved and opened 1 node",
+      "name": "create_save_open_graph",
+      "status": "passed"
+    },
+    {
+      "detail": "decoded H.264 frame 96x64",
+      "name": "h264_mp4_decode",
+      "status": "passed"
+    },
+    {
+      "detail": "enumerated 1 camera(s) and captured from opencv:0",
+      "name": "camera_enumeration_capture",
+      "status": "passed"
+    },
+    {
+      "detail": "enumerated 2 real output(s); mock send and panic passed",
+      "name": "midi_enumeration_mock_send",
+      "status": "passed"
+    },
+    {
+      "detail": "PortAudio loaded with 27 device record(s); synth render passed; brief hardware output stream passed",
+      "name": "debug_audio",
+      "status": "passed"
+    },
+    {
+      "detail": "engine restarted from PID 20812 to PID 11412",
+      "name": "engine_crash_restart",
+      "status": "passed"
+    },
+    {
+      "detail": "autosave discovery/load and redacted diagnostic export passed",
+      "name": "autosave_recovery_diagnostics",
+      "status": "passed"
+    }
+  ],
+  "passed": true,
+  "schema_version": 1
+}
