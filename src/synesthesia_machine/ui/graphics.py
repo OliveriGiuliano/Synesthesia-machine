@@ -19,12 +19,25 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from synesthesia_machine.graph import GroupKind, GroupModel, LiteralValue
+from synesthesia_machine.graph import (
+    GroupKind,
+    GroupModel,
+    LiteralValue,
+    ValidationIssue,
+    ValidationSeverity,
+)
 from synesthesia_machine.ui.parameter_editors import create_parameter_editor
 from synesthesia_machine.ui.theme import Theme, port_color_name
 from synesthesia_machine.ui.view_models import ConnectionViewModel, NodeViewModel, PortViewModel
 
 type ParameterChangeHandler = Callable[[UUID, str, LiteralValue], None]
+
+
+def _diagnostic_tooltip(description: str, issues: tuple[ValidationIssue, ...]) -> str:
+    if not issues:
+        return description
+    details = "\n".join(f"{issue.severity} · {issue.message} ({issue.code})" for issue in issues)
+    return f"{description}\n\n{details}"
 
 
 class GroupGraphicsItem(QGraphicsObject):
@@ -190,7 +203,7 @@ class NodeGraphicsItem(QGraphicsObject):
         )
         self.setCacheMode(QGraphicsItem.CacheMode.DeviceCoordinateCache)
         self.setPos(*view_model.position)
-        self.setToolTip(view_model.description)
+        self.setToolTip(_diagnostic_tooltip(view_model.description, view_model.issues))
         self._create_ports_and_editors()
 
     def _layout_height(self) -> float:
@@ -274,7 +287,14 @@ class NodeGraphicsItem(QGraphicsObject):
             self.view_model.title,
         )
         if self.view_model.issues:
-            painter.setBrush(QBrush(self.theme.color("error")))
+            token = (
+                "error"
+                if any(
+                    issue.severity is ValidationSeverity.ERROR for issue in self.view_model.issues
+                )
+                else "warning"
+            )
+            painter.setBrush(QBrush(self.theme.color(token)))
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawEllipse(
                 QPointF(metrics.node_width - 17.0, metrics.header_height / 2.0), 6.0, 6.0
@@ -346,7 +366,12 @@ class ConnectionGraphicsItem(QGraphicsObject):
         self.path = QPainterPath()
         self.setZValue(-1.0)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
-        self.setToolTip(f"{view_model.source_port_id} → {view_model.destination_port_id}")
+        self.setToolTip(
+            _diagnostic_tooltip(
+                f"{view_model.source_port_id} → {view_model.destination_port_id}",
+                view_model.issues,
+            )
+        )
 
     def set_endpoints(self, start: QPointF, end: QPointF) -> None:
         self.prepareGeometryChange()

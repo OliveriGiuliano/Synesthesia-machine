@@ -26,7 +26,12 @@ from PySide6.QtWidgets import (
 )
 
 from synesthesia_machine.contracts import NodeMemoryDiagnostic
-from synesthesia_machine.graph import LiteralValue
+from synesthesia_machine.graph import (
+    LiteralValue,
+    ValidationIssue,
+    ValidationReport,
+    ValidationSeverity,
+)
 from synesthesia_machine.nodes import NodeDefinition, NodeRegistry
 from synesthesia_machine.ui.canvas import NODE_MIME_TYPE
 from synesthesia_machine.ui.musical_controls import MusicalParameterEditor
@@ -36,6 +41,47 @@ from synesthesia_machine.ui.view_models import ConnectionViewModel, NodeViewMode
 
 _TYPE_ROLE = int(Qt.ItemDataRole.UserRole)
 _INDEX_ROLE = _TYPE_ROLE + 1
+_ISSUE_ROLE = _INDEX_ROLE + 1
+
+
+class ValidationIssuePanel(QWidget):
+    """Always-visible compiler issue summary with navigation requests."""
+
+    issueActivated = Signal(object)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.summary = QLabel("0 errors · 0 warnings", self)
+        self.summary.setAccessibleName("Graph validation summary")
+        self.issues = QListWidget(self)
+        self.issues.setAccessibleName("Graph validation issue list")
+        self.issues.itemClicked.connect(self._activate_issue)
+        self.issues.itemActivated.connect(self._activate_issue)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.addWidget(self.summary)
+        layout.addWidget(self.issues, 1)
+        self.set_report(ValidationReport())
+
+    @Slot(object)
+    def set_report(self, report: ValidationReport) -> None:
+        self.issues.clear()
+        self.summary.setText(f"{len(report.errors)} errors · {len(report.warnings)} warnings")
+        for issue in report.issues:
+            item = QListWidgetItem(f"[{issue.severity}] {issue.message}")
+            item.setData(_ISSUE_ROLE, issue)
+            item.setToolTip(_issue_detail(issue))
+            self.issues.addItem(item)
+        if not report.issues:
+            item = QListWidgetItem("Graph is valid")
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+            self.issues.addItem(item)
+
+    @Slot(QListWidgetItem)
+    def _activate_issue(self, item: QListWidgetItem) -> None:
+        issue = item.data(_ISSUE_ROLE)
+        if isinstance(issue, ValidationIssue):
+            self.issueActivated.emit(issue)
 
 
 class NodeTreeWidget(QTreeWidget):
@@ -302,7 +348,18 @@ class InspectorPanel(QWidget):
                 continue
             callback = partial(self._set_parameter, node.node_id, parameter.spec.id)
             editor = create_parameter_editor(parameter, callback)
-            self.form.addRow(parameter.spec.label, editor)
+            label = QLabel(parameter.spec.label, self.form_container)
+            help_text = parameter.spec.help_text
+            if help_text:
+                label.setToolTip(help_text)
+                label.setAccessibleDescription(help_text)
+            self.form.addRow(label, editor)
+            if help_text:
+                help_label = QLabel(help_text, self.form_container)
+                help_label.setObjectName(f"parameter_help_{parameter.spec.id}")
+                help_label.setWordWrap(True)
+                help_label.setStyleSheet("color: #9aa6b2; font-size: 8pt;")
+                self.form.addRow("", help_label)
         diagnostic = self._memory_diagnostic
         if diagnostic is not None and diagnostic.node_id == node.node_id:
             self.form.addRow(
@@ -367,3 +424,16 @@ def _definition_search_text(definition: NodeDefinition) -> str:
 
 def _format_bytes(value: int) -> str:
     return f"{value / (1024 * 1024):.2f} MiB"
+
+
+def _issue_detail(issue: ValidationIssue) -> str:
+    details = [f"{issue.severity}: {issue.message}", f"Code: {issue.code}"]
+    if issue.node_id is not None:
+        details.append(f"Node: {issue.node_id}")
+    if issue.connection_id is not None:
+        details.append(f"Connection: {issue.connection_id}")
+    if issue.port_id is not None:
+        details.append(f"Port: {issue.port_id}")
+    if issue.severity is ValidationSeverity.ERROR:
+        details.append("This issue prevents activation of the current graph revision.")
+    return "\n".join(details)

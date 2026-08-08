@@ -31,7 +31,7 @@ from synesthesia_machine.contracts import (
     EngineStatus,
     SourceState,
 )
-from synesthesia_machine.graph import AlignMode, DistributionAxis, GroupKind
+from synesthesia_machine.graph import AlignMode, DistributionAxis, GroupKind, ValidationIssue
 from synesthesia_machine.nodes import ExecutionKind, NodeRegistry
 from synesthesia_machine.persistence import (
     GraphPersistenceError,
@@ -53,12 +53,14 @@ from synesthesia_machine.ui.canvas import GraphScene, GraphView
 from synesthesia_machine.ui.previews import RuntimePreviewPanel
 from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.theme import DEFAULT_THEME, Theme
+from synesthesia_machine.ui.transport import resolve_transport_target
 from synesthesia_machine.ui.view_models import PortViewModel
 from synesthesia_machine.ui.widgets import (
     InspectorPanel,
     NodeLibrary,
     NodeSearchDialog,
     SearchCandidate,
+    ValidationIssuePanel,
 )
 
 CLIPBOARD_MIME_TYPE = "application/x-synesthesia-graph-fragment+json"
@@ -109,6 +111,7 @@ class MainWindow(QMainWindow):
         self.view = GraphView(self.scene, theme)
         self.library = NodeLibrary(registry, self)
         self.inspector = InspectorPanel(self.session, self)
+        self.issues_panel = ValidationIssuePanel(self)
         self.preview_panel = RuntimePreviewPanel(self)
         self.recent_menu = QMenu("Open &Recent", self)
         self._recent_paths = self._load_recent_paths()
@@ -179,6 +182,16 @@ class MainWindow(QMainWindow):
         )
         self.preview_dock.setWidget(self.preview_panel)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.preview_dock)
+
+        self.issues_dock = QDockWidget("Validation Issues", self)
+        self.issues_dock.setObjectName("validation_issues_dock")
+        self.issues_dock.setAllowedAreas(
+            Qt.DockWidgetArea.BottomDockWidgetArea
+            | Qt.DockWidgetArea.LeftDockWidgetArea
+            | Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        self.issues_dock.setWidget(self.issues_panel)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.issues_dock)
 
     def _create_actions(self) -> None:
         create = self.action_registry.create
@@ -336,6 +349,11 @@ class MainWindow(QMainWindow):
             self.preview_dock.toggleViewAction(),
             status_tip="Show or hide runtime previews",
         )
+        self.action_registry.register(
+            "toggle_issues",
+            self.issues_dock.toggleViewAction(),
+            status_tip="Show or hide the graph validation issue list",
+        )
 
     def _create_toolbar(self) -> None:
         toolbar = QToolBar("Transport", self)
@@ -381,6 +399,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.action_registry.require("toggle_library"))
         view_menu.addAction(self.action_registry.require("toggle_inspector"))
         view_menu.addAction(self.action_registry.require("toggle_previews"))
+        view_menu.addAction(self.action_registry.require("toggle_issues"))
 
         graph_menu = self.menuBar().addMenu("&Graph")
         graph_menu.addAction(self.action_registry.require("add_node"))
@@ -427,6 +446,8 @@ class MainWindow(QMainWindow):
         self.session.changed.connect(self._schedule_engine_activation)
         self.session.pathChanged.connect(self._refresh_document_ui)
         self.session.dirtyChanged.connect(self._on_dirty_changed)
+        self.session.validationChanged.connect(self.issues_panel.set_report)
+        self.issues_panel.issueActivated.connect(self._focus_validation_issue)
         self.scene.selectionChanged.connect(self._refresh_selection_ui)
         self.scene.connectionDroppedOnEmpty.connect(self._search_compatible_node)
         self.view.requestSearch.connect(self._search_nodes)
@@ -531,20 +552,10 @@ class MainWindow(QMainWindow):
             if (definition := self.registry.get(node.type_id)) is not None
             and definition.execution_kind is ExecutionKind.SOURCE
         )
-        selected = self.scene.selected_node_ids()
-        selected_sources = tuple(node_id for node_id in sources if node_id in selected)
-        if len(selected_sources) == 1:
-            return selected_sources[0]
-        if len(selected_sources) > 1:
-            self.statusBar().showMessage("Select exactly one source for transport", 4000)
-            return None
-        if len(sources) == 1:
-            return sources[0]
-        if not sources:
-            self.statusBar().showMessage("Add a source node before using transport", 4000)
-        else:
-            self.statusBar().showMessage("Select one source node for transport", 4000)
-        return None
+        resolution = resolve_transport_target(sources, self.scene.selected_node_ids())
+        if resolution.target is None:
+            self.statusBar().showMessage(resolution.message, 4000)
+        return resolution.target
 
     @Slot()
     def new_document(self) -> None:
@@ -793,6 +804,13 @@ class MainWindow(QMainWindow):
         errors = len(self.session.report.errors)
         warnings = len(self.session.report.warnings)
         self._validation_status.setText(f"{errors} error(s) · {warnings} warning(s)")
+        self._validation_status.setToolTip(
+            "\n".join(
+                f"{issue.severity}: {issue.message} ({issue.code})"
+                for issue in self.session.report.issues[:8]
+            )
+            or "Graph is valid"
+        )
         self._refresh_action_states()
 
     @Slot()
@@ -832,6 +850,40 @@ class MainWindow(QMainWindow):
             self.action_registry.require(key).setEnabled(selected_node_count >= 2)
         self.action_registry.require("distribute_horizontal").setEnabled(selected_node_count >= 3)
         self.action_registry.require("distribute_vertical").setEnabled(selected_node_count >= 3)
+        sources = tuple(
+            node.id
+            for node in self.session.document.nodes
+            if (definition := self.registry.get(node.type_id)) is not None
+            and definition.execution_kind is ExecutionKind.SOURCE
+        )
+        transport = resolve_transport_target(sources, self.scene.selected_node_ids())
+        for key, verb in (
+            ("play", "Play or resume"),
+            ("pause", "Pause"),
+            ("stop", "Stop"),
+            ("reload", "Reload"),
+        ):
+            action = self.action_registry.require(key)
+            action.setEnabled(transport.target is not None)
+            action.setToolTip(
+                f"{verb} {transport.message.removeprefix('Targeting ').lower()}"
+                if transport.target is not None
+                else transport.message
+            )
+
+    @Slot(object)
+    def _focus_validation_issue(self, issue: ValidationIssue) -> None:
+        if issue.node_id is not None:
+            self.scene.select_node_ids({issue.node_id})
+            item = self.scene.node_items.get(issue.node_id)
+            if item is not None:
+                self.view.ensureVisible(item, 80, 80)
+        elif issue.connection_id is not None:
+            self.scene.select_connection_ids({issue.connection_id})
+            item = self.scene.connection_items.get(issue.connection_id)
+            if item is not None:
+                self.view.ensureVisible(item, 80, 80)
+        self.statusBar().showMessage(f"{issue.code}: {issue.message}", 6000)
 
     @Slot()
     def _schedule_engine_activation(self) -> None:

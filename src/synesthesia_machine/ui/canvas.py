@@ -104,6 +104,13 @@ class GraphScene(QGraphicsScene):
             if item is not None:
                 item.setSelected(True)
 
+    def select_connection_ids(self, connection_ids: set[UUID]) -> None:
+        self.clearSelection()
+        for connection_id in connection_ids:
+            item = self.connection_items.get(connection_id)
+            if item is not None:
+                item.setSelected(True)
+
     def update_connections(self) -> None:
         for item in self.connection_items.values():
             model = item.view_model
