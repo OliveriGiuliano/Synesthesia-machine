@@ -913,7 +913,10 @@ class MainWindow(QMainWindow):
         if not self.session.is_dirty:
             return
         try:
-            path = self.autosave_store.save(self.session.document.snapshot())
+            path = self.autosave_store.save(
+                self.session.document.snapshot(),
+                explicit_path=self.session.current_path,
+            )
         except OSError as error:
             self.statusBar().showMessage(f"Autosave failed: {error}", 5000)
             return
@@ -973,6 +976,8 @@ class MainWindow(QMainWindow):
             return
 
     def _explicit_path_for(self, record: RecoveryRecord) -> Path | None:
+        if record.explicit_path is not None:
+            return record.explicit_path
         for path in self._recent_paths:
             try:
                 snapshot = load_graph(path, self.registry)

@@ -158,10 +158,12 @@ def save_graph(
     destination = Path(path).expanduser().resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
     content = graph_to_json(_with_persisted_media_paths(snapshot, destination.parent))
-    _atomic_write_text(destination, content, retain_backup=retain_backup)
+    write_text_atomically(destination, content, retain_backup=retain_backup)
 
 
-def _atomic_write_text(destination: Path, content: str, *, retain_backup: bool) -> None:
+def write_text_atomically(destination: Path, content: str, *, retain_backup: bool) -> None:
+    """Durably replace one text file, optionally retaining its previous generation."""
+
     temporary_path: Path | None = None
     backup_temporary_path: Path | None = None
     try:
