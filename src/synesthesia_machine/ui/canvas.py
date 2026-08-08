@@ -61,6 +61,7 @@ class GraphScene(QGraphicsScene):
         self._temporary: TemporaryConnectionGraphicsItem | None = None
         self._large_graph_mode = False
         self._detail_visible = True
+        self._node_heat_levels: dict[UUID, float] = {}
         self.grid_snap_enabled = False
         self.grid_spacing = theme.metrics.grid_size
         self.setSceneRect(-4000.0, -3000.0, 8000.0, 6000.0)
@@ -108,6 +109,7 @@ class GraphScene(QGraphicsScene):
                     defer_parameter_editors=large_graph_mode,
                 )
                 item.set_detail_visible(self._detail_visible)
+                item.set_heat_level(self._node_heat_levels.get(node.node_id))
                 self.addItem(item)
                 item.setSelected(node.node_id in selected_nodes)
                 self.node_items[node.node_id] = item
@@ -130,6 +132,11 @@ class GraphScene(QGraphicsScene):
         self._detail_visible = detail_visible
         for item in self.node_items.values():
             item.set_detail_visible(detail_visible)
+
+    def set_node_heatmap(self, levels: dict[UUID, float] | None) -> None:
+        self._node_heat_levels = dict(levels or {})
+        for node_id, item in self.node_items.items():
+            item.set_heat_level(self._node_heat_levels.get(node_id))
 
     def select_node_ids(self, node_ids: set[UUID]) -> None:
         self.clearSelection()

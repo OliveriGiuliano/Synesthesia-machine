@@ -204,6 +204,7 @@ class NodeGraphicsItem(QGraphicsObject):
         self._parameter_rows: dict[str, float] = {}
         self._defer_parameter_editors = defer_parameter_editors
         self._detail_visible = True
+        self._heat_level: float | None = None
         self._drag_origin: dict[UUID, tuple[float, float]] = {}
         self._height = self._layout_height()
         self.setFlags(
@@ -215,6 +216,17 @@ class NodeGraphicsItem(QGraphicsObject):
         self.setPos(*view_model.position)
         self.setToolTip(_diagnostic_tooltip(view_model.description, view_model.issues))
         self._create_ports_and_editors()
+
+    @property
+    def heat_level(self) -> float | None:
+        return self._heat_level
+
+    def set_heat_level(self, level: float | None) -> None:
+        normalized = None if level is None else min(1.0, max(0.0, level))
+        if normalized == self._heat_level:
+            return
+        self._heat_level = normalized
+        self.update()
 
     def _layout_height(self) -> float:
         if self.view_model.collapsed:
@@ -300,10 +312,18 @@ class NodeGraphicsItem(QGraphicsObject):
         del widget
         metrics = self.theme.metrics
         body = QRectF(0.0, 0.0, metrics.node_width, self._height)
-        pen = QPen(
-            self.theme.color("selection") if self.isSelected() else self.theme.color("border")
-        )
-        pen.setWidthF(2.2 if self.isSelected() else 1.0)
+        border_color = self.theme.color("border")
+        border_width = 1.0
+        if self._heat_level is not None:
+            border_color = _interpolate_color(
+                self.theme.color("accent"), self.theme.color("error"), self._heat_level
+            )
+            border_width = 1.5 + self._heat_level * 2.5
+        if self.isSelected():
+            border_color = self.theme.color("selection")
+            border_width = max(border_width, 2.2)
+        pen = QPen(border_color)
+        pen.setWidthF(border_width)
         painter.setPen(pen)
         painter.setBrush(QBrush(self.theme.color("node")))
         painter.drawRoundedRect(body, metrics.node_radius, metrics.node_radius)
@@ -393,6 +413,16 @@ class NodeGraphicsItem(QGraphicsObject):
         scene = cast("GraphSceneProtocol", self.scene())
         scene.commit_node_move(self._drag_origin)
         self._drag_origin = {}
+
+
+def _interpolate_color(start: QColor, end: QColor, amount: float) -> QColor:
+    inverse = 1.0 - amount
+    return QColor.fromRgbF(
+        start.redF() * inverse + end.redF() * amount,
+        start.greenF() * inverse + end.greenF() * amount,
+        start.blueF() * inverse + end.blueF() * amount,
+        1.0,
+    )
 
 
 class ConnectionGraphicsItem(QGraphicsObject):

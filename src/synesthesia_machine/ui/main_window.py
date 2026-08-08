@@ -51,6 +51,7 @@ from synesthesia_machine.ui.application_settings import (
 )
 from synesthesia_machine.ui.canvas import GraphScene, GraphView
 from synesthesia_machine.ui.previews import RuntimePreviewPanel
+from synesthesia_machine.ui.profiler import ProfilerPanel, profile_heat_levels
 from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.theme import DEFAULT_THEME, Theme
 from synesthesia_machine.ui.transport import resolve_transport_target
@@ -113,6 +114,7 @@ class MainWindow(QMainWindow):
         self.inspector = InspectorPanel(self.session, self)
         self.issues_panel = ValidationIssuePanel(self)
         self.preview_panel = RuntimePreviewPanel(self)
+        self.profiler_panel = ProfilerPanel(self)
         self.recent_menu = QMenu("Open &Recent", self)
         self._recent_paths = self._load_recent_paths()
         self._image_sequences: dict[UUID, int] = {}
@@ -129,6 +131,8 @@ class MainWindow(QMainWindow):
         self._preview_timer.setInterval(16)
         self._metrics_timer = QTimer(self)
         self._metrics_timer.setInterval(100)
+        self._profiler_timer = QTimer(self)
+        self._profiler_timer.setInterval(250)
         self._node_count = QLabel(self)
         self._validation_status = QLabel(self)
         self._engine_status = QLabel(self)
@@ -182,6 +186,17 @@ class MainWindow(QMainWindow):
         )
         self.preview_dock.setWidget(self.preview_panel)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.preview_dock)
+
+        self.profiler_dock = QDockWidget("Runtime Profiler", self)
+        self.profiler_dock.setObjectName("runtime_profiler_dock")
+        self.profiler_dock.setAllowedAreas(
+            Qt.DockWidgetArea.BottomDockWidgetArea
+            | Qt.DockWidgetArea.LeftDockWidgetArea
+            | Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        self.profiler_dock.setWidget(self.profiler_panel)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.profiler_dock)
+        self.profiler_dock.hide()
 
         self.issues_dock = QDockWidget("Validation Issues", self)
         self.issues_dock.setObjectName("validation_issues_dock")
@@ -350,6 +365,11 @@ class MainWindow(QMainWindow):
             status_tip="Show or hide runtime previews",
         )
         self.action_registry.register(
+            "toggle_profiler",
+            self.profiler_dock.toggleViewAction(),
+            status_tip="Show or hide per-node runtime profiling",
+        )
+        self.action_registry.register(
             "toggle_issues",
             self.issues_dock.toggleViewAction(),
             status_tip="Show or hide the graph validation issue list",
@@ -399,6 +419,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.action_registry.require("toggle_library"))
         view_menu.addAction(self.action_registry.require("toggle_inspector"))
         view_menu.addAction(self.action_registry.require("toggle_previews"))
+        view_menu.addAction(self.action_registry.require("toggle_profiler"))
         view_menu.addAction(self.action_registry.require("toggle_issues"))
 
         graph_menu = self.menuBar().addMenu("&Graph")
@@ -456,6 +477,10 @@ class MainWindow(QMainWindow):
         self._activation_timer.timeout.connect(self._activate_graph)
         self._preview_timer.timeout.connect(self._poll_previews)
         self._metrics_timer.timeout.connect(self._refresh_engine_status)
+        self._profiler_timer.timeout.connect(self._refresh_profiles)
+        self.profiler_dock.visibilityChanged.connect(self._on_profiler_visibility_changed)
+        self.profiler_panel.resetRequested.connect(self._reset_profiling)
+        self.profiler_panel.heatmapChanged.connect(self._update_profiler_heatmap)
         QApplication.clipboard().dataChanged.connect(self._refresh_action_states)
 
     @Slot()
@@ -970,6 +995,44 @@ class MainWindow(QMainWindow):
             f"drops {metrics.dropped_before_processing} · RAM {memory_mib:.1f} MiB"
         )
 
+    @Slot(bool)
+    def _on_profiler_visibility_changed(self, visible: bool) -> None:
+        if visible and not self._engine_closed:
+            self._profiler_timer.start()
+            self._refresh_profiles()
+            return
+        self._profiler_timer.stop()
+        self.scene.set_node_heatmap(None)
+
+    @Slot()
+    def _refresh_profiles(self) -> None:
+        if self._engine_closed or not self.profiler_dock.isVisible() or self.profiler_panel.frozen:
+            return
+        try:
+            profiles = self.engine_client.node_profiles()
+        except (RuntimeError, TimeoutError):
+            return
+        names = {node.node_id: node.title for node in self.session.view_model.nodes}
+        if self.profiler_panel.set_profiles(profiles, names):
+            self._update_profiler_heatmap(self.profiler_panel.heatmap_checkbox.isChecked())
+
+    @Slot()
+    def _reset_profiling(self) -> None:
+        if self._engine_closed:
+            return
+        try:
+            self.engine_client.reset_profiling()
+        except (RuntimeError, TimeoutError):
+            self.statusBar().showMessage("Could not reset runtime profiling", 3000)
+            return
+        self.scene.set_node_heatmap(None)
+        self.statusBar().showMessage("Runtime profiling reset", 2000)
+
+    @Slot(bool)
+    def _update_profiler_heatmap(self, enabled: bool) -> None:
+        levels = profile_heat_levels(self.profiler_panel.profiles) if enabled else None
+        self.scene.set_node_heatmap(levels)
+
     def _show_engine_failure(self, status: EngineStatus) -> None:
         state = status.connection_state.value
         exit_text = "" if status.exit_code is None else f" · exit {status.exit_code}"
@@ -1179,6 +1242,7 @@ class MainWindow(QMainWindow):
             self._activation_timer.stop()
             self._preview_timer.stop()
             self._metrics_timer.stop()
+            self._profiler_timer.stop()
             if not self._engine_closed:
                 self.engine_client.close()
                 self._engine_closed = True
