@@ -147,8 +147,9 @@ def image_to_luminance(image: ImageFrame) -> ChannelFrame:
         for index, channel in enumerate(descriptor.channels)
         if channel.semantic is not ChannelSemantic.ALPHA
     )
-    if not np.isfinite(image.data[..., colour_indices]).all():
-        raise ValueError("Image to Luminance requires finite colour-channel values")
+    for index in colour_indices:
+        if not np.isfinite(image.data[..., index]).all():
+            raise ValueError("Image to Luminance requires finite colour-channel values")
     rgb, _ = _to_srgb(image.data, image.color_space)
     linear = _srgb_to_linear(rgb)
     luminance = (
