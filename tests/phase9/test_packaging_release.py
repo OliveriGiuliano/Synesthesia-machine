@@ -31,7 +31,7 @@ def test_release_configuration_is_standalone_versioned_and_console_free() -> Non
     assert parser.get("python", "packages") == "Nuitka==4.1"
     extra_args = parser.get("nuitka", "extra_args")
     assert "--windows-console-mode=disable" in extra_args
-    assert "--include-package=av" in extra_args
+    assert "--include-module=av.utils" in extra_args
     assert f"--product-version={__version__}" in extra_args
     assert f"--file-version={__version__}.0" in extra_args
     assert "--onefile" not in extra_args
