@@ -5,41 +5,41 @@
   ],
   "measured_ticks_per_mode": 180,
   "repetitions": 5,
-  "median_off_ms_per_tick": 13.928040555555556,
-  "median_on_ms_per_tick": 13.702817777777778,
-  "overhead_percent": -0.16597451031309385,
+  "median_off_ms_per_tick": 13.226344444444445,
+  "median_on_ms_per_tick": 13.556615,
+  "overhead_percent": 1.5348793529105231,
   "target_percent": 3.0,
   "passed": true,
   "samples": [
     {
       "repetition": 1,
-      "profiler_off_ms_per_tick": 14.443874444444445,
-      "profiler_on_ms_per_tick": 18.255516111111113,
-      "overhead_percent": 26.389329825092346
+      "profiler_off_ms_per_tick": 13.226344444444445,
+      "profiler_on_ms_per_tick": 13.415098333333335,
+      "overhead_percent": 1.427105499041903
     },
     {
       "repetition": 2,
-      "profiler_off_ms_per_tick": 13.953406666666666,
-      "profiler_on_ms_per_tick": 15.535211111111112,
-      "overhead_percent": 11.336331565704484
+      "profiler_off_ms_per_tick": 12.168736666666666,
+      "profiler_on_ms_per_tick": 12.745408333333334,
+      "overhead_percent": 4.738960850770324
     },
     {
       "repetition": 3,
-      "profiler_off_ms_per_tick": 13.928040555555556,
-      "profiler_on_ms_per_tick": 13.702817777777778,
-      "overhead_percent": -1.6170456775985054
+      "profiler_off_ms_per_tick": 13.194462777777778,
+      "profiler_on_ms_per_tick": 13.721055555555555,
+      "overhead_percent": 3.9910134019603305
     },
     {
       "repetition": 4,
-      "profiler_off_ms_per_tick": 13.596130555555556,
-      "profiler_on_ms_per_tick": 13.573564444444443,
-      "overhead_percent": -0.16597451031309385
+      "profiler_off_ms_per_tick": 13.391247222222223,
+      "profiler_on_ms_per_tick": 13.582467222222222,
+      "overhead_percent": 1.4279476498848975
     },
     {
       "repetition": 5,
-      "profiler_off_ms_per_tick": 13.527745,
-      "profiler_on_ms_per_tick": 13.50193,
-      "overhead_percent": -0.19083003116927566
+      "profiler_off_ms_per_tick": 13.351682777777778,
+      "profiler_on_ms_per_tick": 13.556615,
+      "overhead_percent": 1.5348793529105231
     }
   ]
 }

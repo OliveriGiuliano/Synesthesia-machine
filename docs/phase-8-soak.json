@@ -1,0 +1,38 @@
+{
+  "generated_at_utc": "2026-08-08T11:46:08.098731+00:00",
+  "git_commit": "27bba58709187440845eccdd777a7f33b09f24bd",
+  "methodology": {
+    "accelerated": true,
+    "target_fps": 60,
+    "equivalent_duration_minutes": 60.0,
+    "memory_scope": "Production scheduler, looping source resets, bounded Hold Image",
+    "profiler_scope": "Bounded rolling window under one record per equivalent frame",
+    "midi_scope": "Latest-state mailbox overload followed by panic and close"
+  },
+  "memory": {
+    "ticks": 216000,
+    "equivalent_minutes": 60.0,
+    "wall_clock_s": 2.3073436000013317,
+    "scheduler_errors": 0,
+    "post_warmup_growth_bytes": 0,
+    "post_warmup_span_bytes": 0,
+    "peak_retained_frames": 8,
+    "final_retained_frames": 0,
+    "bounded": true
+  },
+  "profiler": {
+    "invocations": 216000,
+    "rolling_window_size": 240,
+    "rolling_window_capacity": 240,
+    "bounded": true
+  },
+  "midi_overload": {
+    "published_state_count": 20,
+    "dropped_state_updates": 18,
+    "active_notes_after_latest_state": 1,
+    "active_notes_after_panic": 0,
+    "active_notes_after_close": 0,
+    "no_stuck_notes": true
+  },
+  "passed": true
+}
