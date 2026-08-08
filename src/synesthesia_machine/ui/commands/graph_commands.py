@@ -17,6 +17,7 @@ from synesthesia_machine.graph import (
     NodeModel,
 )
 from synesthesia_machine.persistence.clipboard import ClipboardFragment
+from synesthesia_machine.persistence.media_relink import relinked_media_node
 
 type ChangeCallback = Callable[[], None]
 
@@ -276,6 +277,30 @@ class SetParameterCommand(_DocumentCommand):
             return False
         self.new_node = other.new_node
         return True
+
+    def redo(self) -> None:
+        self.document.restore_node(self.new_node, replace_existing=True)
+        self._changed()
+
+    def undo(self) -> None:
+        self.document.restore_node(self.old_node, replace_existing=True)
+        self._changed()
+
+
+class RelinkMediaCommand(_DocumentCommand):
+    def __init__(
+        self,
+        document: GraphDocument,
+        node_id: UUID,
+        candidate: str,
+        on_changed: ChangeCallback | None = None,
+    ) -> None:
+        super().__init__("Relink missing media", document, on_changed)
+        node = document.node(node_id)
+        if node is None:
+            raise KeyError(f"Unknown node: {node_id}")
+        self.old_node = node
+        self.new_node = relinked_media_node(node, candidate)
 
     def redo(self) -> None:
         self.document.restore_node(self.new_node, replace_existing=True)

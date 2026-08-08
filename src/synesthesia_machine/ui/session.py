@@ -39,6 +39,7 @@ from synesthesia_machine.ui.commands import (
     MoveGroupsCommand,
     MoveNodesCommand,
     PasteCommand,
+    RelinkMediaCommand,
     RemoveConnectionCommand,
     ReplaceConnectionCommand,
     SetParameterCommand,
@@ -238,6 +239,16 @@ class DocumentSession(QObject):
                 node_id,
                 parameter_id,
                 value,
+                self._command_change_callback,
+            )
+        )
+
+    def relink_media(self, node_id: UUID, candidate: str | Path) -> None:
+        self.push(
+            RelinkMediaCommand(
+                self.document,
+                node_id,
+                str(Path(candidate).expanduser().resolve()),
                 self._command_change_callback,
             )
         )

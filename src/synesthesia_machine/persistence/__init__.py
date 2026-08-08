@@ -17,6 +17,17 @@ from synesthesia_machine.persistence.graph_io import (
     load_graph,
     save_graph,
 )
+from synesthesia_machine.persistence.media_relink import (
+    MEDIA_ABSOLUTE_FALLBACK_KEY,
+    MEDIA_FINGERPRINT_KEY,
+    MEDIA_SIZE_KEY,
+    MissingMediaReference,
+    RelinkMatch,
+    RelinkVerification,
+    find_missing_media,
+    media_fingerprint,
+    verify_relink_candidate,
+)
 from synesthesia_machine.persistence.schemas import (
     GRAPH_SCHEMA_VERSION,
     ConnectionSchemaV1,
@@ -32,6 +43,9 @@ from synesthesia_machine.persistence.schemas import (
 __all__ = [
     "CLIPBOARD_FRAGMENT_VERSION",
     "GRAPH_SCHEMA_VERSION",
+    "MEDIA_ABSOLUTE_FALLBACK_KEY",
+    "MEDIA_FINGERPRINT_KEY",
+    "MEDIA_SIZE_KEY",
     "ClipboardFragment",
     "ConnectionSchemaV1",
     "GraphPersistenceError",
@@ -39,8 +53,12 @@ __all__ = [
     "GroupSchemaV1",
     "JsonObject",
     "JsonValue",
+    "MissingMediaReference",
     "NodeSchemaV1",
+    "RelinkMatch",
+    "RelinkVerification",
     "copy_fragment",
+    "find_missing_media",
     "fragment_from_json",
     "fragment_to_json",
     "graph_from_data",
@@ -48,8 +66,10 @@ __all__ = [
     "graph_to_data",
     "graph_to_json",
     "load_graph",
+    "media_fingerprint",
     "migrate_graph_data",
     "migrate_v0_to_v1",
     "remap_fragment",
     "save_graph",
+    "verify_relink_candidate",
 ]

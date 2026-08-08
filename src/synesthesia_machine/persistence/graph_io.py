@@ -24,6 +24,12 @@ from synesthesia_machine.graph import (
 )
 from synesthesia_machine.nodes import NodeRegistry
 from synesthesia_machine.nodes.input import LOAD_VIDEO_TYPE_ID
+from synesthesia_machine.persistence.media_relink import (
+    MEDIA_ABSOLUTE_FALLBACK_KEY,
+    MEDIA_FINGERPRINT_KEY,
+    MEDIA_SIZE_KEY,
+    media_fingerprint,
+)
 from synesthesia_machine.persistence.schemas import (
     GRAPH_SCHEMA_VERSION,
     ConnectionSchemaV1,
@@ -232,10 +238,31 @@ def _with_persisted_media_paths(snapshot: GraphSnapshot, graph_directory: Path) 
     return replace(
         snapshot,
         nodes=tuple(
-            _replace_video_path(node, _persisted_media_path, graph_directory)
-            for node in snapshot.nodes
+            _with_persisted_video_identity(node, graph_directory) for node in snapshot.nodes
         ),
     )
+
+
+def _with_persisted_video_identity(node: NodeModel, graph_directory: Path) -> NodeModel:
+    if node.type_id != LOAD_VIDEO_TYPE_ID:
+        return node
+    value = node.parameters.get("file_path")
+    if not isinstance(value, str) or not value:
+        return node
+    candidate = Path(value).expanduser()
+    if not candidate.is_absolute():
+        candidate = graph_directory / candidate
+    resolved = candidate.resolve()
+    parameters = dict(node.parameters)
+    parameters["file_path"] = _persisted_media_path(str(resolved), graph_directory)
+    ui_state = dict(node.ui_state)
+    if resolved.is_file():
+        ui_state[MEDIA_ABSOLUTE_FALLBACK_KEY] = str(resolved)
+        ui_state[MEDIA_FINGERPRINT_KEY] = media_fingerprint(resolved)
+        ui_state[MEDIA_SIZE_KEY] = resolved.stat().st_size
+    elif MEDIA_ABSOLUTE_FALLBACK_KEY not in ui_state:
+        ui_state[MEDIA_ABSOLUTE_FALLBACK_KEY] = str(resolved)
+    return replace(node, parameters=parameters, ui_state=ui_state)
 
 
 def _replace_video_path(

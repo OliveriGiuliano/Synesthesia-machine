@@ -35,9 +35,12 @@ from synesthesia_machine.graph import AlignMode, DistributionAxis, GroupKind
 from synesthesia_machine.nodes import ExecutionKind, NodeRegistry
 from synesthesia_machine.persistence import (
     GraphPersistenceError,
+    RelinkMatch,
+    find_missing_media,
     fragment_from_json,
     fragment_to_json,
     load_graph,
+    verify_relink_candidate,
 )
 from synesthesia_machine.persistence.autosave import AutosaveStore, RecoveryRecord
 from synesthesia_machine.ui.actions import ActionRegistry, ActionSpec
@@ -186,6 +189,14 @@ class MainWindow(QMainWindow):
         create(
             ActionSpec("open", "&Open…", "Open a graph", QKeySequence.StandardKey.Open),
             self.open_document,
+        )
+        create(
+            ActionSpec(
+                "relink_media",
+                "Locate Missing &Media…",
+                "Select a replacement file for a missing Load Video source",
+            ),
+            self.locate_missing_media,
         )
         create(
             ActionSpec("save", "&Save", "Save the graph", QKeySequence.StandardKey.Save),
@@ -343,6 +354,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.action_registry.require("new"))
         file_menu.addAction(self.action_registry.require("open"))
         file_menu.addMenu(self.recent_menu)
+        file_menu.addAction(self.action_registry.require("relink_media"))
         file_menu.addSeparator()
         file_menu.addAction(self.action_registry.require("save"))
         file_menu.addAction(self.action_registry.require("save_as"))
@@ -564,8 +576,59 @@ class MainWindow(QMainWindow):
         if decision is _ReplacementDecision.DISCARD:
             self.autosave_store.discard(previous_id)
         self._remember_recent(path)
-        self.statusBar().showMessage(f"Opened {path.name}", 4000)
+        missing_count = len(find_missing_media(self.session.document.snapshot()))
+        if missing_count:
+            self.statusBar().showMessage(
+                f"Opened {path.name} · {missing_count} missing media file(s); "
+                "use File → Locate Missing Media",
+                8000,
+            )
+        else:
+            self.statusBar().showMessage(f"Opened {path.name}", 4000)
         return True
+
+    @Slot()
+    def locate_missing_media(self) -> None:
+        references = find_missing_media(self.session.document.snapshot())
+        selected_node_ids = self.scene.selected_node_ids()
+        selected_references = tuple(
+            reference for reference in references if reference.node_id in selected_node_ids
+        )
+        candidates = selected_references or references
+        if not candidates:
+            self.statusBar().showMessage("No missing media files were found", 4000)
+            return
+        reference = candidates[0]
+        selected, _ = QFileDialog.getOpenFileName(
+            self,
+            "Locate Missing Video",
+            str(reference.missing_path.parent),
+            "Video files (*.mp4 *.mov *.mkv *.avi *.webm);;All files (*)",
+        )
+        if not selected:
+            return
+        verification = verify_relink_candidate(reference, selected)
+        if verification.match is RelinkMatch.MISMATCH:
+            choice = QMessageBox.warning(
+                self,
+                "Media identity differs",
+                f"{verification.message}\n\nUse this explicitly selected file anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if choice is not QMessageBox.StandardButton.Yes:
+                return
+        try:
+            self.session.relink_media(reference.node_id, selected)
+        except (OSError, ValueError) as error:
+            self._show_error("Could not relink media", str(error))
+            return
+        self.scene.select_node_ids({reference.node_id})
+        remaining = len(find_missing_media(self.session.document.snapshot()))
+        self.statusBar().showMessage(
+            f"Relinked {Path(selected).name} · {remaining} missing media file(s) remain",
+            5000,
+        )
 
     @Slot()
     def save_document(self) -> bool:
