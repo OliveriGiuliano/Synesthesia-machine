@@ -58,7 +58,7 @@ class ChannelSemantic(StrEnum):
     CHROMA_BLUE = "CHROMA_BLUE"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class FrameContext:
     clock_id: UUID
     tick_index: int
@@ -67,6 +67,28 @@ class FrameContext:
     received_monotonic_ns: int
     deadline_monotonic_ns: int | None
     is_realtime: bool
+
+    def __init__(
+        self,
+        clock_id: UUID,
+        tick_index: int,
+        source_frame_index: int | None,
+        source_time_s: float,
+        received_monotonic_ns: int,
+        deadline_monotonic_ns: int | None,
+        is_realtime: bool,
+    ) -> None:
+        # CPython 3.12 on Windows can corrupt sustained calls to the generated
+        # frozen-slotted dataclass initializer. An explicit initializer keeps
+        # the immutable contract while avoiding that long-running interpreter path.
+        object.__setattr__(self, "clock_id", clock_id)
+        object.__setattr__(self, "tick_index", tick_index)
+        object.__setattr__(self, "source_frame_index", source_frame_index)
+        object.__setattr__(self, "source_time_s", source_time_s)
+        object.__setattr__(self, "received_monotonic_ns", received_monotonic_ns)
+        object.__setattr__(self, "deadline_monotonic_ns", deadline_monotonic_ns)
+        object.__setattr__(self, "is_realtime", is_realtime)
+        self.__post_init__()
 
     def __post_init__(self) -> None:
         if self.tick_index < 1:

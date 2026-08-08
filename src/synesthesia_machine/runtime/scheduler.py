@@ -122,13 +122,16 @@ class Scheduler:
         errors: list[NodeExecutionError] = []
         invocations: dict[UUID, int] = {}
         for node in self.plan.nodes:
-            outputs_are_cached = bool(node.output_types) and all(
-                PortKey(node.node_id, port_id) in values for port_id in node.output_types
-            )
+            outputs_are_cached = bool(node.output_types)
+            for port_id in node.output_types:
+                if PortKey(node.node_id, port_id) not in values:
+                    outputs_are_cached = False
+                    break
             if not node.is_demanded or outputs_are_cached:
                 continue
             inputs: dict[str, RuntimeValue] = {}
-            for port_id, binding in node.input_bindings.items():
+            for port_id in node.input_bindings:
+                binding = node.input_bindings[port_id]
                 value = values.get(binding.source, NoData)
                 if (
                     binding.conversion is ScalarConversion.INT_TO_FLOAT
@@ -137,9 +140,13 @@ class Scheduler:
                 ):
                     value = float(value)
                 inputs[port_id] = value
-            if not node.definition.handles_no_data and any(
-                value is NoData for value in inputs.values()
-            ):
+            contains_no_data = False
+            if not node.definition.handles_no_data:
+                for value in inputs.values():
+                    if value is NoData:
+                        contains_no_data = True
+                        break
+            if contains_no_data:
                 outputs = {port_id: NoData for port_id in node.output_types}
             else:
                 collect_timing = self._timing_hook is not None or self._profiling_hook is not None
