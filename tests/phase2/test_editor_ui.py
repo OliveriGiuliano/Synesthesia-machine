@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFileDialog,
     QLineEdit,
     QMessageBox,
     QPushButton,
@@ -39,7 +40,12 @@ from synesthesia_machine.persistence import save_graph
 from synesthesia_machine.runtime import InProcessEngineClient
 from synesthesia_machine.ui.graphics import NodeGraphicsItem
 from synesthesia_machine.ui.main_window import MainWindow
-from synesthesia_machine.ui.parameter_editors import create_parameter_editor
+from synesthesia_machine.ui.parameter_editors import (
+    FilePathParameterEditor,
+    FloatRangeParameterEditor,
+    IntRangeParameterEditor,
+    create_parameter_editor,
+)
 from synesthesia_machine.ui.view_models import ParameterViewModel
 from synesthesia_machine.ui.widgets import NodeSearchDialog, SearchCandidate
 
@@ -252,6 +258,50 @@ def test_scalar_editor_factory_supports_all_phase_2_literal_types() -> None:
         )
         assert isinstance(editor, expected_type)
         assert editor.accessibleName() == spec.label
+
+
+def test_bounded_numeric_metadata_uses_sliders_and_commits_values(
+    qapp: QApplication,
+) -> None:
+    edits: list[object] = []
+    float_spec = ParameterSpec("gain", "Gain", PortType.FLOAT, 0.25, minimum=0.0, maximum=1.0)
+    float_editor = create_parameter_editor(
+        ParameterViewModel(float_spec, 0.25, False), edits.append
+    )
+    assert isinstance(float_editor, FloatRangeParameterEditor)
+    assert (float_editor.minimum(), float_editor.maximum()) == (0.0, 1.0)
+    float_editor.setValue(0.75)
+    qapp.processEvents()
+    assert edits[-1] == pytest.approx(0.75)
+
+    int_spec = ParameterSpec("voices", "Voices", PortType.INT, 4, minimum=1, maximum=16)
+    int_editor = create_parameter_editor(ParameterViewModel(int_spec, 4, False), edits.append)
+    assert isinstance(int_editor, IntRangeParameterEditor)
+    assert (int_editor.minimum(), int_editor.maximum()) == (1, 16)
+    int_editor.setValue(12)
+    qapp.processEvents()
+    assert edits[-1] == 12
+
+
+def test_video_file_path_editor_browses_and_commits_selected_path(
+    qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    del qapp
+    selected = "C:/media/example.mkv"
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        lambda *_args, **_kwargs: (selected, "Video files"),
+    )
+    edits: list[object] = []
+    spec = ParameterSpec("file_path", "File path", PortType.STRING, "")
+    editor = create_parameter_editor(ParameterViewModel(spec, "", False), edits.append)
+
+    assert isinstance(editor, FilePathParameterEditor)
+    assert editor.browse_button.text() == "Browse…"
+    editor.browse_button.click()
+    assert editor.text() == selected
+    assert edits == [selected]
 
 
 def test_matrix_editor_commits_valid_nested_json_and_marks_invalid_input(

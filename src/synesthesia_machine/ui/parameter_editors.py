@@ -6,15 +6,20 @@ import json
 from collections.abc import Callable
 from typing import cast
 
-from PySide6.QtCore import Slot
+from PySide6.QtCore import Qt, QTimer, Slot
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QColorDialog,
     QComboBox,
     QDoubleSpinBox,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
     QLineEdit,
     QPushButton,
+    QSizePolicy,
+    QSlider,
     QSpinBox,
     QWidget,
 )
@@ -37,12 +42,18 @@ def create_parameter_editor(
     spec = parameter.spec
     if spec.choices:
         editor: QWidget = ChoiceParameterEditor(parameter, on_changed)
+    elif spec.value_type is PortType.FLOAT and _has_finite_range(parameter):
+        editor = FloatRangeParameterEditor(parameter, on_changed)
     elif spec.value_type is PortType.FLOAT:
         editor = FloatParameterEditor(parameter, on_changed)
+    elif spec.value_type is PortType.INT and _has_finite_range(parameter):
+        editor = IntRangeParameterEditor(parameter, on_changed)
     elif spec.value_type is PortType.INT:
         editor = IntParameterEditor(parameter, on_changed)
     elif spec.value_type is PortType.BOOL:
         editor = BoolParameterEditor(parameter, on_changed)
+    elif spec.value_type is PortType.STRING and spec.id == "file_path":
+        editor = FilePathParameterEditor(parameter, on_changed, compact=compact)
     elif spec.value_type is PortType.STRING:
         editor = StringParameterEditor(parameter, on_changed)
     elif spec.value_type is PortType.COLOR:
@@ -60,6 +71,141 @@ def create_parameter_editor(
     if compact:
         editor.setMaximumHeight(23)
     return editor
+
+
+def _has_finite_range(parameter: ParameterViewModel) -> bool:
+    spec = parameter.spec
+    return spec.minimum is not None and spec.maximum is not None
+
+
+class _RangeParameterEditor(QWidget):
+    """Shared slider/value surface for parameters with finite metadata bounds."""
+
+    def __init__(self, parameter: ParameterViewModel, on_changed: ParameterChanged) -> None:
+        super().__init__()
+        self._on_changed = on_changed
+        self.slider = QSlider(Qt.Orientation.Horizontal, self)
+        self.slider.setObjectName(f"parameter_{parameter.spec.id}_slider")
+        self.slider.setAccessibleName(f"{parameter.spec.label} slider")
+        self.value_label = QLabel(self)
+        self.value_label.setObjectName(f"parameter_{parameter.spec.id}_value")
+        self.value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.value_label.setMinimumWidth(48)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        layout.addWidget(self.slider, 1)
+        layout.addWidget(self.value_label)
+        self._commit_timer = QTimer(self)
+        self._commit_timer.setSingleShot(True)
+        self._commit_timer.timeout.connect(self._commit)
+        self.slider.valueChanged.connect(self._value_changed)
+        self.slider.sliderReleased.connect(self._schedule_commit)
+
+    @Slot(int)
+    def _value_changed(self, position: int) -> None:
+        del position
+        self._update_value_label()
+        if not self.slider.isSliderDown():
+            self._schedule_commit()
+
+    @Slot()
+    def _schedule_commit(self) -> None:
+        self._commit_timer.start(0)
+
+    def _update_value_label(self) -> None:
+        raise NotImplementedError
+
+    def _commit(self) -> None:
+        raise NotImplementedError
+
+
+class FloatRangeParameterEditor(_RangeParameterEditor):
+    """Linear high-resolution slider for a bounded floating-point parameter."""
+
+    _STEPS = 10_000
+
+    def __init__(self, parameter: ParameterViewModel, on_changed: ParameterChanged) -> None:
+        spec = parameter.spec
+        assert spec.minimum is not None and spec.maximum is not None
+        self._minimum = float(spec.minimum)
+        self._maximum = float(spec.maximum)
+        super().__init__(parameter, on_changed)
+        self.slider.blockSignals(True)
+        self.slider.setRange(0, self._STEPS if self._maximum > self._minimum else 0)
+        value = float(parameter.value) if isinstance(parameter.value, float) else self._minimum
+        self.slider.setValue(self._position_for_value(value))
+        self.slider.blockSignals(False)
+        self._update_value_label()
+
+    def minimum(self) -> float:
+        return self._minimum
+
+    def maximum(self) -> float:
+        return self._maximum
+
+    def value(self) -> float:
+        if self._maximum <= self._minimum:
+            return self._minimum
+        ratio = self.slider.value() / self._STEPS
+        return self._minimum + ratio * (self._maximum - self._minimum)
+
+    def setValue(self, value: float) -> None:
+        self.slider.setValue(self._position_for_value(value))
+
+    def _position_for_value(self, value: float) -> int:
+        if self._maximum <= self._minimum:
+            return 0
+        clamped = min(self._maximum, max(self._minimum, value))
+        return round((clamped - self._minimum) * self._STEPS / (self._maximum - self._minimum))
+
+    def _update_value_label(self) -> None:
+        self.value_label.setText(f"{self.value():.6g}")
+
+    @Slot()
+    def _commit(self) -> None:
+        self._on_changed(float(self.value()))
+
+
+class IntRangeParameterEditor(_RangeParameterEditor):
+    """Native integer slider for a bounded integer parameter."""
+
+    def __init__(self, parameter: ParameterViewModel, on_changed: ParameterChanged) -> None:
+        spec = parameter.spec
+        assert spec.minimum is not None and spec.maximum is not None
+        self._minimum = int(spec.minimum)
+        self._maximum = int(spec.maximum)
+        super().__init__(parameter, on_changed)
+        self.slider.blockSignals(True)
+        self.slider.setRange(self._minimum, self._maximum)
+        value = (
+            int(parameter.value)
+            if isinstance(parameter.value, int) and not isinstance(parameter.value, bool)
+            else self._minimum
+        )
+        self.slider.setValue(value)
+        self.slider.blockSignals(False)
+        self._update_value_label()
+
+    def minimum(self) -> int:
+        return self._minimum
+
+    def maximum(self) -> int:
+        return self._maximum
+
+    def value(self) -> int:
+        return self.slider.value()
+
+    def setValue(self, value: int) -> None:
+        self.slider.setValue(value)
+
+    def _update_value_label(self) -> None:
+        self.value_label.setText(str(self.value()))
+
+    @Slot()
+    def _commit(self) -> None:
+        self._on_changed(int(self.value()))
 
 
 class FloatParameterEditor(QDoubleSpinBox):
@@ -125,6 +271,75 @@ class StringParameterEditor(QLineEdit):
         self._on_changed(self.text())
 
 
+class FilePathParameterEditor(QWidget):
+    """Editable media path with an adjacent native file picker."""
+
+    VIDEO_FILTER = "Video files (*.avi *.m4v *.mkv *.mov *.mp4 *.mpeg *.mpg *.webm);;All files (*)"
+
+    def __init__(
+        self,
+        parameter: ParameterViewModel,
+        on_changed: ParameterChanged,
+        *,
+        compact: bool,
+    ) -> None:
+        super().__init__()
+        self._on_changed = on_changed
+        self.path_edit = QLineEdit(self)
+        self.path_edit.setObjectName(f"parameter_{parameter.spec.id}_text")
+        self.path_edit.setAccessibleName(f"{parameter.spec.label} text")
+        if isinstance(parameter.value, str):
+            self.path_edit.setText(parameter.value)
+        self.browse_button = QPushButton("…" if compact else "Browse…", self)
+        self.browse_button.setObjectName(f"parameter_{parameter.spec.id}_browse")
+        self.browse_button.setAccessibleName(f"Browse for {parameter.spec.label.casefold()}")
+        self.browse_button.setToolTip("Choose a video file")
+        if compact:
+            self.browse_button.setFixedWidth(28)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        layout.addWidget(self.path_edit, 1)
+        layout.addWidget(self.browse_button)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._commit_timer = QTimer(self)
+        self._commit_timer.setSingleShot(True)
+        self._commit_timer.timeout.connect(self._flush_commit)
+        self.path_edit.editingFinished.connect(self._commit)
+        self.browse_button.clicked.connect(self._browse)
+
+    def text(self) -> str:
+        return self.path_edit.text()
+
+    def setText(self, value: str) -> None:
+        self.path_edit.setText(value)
+
+    @Slot()
+    def _commit(self) -> None:
+        if self.graphicsProxyWidget() is not None:
+            self._commit_timer.start(0)
+            return
+        self._flush_commit()
+
+    @Slot()
+    def _flush_commit(self) -> None:
+        self._on_changed(self.path_edit.text())
+
+    @Slot(bool)
+    def _browse(self, checked: bool = False) -> None:
+        del checked
+        selected, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "Choose video file",
+            self.path_edit.text(),
+            self.VIDEO_FILTER,
+        )
+        if not selected:
+            return
+        self.path_edit.setText(selected)
+        self._commit()
+
+
 class MatrixParameterEditor(QLineEdit):
     """Compact JSON nested-array editor for immutable numeric matrices."""
 
@@ -175,7 +390,40 @@ class ChoiceParameterEditor(QComboBox):
         index = self.findData(parameter.value)
         if index >= 0:
             self.setCurrentIndex(index)
-        self.currentIndexChanged.connect(self._commit)
+        self.view().setObjectName("parameter_choice_popup")
+        self._pending_index = -1
+        self._commit_timer = QTimer(self)
+        self._commit_timer.setSingleShot(True)
+        self._commit_timer.timeout.connect(self._commit_pending)
+        self._original_proxy_z: float | None = None
+        self.currentIndexChanged.connect(self._selection_changed)
+
+    def showPopup(self) -> None:
+        proxy = self.graphicsProxyWidget()
+        if proxy is not None:
+            self._original_proxy_z = proxy.zValue()
+            proxy.setZValue(10_000.0)
+        super().showPopup()
+        self.view().raise_()
+
+    def hidePopup(self) -> None:
+        super().hidePopup()
+        proxy = self.graphicsProxyWidget()
+        if proxy is not None and self._original_proxy_z is not None:
+            proxy.setZValue(self._original_proxy_z)
+        self._original_proxy_z = None
+
+    @Slot(int)
+    def _selection_changed(self, index: int) -> None:
+        if self.graphicsProxyWidget() is None:
+            self._commit(index)
+            return
+        self._pending_index = index
+        self._commit_timer.start(0)
+
+    @Slot()
+    def _commit_pending(self) -> None:
+        self._commit(self._pending_index)
 
     @Slot(int)
     def _commit(self, index: int) -> None:

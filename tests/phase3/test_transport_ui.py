@@ -277,6 +277,9 @@ def test_preview_and_metrics_polling_update_ui_with_sequence_coalescing(
 
     assert window.preview_panel.image_widget.latest_preview is image
     assert window.preview_panel.note_widget.latest_preview is notes
+    assert window.preview_panel.splitter.count() == 2
+    assert window.preview_panel.image_widget.isVisible()
+    assert window.preview_panel.note_widget.isVisible()
     assert "sequence 1" in window.preview_panel.image_caption.text()
     assert window._image_sequences == {IMAGE_NODE: 1}
     assert window._note_sequences == {NOTE_NODE: 1}
@@ -346,6 +349,19 @@ def test_inspector_and_combo_popup_have_explicit_dark_theme_surfaces(
     assert "QWidget#inspector_form_container" in style_sheet
     assert "QComboBox QAbstractItemView" in style_sheet
     assert "QComboBox QAbstractItemView::item:selected" in style_sheet
+    application = QApplication.instance()
+    assert application is not None
+    assert "QAbstractItemView#parameter_choice_popup" in application.styleSheet()
+
+    inline_proxy = window.scene.node_items[audio_id].parameter_editors["waveform"]
+    inline_combo = inline_proxy.widget()
+    assert isinstance(inline_combo, QComboBox)
+    original_z = inline_proxy.zValue()
+    inline_combo.showPopup()
+    assert inline_proxy.zValue() == 10_000.0
+    assert inline_combo.view().objectName() == "parameter_choice_popup"
+    inline_combo.hidePopup()
+    assert inline_proxy.zValue() == original_z
 
 
 def test_selected_node_memory_diagnostic_is_published_to_inspector(

@@ -152,6 +152,9 @@ class MainWindow(QMainWindow):
         self.setWindowModified(False)
         self.resize(1280, 760)
         self.setMinimumSize(900, 560)
+        application = cast(QApplication | None, QApplication.instance())
+        if application is not None:
+            application.setStyleSheet(theme.style_sheet())
         self.setStyleSheet(theme.style_sheet())
         self.setCentralWidget(self.view)
         self._create_docks()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from PySide6.QtGui import QFontMetricsF
 from PySide6.QtWidgets import QApplication, QLabel
 
 from synesthesia_machine.app.registry import create_application_registry
@@ -66,6 +67,25 @@ def test_node_tooltip_includes_issue_message_and_stable_code(qapp: QApplication)
     assert node.issues
     assert node.issues[0].message in item.toolTip()
     assert node.issues[0].code in item.toolTip()
+
+
+def test_node_width_accounts_for_long_parameter_labels(qapp: QApplication) -> None:
+    del qapp
+    registry = create_application_registry()
+    session = DocumentSession(registry)
+    node_id = session.add_node("synmachine.input.load_video", (0.0, 0.0))
+    node = next(node for node in session.view_model.nodes if node.node_id == node_id)
+    item = NodeGraphicsItem(node, DEFAULT_THEME, session.set_parameter)
+    label = next(
+        parameter.spec.label
+        for parameter in node.parameters
+        if parameter.spec.id == "process_every_nth_frame"
+    )
+    label_width = QFontMetricsF(DEFAULT_THEME.body_font()).horizontalAdvance(label)
+    editor_left = item.parameter_editors["process_every_nth_frame"].pos().x()
+
+    assert item.node_width > DEFAULT_THEME.metrics.node_width
+    assert editor_left - 10.0 - 13.0 >= label_width
 
 
 def test_inspector_renders_parameter_help_as_visible_text(qapp: QApplication) -> None:

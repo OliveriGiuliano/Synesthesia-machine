@@ -8,7 +8,15 @@ from typing import cast
 from uuid import UUID
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPainterPathStroker, QPen
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QFontMetricsF,
+    QPainter,
+    QPainterPath,
+    QPainterPathStroker,
+    QPen,
+)
 from PySide6.QtWidgets import (
     QGraphicsItem,
     QGraphicsObject,
@@ -187,6 +195,11 @@ class PortGraphicsItem(QGraphicsObject):
 class NodeGraphicsItem(QGraphicsObject):
     """Movable projection of a NodeViewModel; it never mutates GraphDocument."""
 
+    _EDITOR_WIDTH = 150.0
+    _EDITOR_RIGHT_MARGIN = 10.0
+    _LABEL_LEFT = 13.0
+    _LABEL_EDITOR_GAP = 10.0
+
     def __init__(
         self,
         view_model: NodeViewModel,
@@ -206,6 +219,7 @@ class NodeGraphicsItem(QGraphicsObject):
         self._detail_visible = True
         self._heat_level: float | None = None
         self._drag_origin: dict[UUID, tuple[float, float]] = {}
+        self._width = self._layout_width()
         self._height = self._layout_height()
         self.setFlags(
             QGraphicsItem.GraphicsItemFlag.ItemIsMovable
@@ -235,6 +249,35 @@ class NodeGraphicsItem(QGraphicsObject):
         rows = ordinary_inputs + len(self.view_model.parameters) + len(self.view_model.outputs)
         return self.theme.metrics.header_height + max(rows, 1) * self.theme.metrics.row_height + 8.0
 
+    def _layout_width(self) -> float:
+        metrics = self.theme.metrics
+        title_width = QFontMetricsF(self.theme.title_font()).horizontalAdvance(
+            self.view_model.title
+        )
+        required = title_width + 50.0
+        if self.view_model.parameters:
+            label_metrics = QFontMetricsF(self.theme.body_font())
+            longest_label = max(
+                label_metrics.horizontalAdvance(parameter.spec.label)
+                for parameter in self.view_model.parameters
+            )
+            required = max(
+                required,
+                self._LABEL_LEFT
+                + longest_label
+                + self._LABEL_EDITOR_GAP
+                + self._EDITOR_WIDTH
+                + self._EDITOR_RIGHT_MARGIN,
+            )
+        return max(metrics.node_width, required)
+
+    @property
+    def node_width(self) -> float:
+        return self._width
+
+    def _editor_left(self) -> float:
+        return self._width - self._EDITOR_WIDTH - self._EDITOR_RIGHT_MARGIN
+
     def _create_ports_and_editors(self) -> None:
         metrics = self.theme.metrics
         y = metrics.header_height + metrics.row_height / 2.0
@@ -258,7 +301,7 @@ class NodeGraphicsItem(QGraphicsObject):
             y += metrics.row_height
         for port in self.view_model.outputs:
             child = PortGraphicsItem(port, self.theme, self)
-            child.setPos(metrics.node_width, y)
+            child.setPos(self._width, y)
             self.ports[(port.port_id, True)] = child
             y += metrics.row_height
 
@@ -269,11 +312,11 @@ class NodeGraphicsItem(QGraphicsObject):
             parameter.spec.id,
         )
         editor = create_parameter_editor(parameter, callback, compact=True)
-        editor.setFixedWidth(118)
+        editor.setFixedWidth(round(self._EDITOR_WIDTH))
         proxy = QGraphicsProxyWidget(self)
         proxy.setWidget(editor)
         proxy.setPos(
-            self.theme.metrics.node_width - 128.0,
+            self._editor_left(),
             y - self.theme.metrics.row_height / 2.0 + 2.0,
         )
         proxy.setVisible(self._detail_visible)
@@ -299,7 +342,7 @@ class NodeGraphicsItem(QGraphicsObject):
         return QRectF(
             -margin,
             -margin,
-            self.theme.metrics.node_width + margin * 2.0,
+            self._width + margin * 2.0,
             self._height + margin * 2.0,
         )
 
@@ -311,7 +354,7 @@ class NodeGraphicsItem(QGraphicsObject):
     ) -> None:
         del widget
         metrics = self.theme.metrics
-        body = QRectF(0.0, 0.0, metrics.node_width, self._height)
+        body = QRectF(0.0, 0.0, self._width, self._height)
         border_color = self.theme.color("border")
         border_width = 1.0
         if self._heat_level is not None:
@@ -329,14 +372,14 @@ class NodeGraphicsItem(QGraphicsObject):
         painter.drawRoundedRect(body, metrics.node_radius, metrics.node_radius)
         painter.setBrush(QBrush(self.theme.color("node_header")))
         painter.drawRoundedRect(
-            QRectF(0.0, 0.0, metrics.node_width, metrics.header_height),
+            QRectF(0.0, 0.0, self._width, metrics.header_height),
             metrics.node_radius,
             metrics.node_radius,
         )
         painter.setPen(self.theme.color("text"))
         painter.setFont(self.theme.title_font())
         painter.drawText(
-            QRectF(12.0, 0.0, metrics.node_width - 38.0, metrics.header_height),
+            QRectF(12.0, 0.0, self._width - 38.0, metrics.header_height),
             Qt.AlignmentFlag.AlignVCenter,
             self.view_model.title,
         )
@@ -350,9 +393,7 @@ class NodeGraphicsItem(QGraphicsObject):
             )
             painter.setBrush(QBrush(self.theme.color(token)))
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawEllipse(
-                QPointF(metrics.node_width - 17.0, metrics.header_height / 2.0), 6.0, 6.0
-            )
+            painter.drawEllipse(QPointF(self._width - 17.0, metrics.header_height / 2.0), 6.0, 6.0)
         level_of_detail = option.levelOfDetailFromTransform(painter.worldTransform())
         if self.view_model.collapsed or not self._detail_visible or level_of_detail < 0.35:
             return
@@ -363,7 +404,15 @@ class NodeGraphicsItem(QGraphicsObject):
             y += metrics.row_height
         for parameter in self.view_model.parameters:
             detail = "Live input" if parameter.connected else ""
-            self._draw_row(painter, y, parameter.spec.label, detail, False, parameter.connected)
+            self._draw_row(
+                painter,
+                y,
+                parameter.spec.label,
+                detail,
+                False,
+                parameter.connected,
+                has_editor=True,
+            )
             y += metrics.row_height
         for port in self.view_model.outputs:
             self._draw_row(painter, y, port.label, port.type_name, True)
@@ -377,19 +426,26 @@ class NodeGraphicsItem(QGraphicsObject):
         detail: str,
         right: bool,
         disabled: bool = False,
+        *,
+        has_editor: bool = False,
     ) -> None:
         metrics = self.theme.metrics
         painter.setPen(self.theme.color("disabled" if disabled else "text"))
         alignment = Qt.AlignmentFlag.AlignVCenter | (
             Qt.AlignmentFlag.AlignRight if right else Qt.AlignmentFlag.AlignLeft
         )
-        painter.drawText(
-            QRectF(13.0, y, metrics.node_width * 0.42, metrics.row_height), alignment, label
+        label_width = (
+            self._editor_left() - self._LABEL_EDITOR_GAP - self._LABEL_LEFT
+            if has_editor
+            else self._width * 0.42
         )
+        painter.drawText(QRectF(13.0, y, label_width, metrics.row_height), alignment, label)
         if not right and detail:
             painter.setPen(self.theme.color("muted_text" if not disabled else "disabled"))
+            detail_left = self._editor_left() if has_editor else self._width * 0.42
+            detail_width = self._EDITOR_WIDTH if has_editor else self._width * 0.52
             painter.drawText(
-                QRectF(metrics.node_width * 0.42, y, metrics.node_width * 0.52, metrics.row_height),
+                QRectF(detail_left, y, detail_width, metrics.row_height),
                 Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
                 detail,
             )

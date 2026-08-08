@@ -86,6 +86,18 @@ class Theme:
             QComboBox QAbstractItemView::item {{ min-height: 24px; padding: 3px 6px; }}
             QComboBox QAbstractItemView::item:selected {{ background: {colors.accent};
                 color: {colors.canvas}; }}
+            QAbstractItemView#parameter_choice_popup {{ background: {colors.canvas};
+                color: {colors.text}; border: 1px solid {colors.border};
+                selection-background-color: {colors.accent}; selection-color: {colors.canvas};
+                outline: 0; }}
+            QSlider::groove:horizontal {{ height: 6px; background: {colors.canvas};
+                border: 1px solid {colors.border}; border-radius: 3px; }}
+            QSlider::sub-page:horizontal {{ background: {colors.accent};
+                border-radius: 3px; }}
+            QSlider::handle:horizontal {{ width: 14px; margin: -5px 0;
+                background: {colors.text}; border: 1px solid {colors.accent};
+                border-radius: 7px; }}
+            QSlider::handle:horizontal:hover {{ background: {colors.selection}; }}
             QMenu::item {{ padding: 5px 24px 5px 9px; background: transparent; }}
             QMenu::item:selected {{ background: {colors.accent}; color: {colors.canvas}; }}
             QPushButton {{ background: {colors.node_header}; border: 1px solid {colors.border};

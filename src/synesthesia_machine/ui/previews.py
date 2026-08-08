@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPaintEvent, QPixmap
-from PySide6.QtWidgets import QLabel, QTabWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QSplitter, QVBoxLayout, QWidget
 
 from synesthesia_machine.contracts import ImagePreview, NotePreview
 
@@ -119,7 +119,7 @@ class NotePreviewWidget(QWidget):
 
 
 class RuntimePreviewPanel(QWidget):
-    """Visible Phase 3 image and note preview surface."""
+    """Simultaneously visible image and note preview surface."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -133,24 +133,32 @@ class RuntimePreviewPanel(QWidget):
         self.note_caption.setObjectName("note_preview_caption")
 
         image_page = QWidget(self)
+        image_page.setObjectName("image_preview_page")
+        image_page.setAccessibleName("Image preview section")
         image_layout = QVBoxLayout(image_page)
         image_layout.setContentsMargins(4, 4, 4, 4)
         image_layout.addWidget(self.image_caption)
         image_layout.addWidget(self.image_widget, 1)
 
         note_page = QWidget(self)
+        note_page.setObjectName("note_preview_page")
+        note_page.setAccessibleName("Note preview section")
         note_layout = QVBoxLayout(note_page)
         note_layout.setContentsMargins(4, 4, 4, 4)
         note_layout.addWidget(self.note_caption)
         note_layout.addWidget(self.note_widget, 1)
 
-        self.tabs = QTabWidget(self)
-        self.tabs.setAccessibleName("Runtime preview types")
-        self.tabs.addTab(image_page, "Image")
-        self.tabs.addTab(note_page, "Notes")
+        self.splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        self.splitter.setObjectName("runtime_preview_splitter")
+        self.splitter.setAccessibleName("Image and note previews")
+        self.splitter.setChildrenCollapsible(False)
+        self.splitter.addWidget(image_page)
+        self.splitter.addWidget(note_page)
+        self.splitter.setStretchFactor(0, 3)
+        self.splitter.setStretchFactor(1, 2)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.tabs)
+        layout.addWidget(self.splitter)
 
     def show_image_preview(self, preview: ImagePreview) -> None:
         self.image_widget.set_preview(preview)
