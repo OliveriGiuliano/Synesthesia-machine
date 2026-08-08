@@ -28,6 +28,15 @@ from synesthesia_machine.persistence.media_relink import (
     media_fingerprint,
     verify_relink_candidate,
 )
+from synesthesia_machine.persistence.node_migrations import (
+    BUILTIN_NODE_MIGRATIONS,
+    NodeMigration,
+    NodeMigrationRegistry,
+    NodeMigrationResult,
+    NodeMigrationStep,
+    migrate_load_video_v0_to_v1,
+    migrate_number_v0_to_v1,
+)
 from synesthesia_machine.persistence.schemas import (
     GRAPH_SCHEMA_VERSION,
     ConnectionSchemaV1,
@@ -41,6 +50,7 @@ from synesthesia_machine.persistence.schemas import (
 )
 
 __all__ = [
+    "BUILTIN_NODE_MIGRATIONS",
     "CLIPBOARD_FRAGMENT_VERSION",
     "GRAPH_SCHEMA_VERSION",
     "MEDIA_ABSOLUTE_FALLBACK_KEY",
@@ -54,6 +64,10 @@ __all__ = [
     "JsonObject",
     "JsonValue",
     "MissingMediaReference",
+    "NodeMigration",
+    "NodeMigrationRegistry",
+    "NodeMigrationResult",
+    "NodeMigrationStep",
     "NodeSchemaV1",
     "RelinkMatch",
     "RelinkVerification",
@@ -68,6 +82,8 @@ __all__ = [
     "load_graph",
     "media_fingerprint",
     "migrate_graph_data",
+    "migrate_load_video_v0_to_v1",
+    "migrate_number_v0_to_v1",
     "migrate_v0_to_v1",
     "remap_fragment",
     "save_graph",

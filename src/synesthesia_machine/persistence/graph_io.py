@@ -30,11 +30,13 @@ from synesthesia_machine.persistence.media_relink import (
     MEDIA_SIZE_KEY,
     media_fingerprint,
 )
+from synesthesia_machine.persistence.node_migrations import BUILTIN_NODE_MIGRATIONS
 from synesthesia_machine.persistence.schemas import (
     GRAPH_SCHEMA_VERSION,
     ConnectionSchemaV1,
     GraphSchemaV1,
     GroupSchemaV1,
+    JsonObject,
     JsonValue,
     NodeSchemaV1,
     migrate_graph_data,
@@ -340,6 +342,27 @@ def _group_to_data(group: GroupModel) -> GroupSchemaV1:
 def _node_from_data(value: object, registry: NodeRegistry, index: int) -> NodeModel:
     path = f"$.nodes[{index}]"
     data = _expect_object(value, path)
+    type_id = _expect_str(data.get("type_id"), f"{path}.type_id")
+    definition = registry.get(type_id)
+    if definition is None:
+        raise GraphPersistenceError("unknown_node_type", f"Unknown node type {type_id!r}", path)
+    version = _expect_int(
+        data.get("implementation_version"),
+        f"{path}.implementation_version",
+        minimum=0,
+    )
+    if version < definition.implementation_version:
+        try:
+            data = cast(
+                "dict[str, object]",
+                BUILTIN_NODE_MIGRATIONS.migrate(
+                    cast("JsonObject", data),
+                    type_id=type_id,
+                    target_version=definition.implementation_version,
+                ).data,
+            )
+        except ValueError as error:
+            raise GraphPersistenceError("node_migration_failed", str(error), path) from error
     _require_exact_keys(
         data,
         {
@@ -355,10 +378,6 @@ def _node_from_data(value: object, registry: NodeRegistry, index: int) -> NodeMo
         },
         path,
     )
-    type_id = _expect_str(data["type_id"], f"{path}.type_id")
-    definition = registry.get(type_id)
-    if definition is None:
-        raise GraphPersistenceError("unknown_node_type", f"Unknown node type {type_id!r}", path)
     version = _expect_int(
         data["implementation_version"], f"{path}.implementation_version", minimum=1
     )

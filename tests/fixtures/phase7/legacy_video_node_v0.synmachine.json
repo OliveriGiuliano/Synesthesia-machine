@@ -1,0 +1,24 @@
+{
+  "application_version": "0.0.0-prototype",
+  "connections": [],
+  "document_id": "70000000-0000-0000-0000-000000000010",
+  "document_settings": {},
+  "groups": [],
+  "nodes": [
+    {
+      "collapsed": false,
+      "id": "70000000-0000-0000-0000-000000000011",
+      "implementation_version": 0,
+      "parameters": {
+        "path": "media/legacy.mp4"
+      },
+      "position": [0.0, 0.0],
+      "size": null,
+      "type_id": "synmachine.input.load_video",
+      "ui_state": {},
+      "user_label": null
+    }
+  ],
+  "schema_version": 1,
+  "ui_state": {}
+}

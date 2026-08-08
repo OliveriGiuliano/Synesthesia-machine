@@ -1,0 +1,14 @@
+{
+  "connections": [],
+  "document_id": "70000000-0000-0000-0000-000000000001",
+  "nodes": [
+    {
+      "id": "70000000-0000-0000-0000-000000000002",
+      "parameters": {
+        "value": 7.5
+      },
+      "type_id": "synmachine.utility.number",
+      "version": 0
+    }
+  ]
+}
