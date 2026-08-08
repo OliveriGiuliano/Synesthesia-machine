@@ -8,7 +8,7 @@ icon = src/synesthesia_machine/resources/synesthesia-machine.ico
 
 [python]
 python_path =
-packages = Nuitka==2.7.11
+packages = Nuitka==4.1
 
 [qt]
 qml_files =

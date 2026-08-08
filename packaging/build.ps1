@@ -72,8 +72,9 @@ try {
     $env:SOURCE_DATE_EPOCH = (git show -s --format=%ct HEAD).Trim()
     Assert-NativeSuccess -Operation 'git source timestamp'
     uv run pyside6-deploy -c (Join-Path $workRoot 'pysidedeploy.spec') -f -v
-    if (-not (Test-Path -LiteralPath $artifact -PathType Container)) {
-        throw "Standalone artifact was not created: $artifact"
+    $executable = Join-Path $artifact 'SynesthesiaMachine.exe'
+    if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
+        throw "Standalone executable was not created: $executable"
     }
 
     $portAudioSource = Join-Path $repository `

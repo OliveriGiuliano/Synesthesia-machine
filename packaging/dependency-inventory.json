@@ -1370,7 +1370,7 @@
   ],
   "schema_version": 1,
   "source_inputs": {
-    "pyproject_sha256": "67c0534fb69d9d6d2d5f9ee750c10ca7cba126306054f16ac80e2b87e63611e3",
-    "uv_lock_sha256": "f55d64ee5f7a143bf2004a3a65ee6da82c3f897b04684c3885cca552546c0d9c"
+    "pyproject_sha256": "58a0e7c76338bddf17a40dfdfe53e4d3c53b93a3e3a2c8128ea5d31a3952211b",
+    "uv_lock_sha256": "b43ff2476961f59a5cf3c0561c709ee40a0025f70b3fd4d2e470dd9fffa35f72"
   }
 }

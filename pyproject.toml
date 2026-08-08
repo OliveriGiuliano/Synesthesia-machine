@@ -33,7 +33,7 @@ dev = [
     "ruff>=0.14,<0.15",
 ]
 packaging = [
-    "nuitka==2.7.11",
+    "nuitka==4.1",
     "ordered-set==4.1.0",
     "pip==25.3",
     "zstandard==0.25.0",

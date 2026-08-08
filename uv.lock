@@ -83,13 +83,9 @@ wheels = [
 
 [[package]]
 name = "nuitka"
-version = "2.7.11"
+version = "4.1"
 source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "ordered-set" },
-    { name = "zstandard" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/bf/5a/19e8bd1c30a83189808cc68883480406b9cd9e8ea99654c313c81d71bec1/Nuitka-2.7.11.tar.gz", hash = "sha256:8009d7acb7d0467c96ecd02e4105fc488e0c12e5296cb49b0a9197de883c8123", size = 3887328, upload-time = "2025-06-28T12:51:24.768Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/53/db/b7a344ad688cd6d8547746869f904b105674ff529a24fa5a3d7bdd95560a/nuitka-4.1.tar.gz", hash = "sha256:99092d26f5f8d5264186924451f7df5872bf6a922297062ace2798ecec7cfa0f", size = 4543258, upload-time = "2026-05-11T07:16:35.483Z" }
 
 [[package]]
 name = "numpy"
@@ -389,7 +385,7 @@ dev = [
     { name = "ruff", specifier = ">=0.14,<0.15" },
 ]
 packaging = [
-    { name = "nuitka", specifier = "==2.7.11" },
+    { name = "nuitka", specifier = "==4.1" },
     { name = "ordered-set", specifier = "==4.1.0" },
     { name = "pip", specifier = "==25.3" },
     { name = "zstandard", specifier = "==0.25.0" },
