@@ -414,7 +414,7 @@ def _run_once(
             run_index=run_index,
             observed_measurement_s=observed_s,
             input_fps=input_fps,
-            processed_fps=processed_ticks / observed_s,
+            processed_fps=processed_ticks / measurement_s,
             preview_fps=final_metrics.preview_fps,
             processed_ticks=processed_ticks,
             dropped_before_processing=(

@@ -1,0 +1,45 @@
+{
+  "resolution": [
+    500,
+    500
+  ],
+  "measured_ticks_per_mode": 180,
+  "repetitions": 5,
+  "median_off_ms_per_tick": 13.928040555555556,
+  "median_on_ms_per_tick": 13.702817777777778,
+  "overhead_percent": -0.16597451031309385,
+  "target_percent": 3.0,
+  "passed": true,
+  "samples": [
+    {
+      "repetition": 1,
+      "profiler_off_ms_per_tick": 14.443874444444445,
+      "profiler_on_ms_per_tick": 18.255516111111113,
+      "overhead_percent": 26.389329825092346
+    },
+    {
+      "repetition": 2,
+      "profiler_off_ms_per_tick": 13.953406666666666,
+      "profiler_on_ms_per_tick": 15.535211111111112,
+      "overhead_percent": 11.336331565704484
+    },
+    {
+      "repetition": 3,
+      "profiler_off_ms_per_tick": 13.928040555555556,
+      "profiler_on_ms_per_tick": 13.702817777777778,
+      "overhead_percent": -1.6170456775985054
+    },
+    {
+      "repetition": 4,
+      "profiler_off_ms_per_tick": 13.596130555555556,
+      "profiler_on_ms_per_tick": 13.573564444444443,
+      "overhead_percent": -0.16597451031309385
+    },
+    {
+      "repetition": 5,
+      "profiler_off_ms_per_tick": 13.527745,
+      "profiler_on_ms_per_tick": 13.50193,
+      "overhead_percent": -0.19083003116927566
+    }
+  ]
+}
