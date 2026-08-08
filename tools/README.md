@@ -99,6 +99,35 @@ costs. It is intentionally distinct from the architecture section 18.6 full-grap
 and does not claim source/processed FPS, drops, end-to-end latency, a 30-second run, or a three-run
 release median. Deterministic output state is the gate; wall-clock equality is not.
 
+## Phase 7 robustness and editor evidence
+
+```powershell
+# Spawn a child that writes an autosave and exits immediately with code 73. The parent proves the
+# unsaved node and explicit graph path are recoverable, then writes docs/phase-7-recovery.json.
+uv run python -m tools.phase7_recovery --output docs/phase-7-recovery.json
+
+# Validate current examples or legacy fixtures through graph and node migration chains. The command
+# is read-only and exits non-zero if any graph is invalid.
+uv run python -m tools.phase7_validate_graphs examples tests/fixtures/phase7
+
+# Build a 500-node graph in the real offscreen QGraphicsScene, edit one node, select one lazy editor,
+# enter low-detail mode, and write docs/phase-7-large-graph.json.
+uv run python -m tools.phase7_large_graph
+```
+
+The recovery harness intentionally uses `os._exit(73)` after the production `AutosaveStore` has
+durably replaced both recovery payload and manifest. It does not simulate an operating-system power
+loss during an individual filesystem flush.
+
+The graph validator never rewrites inputs. It reports source/current graph versions and the count of
+required node-version steps. The committed legacy fixtures cover graph v0→v1 plus Number v0→v1 and
+Load Video v0→v1 parameter migrations.
+
+The large-graph gate requires scene construction at or below 5000 ms, one incremental parameter edit
+at or below 1000 ms, no eager parameter editors for the full graph, stable identity for unaffected
+graphics items, and no visible ports/editors below 0.55 zoom. These are local offscreen interaction
+criteria, not GPU/display or runtime-throughput benchmarks.
+
 Automated tests never access physical devices. Camera behavior is tested through injected capture
 factories, MIDI through `MockMidiBackend`, audio by calling the callback with preallocated arrays,
 and PyAV through a generated temporary MP4.

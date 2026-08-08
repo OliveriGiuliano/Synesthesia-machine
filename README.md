@@ -3,12 +3,14 @@
 Synesthesia Machine is a Windows desktop instrument that transforms video and camera data into
 live MIDI note states through a typed visual node graph.
 
-**Phases 0–6 are complete.** Production UI composition supervises a spawned engine process for
+**Phases 0–7 are complete.** Production UI composition supervises a spawned engine process for
 runtime execution, bounded shared-memory previews, camera capture, MIDI output, debug audio, and
-profiling. The built-in registry now contains 58 definitions, including the complete Phase 5 image
-library plus shared musical controls, MIDI-state utilities, Scanline, Edges to Pitch, Fourier, and
-Optical Flow. Live camera behavior is covered with deterministic simulation because no physical camera
-was available; an explicitly selected loopMIDI port was exercised separately from automated tests.
+profiling. The editor now adds groups/comments, deterministic layout tools, preferences/recent files,
+atomic backups, forced-crash recovery, fingerprinted missing-media relinking, migrations, navigable
+validation, source-scoped transport, and large-graph detail scaling. The built-in registry remains at
+58 definitions. Live camera behavior is covered with deterministic simulation because no physical
+camera was available; an explicitly selected loopMIDI port was exercised separately from automated
+tests.
 
 ## Requirements
 
@@ -37,6 +39,9 @@ uv run python -m tools.phase3_performance  # 60-second Phase 3 diagnostic
 uv run python -m tools.phase4_performance  # Process-backed Phase 4 diagnostic
 uv run python -m tools.phase5_soak         # 30-minute-equivalent Phase 5 memory soak
 uv run python -m tools.phase6_benchmarks   # Deterministic 500x500 algorithm diagnostics
+uv run python -m tools.phase7_recovery     # Forced-exit autosave/recovery proof
+uv run python -m tools.phase7_validate_graphs examples  # Migration-aware graph validation
+uv run python -m tools.phase7_large_graph  # 500-node editor responsiveness evidence
 ```
 
 Hardware spikes are documented in [`tools/README.md`](tools/README.md). Automated tests use
@@ -88,6 +93,21 @@ full graph-throughput claim. See the [node reference](docs/phase-6-node-referenc
 [example instructions](examples/phase6/README.md), and
 [Phase 6 completion report](docs/phase-6-completion-report.md).
 
+### Phase 7 daily-use editor robustness
+
+Phase 7 keeps all existing graphs and runtime behavior while making the editor safer for regular
+technical work. Canvas groups/comments and layout changes share exact undo/redo; saves use atomic
+replacement with one previous-generation backup; dirty work has a 60-second default recovery path;
+and Load Video media can be explicitly relinked with stored size/fingerprint checks. Validation issues
+are continuously visible and navigable, and large graphs use incremental scene synchronization, lazy
+parameter editors, and low-zoom detail suppression.
+
+Canonical evidence is committed in
+[`docs/phase-7-recovery.json`](docs/phase-7-recovery.json) and
+[`docs/phase-7-large-graph.json`](docs/phase-7-large-graph.json). See the
+[Phase 7 completion report](docs/phase-7-completion-report.md) for persistence behavior, migration
+fixtures, test results, measurements, and limitations.
+
 ## Architecture
 
 The implementation contract is
@@ -103,8 +123,9 @@ Current module boundaries include:
 - `src/synesthesia_machine/media` and `midi`: deterministic vectorized/OpenCV image processing,
   musical mapping, reconnecting camera capture, persistent exact-port MIDI output, and debug
   synthesis;
-- `src/synesthesia_machine/ui`: the PySide6 editor, transport, status, and preview adapters;
+- `src/synesthesia_machine/ui`: the PySide6 editor, productivity commands, validation navigation,
+  source-scoped transport, status, and preview adapters;
 - `examples/phase3`, `examples/phase5`, and `examples/phase6`: portable executable graphs,
   deterministic media, historical/current all-definition catalogue smoke artifacts, and safe Phase 6
   algorithm examples;
-- `tests`: hardware-independent Phase 1–6 and smoke acceptance coverage.
+- `tests`: hardware-independent Phase 1–7 and smoke acceptance coverage.
