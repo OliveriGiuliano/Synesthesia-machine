@@ -58,6 +58,8 @@ class GraphScene(QGraphicsScene):
         self.group_items: dict[UUID, GroupGraphicsItem] = {}
         self._drag_port: PortGraphicsItem | None = None
         self._temporary: TemporaryConnectionGraphicsItem | None = None
+        self.grid_snap_enabled = False
+        self.grid_spacing = theme.metrics.grid_size
         self.setSceneRect(-4000.0, -3000.0, 8000.0, 6000.0)
         session.changed.connect(self.sync_from_session)
         self.sync_from_session()
@@ -144,7 +146,9 @@ class GraphScene(QGraphicsScene):
 
     def commit_node_move(self, origins: dict[UUID, tuple[float, float]]) -> None:
         current = {
-            node_id: (self.node_items[node_id].pos().x(), self.node_items[node_id].pos().y())
+            node_id: self._snapped_position(
+                self.node_items[node_id].pos().x(), self.node_items[node_id].pos().y()
+            )
             for node_id in origins
             if node_id in self.node_items
         }
@@ -159,11 +163,28 @@ class GraphScene(QGraphicsScene):
 
     def commit_group_move(self, origins: dict[UUID, tuple[float, float]]) -> None:
         current = {
-            group_id: (self.group_items[group_id].pos().x(), self.group_items[group_id].pos().y())
+            group_id: self._snapped_position(
+                self.group_items[group_id].pos().x(), self.group_items[group_id].pos().y()
+            )
             for group_id in origins
             if group_id in self.group_items
         }
         self.session.move_groups(origins, current)
+
+    def configure_grid_snap(self, *, enabled: bool, spacing: float) -> None:
+        if not math.isfinite(spacing) or spacing <= 0.0:
+            raise ValueError("Grid snap spacing must be finite and positive")
+        self.grid_snap_enabled = enabled
+        self.grid_spacing = spacing
+        self.update()
+
+    def _snapped_position(self, x: float, y: float) -> tuple[float, float]:
+        if not self.grid_snap_enabled:
+            return x, y
+        return (
+            round(x / self.grid_spacing) * self.grid_spacing,
+            round(y / self.grid_spacing) * self.grid_spacing,
+        )
 
     def edit_group(self, group_id: UUID) -> None:
         group = self.session.document.group(group_id)
@@ -296,7 +317,7 @@ class GraphScene(QGraphicsScene):
     def drawBackground(self, painter: QPainter, rect: QRectF | QRect) -> None:
         rect = QRectF(rect)
         painter.fillRect(rect, QBrush(self.theme.color("canvas")))
-        spacing = self.theme.metrics.grid_size
+        spacing = self.grid_spacing
         left = math.floor(rect.left() / spacing) * spacing
         top = math.floor(rect.top() / spacing) * spacing
         pen = QPen(self.theme.color("grid"))

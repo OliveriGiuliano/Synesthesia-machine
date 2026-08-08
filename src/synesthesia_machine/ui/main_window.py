@@ -41,6 +41,11 @@ from synesthesia_machine.persistence import (
 )
 from synesthesia_machine.persistence.autosave import AutosaveStore, RecoveryRecord
 from synesthesia_machine.ui.actions import ActionRegistry, ActionSpec
+from synesthesia_machine.ui.application_settings import (
+    ApplicationSettingsStore,
+    EditorPreferences,
+    PreferencesDialog,
+)
 from synesthesia_machine.ui.canvas import GraphScene, GraphView
 from synesthesia_machine.ui.previews import RuntimePreviewPanel
 from synesthesia_machine.ui.session import DocumentSession
@@ -55,7 +60,6 @@ from synesthesia_machine.ui.widgets import (
 
 CLIPBOARD_MIME_TYPE = "application/x-synesthesia-graph-fragment+json"
 GRAPH_FILE_FILTER = "Synesthesia Machine Graph (*.synmachine.json *.json)"
-_MAX_RECENT_FILES = 8
 
 
 class _ReplacementDecision(Enum):
@@ -89,10 +93,16 @@ class MainWindow(QMainWindow):
         self.engine_client = engine_client
         self.theme = theme
         self.settings = settings or QSettings("Synesthesia Machine", "Synesthesia Machine")
+        self.settings_store = ApplicationSettingsStore(self.settings)
+        self.preferences = self.settings_store.load_preferences()
         self.session = DocumentSession(registry, self)
         self.autosave_store = AutosaveStore(paths.recovery)
         self.action_registry = ActionRegistry(self)
         self.scene = GraphScene(self.session, theme, self)
+        self.scene.configure_grid_snap(
+            enabled=self.preferences.grid_snap_enabled,
+            spacing=self.preferences.grid_size,
+        )
         self.view = GraphView(self.scene, theme)
         self.library = NodeLibrary(registry, self)
         self.inspector = InspectorPanel(self.session, self)
@@ -105,7 +115,7 @@ class MainWindow(QMainWindow):
         self._engine_failure_signature: tuple[object, ...] | None = None
         self._autosave_timer = QTimer(self)
         self._autosave_timer.setSingleShot(True)
-        self._autosave_timer.setInterval(60_000)
+        self._autosave_timer.setInterval(self.preferences.autosave_delay_seconds * 1000)
         self._activation_timer = QTimer(self)
         self._activation_timer.setSingleShot(True)
         self._activation_timer.setInterval(100)
@@ -191,6 +201,10 @@ class MainWindow(QMainWindow):
             self.save_document_as,
         )
         create(ActionSpec("exit", "E&xit", "Close Synesthesia Machine", "Ctrl+Q"), self.close)
+        create(
+            ActionSpec("preferences", "&Preferences…", "Edit autosave and canvas preferences"),
+            self.edit_preferences,
+        )
 
         undo = self.session.undo_stack.createUndoAction(self, "&Undo")
         undo.setShortcut(QKeySequence.StandardKey.Undo)
@@ -345,6 +359,8 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(self.action_registry.require("delete"))
         edit_menu.addSeparator()
         edit_menu.addAction(self.action_registry.require("select_all"))
+        edit_menu.addSeparator()
+        edit_menu.addAction(self.action_registry.require("preferences"))
 
         view_menu = self.menuBar().addMenu("&View")
         view_menu.addAction(self.action_registry.require("frame_selection"))
@@ -967,17 +983,14 @@ class MainWindow(QMainWindow):
         return None
 
     def _load_recent_paths(self) -> list[Path]:
-        raw: object = self.settings.value("recentFiles", [])
-        if not isinstance(raw, list):
-            return []
-        values = cast(list[object], raw)
-        return [Path(value) for value in values if isinstance(value, str) and Path(value).exists()]
+        return self.settings_store.load_recent_files(self.preferences.recent_file_limit)
 
     def _remember_recent(self, path: Path) -> None:
-        resolved = path.resolve()
-        self._recent_paths = [resolved, *(item for item in self._recent_paths if item != resolved)]
-        self._recent_paths = self._recent_paths[:_MAX_RECENT_FILES]
-        self.settings.setValue("recentFiles", [str(item) for item in self._recent_paths])
+        self._recent_paths = self.settings_store.remember_recent(
+            path,
+            self._recent_paths,
+            self.preferences.recent_file_limit,
+        )
         self._refresh_recent_menu()
 
     def _refresh_recent_menu(self) -> None:
@@ -992,6 +1005,34 @@ class MainWindow(QMainWindow):
             action.setToolTip(str(path))
             action.triggered.connect(partial(self.open_path, path))
             self.recent_menu.addAction(action)
+        self.recent_menu.addSeparator()
+        clear_action = QAction("&Clear Recent Graphs", self.recent_menu)
+        clear_action.triggered.connect(self._clear_recent)
+        self.recent_menu.addAction(clear_action)
+
+    @Slot()
+    def _clear_recent(self) -> None:
+        self._recent_paths = []
+        self.settings_store.clear_recent()
+        self._refresh_recent_menu()
+
+    @Slot()
+    def edit_preferences(self) -> None:
+        dialog = PreferencesDialog(self.preferences, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.apply_preferences(dialog.preferences())
+
+    def apply_preferences(self, preferences: EditorPreferences) -> None:
+        self.preferences = preferences
+        self.settings_store.save_preferences(preferences)
+        self._autosave_timer.setInterval(preferences.autosave_delay_seconds * 1000)
+        self.scene.configure_grid_snap(
+            enabled=preferences.grid_snap_enabled,
+            spacing=preferences.grid_size,
+        )
+        self._recent_paths = self._recent_paths[: preferences.recent_file_limit]
+        self.settings.setValue("recentFiles", [str(path) for path in self._recent_paths])
+        self._refresh_recent_menu()
 
     def _restore_window_state(self) -> None:
         geometry = cast(object, self.settings.value("windowGeometry"))
