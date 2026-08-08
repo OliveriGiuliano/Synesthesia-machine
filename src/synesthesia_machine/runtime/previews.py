@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from uuid import UUID
@@ -81,6 +82,7 @@ class PreviewBroker:
         self._note_sequences: dict[UUID, int] = {}
         self._image_last_published: dict[UUID, float] = {}
         self._note_last_published: dict[UUID, float] = {}
+        self._image_publication_times: deque[float] = deque(maxlen=240)
         self._generation = 0
 
     def configure(self, plan: ExecutionPlan) -> None:
@@ -211,6 +213,7 @@ class PreviewBroker:
                 )
                 self._image_sequences[target.node_id] = sequence
                 self._image_last_published[target.node_id] = now
+                self._image_publication_times.append(now)
             for target, value, notes in note_publications:
                 if not _is_due(
                     self._note_last_published.get(target.node_id), now, target.interval_s
@@ -252,6 +255,16 @@ class PreviewBroker:
                 if preview.sequence > thresholds.get(node_id, 0)
             )
 
+    def preview_fps(self) -> float:
+        """Return image-preview publications during the latest one-second window."""
+
+        now = self._monotonic()
+        with self._lock:
+            cutoff = now - 1.0
+            while self._image_publication_times and self._image_publication_times[0] < cutoff:
+                self._image_publication_times.popleft()
+            return float(len(self._image_publication_times))
+
     def _clear_locked(self) -> None:
         self._image_previews.clear()
         self._note_previews.clear()
@@ -259,6 +272,7 @@ class PreviewBroker:
         self._note_sequences.clear()
         self._image_last_published.clear()
         self._note_last_published.clear()
+        self._image_publication_times.clear()
 
 
 def _preview_image_data(image: ImageFrame, max_dimension: int) -> NDArray[np.uint8]:

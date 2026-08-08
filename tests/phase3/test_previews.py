@@ -144,6 +144,7 @@ def test_image_preview_throttles_to_configured_rate_and_coalesces_latest_tick() 
             {},
         )
     )
+    assert broker.preview_fps() == 1.0
     clock.value = 1.0 / 60.0
     broker.publish(
         TickResult(
@@ -165,6 +166,9 @@ def test_image_preview_throttles_to_configured_rate_and_coalesces_latest_tick() 
     preview = broker.poll_images({IMAGE_VISUALIZER_ID: 1})[0]
     assert preview.sequence == 2 and preview.tick_index == 3
     assert np.all(preview.data == 255)
+    assert broker.preview_fps() == 2.0
+    clock.value = 2.0
+    assert broker.preview_fps() == 0.0
 
 
 def test_note_preview_is_compact_sorted_60hz_and_replaced_on_activation() -> None:

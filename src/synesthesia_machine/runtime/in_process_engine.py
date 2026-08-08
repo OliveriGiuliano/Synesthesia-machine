@@ -237,6 +237,10 @@ class LatestFrameGraphWorker:
             ordered[-1] / 1_000_000.0,
         )
 
+    def reset_graph_execution_metrics(self) -> None:
+        with self._condition:
+            self._graph_durations_ns.clear()
+
     def mailbox_metrics(self, source_node_id: UUID) -> SourceMailboxMetrics:
         """Return an atomic snapshot of one source's two-slot latest-frame mailbox."""
 
@@ -628,6 +632,9 @@ class InProcessEngineClient:
 
     def reset_profiling(self) -> None:
         self._profiler.reset()
+        worker = self._worker
+        if worker is not None:
+            worker.reset_graph_execution_metrics()
 
     def metrics(self) -> EngineMetrics:
         with self._lock:
@@ -654,6 +661,7 @@ class InProcessEngineClient:
                 memory_bytes=psutil.Process().memory_info().rss,
                 mailbox_occupancy=sum(status.mailbox_occupancy for status in statuses),
                 mailbox_capacity=sum(status.mailbox_capacity for status in statuses),
+                preview_fps=self._preview_broker.preview_fps(),
                 frame_age_ms=max((status.frame_age_ms for status in statuses), default=0.0),
                 processing_latency_ms=max(
                     (status.processing_latency_ms for status in statuses), default=0.0
