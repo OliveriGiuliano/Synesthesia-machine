@@ -276,6 +276,11 @@ def test_slow_graph_drops_stale_frames_with_bounded_latency_and_visible_metrics(
         assert metrics.mailbox_capacity == 2
         assert metrics.processing_latency_ms == 30.0
         assert metrics.frame_age_ms == 30.0
+        assert metrics.graph_latency_window_size == 2
+        assert metrics.p50_graph_execution_ms > 0.0
+        assert metrics.p95_graph_execution_ms >= metrics.p50_graph_execution_ms
+        assert metrics.p99_graph_execution_ms >= metrics.p95_graph_execution_ms
+        assert metrics.max_graph_execution_ms >= metrics.p99_graph_execution_ms
     finally:
         if sink_factory.runtime is not None:
             for event in sink_factory.runtime.release:

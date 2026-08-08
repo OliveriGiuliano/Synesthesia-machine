@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from collections import deque
@@ -110,6 +111,7 @@ class _ResetCommand:
 type _GraphCommand = _TickCommand | _ResetCommand
 
 _SOURCE_MAILBOX_CAPACITY = 2
+_GRAPH_LATENCY_WINDOW = 240
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,10 +134,12 @@ class LatestFrameGraphWorker:
         *,
         preview_broker: PreviewBroker | None = None,
         monotonic_ns: Callable[[], int] = time.perf_counter_ns,
+        execution_clock_ns: Callable[[], int] = time.perf_counter_ns,
     ) -> None:
         self._facade = facade
         self._preview_broker = preview_broker
         self._monotonic_ns = monotonic_ns
+        self._execution_clock_ns = execution_clock_ns
         self._condition = threading.Condition()
         self._commands: deque[_GraphCommand] = deque()
         self._busy = False
@@ -145,6 +149,7 @@ class LatestFrameGraphWorker:
         self._dropped_by_source: dict[UUID, int] = {}
         self._last_completed_received_ns: dict[UUID, int] = {}
         self._last_processing_latency_ms: dict[UUID, float] = {}
+        self._graph_durations_ns: deque[int] = deque(maxlen=_GRAPH_LATENCY_WINDOW)
         self._last_result: TickResult | None = None
         self._last_error: str | None = None
         self._started_ns: int | None = None
@@ -219,6 +224,19 @@ class LatestFrameGraphWorker:
         with self._condition:
             return sum(self._dropped_by_source.values())
 
+    def graph_execution_metrics(self) -> tuple[int, float, float, float, float]:
+        with self._condition:
+            ordered = tuple(sorted(self._graph_durations_ns))
+        if not ordered:
+            return (0, 0.0, 0.0, 0.0, 0.0)
+        return (
+            len(ordered),
+            _duration_percentile_ms(ordered, 50.0),
+            _duration_percentile_ms(ordered, 95.0),
+            _duration_percentile_ms(ordered, 99.0),
+            ordered[-1] / 1_000_000.0,
+        )
+
     def mailbox_metrics(self, source_node_id: UUID) -> SourceMailboxMetrics:
         """Return an atomic snapshot of one source's two-slot latest-frame mailbox."""
 
@@ -259,6 +277,7 @@ class LatestFrameGraphWorker:
             self._dropped_by_source.clear()
             self._last_completed_received_ns.clear()
             self._last_processing_latency_ms.clear()
+            self._graph_durations_ns.clear()
             self._last_result = None
             self._last_error = None
             self._started_ns = None
@@ -293,6 +312,7 @@ class LatestFrameGraphWorker:
                     self._facade.reset_source(command.source_node_id, command.reason)
                 else:
                     frame = command.frame
+                    graph_started_ns = self._execution_clock_ns()
                     result = self._facade.tick(
                         frame.context,
                         source_values={
@@ -305,12 +325,14 @@ class LatestFrameGraphWorker:
                     if self._preview_broker is not None:
                         self._preview_broker.publish(result)
                     completed_ns = self._monotonic_ns()
+                    graph_duration_ns = max(0, self._execution_clock_ns() - graph_started_ns)
                     with self._condition:
                         if self._started_ns is None:
                             self._started_ns = completed_ns
                         self._last_tick_ns = completed_ns
                         self._processed_ticks += 1
                         self._last_result = result
+                        self._graph_durations_ns.append(graph_duration_ns)
                         received_ns = frame.context.received_monotonic_ns
                         self._last_completed_received_ns[command.source_node_id] = received_ns
                         self._last_processing_latency_ms[command.source_node_id] = max(
@@ -328,6 +350,18 @@ class LatestFrameGraphWorker:
     def _ensure_open(self) -> None:
         if self._closed:
             raise RuntimeError("Graph worker is closed")
+
+
+def _duration_percentile_ms(ordered_ns: tuple[int, ...], percentile: float) -> float:
+    position = (len(ordered_ns) - 1) * percentile / 100.0
+    lower = math.floor(position)
+    upper = math.ceil(position)
+    if lower == upper:
+        value_ns = float(ordered_ns[lower])
+    else:
+        fraction = position - lower
+        value_ns = ordered_ns[lower] * (1.0 - fraction) + ordered_ns[upper] * fraction
+    return value_ns / 1_000_000.0
 
 
 class _FailedSource:
@@ -606,6 +640,9 @@ class InProcessEngineClient:
             elapsed_s = worker.elapsed_s if worker is not None else 0.0
             processed_fps = processed_ticks / elapsed_s if elapsed_s > 0.0 else 0.0
             p95_ms = self._profiler.global_p95_ms()
+            graph_window, graph_p50, graph_p95, graph_p99, graph_max = (
+                worker.graph_execution_metrics() if worker is not None else (0, 0.0, 0.0, 0.0, 0.0)
+            )
             return EngineMetrics(
                 state=state,
                 graph_revision=self._graph_revision,
@@ -621,6 +658,11 @@ class InProcessEngineClient:
                 processing_latency_ms=max(
                     (status.processing_latency_ms for status in statuses), default=0.0
                 ),
+                graph_latency_window_size=graph_window,
+                p50_graph_execution_ms=graph_p50,
+                p95_graph_execution_ms=graph_p95,
+                p99_graph_execution_ms=graph_p99,
+                max_graph_execution_ms=graph_max,
             )
 
     def poll_image_previews(

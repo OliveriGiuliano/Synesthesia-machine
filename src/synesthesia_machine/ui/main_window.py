@@ -1002,7 +1002,7 @@ class MainWindow(QMainWindow):
         self._engine_status.setText(
             f"Engine {metrics.state.value} · source {source_text} · "
             f"{metrics.processed_ticks} ticks @ {metrics.processed_fps:.1f} FPS · "
-            f"p95 {metrics.p95_node_time_ms:.2f} ms · "
+            f"graph p95 {metrics.p95_graph_execution_ms:.2f} ms · "
             f"drops {metrics.dropped_before_processing} · RAM {memory_mib:.1f} MiB"
         )
 

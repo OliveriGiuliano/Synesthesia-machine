@@ -198,6 +198,11 @@ class EngineMetrics:
     preview_fps: float = 0.0
     frame_age_ms: float = 0.0
     processing_latency_ms: float = 0.0
+    graph_latency_window_size: int = 0
+    p50_graph_execution_ms: float = 0.0
+    p95_graph_execution_ms: float = 0.0
+    p99_graph_execution_ms: float = 0.0
+    max_graph_execution_ms: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
