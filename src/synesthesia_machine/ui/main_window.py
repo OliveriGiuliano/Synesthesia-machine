@@ -31,6 +31,7 @@ from synesthesia_machine.contracts import (
     EngineStatus,
     SourceState,
 )
+from synesthesia_machine.graph import GroupKind
 from synesthesia_machine.nodes import ExecutionKind, NodeRegistry
 from synesthesia_machine.persistence import (
     GraphPersistenceError,
@@ -231,6 +232,14 @@ class MainWindow(QMainWindow):
             ActionSpec("add_node", "&Add Node…", "Search for a node to add", "Ctrl+Space"),
             self.search_at_center,
         )
+        create(
+            ActionSpec("add_group", "Add &Group", "Add an organizational group to the canvas"),
+            self.add_group_at_center,
+        )
+        create(
+            ActionSpec("add_comment", "Add &Comment", "Add a free-form canvas comment"),
+            self.add_comment_at_center,
+        )
         create(ActionSpec("play", "&Play", "Play or resume the targeted source", "F5"), self.play)
         create(ActionSpec("pause", "P&ause", "Pause the targeted source", "F6"), self.pause)
         create(ActionSpec("stop", "&Stop", "Stop the targeted source", "F7"), self.stop)
@@ -310,6 +319,8 @@ class MainWindow(QMainWindow):
 
         graph_menu = self.menuBar().addMenu("&Graph")
         graph_menu.addAction(self.action_registry.require("add_node"))
+        graph_menu.addAction(self.action_registry.require("add_group"))
+        graph_menu.addAction(self.action_registry.require("add_comment"))
         graph_menu.addSeparator()
         for key in ("play", "pause", "stop", "reload"):
             graph_menu.addAction(self.action_registry.require(key))
@@ -615,6 +626,29 @@ class MainWindow(QMainWindow):
         self.scene.select_node_ids({node_id})
 
     @Slot()
+    def add_group_at_center(self) -> None:
+        center = self.view.mapToScene(self.view.viewport().rect().center())
+        group_id = self.session.add_group(
+            GroupKind.GROUP,
+            (center.x() - 240.0, center.y() - 160.0),
+            title="Group",
+        )
+        self.scene.select_group_ids({group_id})
+
+    @Slot()
+    def add_comment_at_center(self) -> None:
+        center = self.view.mapToScene(self.view.viewport().rect().center())
+        group_id = self.session.add_group(
+            GroupKind.COMMENT,
+            (center.x() - 160.0, center.y() - 80.0),
+            title="Comment",
+            text="Double-click to edit this comment.",
+            size=(320.0, 160.0),
+            color="#5a4f36",
+        )
+        self.scene.select_group_ids({group_id})
+
+    @Slot()
     def _refresh_document_ui(self) -> None:
         path = self.session.current_path
         name = path.name if path is not None else "Untitled"
@@ -622,7 +656,8 @@ class MainWindow(QMainWindow):
         self.setWindowModified(self.session.is_dirty)
         snapshot = self.session.document.snapshot()
         self._node_count.setText(
-            f"{len(snapshot.nodes)} node(s) · {len(snapshot.connections)} cable(s)"
+            f"{len(snapshot.nodes)} node(s) · {len(snapshot.connections)} cable(s) · "
+            f"{len(snapshot.groups)} group/comment(s)"
         )
         errors = len(self.session.report.errors)
         warnings = len(self.session.report.warnings)
@@ -640,7 +675,11 @@ class MainWindow(QMainWindow):
     @Slot()
     def _refresh_action_states(self) -> None:
         has_nodes = bool(self.scene.selected_node_ids())
-        has_selection = has_nodes or bool(self.scene.selected_connection_ids())
+        has_selection = (
+            has_nodes
+            or bool(self.scene.selected_connection_ids())
+            or bool(self.scene.selected_group_ids())
+        )
         self.action_registry.require("copy").setEnabled(has_nodes)
         self.action_registry.require("duplicate").setEnabled(has_nodes)
         self.action_registry.require("delete").setEnabled(has_selection)

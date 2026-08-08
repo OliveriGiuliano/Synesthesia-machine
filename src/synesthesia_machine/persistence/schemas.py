@@ -35,13 +35,23 @@ class ConnectionSchemaV1(TypedDict):
     destination_port_id: str
 
 
+class GroupSchemaV1(TypedDict):
+    id: str
+    kind: str
+    title: str
+    text: str
+    position: list[float]
+    size: list[float]
+    color: str
+
+
 class GraphSchemaV1(TypedDict):
     schema_version: int
     application_version: str
     document_id: str
     nodes: list[NodeSchemaV1]
     connections: list[ConnectionSchemaV1]
-    groups: list[JsonObject]
+    groups: list[GroupSchemaV1]
     document_settings: dict[str, JsonValue]
     ui_state: dict[str, JsonValue]
 

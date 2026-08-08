@@ -12,6 +12,7 @@ from synesthesia_machine.graph import (
     ConnectionModel,
     GraphCompiler,
     GraphDocument,
+    GroupModel,
     LiteralValue,
     NodeModel,
 )
@@ -56,6 +57,117 @@ class AddNodeCommand(_DocumentCommand):
 
     def undo(self) -> None:
         self.document.remove_node(self.node.id)
+        self._changed()
+
+
+class AddGroupCommand(_DocumentCommand):
+    def __init__(
+        self,
+        document: GraphDocument,
+        group: GroupModel,
+        on_changed: ChangeCallback | None = None,
+    ) -> None:
+        super().__init__("Add canvas group", document, on_changed)
+        self.group = group
+
+    def redo(self) -> None:
+        self.document.restore_group(self.group)
+        self._changed()
+
+    def undo(self) -> None:
+        self.document.remove_group(self.group.id)
+        self._changed()
+
+
+class DeleteGroupsCommand(_DocumentCommand):
+    def __init__(
+        self,
+        document: GraphDocument,
+        group_ids: set[UUID],
+        on_changed: ChangeCallback | None = None,
+    ) -> None:
+        super().__init__("Delete canvas groups", document, on_changed)
+        selected = frozenset(group_ids)
+        self.groups = tuple(group for group in document.groups if group.id in selected)
+
+    def redo(self) -> None:
+        for group in self.groups:
+            if self.document.group(group.id) is not None:
+                self.document.remove_group(group.id)
+        self._changed()
+
+    def undo(self) -> None:
+        for group in self.groups:
+            self.document.restore_group(group)
+        self._changed()
+
+
+class MoveGroupsCommand(_DocumentCommand):
+    _COMMAND_ID = 0x534D03
+
+    def __init__(
+        self,
+        document: GraphDocument,
+        old_positions: Mapping[UUID, tuple[float, float]],
+        new_positions: Mapping[UUID, tuple[float, float]],
+        on_changed: ChangeCallback | None = None,
+    ) -> None:
+        super().__init__("Move canvas groups", document, on_changed)
+        if set(old_positions) != set(new_positions):
+            raise ValueError("Group move position maps must contain the same IDs")
+        self.old_positions = dict(old_positions)
+        self.new_positions = dict(new_positions)
+
+    def id(self) -> int:
+        return self._COMMAND_ID
+
+    def mergeWith(self, other: QUndoCommand) -> bool:
+        if not isinstance(other, MoveGroupsCommand):
+            return False
+        if other.document is not self.document or set(other.new_positions) != set(
+            self.new_positions
+        ):
+            return False
+        self.new_positions = dict(other.new_positions)
+        return True
+
+    def redo(self) -> None:
+        self._apply(self.new_positions)
+
+    def undo(self) -> None:
+        self._apply(self.old_positions)
+
+    def _apply(self, positions: Mapping[UUID, tuple[float, float]]) -> None:
+        for group_id in sorted(positions, key=str):
+            group = self.document.group(group_id)
+            if group is None:
+                raise KeyError(f"Unknown group: {group_id}")
+            self.document.restore_group(
+                replace(group, position=positions[group_id]), replace_existing=True
+            )
+        self._changed()
+
+
+class EditGroupCommand(_DocumentCommand):
+    def __init__(
+        self,
+        document: GraphDocument,
+        new_group: GroupModel,
+        on_changed: ChangeCallback | None = None,
+    ) -> None:
+        super().__init__("Edit canvas group", document, on_changed)
+        old_group = document.group(new_group.id)
+        if old_group is None:
+            raise KeyError(f"Unknown group: {new_group.id}")
+        self.old_group = old_group
+        self.new_group = new_group
+
+    def redo(self) -> None:
+        self.document.restore_group(self.new_group, replace_existing=True)
+        self._changed()
+
+    def undo(self) -> None:
+        self.document.restore_group(self.old_group, replace_existing=True)
         self._changed()
 
 

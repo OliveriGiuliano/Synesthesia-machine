@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from uuid import UUID, uuid4
 from weakref import ref
@@ -13,6 +14,8 @@ from synesthesia_machine.graph import (
     ConnectionModel,
     GraphCompiler,
     GraphDocument,
+    GroupKind,
+    GroupModel,
     LiteralValue,
     NodeModel,
     ValidationReport,
@@ -27,9 +30,13 @@ from synesthesia_machine.persistence import (
 )
 from synesthesia_machine.ui.commands import (
     AddConnectionCommand,
+    AddGroupCommand,
     AddNodeCommand,
+    DeleteGroupsCommand,
     DeleteNodesCommand,
     DuplicateCommand,
+    EditGroupCommand,
+    MoveGroupsCommand,
     MoveNodesCommand,
     PasteCommand,
     RemoveConnectionCommand,
@@ -125,12 +132,73 @@ class DocumentSession(QObject):
         self.push(AddNodeCommand(self.document, node, self._command_change_callback))
         return node.id
 
+    def add_group(
+        self,
+        kind: GroupKind,
+        position: tuple[float, float],
+        *,
+        title: str,
+        text: str = "",
+        size: tuple[float, float] = (480.0, 320.0),
+        color: str = "#46515f",
+    ) -> UUID:
+        group = GroupModel(uuid4(), kind, title, text, position, size, color)
+        self.push(AddGroupCommand(self.document, group, self._command_change_callback))
+        return group.id
+
+    def delete_groups(self, group_ids: set[UUID]) -> None:
+        if group_ids:
+            self.push(DeleteGroupsCommand(self.document, group_ids, self._command_change_callback))
+
+    def move_groups(
+        self,
+        old_positions: dict[UUID, tuple[float, float]],
+        new_positions: dict[UUID, tuple[float, float]],
+    ) -> None:
+        if old_positions != new_positions:
+            self.push(
+                MoveGroupsCommand(
+                    self.document,
+                    old_positions,
+                    new_positions,
+                    self._command_change_callback,
+                )
+            )
+
+    def update_group(
+        self,
+        group_id: UUID,
+        *,
+        title: str | None = None,
+        text: str | None = None,
+        size: tuple[float, float] | None = None,
+        color: str | None = None,
+    ) -> None:
+        group = self.document.group(group_id)
+        if group is None:
+            raise KeyError(f"Unknown group: {group_id}")
+        updated = replace(
+            group,
+            title=group.title if title is None else title,
+            text=group.text if text is None else text,
+            size=group.size if size is None else size,
+            color=group.color if color is None else color,
+        )
+        if updated != group:
+            self.push(EditGroupCommand(self.document, updated, self._command_change_callback))
+
     def delete_nodes(self, node_ids: set[UUID]) -> None:
         if node_ids:
             self.push(DeleteNodesCommand(self.document, node_ids, self._command_change_callback))
 
-    def delete_selection(self, node_ids: set[UUID], connection_ids: set[UUID]) -> None:
-        if not node_ids and not connection_ids:
+    def delete_selection(
+        self,
+        node_ids: set[UUID],
+        connection_ids: set[UUID],
+        group_ids: set[UUID] | None = None,
+    ) -> None:
+        selected_groups: set[UUID] = set() if group_ids is None else group_ids
+        if not node_ids and not connection_ids and not selected_groups:
             return
         incident_ids = {
             connection.id for connection in self.document.incident_connections(node_ids)
@@ -141,6 +209,7 @@ class DocumentSession(QObject):
             for connection_id in sorted(independent_connections, key=str):
                 self.remove_connection(connection_id)
             self.delete_nodes(node_ids)
+            self.delete_groups(selected_groups)
         finally:
             self.undo_stack.endMacro()
 

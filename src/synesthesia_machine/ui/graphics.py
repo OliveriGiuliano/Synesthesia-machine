@@ -8,7 +8,7 @@ from typing import cast
 from uuid import UUID
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QPainter, QPainterPath, QPainterPathStroker, QPen
+from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPainterPathStroker, QPen
 from PySide6.QtWidgets import (
     QGraphicsItem,
     QGraphicsObject,
@@ -19,12 +19,79 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from synesthesia_machine.graph import LiteralValue
+from synesthesia_machine.graph import GroupKind, GroupModel, LiteralValue
 from synesthesia_machine.ui.parameter_editors import create_parameter_editor
 from synesthesia_machine.ui.theme import Theme, port_color_name
 from synesthesia_machine.ui.view_models import ConnectionViewModel, NodeViewModel, PortViewModel
 
 type ParameterChangeHandler = Callable[[UUID, str, LiteralValue], None]
+
+
+class GroupGraphicsItem(QGraphicsObject):
+    """Movable persisted group/comment projection rendered behind graph nodes."""
+
+    def __init__(self, model: GroupModel, theme: Theme) -> None:
+        super().__init__()
+        self.model = model
+        self.theme = theme
+        self._drag_origin: dict[UUID, tuple[float, float]] = {}
+        self.setFlags(
+            QGraphicsItem.GraphicsItemFlag.ItemIsMovable
+            | QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
+        )
+        self.setPos(*model.position)
+        self.setZValue(-3.0 if model.kind is GroupKind.GROUP else -0.75)
+        self.setToolTip(model.text or model.title)
+
+    def boundingRect(self) -> QRectF:
+        return QRectF(0.0, 0.0, self.model.size[0], self.model.size[1])
+
+    def paint(
+        self,
+        painter: QPainter,
+        option: QStyleOptionGraphicsItem,
+        widget: QWidget | None = None,
+    ) -> None:
+        del option, widget
+        body = self.boundingRect()
+        fill = QColor(self.model.color)
+        fill.setAlpha(42 if self.model.kind is GroupKind.GROUP else 78)
+        border = self.theme.color("selection") if self.isSelected() else QColor(self.model.color)
+        pen = QPen(border)
+        pen.setWidthF(2.2 if self.isSelected() else 1.2)
+        painter.setPen(pen)
+        painter.setBrush(QBrush(fill))
+        painter.drawRoundedRect(body, 8.0, 8.0)
+        painter.setPen(self.theme.color("text"))
+        painter.setFont(self.theme.title_font())
+        painter.drawText(
+            QRectF(12.0, 6.0, max(0.0, body.width() - 24.0), 26.0),
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+            self.model.title,
+        )
+        if self.model.text:
+            painter.setFont(self.theme.body_font())
+            painter.setPen(self.theme.color("muted_text"))
+            painter.drawText(
+                QRectF(12.0, 36.0, max(0.0, body.width() - 24.0), max(0.0, body.height() - 48.0)),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+                self.model.text,
+            )
+
+    def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        super().mousePressEvent(event)
+        scene = cast("GraphSceneProtocol", self.scene())
+        self._drag_origin = scene.selected_group_positions()
+
+    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        super().mouseReleaseEvent(event)
+        scene = cast("GraphSceneProtocol", self.scene())
+        scene.commit_group_move(self._drag_origin)
+        self._drag_origin = {}
+
+    def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        cast("GraphSceneProtocol", self.scene()).edit_group(self.model.id)
+        event.accept()
 
 
 class PortGraphicsItem(QGraphicsObject):
@@ -360,3 +427,6 @@ class GraphSceneProtocol:
     def update_connections(self) -> None: ...
     def selected_node_positions(self) -> dict[UUID, tuple[float, float]]: ...
     def commit_node_move(self, origins: dict[UUID, tuple[float, float]]) -> None: ...
+    def selected_group_positions(self) -> dict[UUID, tuple[float, float]]: ...
+    def commit_group_move(self, origins: dict[UUID, tuple[float, float]]) -> None: ...
+    def edit_group(self, group_id: UUID) -> None: ...

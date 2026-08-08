@@ -14,13 +14,21 @@ from typing import cast
 from uuid import UUID
 
 from synesthesia_machine.contracts import ColorValue, NumericMatrix
-from synesthesia_machine.graph import ConnectionModel, GraphSnapshot, LiteralValue, NodeModel
+from synesthesia_machine.graph import (
+    ConnectionModel,
+    GraphSnapshot,
+    GroupKind,
+    GroupModel,
+    LiteralValue,
+    NodeModel,
+)
 from synesthesia_machine.nodes import NodeRegistry
 from synesthesia_machine.nodes.input import LOAD_VIDEO_TYPE_ID
 from synesthesia_machine.persistence.schemas import (
     GRAPH_SCHEMA_VERSION,
     ConnectionSchemaV1,
     GraphSchemaV1,
+    GroupSchemaV1,
     JsonValue,
     NodeSchemaV1,
     migrate_graph_data,
@@ -53,7 +61,10 @@ def graph_to_data(snapshot: GraphSnapshot) -> GraphSchemaV1:
         document_id=str(snapshot.document_id),
         nodes=nodes,
         connections=connections,
-        groups=[],
+        groups=[
+            _group_to_data(group)
+            for group in sorted(snapshot.groups, key=lambda item: str(item.id))
+        ],
         document_settings=_literal_mapping_to_data(snapshot.document_settings),
         ui_state={},
     )
@@ -98,7 +109,9 @@ def graph_from_data(data: Mapping[str, object], registry: NodeRegistry) -> Graph
     _expect_int(migrated["schema_version"], "$.schema_version", minimum=1)
     _expect_str(migrated["application_version"], "$.application_version")
     document_id = _expect_uuid(migrated["document_id"], "$.document_id")
-    _validate_empty_list(migrated["groups"], "$.groups")
+    raw_groups = _expect_list(migrated["groups"], "$.groups")
+    groups = tuple(_group_from_data(value, index) for index, value in enumerate(raw_groups))
+    _ensure_unique_ids((group.id for group in groups), "group", "$.groups")
     _validate_empty_object(migrated["ui_state"], "$.ui_state")
     settings = _expect_literal_mapping(migrated["document_settings"], "$.document_settings")
 
@@ -117,6 +130,7 @@ def graph_from_data(data: Mapping[str, object], registry: NodeRegistry) -> Graph
         nodes=tuple(sorted(nodes, key=lambda item: str(item.id))),
         connections=tuple(sorted(connections, key=lambda item: str(item.id))),
         document_settings=settings,
+        groups=tuple(sorted(groups, key=lambda item: str(item.id))),
     )
 
 
@@ -255,6 +269,18 @@ def _connection_to_data(connection: ConnectionModel) -> ConnectionSchemaV1:
     )
 
 
+def _group_to_data(group: GroupModel) -> GroupSchemaV1:
+    return GroupSchemaV1(
+        id=str(group.id),
+        kind=group.kind.value,
+        title=group.title,
+        text=group.text,
+        position=[group.position[0], group.position[1]],
+        size=[group.size[0], group.size[1]],
+        color=group.color,
+    )
+
+
 def _node_from_data(value: object, registry: NodeRegistry, index: int) -> NodeModel:
     path = f"$.nodes[{index}]"
     data = _expect_object(value, path)
@@ -329,6 +355,33 @@ def _connection_from_data(value: object, index: int) -> ConnectionModel:
         ),
         destination_port_id=_expect_str(data["destination_port_id"], f"{path}.destination_port_id"),
     )
+
+
+def _group_from_data(value: object, index: int) -> GroupModel:
+    path = f"$.groups[{index}]"
+    data = _expect_object(value, path)
+    _require_exact_keys(data, {"id", "kind", "title", "text", "position", "size", "color"}, path)
+    kind_value = _expect_str(data["kind"], f"{path}.kind")
+    try:
+        kind = GroupKind(kind_value)
+    except ValueError as error:
+        raise GraphPersistenceError(
+            "invalid_value",
+            f"Expected one of: {', '.join(item.value for item in GroupKind)}",
+            f"{path}.kind",
+        ) from error
+    try:
+        return GroupModel(
+            id=_expect_uuid(data["id"], f"{path}.id"),
+            kind=kind,
+            title=_expect_str(data["title"], f"{path}.title"),
+            text=_expect_str(data["text"], f"{path}.text"),
+            position=_expect_pair(data["position"], f"{path}.position"),
+            size=_expect_pair(data["size"], f"{path}.size"),
+            color=_expect_str(data["color"], f"{path}.color"),
+        )
+    except ValueError as error:
+        raise GraphPersistenceError("invalid_value", str(error), path) from error
 
 
 def _expect_object(value: object, path: str) -> dict[str, object]:
@@ -463,15 +516,6 @@ def _require_exact_keys(data: Mapping[str, object], expected: set[str], path: st
         raise GraphPersistenceError("missing_field", f"Missing fields: {', '.join(missing)}", path)
     if unknown:
         raise GraphPersistenceError("unknown_field", f"Unknown fields: {', '.join(unknown)}", path)
-
-
-def _validate_empty_list(value: object, path: str) -> None:
-    if not isinstance(value, list):
-        raise GraphPersistenceError("invalid_type", "Expected JSON array", path)
-    if value:
-        raise GraphPersistenceError(
-            "unsupported_content", "This reserved field must be empty in schema version 1", path
-        )
 
 
 def _validate_empty_object(value: object, path: str) -> None:

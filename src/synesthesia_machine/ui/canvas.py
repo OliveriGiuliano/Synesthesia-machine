@@ -18,10 +18,11 @@ from PySide6.QtGui import (
     QPen,
     QWheelEvent,
 )
-from PySide6.QtWidgets import QGraphicsScene, QGraphicsView
+from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QInputDialog
 
 from synesthesia_machine.ui.graphics import (
     ConnectionGraphicsItem,
+    GroupGraphicsItem,
     NodeGraphicsItem,
     PortGraphicsItem,
     TemporaryConnectionGraphicsItem,
@@ -46,6 +47,7 @@ class GraphScene(QGraphicsScene):
         self.theme = theme
         self.node_items: dict[UUID, NodeGraphicsItem] = {}
         self.connection_items: dict[UUID, ConnectionGraphicsItem] = {}
+        self.group_items: dict[UUID, GroupGraphicsItem] = {}
         self._drag_port: PortGraphicsItem | None = None
         self._temporary: TemporaryConnectionGraphicsItem | None = None
         self.setSceneRect(-4000.0, -3000.0, 8000.0, 6000.0)
@@ -55,9 +57,16 @@ class GraphScene(QGraphicsScene):
     def sync_from_session(self) -> None:
         selected_nodes = self.selected_node_ids()
         selected_connections = self.selected_connection_ids()
+        selected_groups = self.selected_group_ids()
         self.clear()
         self.node_items.clear()
         self.connection_items.clear()
+        self.group_items.clear()
+        for group in self.session.document.groups:
+            item = GroupGraphicsItem(group, self.theme)
+            self.addItem(item)
+            item.setSelected(group.id in selected_groups)
+            self.group_items[group.id] = item
         view_model = self.session.view_model
         for node in view_model.nodes:
             item = NodeGraphicsItem(node, self.theme, self.session.set_parameter)
@@ -75,6 +84,13 @@ class GraphScene(QGraphicsScene):
         self.clearSelection()
         for node_id in node_ids:
             item = self.node_items.get(node_id)
+            if item is not None:
+                item.setSelected(True)
+
+    def select_group_ids(self, group_ids: set[UUID]) -> None:
+        self.clearSelection()
+        for group_id in group_ids:
+            item = self.group_items.get(group_id)
             if item is not None:
                 item.setSelected(True)
 
@@ -106,6 +122,11 @@ class GraphScene(QGraphicsScene):
             if isinstance(item, ConnectionGraphicsItem)
         }
 
+    def selected_group_ids(self) -> set[UUID]:
+        return {
+            item.model.id for item in self.selectedItems() if isinstance(item, GroupGraphicsItem)
+        }
+
     def selected_node_positions(self) -> dict[UUID, tuple[float, float]]:
         return {
             node_id: (item.pos().x(), item.pos().y())
@@ -121,8 +142,41 @@ class GraphScene(QGraphicsScene):
         }
         self.session.move_nodes(origins, current)
 
+    def selected_group_positions(self) -> dict[UUID, tuple[float, float]]:
+        return {
+            group_id: (item.pos().x(), item.pos().y())
+            for group_id, item in self.group_items.items()
+            if item.isSelected()
+        }
+
+    def commit_group_move(self, origins: dict[UUID, tuple[float, float]]) -> None:
+        current = {
+            group_id: (self.group_items[group_id].pos().x(), self.group_items[group_id].pos().y())
+            for group_id in origins
+            if group_id in self.group_items
+        }
+        self.session.move_groups(origins, current)
+
+    def edit_group(self, group_id: UUID) -> None:
+        group = self.session.document.group(group_id)
+        if group is None:
+            return
+        title, accepted = QInputDialog.getText(None, "Edit canvas item", "Title", text=group.title)
+        if not accepted:
+            return
+        text, accepted = QInputDialog.getMultiLineText(
+            None,
+            "Edit canvas item",
+            "Comment text",
+            text=group.text,
+        )
+        if accepted:
+            self.session.update_group(group_id, title=title, text=text)
+
     def delete_selection(self) -> None:
-        self.session.delete_selection(self.selected_node_ids(), self.selected_connection_ids())
+        self.session.delete_selection(
+            self.selected_node_ids(), self.selected_connection_ids(), self.selected_group_ids()
+        )
 
     def begin_connection_drag(self, port: PortGraphicsItem, position: QPointF) -> None:
         self._drag_port = port

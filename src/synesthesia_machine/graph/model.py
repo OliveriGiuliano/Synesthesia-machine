@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
+from enum import StrEnum
 from types import MappingProxyType
 from uuid import UUID, uuid4
 
@@ -49,6 +51,37 @@ class ConnectionModel:
     destination_port_id: str
 
 
+class GroupKind(StrEnum):
+    GROUP = "GROUP"
+    COMMENT = "COMMENT"
+
+
+@dataclass(frozen=True, slots=True)
+class GroupModel:
+    """Persisted organizational rectangle or free-form canvas comment."""
+
+    id: UUID
+    kind: GroupKind
+    title: str
+    text: str
+    position: tuple[float, float]
+    size: tuple[float, float]
+    color: str = "#46515f"
+
+    def __post_init__(self) -> None:
+        values = (*self.position, *self.size)
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("Group position and size must be finite")
+        if self.size[0] <= 0.0 or self.size[1] <= 0.0:
+            raise ValueError("Group size must be positive")
+        if (
+            len(self.color) != 7
+            or not self.color.startswith("#")
+            or any(character not in "0123456789abcdefABCDEF" for character in self.color[1:])
+        ):
+            raise ValueError("Group color must use #RRGGBB format")
+
+
 @dataclass(frozen=True, slots=True)
 class GraphSnapshot:
     document_id: UUID
@@ -56,6 +89,7 @@ class GraphSnapshot:
     nodes: tuple[NodeModel, ...]
     connections: tuple[ConnectionModel, ...]
     document_settings: Mapping[str, LiteralValue] = field(default_factory=_empty_literals)
+    groups: tuple[GroupModel, ...] = ()
 
     def __post_init__(self) -> None:
         if self.revision < 0:
@@ -75,6 +109,7 @@ class GraphDocument:
         self.revision = 0
         self._nodes: dict[UUID, NodeModel] = {}
         self._connections: dict[UUID, ConnectionModel] = {}
+        self._groups: dict[UUID, GroupModel] = {}
         self._document_settings: dict[str, LiteralValue] = {}
 
     @classmethod
@@ -83,6 +118,7 @@ class GraphDocument:
         document.revision = snapshot.revision
         document._nodes = {node.id: node for node in snapshot.nodes}
         document._connections = {connection.id: connection for connection in snapshot.connections}
+        document._groups = {group.id: group for group in snapshot.groups}
         document._document_settings = dict(snapshot.document_settings)
         return document
 
@@ -94,6 +130,10 @@ class GraphDocument:
     def connections(self) -> tuple[ConnectionModel, ...]:
         return tuple(self._connections[key] for key in sorted(self._connections, key=str))
 
+    @property
+    def groups(self) -> tuple[GroupModel, ...]:
+        return tuple(self._groups[key] for key in sorted(self._groups, key=str))
+
     def node(self, node_id: UUID) -> NodeModel | None:
         """Return one immutable node value without exposing mutable storage."""
 
@@ -103,6 +143,39 @@ class GraphDocument:
         """Return one immutable connection value without exposing mutable storage."""
 
         return self._connections.get(connection_id)
+
+    def group(self, group_id: UUID) -> GroupModel | None:
+        return self._groups.get(group_id)
+
+    def add_group(
+        self,
+        kind: GroupKind,
+        *,
+        title: str,
+        text: str = "",
+        position: tuple[float, float] = (0.0, 0.0),
+        size: tuple[float, float] = (480.0, 320.0),
+        color: str = "#46515f",
+        group_id: UUID | None = None,
+    ) -> UUID:
+        identifier = group_id or uuid4()
+        self.restore_group(GroupModel(identifier, kind, title, text, position, size, color))
+        return identifier
+
+    def restore_group(self, group: GroupModel, *, replace_existing: bool = False) -> None:
+        existing = self._groups.get(group.id)
+        if existing is not None and not replace_existing:
+            raise ValueError(f"Group already exists: {group.id}")
+        if existing == group:
+            return
+        self._groups[group.id] = group
+        self._touch()
+
+    def remove_group(self, group_id: UUID) -> None:
+        if group_id not in self._groups:
+            raise KeyError(f"Unknown group: {group_id}")
+        del self._groups[group_id]
+        self._touch()
 
     def incoming_connection(self, node_id: UUID, port_id: str) -> ConnectionModel | None:
         """Return the single connection occupying an input, if any."""
@@ -274,6 +347,7 @@ class GraphDocument:
             nodes=self.nodes,
             connections=self.connections,
             document_settings=self._document_settings,
+            groups=self.groups,
         )
 
     def _require_node(self, node_id: UUID) -> NodeModel:

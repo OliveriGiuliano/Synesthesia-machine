@@ -10,6 +10,8 @@ from synesthesia_machine.graph.model import (
     ConnectionModel,
     GraphDocument,
     GraphSnapshot,
+    GroupKind,
+    GroupModel,
     LiteralValue,
     NodeModel,
 )
@@ -26,6 +28,8 @@ __all__ = [
     "GraphCompiler",
     "GraphDocument",
     "GraphSnapshot",
+    "GroupKind",
+    "GroupModel",
     "LiteralValue",
     "NodeModel",
     "ValidationIssue",

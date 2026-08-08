@@ -2,10 +2,14 @@
 
 from synesthesia_machine.ui.commands.graph_commands import (
     AddConnectionCommand,
+    AddGroupCommand,
     AddNodeCommand,
+    DeleteGroupsCommand,
     DeleteNodesCommand,
     DuplicateCommand,
+    EditGroupCommand,
     IncompatibleConnectionError,
+    MoveGroupsCommand,
     MoveNodesCommand,
     PasteCommand,
     RemoveConnectionCommand,
@@ -15,10 +19,14 @@ from synesthesia_machine.ui.commands.graph_commands import (
 
 __all__ = [
     "AddConnectionCommand",
+    "AddGroupCommand",
     "AddNodeCommand",
+    "DeleteGroupsCommand",
     "DeleteNodesCommand",
     "DuplicateCommand",
+    "EditGroupCommand",
     "IncompatibleConnectionError",
+    "MoveGroupsCommand",
     "MoveNodesCommand",
     "PasteCommand",
     "RemoveConnectionCommand",
