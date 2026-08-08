@@ -32,7 +32,7 @@ class AutosaveStore:
     def save(self, snapshot: GraphSnapshot) -> Path:
         self.recovery_directory.mkdir(parents=True, exist_ok=True)
         path = self.path_for(snapshot.document_id)
-        save_graph(path, snapshot)
+        save_graph(path, snapshot, retain_backup=False)
         return path
 
     def discover(self) -> tuple[RecoveryRecord, ...]:

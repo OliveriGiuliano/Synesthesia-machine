@@ -147,13 +147,23 @@ def graph_from_json(text: str, registry: NodeRegistry) -> GraphSnapshot:
     return graph_from_data(data, registry)
 
 
-def save_graph(path: str | Path, snapshot: GraphSnapshot) -> None:
+def save_graph(
+    path: str | Path,
+    snapshot: GraphSnapshot,
+    *,
+    retain_backup: bool = True,
+) -> None:
     """Atomically save a graph and retain one backup of the previous file."""
 
     destination = Path(path).expanduser().resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
     content = graph_to_json(_with_persisted_media_paths(snapshot, destination.parent))
+    _atomic_write_text(destination, content, retain_backup=retain_backup)
+
+
+def _atomic_write_text(destination: Path, content: str, *, retain_backup: bool) -> None:
     temporary_path: Path | None = None
+    backup_temporary_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
             "w",
@@ -168,13 +178,30 @@ def save_graph(path: str | Path, snapshot: GraphSnapshot) -> None:
             temporary.flush()
             os.fsync(temporary.fileno())
             temporary_path = Path(temporary.name)
-        if destination.exists():
-            shutil.copy2(destination, _backup_path(destination))
+        if retain_backup and destination.exists():
+            with (
+                destination.open("rb") as source,
+                tempfile.NamedTemporaryFile(
+                    "wb",
+                    dir=destination.parent,
+                    prefix=f".{destination.name}.backup.",
+                    suffix=".tmp",
+                    delete=False,
+                ) as backup_temporary,
+            ):
+                shutil.copyfileobj(source, backup_temporary)
+                backup_temporary.flush()
+                os.fsync(backup_temporary.fileno())
+                backup_temporary_path = Path(backup_temporary.name)
+            os.replace(backup_temporary_path, _backup_path(destination))
+            backup_temporary_path = None
         os.replace(temporary_path, destination)
         temporary_path = None
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
+        if backup_temporary_path is not None:
+            backup_temporary_path.unlink(missing_ok=True)
 
 
 def load_graph(path: str | Path, registry: NodeRegistry) -> GraphSnapshot:
