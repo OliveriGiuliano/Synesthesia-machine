@@ -31,6 +31,7 @@ from synesthesia_machine.contracts import (
     SourceState,
     SourceStatus,
 )
+from synesthesia_machine.media_path import normalize_media_path
 from synesthesia_machine.nodes.base import ResetReason
 
 _NANOSECONDS_PER_SECOND = 1_000_000_000
@@ -165,9 +166,9 @@ type ResetCallback = Callable[[ResetReason], None]
 def inspect_video(path: str | Path, *, stream_index: int = 0) -> VideoMetadata:
     """Read video metadata and close the PyAV container without starting playback."""
 
-    source_path = Path(path).expanduser().resolve()
+    source_path = normalize_media_path(path).resolve()
     if not source_path.is_file():
-        raise FileNotFoundError(source_path)
+        raise FileNotFoundError(f"Video file does not exist: {source_path}")
     if stream_index < 0:
         raise ValueError("stream_index cannot be negative")
 

@@ -9,6 +9,7 @@ from pathlib import Path
 from uuid import UUID
 
 from synesthesia_machine.graph import GraphSnapshot, NodeModel
+from synesthesia_machine.media_path import normalize_media_path
 from synesthesia_machine.nodes.input import LOAD_VIDEO_TYPE_ID
 
 MEDIA_ABSOLUTE_FALLBACK_KEY = "media_absolute_fallback"
@@ -43,7 +44,7 @@ class RelinkVerification:
 def media_fingerprint(path: str | Path) -> str:
     """Return a bounded-cost content identity using file size plus edge samples."""
 
-    source = Path(path).expanduser().resolve()
+    source = normalize_media_path(path).resolve()
     size = source.stat().st_size
     digest = hashlib.sha256()
     digest.update(b"synmachine-media-fingerprint-v1\0")
@@ -66,12 +67,12 @@ def find_missing_media(snapshot: GraphSnapshot) -> tuple[MissingMediaReference, 
         raw_path = node.parameters.get("file_path")
         if not isinstance(raw_path, str) or not raw_path:
             continue
-        missing_path = Path(raw_path).expanduser().resolve()
+        missing_path = normalize_media_path(raw_path).resolve()
         if missing_path.is_file():
             continue
         raw_fallback = node.ui_state.get(MEDIA_ABSOLUTE_FALLBACK_KEY)
         fallback = (
-            Path(raw_fallback).expanduser().resolve()
+            normalize_media_path(raw_fallback).resolve()
             if isinstance(raw_fallback, str) and raw_fallback
             else None
         )
@@ -98,7 +99,7 @@ def verify_relink_candidate(
     reference: MissingMediaReference,
     candidate: str | Path,
 ) -> RelinkVerification:
-    path = Path(candidate).expanduser().resolve()
+    path = normalize_media_path(candidate).resolve()
     if not path.is_file():
         return RelinkVerification(RelinkMatch.MISMATCH, f"The selected file does not exist: {path}")
     size = path.stat().st_size
@@ -125,7 +126,7 @@ def relinked_media_node(node: NodeModel, candidate: str | Path) -> NodeModel:
 
     if node.type_id != LOAD_VIDEO_TYPE_ID:
         raise ValueError("Only Load Video nodes contain relinkable media")
-    path = Path(candidate).expanduser().resolve()
+    path = normalize_media_path(candidate).resolve()
     if not path.is_file():
         raise FileNotFoundError(path)
     parameters = dict(node.parameters)

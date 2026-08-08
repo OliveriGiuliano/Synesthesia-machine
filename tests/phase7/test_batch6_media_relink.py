@@ -57,6 +57,29 @@ def test_saved_media_is_relative_and_survives_project_tree_relocation(tmp_path: 
     )
 
 
+def test_shell_quoted_media_path_is_normalized_for_save_and_missing_checks(
+    tmp_path: Path,
+) -> None:
+    media_path = tmp_path / "media" / "quoted clip.mkv"
+    media_path.parent.mkdir()
+    media_path.write_bytes(b"quoted-media")
+    graph_path = tmp_path / "quoted.synmachine.json"
+    document = GraphDocument()
+    document.add_node(
+        "synmachine.input.load_video",
+        parameters={"file_path": f'"{media_path}"'},
+    )
+
+    assert not find_missing_media(document.snapshot())
+    save_graph(graph_path, document.snapshot())
+    payload = json.loads(graph_path.read_text(encoding="utf-8"))
+    loaded = load_graph(graph_path, create_application_registry())
+
+    assert Path(payload["nodes"][0]["parameters"]["file_path"]) == Path("media/quoted clip.mkv")
+    assert loaded.nodes[0].parameters["file_path"] == str(media_path.resolve())
+    assert not find_missing_media(loaded)
+
+
 def test_missing_media_relink_verifies_identity_and_undoes_exactly(tmp_path: Path) -> None:
     graph_path, media_path = _saved_video_graph(tmp_path / "project")
     relocated_media = tmp_path / "library" / "renamed.mp4"

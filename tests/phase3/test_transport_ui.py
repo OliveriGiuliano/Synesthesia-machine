@@ -9,9 +9,9 @@ from uuid import UUID
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtWidgets import QApplication, QLabel, QToolButton
 
 from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.app.settings import ApplicationPaths
@@ -233,6 +233,35 @@ def test_transport_auto_targets_sole_source_resumes_paused_and_never_fans_out(
     assert len(client.calls) == count
 
 
+def test_transport_toolbar_has_named_visible_hover_press_controls_and_click_feedback(
+    runtime_window: tuple[MainWindow, _RecordingEngineClient],
+) -> None:
+    window, client = runtime_window
+    source_id = window.session.add_node("synmachine.input.load_video", (0.0, 0.0))
+    client.statuses[source_id] = _source_status(source_id)
+    window._refresh_action_states()
+
+    for key in ("play", "pause", "stop", "reload"):
+        action = window.action_registry.require(key)
+        button = window.transport_toolbar.widgetForAction(action)
+        assert isinstance(button, QToolButton)
+        assert button.objectName() == f"transport_{key}_button"
+        assert button.property("transportControl") is True
+        assert button.accessibleName() == action.text().replace("&", "")
+        assert button.isEnabled()
+
+    style_sheet = window.styleSheet()
+    assert 'QToolButton[transportControl="true"]:hover' in style_sheet
+    assert 'QToolButton[transportControl="true"]:pressed' in style_sheet
+    assert 'QToolButton[transportControl="true"]:disabled' in style_sheet
+
+    play_button = window.transport_toolbar.widgetForAction(window.action_registry.require("play"))
+    assert isinstance(play_button, QToolButton)
+    QTest.mouseClick(play_button, Qt.MouseButton.LeftButton)
+    assert client.calls[-1] == ("play", source_id)
+    assert "Playing source" in window.statusBar().currentMessage()
+
+
 def test_preview_and_metrics_polling_update_ui_with_sequence_coalescing(
     runtime_window: tuple[MainWindow, _RecordingEngineClient],
 ) -> None:
@@ -254,6 +283,26 @@ def test_preview_and_metrics_polling_update_ui_with_sequence_coalescing(
     assert "42 ticks" in window._engine_status.text()
     assert "in/process/preview 0.0/29.5/0.0 FPS" in window._engine_status.text()
     assert "drops 3" in window._engine_status.text()
+
+
+def test_source_error_detail_is_visible_in_status_bar_and_engine_tooltip(
+    runtime_window: tuple[MainWindow, _RecordingEngineClient],
+) -> None:
+    window, client = runtime_window
+    source_id = window.session.add_node("synmachine.input.load_video", (0.0, 0.0))
+    error = "Video file does not exist: C:\\missing\\clip.mkv"
+    client.statuses[source_id] = SourceStatus(
+        source_id,
+        SourceState.ERROR,
+        "C:\\missing\\clip.mkv",
+        last_error=error,
+    )
+
+    window._refresh_engine_status()
+
+    expected = f"Source {str(source_id)[:8]}: {error}"
+    assert window.statusBar().currentMessage() == expected
+    assert window._engine_status.toolTip() == expected
 
 
 def test_selected_node_memory_diagnostic_is_published_to_inspector(

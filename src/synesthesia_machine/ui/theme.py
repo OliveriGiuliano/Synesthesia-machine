@@ -79,7 +79,21 @@ class Theme:
                 border-radius: 3px; padding: 4px; selection-background-color: {colors.accent}; }}
             QPushButton {{ background: {colors.node_header}; border: 1px solid {colors.border};
                 border-radius: 3px; padding: 5px 9px; }}
-            QPushButton:hover {{ border-color: {colors.accent}; }}
+            QPushButton:hover {{ background: {colors.border}; border-color: {colors.accent}; }}
+            QPushButton:pressed {{ background: {colors.accent}; color: {colors.canvas}; }}
+            QToolBar#transport_toolbar {{ background: {colors.panel}; spacing: 4px;
+                border-bottom: 1px solid {colors.border}; padding: 3px; }}
+            QToolBar#transport_toolbar QToolButton[transportControl="true"] {{
+                background: {colors.node_header}; border: 1px solid {colors.border};
+                border-radius: 4px; min-width: 54px; padding: 5px 9px; margin: 1px; }}
+            QToolBar#transport_toolbar QToolButton[transportControl="true"]:hover {{
+                background: {colors.border}; border-color: {colors.accent}; color: {colors.text}; }}
+            QToolBar#transport_toolbar QToolButton[transportControl="true"]:pressed {{
+                background: {colors.accent}; border-color: {colors.selection};
+                color: {colors.canvas}; padding-top: 6px; padding-bottom: 4px; }}
+            QToolBar#transport_toolbar QToolButton[transportControl="true"]:disabled {{
+                background: {colors.panel}; border-color: {colors.grid};
+                color: {colors.disabled}; }}
             QToolTip {{ background: {colors.node_header}; color: {colors.text};
                 border: 1px solid {colors.border}; }}
         """

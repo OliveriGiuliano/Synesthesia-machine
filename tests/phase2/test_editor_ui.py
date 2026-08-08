@@ -5,7 +5,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
-from PySide6.QtCore import QPointF, QSettings, Qt
+from PySide6.QtCore import QPointF, QSettings, Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -364,6 +364,28 @@ def test_open_prompts_once_and_malformed_file_is_reported(
     )
     assert not window.open_path(malformed)
     assert errors and errors[0][0] == "Could not open graph"
+
+
+def test_discard_button_from_real_unsaved_close_dialog_closes_window(window: MainWindow) -> None:
+    window.session.add_node("synmachine.utility.number", (0.0, 0.0))
+    window.show()
+    clicked: list[QMessageBox.StandardButton] = []
+
+    def click_discard() -> None:
+        dialog = QApplication.activeModalWidget()
+        if not isinstance(dialog, QMessageBox):
+            return
+        button = dialog.button(QMessageBox.StandardButton.Discard)
+        if button is not None:
+            clicked.append(QMessageBox.StandardButton.Discard)
+            button.click()
+
+    QTimer.singleShot(0, click_discard)
+
+    assert window.close()
+    assert clicked == [QMessageBox.StandardButton.Discard]
+    assert not window.isVisible()
+    assert window._engine_closed
 
 
 def test_recovery_offer_restores_dirty_session_and_explicit_save_discards_recovery(

@@ -22,6 +22,7 @@ from synesthesia_machine.graph import (
     LiteralValue,
     NodeModel,
 )
+from synesthesia_machine.media_path import normalize_media_path
 from synesthesia_machine.nodes import NodeRegistry
 from synesthesia_machine.nodes.input import LOAD_VIDEO_TYPE_ID
 from synesthesia_machine.persistence.media_relink import (
@@ -251,7 +252,7 @@ def _with_persisted_video_identity(node: NodeModel, graph_directory: Path) -> No
     value = node.parameters.get("file_path")
     if not isinstance(value, str) or not value:
         return node
-    candidate = Path(value).expanduser()
+    candidate = normalize_media_path(value)
     if not candidate.is_absolute():
         candidate = graph_directory / candidate
     resolved = candidate.resolve()
@@ -286,14 +287,14 @@ def _replace_video_path(
 
 
 def _resolve_media_path(value: str, graph_directory: Path) -> str:
-    candidate = Path(value).expanduser()
+    candidate = normalize_media_path(value)
     if not candidate.is_absolute():
         candidate = graph_directory / candidate
     return str(candidate.resolve())
 
 
 def _persisted_media_path(value: str, graph_directory: Path) -> str:
-    candidate = Path(value).expanduser()
+    candidate = normalize_media_path(value)
     if not candidate.is_absolute():
         return str(candidate)
     resolved = candidate.resolve()

@@ -69,6 +69,15 @@ def test_inspection_reads_metadata_without_starting_playback(tmp_path: Path) -> 
         source.close()
 
 
+def test_inspection_accepts_shell_quoted_pasted_video_path(tmp_path: Path) -> None:
+    path = generate_test_video(tmp_path / "quoted path.mkv", width=32, height=24, frame_count=2)
+
+    metadata = inspect_video(f'"{path}"')
+
+    assert metadata.path == path.resolve()
+    assert metadata.width == 32 and metadata.height == 24
+
+
 def test_vfr_pts_and_exact_nth_selection_drive_presentation_timeline(tmp_path: Path) -> None:
     path = generate_vfr_test_video(tmp_path / "vfr.mp4")
     with av.open(str(path), mode="r") as container:

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QToolBar,
+    QToolButton,
 )
 
 from synesthesia_machine import __version__
@@ -128,6 +129,7 @@ class MainWindow(QMainWindow):
         self._note_sequences: dict[UUID, int] = {}
         self._engine_closed = False
         self._engine_failure_signature: tuple[object, ...] | None = None
+        self._source_error_signature: tuple[tuple[UUID, str], ...] = ()
         self._autosave_timer = QTimer(self)
         self._autosave_timer.setSingleShot(True)
         self._autosave_timer.setInterval(self.preferences.autosave_delay_seconds * 1000)
@@ -395,8 +397,15 @@ class MainWindow(QMainWindow):
         toolbar.setObjectName("transport_toolbar")
         toolbar.setAccessibleName("Source transport and panic")
         toolbar.setMovable(False)
+        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         for key in ("play", "pause", "stop", "reload"):
-            toolbar.addAction(self.action_registry.require(key))
+            action = self.action_registry.require(key)
+            toolbar.addAction(action)
+            button = toolbar.widgetForAction(action)
+            if isinstance(button, QToolButton):
+                button.setObjectName(f"transport_{key}_button")
+                button.setProperty("transportControl", True)
+                button.setAccessibleName(action.text().replace("&", ""))
         toolbar.addSeparator()
         toolbar.addAction(self.action_registry.require("panic"))
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
@@ -670,7 +679,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel,
             )
-            if choice is not QMessageBox.StandardButton.Yes:
+            if choice != QMessageBox.StandardButton.Yes:
                 return
         try:
             self.session.relink_media(reference.node_id, selected)
@@ -1026,6 +1035,21 @@ class MainWindow(QMainWindow):
             return
         self.inspector.set_memory_diagnostic(diagnostic)
         source_text = ", ".join(status.state.value for status in sources) or "no source"
+        source_errors = tuple(
+            (status.node_id, status.last_error or "Unknown source error")
+            for status in sources
+            if status.state is SourceState.ERROR
+        )
+        if source_errors:
+            error_detail = "\n".join(
+                f"Source {str(node_id)[:8]}: {message}" for node_id, message in source_errors
+            )
+            self._engine_status.setToolTip(error_detail)
+            if source_errors != self._source_error_signature:
+                self.statusBar().showMessage(error_detail, 10000)
+        else:
+            self._engine_status.setToolTip("Live engine and source performance")
+        self._source_error_signature = source_errors
         memory_mib = metrics.memory_bytes / (1024 * 1024)
         self._engine_status.setText(
             f"Engine {metrics.state.value} · source {source_text} · "
@@ -1133,7 +1157,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
-            is QMessageBox.StandardButton.Yes
+            == QMessageBox.StandardButton.Yes
         )
         metrics = None
         profiles = ()
@@ -1207,13 +1231,13 @@ class MainWindow(QMainWindow):
             | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Save,
         )
-        if choice is QMessageBox.StandardButton.Save:
+        if choice == QMessageBox.StandardButton.Save:
             return (
                 _ReplacementDecision.PROCEED
                 if self.save_document()
                 else _ReplacementDecision.CANCEL
             )
-        if choice is QMessageBox.StandardButton.Discard:
+        if choice == QMessageBox.StandardButton.Discard:
             return _ReplacementDecision.DISCARD
         return _ReplacementDecision.CANCEL
 
@@ -1234,10 +1258,10 @@ class MainWindow(QMainWindow):
                 | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Open,
             )
-            if choice is QMessageBox.StandardButton.Discard:
+            if choice == QMessageBox.StandardButton.Discard:
                 self.autosave_store.discard(record.document_id)
                 continue
-            if choice is not QMessageBox.StandardButton.Open:
+            if choice != QMessageBox.StandardButton.Open:
                 return
             try:
                 self.session.recover_document(record.path, explicit_path=explicit_path)
