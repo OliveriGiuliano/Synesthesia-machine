@@ -35,6 +35,8 @@ def test_release_configuration_is_standalone_versioned_and_console_free() -> Non
     assert f"--file-version={__version__}.0" in extra_args
     assert "--onefile" not in extra_args
     assert "--include-package-data=sounddevice" not in extra_args
+    assert "--no-prefer-source-code" in extra_args
+    assert "--noinclude-dlls=*asio*.dll" in extra_args
 
 
 def test_windows_icon_contains_all_required_resolutions() -> None:
