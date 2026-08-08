@@ -162,9 +162,7 @@ def _audio_probe() -> str:
         synth.close()
 
     output_devices = [
-        device
-        for device in devices
-        if int(cast("int", device.get("max_output_channels", 0))) > 0
+        device for device in devices if int(cast("int", device.get("max_output_channels", 0))) > 0
     ]
     hardware_detail = "no hardware output available"
     if output_devices:
@@ -226,9 +224,7 @@ def _run_check(name: str, operation: Callable[[], str]) -> SmokeCheck:
         return SmokeCheck(name, "failed", f"{type(error).__name__}: {error}")
 
 
-def _run_optional_check(
-    name: str, operation: Callable[[], tuple[str, str]]
-) -> SmokeCheck:
+def _run_optional_check(name: str, operation: Callable[[], tuple[str, str]]) -> SmokeCheck:
     try:
         status, detail = operation()
         return SmokeCheck(name, status, detail)

@@ -18,7 +18,7 @@ contains generated `THIRD_PARTY_NOTICES.md` plus verbatim licence files under `l
 | PyAV / FFmpeg | Inventory captures exact runtime library versions, codec names, and native DLL hashes, but the wheel does not expose its complete FFmpeg configure flags. The locked wheel includes `libx264`, `libx265`, LAME, OpenCORE AMR, dav1d, SVT-AV1, VPL, VPX, WebP, and other DLLs. Obtain the exact wheel build provenance and review LGPL/GPL/nonfree and patent implications. | Blocked |
 | OpenCV | Review the wheel's Apache-2.0 licence text and bundled third-party native notices/codecs. | Legal review required |
 | Mido / python-rtmidi / RtMidi | Review MIT notices and the exact bundled `rtmidi` native binary. Confirm the selected MIDI backend does not add undisclosed runtime components. | Legal review required |
-| sounddevice / PortAudio / CFFI | Review MIT/BSD notices and bundled PortAudio binaries. The wheel's notice describes default and ASIO-enabled variants; confirm Nuitka output contents and Steinberg ASIO SDK distribution terms. | Legal review required |
+| sounddevice / PortAudio / CFFI | Review MIT/BSD notices and the bundled PortAudio binary. The locked wheel contains default and ASIO-enabled variants, but the build copies only `libportaudio64bit.dll` and fails if an ASIO DLL appears in the artifact. Keep that exclusion verified or review Steinberg ASIO SDK terms before changing it. | Legal review required |
 | NumPy and transitives | Preserve the generated BSD/MIT/other licence texts and review the complete inventory. | Legal review required |
 
 No installer, signing, upload, publication, or external handoff is authorized while this gate is

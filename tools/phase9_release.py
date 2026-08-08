@@ -215,8 +215,7 @@ def _native_files(
 
 def _ffmpeg_runtime() -> dict[str, object]:
     library_versions = {
-        str(name): list(version)
-        for name, version in sorted(av.library_versions.items())
+        str(name): list(version) for name, version in sorted(av.library_versions.items())
     }
     codec_module = importlib.import_module("av.codec")
     codec_values = cast("Iterable[object]", codec_module.codecs_available)
@@ -289,21 +288,20 @@ def write_notices(path: Path, inventory: Mapping[str, object]) -> None:
     for package in packages:
         expression = package.get("license_expression") or package.get("legacy_license") or "unknown"
         license_files = cast("Sequence[Mapping[str, object]]", package["license_files"])
-        file_names = ", ".join(
-            f"`{name}`"
-            for name in sorted(
-                {PurePosixPath(str(item["path"])).name for item in license_files},
-                key=str.casefold,
+        file_names = (
+            ", ".join(
+                f"`{name}`"
+                for name in sorted(
+                    {PurePosixPath(str(item["path"])).name for item in license_files},
+                    key=str.casefold,
+                )
             )
-        ) or "none reported"
+            or "none reported"
+        )
         metadata = str(expression).replace("|", "\\|").replace("\n", " ")
         if len(metadata) > 120:
-            metadata = (
-                "legacy metadata contains full licence text; see bundled licence file"
-            )
-        lines.append(
-            f"| {package['name']} | {package['version']} | {metadata} | {file_names} |"
-        )
+            metadata = "legacy metadata contains full licence text; see bundled licence file"
+        lines.append(f"| {package['name']} | {package['version']} | {metadata} | {file_names} |")
     lines.extend(
         [
             "",

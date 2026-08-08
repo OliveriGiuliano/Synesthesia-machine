@@ -34,6 +34,7 @@ def test_release_configuration_is_standalone_versioned_and_console_free() -> Non
     assert f"--product-version={__version__}" in extra_args
     assert f"--file-version={__version__}.0" in extra_args
     assert "--onefile" not in extra_args
+    assert "--include-package-data=sounddevice" not in extra_args
 
 
 def test_windows_icon_contains_all_required_resolutions() -> None:
@@ -99,9 +100,10 @@ def test_packaged_smoke_report_fails_closed_and_records_skips(
     assert release_smoke.run_packaged_smoke(report_path) == 1
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["passed"] is False
-    assert next(item for item in report["checks"] if item["name"] == "h264_mp4_decode")[
-        "status"
-    ] == "failed"
+    assert (
+        next(item for item in report["checks"] if item["name"] == "h264_mp4_decode")["status"]
+        == "failed"
+    )
 
 
 def test_inventory_covers_locked_native_runtime_and_licence_files() -> None:
@@ -147,7 +149,9 @@ def test_build_and_clean_machine_scripts_enforce_release_boundaries() -> None:
     assert "uv sync --locked --group packaging" in build
     assert "pyside6-deploy" in build
     assert "tools.phase9_release provenance" in build
+    assert "Assert-NativeSuccess -Operation 'static checks'" in build
+    assert "libportaudio64bit.dll" in build
     assert "--packaged-smoke-report" in smoke
-    assert "PATH'] = \"$env:SystemRoot\\System32;$env:SystemRoot\"" in smoke
+    assert 'PATH\'] = "$env:SystemRoot\\System32;$env:SystemRoot"' in smoke
     assert "Remove-Item -LiteralPath $portableCopy" in smoke
     assert "documentSentinel" in smoke
