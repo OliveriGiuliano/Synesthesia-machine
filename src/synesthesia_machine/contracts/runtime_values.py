@@ -13,6 +13,21 @@ import numpy as np
 from numpy.typing import NDArray
 
 
+def _member_descriptors(
+    owner: type[object], names: tuple[str, ...]
+) -> tuple[MemberDescriptorType, ...]:
+    """Resolve generated slot descriptors once, outside sustained construction loops."""
+
+    descriptors: list[MemberDescriptorType] = []
+    namespace = vars(owner)
+    for name in names:
+        descriptor = namespace.get(name)
+        if not isinstance(descriptor, MemberDescriptorType):
+            raise TypeError(f"{owner.__name__}.{name} is not a slot descriptor")
+        descriptors.append(descriptor)
+    return tuple(descriptors)
+
+
 class PortType(StrEnum):
     IMAGE = "IMAGE"
     CHANNEL = "CHANNEL"
@@ -79,21 +94,15 @@ class FrameContext:
         is_realtime: bool,
     ) -> None:
         # CPython 3.12 on Windows can corrupt sustained calls to the generated
-        # frozen-dataclass initializer and object.__setattr__. Direct slot writes
-        # preserve immutability after construction without using that interpreter path.
-        cast(MemberDescriptorType, vars(type(self))["clock_id"]).__set__(self, clock_id)
-        cast(MemberDescriptorType, vars(type(self))["tick_index"]).__set__(self, tick_index)
-        cast(MemberDescriptorType, vars(type(self))["source_frame_index"]).__set__(
-            self, source_frame_index
-        )
-        cast(MemberDescriptorType, vars(type(self))["source_time_s"]).__set__(self, source_time_s)
-        cast(MemberDescriptorType, vars(type(self))["received_monotonic_ns"]).__set__(
-            self, received_monotonic_ns
-        )
-        cast(MemberDescriptorType, vars(type(self))["deadline_monotonic_ns"]).__set__(
-            self, deadline_monotonic_ns
-        )
-        cast(MemberDescriptorType, vars(type(self))["is_realtime"]).__set__(self, is_realtime)
+        # frozen-dataclass initializer and object.__setattr__. Cached slot writes preserve
+        # immutability after construction without repeated specializing descriptor lookups.
+        _FRAME_CONTEXT_SLOTS[0].__set__(self, clock_id)
+        _FRAME_CONTEXT_SLOTS[1].__set__(self, tick_index)
+        _FRAME_CONTEXT_SLOTS[2].__set__(self, source_frame_index)
+        _FRAME_CONTEXT_SLOTS[3].__set__(self, source_time_s)
+        _FRAME_CONTEXT_SLOTS[4].__set__(self, received_monotonic_ns)
+        _FRAME_CONTEXT_SLOTS[5].__set__(self, deadline_monotonic_ns)
+        _FRAME_CONTEXT_SLOTS[6].__set__(self, is_realtime)
         self.__post_init__()
 
     def __post_init__(self) -> None:
@@ -112,6 +121,20 @@ class FrameContext:
         if self.deadline_monotonic_ns is not None and self.deadline_monotonic_ns < 0:
             msg = "deadline_monotonic_ns cannot be negative"
             raise ValueError(msg)
+
+
+_FRAME_CONTEXT_SLOTS = _member_descriptors(
+    FrameContext,
+    (
+        "clock_id",
+        "tick_index",
+        "source_frame_index",
+        "source_time_s",
+        "received_monotonic_ns",
+        "deadline_monotonic_ns",
+        "is_realtime",
+    ),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,12 +186,12 @@ class ImageFrame:
         context: FrameContext,
         provenance: FrameProvenance,
     ) -> None:
-        cast(MemberDescriptorType, vars(type(self))["data"]).__set__(self, data)
-        cast(MemberDescriptorType, vars(type(self))["color_space"]).__set__(self, color_space)
-        cast(MemberDescriptorType, vars(type(self))["channel_names"]).__set__(self, channel_names)
-        cast(MemberDescriptorType, vars(type(self))["alpha_mode"]).__set__(self, alpha_mode)
-        cast(MemberDescriptorType, vars(type(self))["context"]).__set__(self, context)
-        cast(MemberDescriptorType, vars(type(self))["provenance"]).__set__(self, provenance)
+        _IMAGE_FRAME_SLOTS[0].__set__(self, data)
+        _IMAGE_FRAME_SLOTS[1].__set__(self, color_space)
+        _IMAGE_FRAME_SLOTS[2].__set__(self, channel_names)
+        _IMAGE_FRAME_SLOTS[3].__set__(self, alpha_mode)
+        _IMAGE_FRAME_SLOTS[4].__set__(self, context)
+        _IMAGE_FRAME_SLOTS[5].__set__(self, provenance)
         self.__post_init__()
 
     def __post_init__(self) -> None:
@@ -182,6 +205,12 @@ class ImageFrame:
         if not self.data.flags.c_contiguous:
             msg = "image data must be C-contiguous"
             raise ValueError(msg)
+
+
+_IMAGE_FRAME_SLOTS = _member_descriptors(
+    ImageFrame,
+    ("data", "color_space", "channel_names", "alpha_mode", "context", "provenance"),
+)
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -202,12 +231,12 @@ class ChannelFrame:
         cyclic: bool,
         context: FrameContext,
     ) -> None:
-        cast(MemberDescriptorType, vars(type(self))["data"]).__set__(self, data)
-        cast(MemberDescriptorType, vars(type(self))["semantic"]).__set__(self, semantic)
-        cast(MemberDescriptorType, vars(type(self))["nominal_min"]).__set__(self, nominal_min)
-        cast(MemberDescriptorType, vars(type(self))["nominal_max"]).__set__(self, nominal_max)
-        cast(MemberDescriptorType, vars(type(self))["cyclic"]).__set__(self, cyclic)
-        cast(MemberDescriptorType, vars(type(self))["context"]).__set__(self, context)
+        _CHANNEL_FRAME_SLOTS[0].__set__(self, data)
+        _CHANNEL_FRAME_SLOTS[1].__set__(self, semantic)
+        _CHANNEL_FRAME_SLOTS[2].__set__(self, nominal_min)
+        _CHANNEL_FRAME_SLOTS[3].__set__(self, nominal_max)
+        _CHANNEL_FRAME_SLOTS[4].__set__(self, cyclic)
+        _CHANNEL_FRAME_SLOTS[5].__set__(self, context)
         self.__post_init__()
 
     def __post_init__(self) -> None:
@@ -215,6 +244,12 @@ class ChannelFrame:
         if self.nominal_max <= self.nominal_min:
             msg = "nominal_max must be greater than nominal_min"
             raise ValueError(msg)
+
+
+_CHANNEL_FRAME_SLOTS = _member_descriptors(
+    ChannelFrame,
+    ("data", "semantic", "nominal_min", "nominal_max", "cyclic", "context"),
+)
 
 
 @dataclass(frozen=True, slots=True)
