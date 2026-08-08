@@ -6,6 +6,14 @@ from synesthesia_machine.graph.compiler import (
     GraphCompiler,
     types_compatible,
 )
+from synesthesia_machine.graph.layout import (
+    AlignMode,
+    DistributionAxis,
+    LayoutBox,
+    align_boxes,
+    distribute_boxes,
+    tidy_boxes,
+)
 from synesthesia_machine.graph.model import (
     ConnectionModel,
     GraphDocument,
@@ -22,18 +30,24 @@ from synesthesia_machine.graph.validation import (
 )
 
 __all__ = [
+    "AlignMode",
     "CompilationResult",
     "ConnectionCompatibility",
     "ConnectionModel",
+    "DistributionAxis",
     "GraphCompiler",
     "GraphDocument",
     "GraphSnapshot",
     "GroupKind",
     "GroupModel",
+    "LayoutBox",
     "LiteralValue",
     "NodeModel",
     "ValidationIssue",
     "ValidationReport",
     "ValidationSeverity",
+    "align_boxes",
+    "distribute_boxes",
+    "tidy_boxes",
     "types_compatible",
 ]

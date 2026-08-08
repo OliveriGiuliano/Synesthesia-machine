@@ -20,6 +20,14 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QInputDialog
 
+from synesthesia_machine.graph import (
+    AlignMode,
+    DistributionAxis,
+    LayoutBox,
+    align_boxes,
+    distribute_boxes,
+    tidy_boxes,
+)
 from synesthesia_machine.ui.graphics import (
     ConnectionGraphicsItem,
     GroupGraphicsItem,
@@ -177,6 +185,45 @@ class GraphScene(QGraphicsScene):
         self.session.delete_selection(
             self.selected_node_ids(), self.selected_connection_ids(), self.selected_group_ids()
         )
+
+    def align_selection(self, mode: AlignMode) -> None:
+        boxes = self._selected_layout_boxes()
+        if len(boxes) < 2:
+            return
+        self._apply_layout(align_boxes(boxes, mode))
+
+    def distribute_selection(self, axis: DistributionAxis) -> None:
+        boxes = self._selected_layout_boxes()
+        if len(boxes) < 3:
+            return
+        self._apply_layout(distribute_boxes(boxes, axis))
+
+    def tidy_selection(self) -> None:
+        boxes = self._selected_layout_boxes()
+        if len(boxes) < 2:
+            return
+        self._apply_layout(tidy_boxes(boxes, self.session.document.connections))
+
+    def _selected_layout_boxes(self) -> tuple[LayoutBox, ...]:
+        return tuple(
+            LayoutBox(
+                node_id,
+                item.pos().x(),
+                item.pos().y(),
+                item.boundingRect().width(),
+                item.boundingRect().height(),
+            )
+            for node_id, item in sorted(self.node_items.items(), key=lambda pair: str(pair[0]))
+            if item.isSelected()
+        )
+
+    def _apply_layout(self, positions: dict[UUID, tuple[float, float]]) -> None:
+        old_positions: dict[UUID, tuple[float, float]] = {}
+        for node_id in positions:
+            node = self.session.document.node(node_id)
+            if node is not None:
+                old_positions[node_id] = node.position
+        self.session.move_nodes(old_positions, positions)
 
     def begin_connection_drag(self, port: PortGraphicsItem, position: QPointF) -> None:
         self._drag_port = port

@@ -31,7 +31,7 @@ from synesthesia_machine.contracts import (
     EngineStatus,
     SourceState,
 )
-from synesthesia_machine.graph import GroupKind
+from synesthesia_machine.graph import AlignMode, DistributionAxis, GroupKind
 from synesthesia_machine.nodes import ExecutionKind, NodeRegistry
 from synesthesia_machine.persistence import (
     GraphPersistenceError,
@@ -240,6 +240,43 @@ class MainWindow(QMainWindow):
             ActionSpec("add_comment", "Add &Comment", "Add a free-form canvas comment"),
             self.add_comment_at_center,
         )
+        for key, text, mode in (
+            ("align_left", "Align &Left", AlignMode.LEFT),
+            ("align_hcenter", "Align Horizontal &Centers", AlignMode.HORIZONTAL_CENTER),
+            ("align_right", "Align &Right", AlignMode.RIGHT),
+            ("align_top", "Align &Top", AlignMode.TOP),
+            ("align_vcenter", "Align Vertical C&enters", AlignMode.VERTICAL_CENTER),
+            ("align_bottom", "Align &Bottom", AlignMode.BOTTOM),
+        ):
+            create(
+                ActionSpec(key, text, "Align selected nodes as one undoable command"),
+                partial(self.scene.align_selection, mode),
+            )
+        create(
+            ActionSpec(
+                "distribute_horizontal",
+                "Distribute &Horizontally",
+                "Distribute selected nodes horizontally with equal gaps",
+            ),
+            partial(self.scene.distribute_selection, DistributionAxis.HORIZONTAL),
+        )
+        create(
+            ActionSpec(
+                "distribute_vertical",
+                "Distribute &Vertically",
+                "Distribute selected nodes vertically with equal gaps",
+            ),
+            partial(self.scene.distribute_selection, DistributionAxis.VERTICAL),
+        )
+        create(
+            ActionSpec(
+                "tidy_selection",
+                "&Tidy Selection",
+                "Arrange selected nodes into deterministic graph layers",
+                "Ctrl+T",
+            ),
+            self.scene.tidy_selection,
+        )
         create(ActionSpec("play", "&Play", "Play or resume the targeted source", "F5"), self.play)
         create(ActionSpec("pause", "P&ause", "Pause the targeted source", "F6"), self.pause)
         create(ActionSpec("stop", "&Stop", "Stop the targeted source", "F7"), self.stop)
@@ -321,6 +358,21 @@ class MainWindow(QMainWindow):
         graph_menu.addAction(self.action_registry.require("add_node"))
         graph_menu.addAction(self.action_registry.require("add_group"))
         graph_menu.addAction(self.action_registry.require("add_comment"))
+        arrange_menu = graph_menu.addMenu("&Arrange Selection")
+        for key in (
+            "align_left",
+            "align_hcenter",
+            "align_right",
+            "align_top",
+            "align_vcenter",
+            "align_bottom",
+        ):
+            arrange_menu.addAction(self.action_registry.require(key))
+        arrange_menu.addSeparator()
+        arrange_menu.addAction(self.action_registry.require("distribute_horizontal"))
+        arrange_menu.addAction(self.action_registry.require("distribute_vertical"))
+        arrange_menu.addSeparator()
+        arrange_menu.addAction(self.action_registry.require("tidy_selection"))
         graph_menu.addSeparator()
         for key in ("play", "pause", "stop", "reload"):
             graph_menu.addAction(self.action_registry.require(key))
@@ -688,6 +740,19 @@ class MainWindow(QMainWindow):
             mime_data is not None and mime_data.hasFormat(CLIPBOARD_MIME_TYPE)
         )
         self.action_registry.require("frame_selection").setEnabled(has_selection)
+        selected_node_count = len(self.scene.selected_node_ids())
+        for key in (
+            "align_left",
+            "align_hcenter",
+            "align_right",
+            "align_top",
+            "align_vcenter",
+            "align_bottom",
+            "tidy_selection",
+        ):
+            self.action_registry.require(key).setEnabled(selected_node_count >= 2)
+        self.action_registry.require("distribute_horizontal").setEnabled(selected_node_count >= 3)
+        self.action_registry.require("distribute_vertical").setEnabled(selected_node_count >= 3)
 
     @Slot()
     def _schedule_engine_activation(self) -> None:
