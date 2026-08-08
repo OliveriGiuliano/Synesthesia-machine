@@ -18,7 +18,7 @@ plugins = iconengines,imageformats,platforms,styles
 
 [nuitka]
 mode = standalone
-extra_args = --assume-yes-for-downloads --windows-console-mode=disable --company-name="Synesthesia Machine" --product-name="Synesthesia Machine" --file-description="Visual video-to-MIDI instrument" --file-version=0.1.0.0 --product-version=0.1.0 --copyright="Copyright (c) 2026 Synesthesia Machine contributors" --include-package=synesthesia_machine --include-package=mido.backends --include-package=rtmidi --include-package=_sounddevice_data --include-data-files=src/synesthesia_machine/resources/synesthesia-machine.ico=synesthesia_machine/resources/synesthesia-machine.ico --no-prefer-source-code --noinclude-dlls=*asio*.dll --noinclude-qt-translations
+extra_args = --assume-yes-for-downloads --windows-console-mode=disable --company-name="Synesthesia Machine" --product-name="Synesthesia Machine" --file-description="Visual video-to-MIDI instrument" --file-version=0.1.0.0 --product-version=0.1.0 --copyright="Copyright (c) 2026 Synesthesia Machine contributors" --include-package=synesthesia_machine --include-package=av --include-package=mido.backends --include-package=rtmidi --include-package=_sounddevice_data --include-data-files=src/synesthesia_machine/resources/synesthesia-machine.ico=synesthesia_machine/resources/synesthesia-machine.ico --no-prefer-source-code --noinclude-dlls=*asio*.dll --noinclude-qt-translations
 
 [android]
 wheel_pyside =
