@@ -28,7 +28,12 @@ from synesthesia_machine.graph import (
 )
 from synesthesia_machine.ui.parameter_editors import create_parameter_editor
 from synesthesia_machine.ui.theme import Theme, port_color_name
-from synesthesia_machine.ui.view_models import ConnectionViewModel, NodeViewModel, PortViewModel
+from synesthesia_machine.ui.view_models import (
+    ConnectionViewModel,
+    NodeViewModel,
+    ParameterViewModel,
+    PortViewModel,
+)
 
 type ParameterChangeHandler = Callable[[UUID, str, LiteralValue], None]
 
@@ -187,6 +192,8 @@ class NodeGraphicsItem(QGraphicsObject):
         view_model: NodeViewModel,
         theme: Theme,
         on_parameter_changed: ParameterChangeHandler,
+        *,
+        defer_parameter_editors: bool = False,
     ) -> None:
         super().__init__()
         self.view_model = view_model
@@ -194,6 +201,9 @@ class NodeGraphicsItem(QGraphicsObject):
         self._on_parameter_changed = on_parameter_changed
         self.ports: dict[tuple[str, bool], PortGraphicsItem] = {}
         self.parameter_editors: dict[str, QGraphicsProxyWidget] = {}
+        self._parameter_rows: dict[str, float] = {}
+        self._defer_parameter_editors = defer_parameter_editors
+        self._detail_visible = True
         self._drag_origin: dict[UUID, tuple[float, float]] = {}
         self._height = self._layout_height()
         self.setFlags(
@@ -230,23 +240,47 @@ class NodeGraphicsItem(QGraphicsObject):
                 child = PortGraphicsItem(port, self.theme, self)
                 child.setPos(0.0, y)
                 self.ports[(port.port_id, False)] = child
-            callback = partial(
-                self._on_parameter_changed,
-                self.view_model.node_id,
-                parameter.spec.id,
-            )
-            editor = create_parameter_editor(parameter, callback, compact=True)
-            editor.setFixedWidth(118)
-            proxy = QGraphicsProxyWidget(self)
-            proxy.setWidget(editor)
-            proxy.setPos(metrics.node_width - 128.0, y - metrics.row_height / 2.0 + 2.0)
-            self.parameter_editors[parameter.spec.id] = proxy
+            self._parameter_rows[parameter.spec.id] = y
+            if not self._defer_parameter_editors:
+                self._create_parameter_editor(parameter, y)
             y += metrics.row_height
         for port in self.view_model.outputs:
             child = PortGraphicsItem(port, self.theme, self)
             child.setPos(metrics.node_width, y)
             self.ports[(port.port_id, True)] = child
             y += metrics.row_height
+
+    def _create_parameter_editor(self, parameter: ParameterViewModel, y: float) -> None:
+        callback = partial(
+            self._on_parameter_changed,
+            self.view_model.node_id,
+            parameter.spec.id,
+        )
+        editor = create_parameter_editor(parameter, callback, compact=True)
+        editor.setFixedWidth(118)
+        proxy = QGraphicsProxyWidget(self)
+        proxy.setWidget(editor)
+        proxy.setPos(
+            self.theme.metrics.node_width - 128.0,
+            y - self.theme.metrics.row_height / 2.0 + 2.0,
+        )
+        proxy.setVisible(self._detail_visible)
+        self.parameter_editors[parameter.spec.id] = proxy
+
+    def ensure_parameter_editors(self) -> None:
+        for parameter in self.view_model.parameters:
+            if parameter.spec.id not in self.parameter_editors:
+                self._create_parameter_editor(parameter, self._parameter_rows[parameter.spec.id])
+
+    def set_detail_visible(self, visible: bool) -> None:
+        if self._detail_visible == visible:
+            return
+        self._detail_visible = visible
+        for port in self.ports.values():
+            port.setVisible(visible)
+        for editor in self.parameter_editors.values():
+            editor.setVisible(visible)
+        self.update()
 
     def boundingRect(self) -> QRectF:
         margin = self.theme.metrics.port_radius + 3.0
@@ -263,7 +297,7 @@ class NodeGraphicsItem(QGraphicsObject):
         option: QStyleOptionGraphicsItem,
         widget: QWidget | None = None,
     ) -> None:
-        del option, widget
+        del widget
         metrics = self.theme.metrics
         body = QRectF(0.0, 0.0, metrics.node_width, self._height)
         pen = QPen(
@@ -299,7 +333,8 @@ class NodeGraphicsItem(QGraphicsObject):
             painter.drawEllipse(
                 QPointF(metrics.node_width - 17.0, metrics.header_height / 2.0), 6.0, 6.0
             )
-        if self.view_model.collapsed:
+        level_of_detail = option.levelOfDetailFromTransform(painter.worldTransform())
+        if self.view_model.collapsed or not self._detail_visible or level_of_detail < 0.35:
             return
         painter.setFont(self.theme.body_font())
         y = metrics.header_height
@@ -340,6 +375,8 @@ class NodeGraphicsItem(QGraphicsObject):
             )
 
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value: object) -> object:
+        if change is QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged and bool(value):
+            self.ensure_parameter_editors()
         if change is QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
             scene = cast("object | None", self.scene())
             if scene is not None:

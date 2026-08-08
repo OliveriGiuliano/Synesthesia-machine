@@ -1,0 +1,18 @@
+{
+  "criteria": [
+    "scene build <= 5000 ms",
+    "single parameter edit <= 1000 ms",
+    "no bulk parameter editors before selection",
+    "unaffected graphics item identity preserved",
+    "ports and editors hidden below 0.55 zoom"
+  ],
+  "incremental_edit_ms": 8.9,
+  "initial_parameter_editor_count": 0,
+  "large_graph_mode": true,
+  "low_detail_visible_child_count": 0,
+  "node_count": 500,
+  "passed": true,
+  "scene_build_ms": 33.708,
+  "selected_parameter_editor_count": 3,
+  "unaffected_item_identity_preserved": true
+}

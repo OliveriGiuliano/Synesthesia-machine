@@ -39,6 +39,7 @@ from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.theme import Theme
 
 NODE_MIME_TYPE = "application/x-synesthesia-node-type"
+LARGE_GRAPH_NODE_THRESHOLD = 200
 
 
 class GraphScene(QGraphicsScene):
@@ -58,6 +59,8 @@ class GraphScene(QGraphicsScene):
         self.group_items: dict[UUID, GroupGraphicsItem] = {}
         self._drag_port: PortGraphicsItem | None = None
         self._temporary: TemporaryConnectionGraphicsItem | None = None
+        self._large_graph_mode = False
+        self._detail_visible = True
         self.grid_snap_enabled = False
         self.grid_spacing = theme.metrics.grid_size
         self.setSceneRect(-4000.0, -3000.0, 8000.0, 6000.0)
@@ -68,27 +71,65 @@ class GraphScene(QGraphicsScene):
         selected_nodes = self.selected_node_ids()
         selected_connections = self.selected_connection_ids()
         selected_groups = self.selected_group_ids()
-        self.clear()
-        self.node_items.clear()
-        self.connection_items.clear()
-        self.group_items.clear()
-        for group in self.session.document.groups:
-            item = GroupGraphicsItem(group, self.theme)
-            self.addItem(item)
-            item.setSelected(group.id in selected_groups)
-            self.group_items[group.id] = item
         view_model = self.session.view_model
+        large_graph_mode = len(view_model.nodes) >= LARGE_GRAPH_NODE_THRESHOLD
+        force_node_rebuild = large_graph_mode != self._large_graph_mode
+        self._large_graph_mode = large_graph_mode
+
+        groups = {group.id: group for group in self.session.document.groups}
+        for group_id, item in tuple(self.group_items.items()):
+            if group_id not in groups or item.model != groups[group_id]:
+                self.removeItem(item)
+                del self.group_items[group_id]
+        for group_id, group in groups.items():
+            if group_id not in self.group_items:
+                item = GroupGraphicsItem(group, self.theme)
+                self.addItem(item)
+                item.setSelected(group_id in selected_groups)
+                self.group_items[group_id] = item
+
+        connections = {item.connection_id: item for item in view_model.connections}
+        for connection_id, item in tuple(self.connection_items.items()):
+            if connection_id not in connections or item.view_model != connections[connection_id]:
+                self.removeItem(item)
+                del self.connection_items[connection_id]
+
+        nodes = {node.node_id: node for node in view_model.nodes}
+        for node_id, item in tuple(self.node_items.items()):
+            if force_node_rebuild or node_id not in nodes or item.view_model != nodes[node_id]:
+                self.removeItem(item)
+                del self.node_items[node_id]
         for node in view_model.nodes:
-            item = NodeGraphicsItem(node, self.theme, self.session.set_parameter)
-            self.addItem(item)
-            item.setSelected(node.node_id in selected_nodes)
-            self.node_items[node.node_id] = item
+            if node.node_id not in self.node_items:
+                item = NodeGraphicsItem(
+                    node,
+                    self.theme,
+                    self.session.set_parameter,
+                    defer_parameter_editors=large_graph_mode,
+                )
+                item.set_detail_visible(self._detail_visible)
+                self.addItem(item)
+                item.setSelected(node.node_id in selected_nodes)
+                self.node_items[node.node_id] = item
         for connection in view_model.connections:
-            item = ConnectionGraphicsItem(connection, self.theme)
-            self.addItem(item)
-            item.setSelected(connection.connection_id in selected_connections)
-            self.connection_items[connection.connection_id] = item
+            if connection.connection_id not in self.connection_items:
+                item = ConnectionGraphicsItem(connection, self.theme)
+                self.addItem(item)
+                item.setSelected(connection.connection_id in selected_connections)
+                self.connection_items[connection.connection_id] = item
         self.update_connections()
+
+    @property
+    def large_graph_mode(self) -> bool:
+        return self._large_graph_mode
+
+    def set_detail_level(self, scale: float) -> None:
+        detail_visible = scale >= 0.55
+        if detail_visible == self._detail_visible:
+            return
+        self._detail_visible = detail_visible
+        for item in self.node_items.values():
+            item.set_detail_visible(detail_visible)
 
     def select_node_ids(self, node_ids: set[UUID]) -> None:
         self.clearSelection()
@@ -357,6 +398,10 @@ class GraphView(QGraphicsView):
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.setAcceptDrops(True)
         self.setBackgroundBrush(QBrush(theme.color("canvas")))
+        self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.MinimalViewportUpdate)
+        self.setOptimizationFlag(QGraphicsView.OptimizationFlag.DontSavePainterState, True)
+        self.setOptimizationFlag(QGraphicsView.OptimizationFlag.DontAdjustForAntialiasing, True)
+        self.setCacheMode(QGraphicsView.CacheModeFlag.CacheBackground)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         factor = 1.15 if event.angleDelta().y() > 0 else 1.0 / 1.15
@@ -364,6 +409,7 @@ class GraphView(QGraphicsView):
         target = current * factor
         if self.theme.metrics.min_zoom <= target <= self.theme.metrics.max_zoom:
             self.scale(factor, factor)
+            self.graph_scene.set_detail_level(self.transform().m11())
         event.accept()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
@@ -456,6 +502,7 @@ class GraphView(QGraphicsView):
             self.fitInView(
                 rect.adjusted(-60.0, -60.0, 60.0, 60.0), Qt.AspectRatioMode.KeepAspectRatio
             )
+            self.graph_scene.set_detail_level(self.transform().m11())
 
     def frame_all(self) -> None:
         rect = self.graph_scene.itemsBoundingRect()
@@ -463,6 +510,7 @@ class GraphView(QGraphicsView):
             self.fitInView(
                 rect.adjusted(-80.0, -80.0, 80.0, 80.0), Qt.AspectRatioMode.KeepAspectRatio
             )
+            self.graph_scene.set_detail_level(self.transform().m11())
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasFormat(NODE_MIME_TYPE):
