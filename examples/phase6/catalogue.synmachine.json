@@ -1,0 +1,1147 @@
+{
+  "application_version": "0.1.0",
+  "connections": [],
+  "document_id": "65000000-0000-0000-0000-000000000000",
+  "document_settings": {},
+  "groups": [],
+  "nodes": [
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000001",
+      "implementation_version": 1,
+      "parameters": {
+        "amount": 0.05,
+        "animate_seed": false,
+        "channels": "COLOUR",
+        "monochrome": false,
+        "noise_type": "GAUSSIAN",
+        "seed": 0
+      },
+      "position": [
+        0.0,
+        0.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.add_noise",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000002",
+      "implementation_version": 1,
+      "parameters": {
+        "channels": "COLOUR",
+        "value": 0.0
+      },
+      "position": [
+        320.0,
+        0.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.add_scalar",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000003",
+      "implementation_version": 1,
+      "parameters": {
+        "alpha_policy": "COMPOSITE",
+        "blend_mode": "NORMAL",
+        "opacity": 1.0
+      },
+      "position": [
+        640.0,
+        0.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.blend_images",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000004",
+      "implementation_version": 1,
+      "parameters": {
+        "channels": "COLOUR",
+        "offset": 0.0
+      },
+      "position": [
+        960.0,
+        0.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.brightness",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000005",
+      "implementation_version": 1,
+      "parameters": {
+        "aperture_size": 3,
+        "high_threshold": 0.3,
+        "l2_gradient": false,
+        "low_threshold": 0.1,
+        "pre_blur_sigma": 0.0
+      },
+      "position": [
+        1280.0,
+        0.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.canny",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000006",
+      "implementation_version": 1,
+      "parameters": {
+        "target_colour_space": "HSV"
+      },
+      "position": [
+        1600.0,
+        0.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.change_colour_space",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000007",
+      "implementation_version": 1,
+      "parameters": {
+        "channels": "COLOUR",
+        "include_alpha": false,
+        "maximum": 1.0,
+        "minimum": 0.0
+      },
+      "position": [
+        0.0,
+        260.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.clamp",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000008",
+      "implementation_version": 1,
+      "parameters": {
+        "channels": "COLOUR",
+        "gamma": 1.0,
+        "input_black": 0.0,
+        "input_white": 1.0,
+        "output_black": 0.0,
+        "output_white": 1.0
+      },
+      "position": [
+        320.0,
+        260.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.colour_levels",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000009",
+      "implementation_version": 1,
+      "parameters": {
+        "target_colour_space": "SRGB"
+      },
+      "position": [
+        640.0,
+        260.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.combine_channels",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000010",
+      "implementation_version": 1,
+      "parameters": {
+        "channels": "COLOUR",
+        "factor": 1.0,
+        "pivot": 0.5
+      },
+      "position": [
+        960.0,
+        260.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.contrast",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000011",
+      "implementation_version": 1,
+      "parameters": {
+        "border_mode": "REFLECT_101",
+        "delta": 0.0,
+        "kernel": [
+          [
+            1.0
+          ]
+        ],
+        "normalization": "NONE",
+        "scale": 1.0
+      },
+      "position": [
+        1280.0,
+        260.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.convolve",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000012",
+      "implementation_version": 1,
+      "parameters": {
+        "bottom": 1.0,
+        "coordinate_mode": "NORMALIZED",
+        "left": 0.0,
+        "out_of_bounds": "CLAMP",
+        "pad_colour": {
+          "$type": "COLOR",
+          "a": 0.0,
+          "b": 0.0,
+          "g": 0.0,
+          "r": 0.0
+        },
+        "right": 1.0,
+        "top": 0.0
+      },
+      "position": [
+        1600.0,
+        260.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.crop",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000013",
+      "implementation_version": 1,
+      "parameters": {
+        "anchor_x": -1,
+        "anchor_y": -1,
+        "border_mode": "REFLECT_101",
+        "iterations": 1,
+        "kernel_height": 3,
+        "kernel_shape": "RECTANGLE",
+        "kernel_width": 3,
+        "process_alpha": false
+      },
+      "position": [
+        0.0,
+        520.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.dilate",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000014",
+      "implementation_version": 1,
+      "parameters": {
+        "channels": "COLOUR",
+        "epsilon": 1e-06,
+        "near_zero_policy": "REPLACE_WITH_ZERO",
+        "value": 1.0
+      },
+      "position": [
+        320.0,
+        520.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.divide_scalar",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000015",
+      "implementation_version": 1,
+      "parameters": {
+        "anchor_x": -1,
+        "anchor_y": -1,
+        "border_mode": "REFLECT_101",
+        "iterations": 1,
+        "kernel_height": 3,
+        "kernel_shape": "RECTANGLE",
+        "kernel_width": 3,
+        "process_alpha": false
+      },
+      "position": [
+        640.0,
+        520.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.erode",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000016",
+      "implementation_version": 1,
+      "parameters": {
+        "mode": "HORIZONTAL"
+      },
+      "position": [
+        960.0,
+        520.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.flip",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000017",
+      "implementation_version": 1,
+      "parameters": {
+        "channels": "COLOUR",
+        "gamma": 1.0
+      },
+      "position": [
+        1280.0,
+        520.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.gamma",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000018",
+      "implementation_version": 1,
+      "parameters": {
+        "border_mode": "REFLECT_101",
+        "kernel_height": 3,
+        "kernel_width": 3,
+        "sigma_x": 0.0,
+        "sigma_y": 0.0
+      },
+      "position": [
+        1600.0,
+        520.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.gaussian_blur",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000019",
+      "implementation_version": 1,
+      "parameters": {
+        "border_mode": "REFLECT_101",
+        "display_offset": 0.0,
+        "gain": 1.0,
+        "sigma": 1.0
+      },
+      "position": [
+        0.0,
+        780.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.high_pass",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000020",
+      "implementation_version": 1,
+      "parameters": {
+        "delay_frames": 1,
+        "memory_limit_mb": 256
+      },
+      "position": [
+        320.0,
+        780.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.hold_image",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000021",
+      "implementation_version": 1,
+      "parameters": {
+        "turns": 0.0
+      },
+      "position": [
+        640.0,
+        780.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.hue",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000022",
+      "implementation_version": 1,
+      "parameters": {
+        "invert_alpha": false
+      },
+      "position": [
+        960.0,
+        780.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.invert_colour",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000023",
+      "implementation_version": 1,
+      "parameters": {
+        "border_mode": "REFLECT_101",
+        "sigma": 1.0
+      },
+      "position": [
+        1280.0,
+        780.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.low_pass",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000024",
+      "implementation_version": 1,
+      "parameters": {
+        "channels": "COLOUR",
+        "value": 1.0
+      },
+      "position": [
+        1600.0,
+        780.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.multiply_scalar",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000025",
+      "implementation_version": 1,
+      "parameters": {
+        "factor": 1.0
+      },
+      "position": [
+        0.0,
+        1040.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.opacity",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000026",
+      "implementation_version": 1,
+      "parameters": {
+        "channels": "COLOUR",
+        "clamp_input": true,
+        "levels": 4
+      },
+      "position": [
+        320.0,
+        1040.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.posterize",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000027",
+      "implementation_version": 1,
+      "parameters": {
+        "fit_mode": "CONTAIN",
+        "height": 500,
+        "interpolation": "AUTO",
+        "preserve_aspect": true,
+        "width": 500
+      },
+      "position": [
+        640.0,
+        1040.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.resize",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000028",
+      "implementation_version": 1,
+      "parameters": {
+        "angle_degrees": 0.0,
+        "border_colour": {
+          "$type": "COLOR",
+          "a": 0.0,
+          "b": 0.0,
+          "g": 0.0,
+          "r": 0.0
+        },
+        "border_mode": "REFLECT_101",
+        "centre_x": 0.5,
+        "centre_y": 0.5,
+        "expand_canvas": false,
+        "interpolation": "AUTO"
+      },
+      "position": [
+        960.0,
+        1040.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.rotate",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000029",
+      "implementation_version": 1,
+      "parameters": {
+        "factor": 1.0
+      },
+      "position": [
+        1280.0,
+        1040.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.saturation",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000030",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        1600.0,
+        1040.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.separate_channels",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000031",
+      "implementation_version": 1,
+      "parameters": {
+        "amount": 1.0,
+        "border_mode": "REFLECT_101",
+        "sigma": 1.0,
+        "threshold": 0.0
+      },
+      "position": [
+        0.0,
+        1300.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.sharpen",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000032",
+      "implementation_version": 1,
+      "parameters": {
+        "channels": "COLOUR",
+        "constant_policy": "PRESERVE",
+        "ignore_non_finite": true,
+        "lower_percentile": 0.0,
+        "mode": "PER_CHANNEL",
+        "upper_percentile": 100.0
+      },
+      "position": [
+        320.0,
+        1300.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.stretch_contrast",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000033",
+      "implementation_version": 1,
+      "parameters": {
+        "maximum": 1.0,
+        "mode": "BINARY",
+        "threshold": 0.5
+      },
+      "position": [
+        640.0,
+        1300.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.threshold",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000034",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        960.0,
+        1300.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.to_luminance",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000035",
+      "implementation_version": 1,
+      "parameters": {
+        "backend_preference": "AUTO",
+        "device_id": "opencv:0",
+        "process_every_nth_frame": 1,
+        "reconnect_automatically": true,
+        "requested_fps": 30.0,
+        "requested_height": 720,
+        "requested_width": 1280
+      },
+      "position": [
+        1280.0,
+        1300.0
+      ],
+      "size": null,
+      "type_id": "synmachine.input.load_camera",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000036",
+      "implementation_version": 1,
+      "parameters": {
+        "file_path": "",
+        "loop": false,
+        "process_every_nth_frame": 1,
+        "stream_index": 0
+      },
+      "position": [
+        1600.0,
+        1300.0
+      ],
+      "size": null,
+      "type_id": "synmachine.input.load_video",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000037",
+      "implementation_version": 1,
+      "parameters": {
+        "attack_ms": 10.0,
+        "enabled": false,
+        "max_voices": 32,
+        "output_device": "",
+        "release_ms": 80.0,
+        "volume": 0.15,
+        "waveform": "SINE"
+      },
+      "position": [
+        0.0,
+        1560.0
+      ],
+      "size": null,
+      "type_id": "synmachine.output.generate_audio",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000038",
+      "implementation_version": 1,
+      "parameters": {
+        "output_port": "",
+        "velocity_change_threshold": 4,
+        "velocity_update_policy": "Ignore while held"
+      },
+      "position": [
+        320.0,
+        1560.0
+      ],
+      "size": null,
+      "type_id": "synmachine.output.send_midi",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000039",
+      "implementation_version": 1,
+      "parameters": {
+        "binning_mode": "LINEAR_NOMINAL_RANGE",
+        "custom_scale_mask": "111111111111",
+        "ignore_non_finite": true,
+        "maximum_a": 1.0,
+        "maximum_a_enabled": false,
+        "maximum_b": 1.0,
+        "maximum_b_enabled": false,
+        "maximum_polyphony": 16,
+        "maximum_velocity": 127,
+        "midi_channel": 1,
+        "midi_maximum": 127,
+        "midi_minimum": 0,
+        "minimum_a": 0.0,
+        "minimum_b": 0.0,
+        "minimum_velocity": 1,
+        "occupancy_threshold_percent": 0.0,
+        "root_pitch_class": "C",
+        "scale": "chromatic"
+      },
+      "position": [
+        640.0,
+        1560.0
+      ],
+      "size": null,
+      "type_id": "synmachine.synesthesia.channel_to_pitch",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000040",
+      "implementation_version": 1,
+      "parameters": {
+        "contour_limit": 128,
+        "custom_scale_mask": "111111111111",
+        "maximum_polyphony": 16,
+        "maximum_velocity": 127,
+        "midi_channel": 1,
+        "midi_maximum": 127,
+        "midi_minimum": 0,
+        "minimum_contour_area": 1.0,
+        "minimum_contour_perimeter": 1.0,
+        "minimum_velocity": 1,
+        "pitch_feature": "CENTROID_X",
+        "pitch_maximum": 1.0,
+        "pitch_minimum": 0.0,
+        "retrieval_mode": "EXTERNAL",
+        "root_pitch_class": "C",
+        "scale": "chromatic",
+        "velocity_feature": "EDGE_STRENGTH",
+        "velocity_maximum": 1.0,
+        "velocity_minimum": 0.0
+      },
+      "position": [
+        960.0,
+        1560.0
+      ],
+      "size": null,
+      "type_id": "synmachine.synesthesia.edges_to_pitch",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000041",
+      "implementation_version": 1,
+      "parameters": {
+        "activation_threshold": 0.0,
+        "amplitude_ceiling": 10.0,
+        "amplitude_floor": 0.0,
+        "band_aggregation": "MEAN",
+        "custom_scale_mask": "111111111111",
+        "dc_exclusion_radius": 0.0,
+        "frequency_mapping": "RADIAL_MAGNITUDE",
+        "frequency_maximum": 1.0,
+        "frequency_minimum": 0.0,
+        "maximum_polyphony": 16,
+        "maximum_velocity": 127,
+        "midi_channel": 1,
+        "midi_maximum": 127,
+        "midi_minimum": 0,
+        "minimum_velocity": 1,
+        "percentile": 90.0,
+        "root_pitch_class": "C",
+        "scale": "chromatic",
+        "subtract_mean": true,
+        "window": "HANN"
+      },
+      "position": [
+        1280.0,
+        1560.0
+      ],
+      "size": null,
+      "type_id": "synmachine.synesthesia.fourier",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000042",
+      "implementation_version": 1,
+      "parameters": {
+        "aggregation": "CELL_NOTES",
+        "custom_scale_mask": "111111111111",
+        "flow_preset": "BALANCED",
+        "grid_columns": 4,
+        "grid_rows": 4,
+        "magnitude_maximum": 10.0,
+        "magnitude_minimum": 0.0,
+        "maximum_polyphony": 16,
+        "maximum_velocity": 127,
+        "midi_channel": 1,
+        "midi_maximum": 127,
+        "midi_minimum": 0,
+        "minimum_motion_magnitude": 0.5,
+        "minimum_velocity": 1,
+        "pitch_feature": "DIRECTION",
+        "root_pitch_class": "C",
+        "scale": "chromatic",
+        "velocity_feature": "MEAN_MAGNITUDE"
+      },
+      "position": [
+        1600.0,
+        1560.0
+      ],
+      "size": null,
+      "type_id": "synmachine.synesthesia.optical_flow",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000043",
+      "implementation_version": 1,
+      "parameters": {
+        "activation_threshold": 0.0,
+        "advance_rows": 1,
+        "aggregation": "MEAN",
+        "custom_scale_mask": "111111111111",
+        "direction": "BOTTOM_TO_TOP",
+        "line_thickness": 1,
+        "maximum_polyphony": 16,
+        "maximum_velocity": 127,
+        "midi_channel": 1,
+        "midi_maximum": 127,
+        "midi_minimum": 0,
+        "minimum_velocity": 1,
+        "root_pitch_class": "C",
+        "scale": "chromatic",
+        "velocity_curve_exponent": 1.0
+      },
+      "position": [
+        0.0,
+        1820.0
+      ],
+      "size": null,
+      "type_id": "synmachine.synesthesia.scanline",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000044",
+      "implementation_version": 1,
+      "parameters": {
+        "ignore_non_finite": true,
+        "percentile": 50.0,
+        "statistic": "MEAN"
+      },
+      "position": [
+        320.0,
+        1820.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.channel_statistics",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000045",
+      "implementation_version": 1,
+      "parameters": {
+        "absolute_tolerance": 1e-09,
+        "operation": "EQ",
+        "relative_tolerance": 1e-09
+      },
+      "position": [
+        640.0,
+        1820.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.compare",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000046",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        960.0,
+        1820.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.conditional",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000047",
+      "implementation_version": 1,
+      "parameters": {
+        "mode": "ROUND"
+      },
+      "position": [
+        1280.0,
+        1820.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.float_to_integer",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000048",
+      "implementation_version": 1,
+      "parameters": {
+        "operation": "AND"
+      },
+      "position": [
+        1600.0,
+        1820.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.logic",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000049",
+      "implementation_version": 1,
+      "parameters": {
+        "operation": "ADD"
+      },
+      "position": [
+        0.0,
+        2080.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.math",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000050",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        320.0,
+        2080.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.midi_merge",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000051",
+      "implementation_version": 1,
+      "parameters": {
+        "factor": 1.0
+      },
+      "position": [
+        640.0,
+        2080.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.multiply_velocity",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000052",
+      "implementation_version": 1,
+      "parameters": {
+        "float_value": 0.0,
+        "int_value": 0,
+        "number_type": "FLOAT"
+      },
+      "position": [
+        960.0,
+        2080.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.number",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000053",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        1280.0,
+        2080.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.pass_through",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000054",
+      "implementation_version": 1,
+      "parameters": {
+        "clamp": false,
+        "input_maximum": 1.0,
+        "input_minimum": 0.0,
+        "output_maximum": 1.0,
+        "output_minimum": 0.0
+      },
+      "position": [
+        1600.0,
+        2080.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.remap_number",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000055",
+      "implementation_version": 1,
+      "parameters": {
+        "semitones": 0
+      },
+      "position": [
+        0.0,
+        2340.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.transpose",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000056",
+      "implementation_version": 1,
+      "parameters": {
+        "fit_mode": "CONTAIN",
+        "max_dimension": 800,
+        "preview_fps": 30,
+        "show_histogram": false,
+        "value_display_mode": "NOMINAL_RANGE"
+      },
+      "position": [
+        320.0,
+        2340.0
+      ],
+      "size": null,
+      "type_id": "synmachine.visualization.channel_display",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000057",
+      "implementation_version": 1,
+      "parameters": {
+        "checkerboard_alpha": true,
+        "fit_mode": "CONTAIN",
+        "max_dimension": 800,
+        "preview_fps": 30,
+        "show_histogram": false,
+        "value_display_mode": "DISPLAY_TRANSFORM"
+      },
+      "position": [
+        640.0,
+        2340.0
+      ],
+      "size": null,
+      "type_id": "synmachine.visualization.display_image_data",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000058",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        960.0,
+        2340.0
+      ],
+      "size": null,
+      "type_id": "synmachine.visualization.note_visualizer",
+      "ui_state": {},
+      "user_label": null
+    }
+  ],
+  "schema_version": 1,
+  "ui_state": {}
+}

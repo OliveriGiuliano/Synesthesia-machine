@@ -3,12 +3,12 @@
 Synesthesia Machine is a Windows desktop instrument that transforms video and camera data into
 live MIDI note states through a typed visual node graph.
 
-**Phases 0–5 are complete.** Production UI composition supervises a spawned engine process for
+**Phases 0–6 are complete.** Production UI composition supervises a spawned engine process for
 runtime execution, bounded shared-memory previews, camera capture, MIDI output, debug audio, and
-profiling. The built-in registry now contains 51 definitions, including the complete Phase 5 image,
-channel, scalar-bridge, visualization, and bounded temporal library. Live camera behavior is covered
-with deterministic simulation because no physical camera was available; an explicitly selected
-loopMIDI port was exercised separately from automated tests.
+profiling. The built-in registry now contains 58 definitions, including the complete Phase 5 image
+library plus shared musical controls, MIDI-state utilities, Scanline, Edges to Pitch, Fourier, and
+Optical Flow. Live camera behavior is covered with deterministic simulation because no physical camera
+was available; an explicitly selected loopMIDI port was exercised separately from automated tests.
 
 ## Requirements
 
@@ -36,6 +36,7 @@ uv run test                          # Complete automated test suite
 uv run python -m tools.phase3_performance  # 60-second Phase 3 diagnostic
 uv run python -m tools.phase4_performance  # Process-backed Phase 4 diagnostic
 uv run python -m tools.phase5_soak         # 30-minute-equivalent Phase 5 memory soak
+uv run python -m tools.phase6_benchmarks   # Deterministic 500x500 algorithm diagnostics
 ```
 
 Hardware spikes are documented in [`tools/README.md`](tools/README.md). Automated tests use
@@ -74,6 +75,19 @@ and exact retained-capacity evidence is committed in
 [Phase 5 completion report](docs/phase-5-completion-report.md) for the node batches, shared policies,
 tests, limitations, and measurements.
 
+### Phase 6 synesthesia examples and catalogue
+
+[`examples/phase6`](examples/phase6) contains hardware-safe Motion Grid, Edge Ensemble, Scanning Score,
+and Spatial Spectrum graphs plus the current exact 58-node catalogue. The examples use the included
+deterministic video and Note Visualizer or disabled Generate Audio sinks; none opens a MIDI port.
+
+The repeatable Phase 6 diagnostic times all four synthesis algorithms on deterministic 500×500
+fixtures and commits stable output-note states plus median/p95 samples in
+[`docs/phase-6-benchmarks.json`](docs/phase-6-benchmarks.json). It is algorithm-level evidence, not a
+full graph-throughput claim. See the [node reference](docs/phase-6-node-reference.md),
+[example instructions](examples/phase6/README.md), and
+[Phase 6 completion report](docs/phase-6-completion-report.md).
+
 ## Architecture
 
 The implementation contract is
@@ -90,6 +104,7 @@ Current module boundaries include:
   musical mapping, reconnecting camera capture, persistent exact-port MIDI output, and debug
   synthesis;
 - `src/synesthesia_machine/ui`: the PySide6 editor, transport, status, and preview adapters;
-- `examples/phase3` and `examples/phase5`: portable executable graphs, deterministic media, and the
-  all-definition catalogue smoke artifact;
-- `tests`: hardware-independent Phase 1–5 and smoke acceptance coverage.
+- `examples/phase3`, `examples/phase5`, and `examples/phase6`: portable executable graphs,
+  deterministic media, historical/current all-definition catalogue smoke artifacts, and safe Phase 6
+  algorithm examples;
+- `tests`: hardware-independent Phase 1–6 and smoke acceptance coverage.

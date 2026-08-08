@@ -79,6 +79,26 @@ allowance rather than exact equality. This is accelerated source-clock evidence,
 wall-clock operation. Use CLI overrides such as `--ticks`, `--sample-interval`, `--width`, and
 `--height` only for local diagnostics; the no-argument command is canonical.
 
+## Phase 6 algorithm microbenchmarks
+
+```powershell
+# Run Scanline, Edges to Pitch, Fourier, and Optical Flow on deterministic 500×500 fixtures.
+# The canonical command uses three warm-ups and ten measured invocations per algorithm.
+uv run python -m tools.phase6_benchmarks
+```
+
+The command writes `docs/phase-6-benchmarks.json` and exits non-zero unless every invocation returns
+the same non-empty MIDI note state with finite non-negative timing. It records fixture SHA-256 values,
+all timing samples, median/p95, environment/dependency versions, and Git state. Fourier reuses one
+shape cache across the complete run. Use `--warmup-runs` and `--measured-runs` for fast local checks;
+the input resolution remains fixed at the required 500×500.
+
+This tool times direct Qt-free algorithms over pre-built immutable fixtures. It excludes fixture
+construction, JSON serialization, decoder, scheduler, process transport, UI, audio, and MIDI hardware
+costs. It is intentionally distinct from the architecture section 18.6 full-graph release methodology
+and does not claim source/processed FPS, drops, end-to-end latency, a 30-second run, or a three-run
+release median. Deterministic output state is the gate; wall-clock equality is not.
+
 Automated tests never access physical devices. Camera behavior is tested through injected capture
 factories, MIDI through `MockMidiBackend`, audio by calling the callback with preallocated arrays,
 and PyAV through a generated temporary MP4.

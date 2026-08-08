@@ -1,0 +1,150 @@
+{
+  "application_version": "0.1.0",
+  "connections": [
+    {
+      "destination_node_id": "65100000-0000-0000-0000-000000000002",
+      "destination_port_id": "image",
+      "id": "65100000-0000-0000-0001-000000000001",
+      "source_node_id": "65100000-0000-0000-0000-000000000001",
+      "source_port_id": "image"
+    },
+    {
+      "destination_node_id": "65100000-0000-0000-0000-000000000003",
+      "destination_port_id": "image",
+      "id": "65100000-0000-0000-0001-000000000002",
+      "source_node_id": "65100000-0000-0000-0000-000000000002",
+      "source_port_id": "image"
+    },
+    {
+      "destination_node_id": "65100000-0000-0000-0000-000000000004",
+      "destination_port_id": "current",
+      "id": "65100000-0000-0000-0001-000000000003",
+      "source_node_id": "65100000-0000-0000-0000-000000000002",
+      "source_port_id": "image"
+    },
+    {
+      "destination_node_id": "65100000-0000-0000-0000-000000000004",
+      "destination_port_id": "reference",
+      "id": "65100000-0000-0000-0001-000000000004",
+      "source_node_id": "65100000-0000-0000-0000-000000000003",
+      "source_port_id": "image"
+    },
+    {
+      "destination_node_id": "65100000-0000-0000-0000-000000000005",
+      "destination_port_id": "midi",
+      "id": "65100000-0000-0000-0001-000000000005",
+      "source_node_id": "65100000-0000-0000-0000-000000000004",
+      "source_port_id": "midi"
+    }
+  ],
+  "document_id": "65100000-0000-0000-0000-000000000000",
+  "document_settings": {},
+  "groups": [],
+  "nodes": [
+    {
+      "collapsed": false,
+      "id": "65100000-0000-0000-0000-000000000001",
+      "implementation_version": 1,
+      "parameters": {
+        "file_path": "..\\phase5\\media\\phase5_reference.mp4",
+        "loop": true,
+        "process_every_nth_frame": 1,
+        "stream_index": 0
+      },
+      "position": [
+        0.0,
+        0.0
+      ],
+      "size": null,
+      "type_id": "synmachine.input.load_video",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65100000-0000-0000-0000-000000000002",
+      "implementation_version": 1,
+      "parameters": {
+        "fit_mode": "STRETCH",
+        "height": 500,
+        "interpolation": "AUTO",
+        "preserve_aspect": false,
+        "width": 500
+      },
+      "position": [
+        300.0,
+        0.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.resize",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65100000-0000-0000-0000-000000000003",
+      "implementation_version": 1,
+      "parameters": {
+        "delay_frames": 1,
+        "memory_limit_mb": 256
+      },
+      "position": [
+        600.0,
+        260.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.hold_image",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65100000-0000-0000-0000-000000000004",
+      "implementation_version": 1,
+      "parameters": {
+        "aggregation": "CELL_NOTES",
+        "custom_scale_mask": "111111111111",
+        "flow_preset": "BALANCED",
+        "grid_columns": 4,
+        "grid_rows": 4,
+        "magnitude_maximum": 10.0,
+        "magnitude_minimum": 0.0,
+        "maximum_polyphony": 8,
+        "maximum_velocity": 110,
+        "midi_channel": 1,
+        "midi_maximum": 84,
+        "midi_minimum": 48,
+        "minimum_motion_magnitude": 0.5,
+        "minimum_velocity": 20,
+        "pitch_feature": "DIRECTION",
+        "root_pitch_class": "C",
+        "scale": "minor_pentatonic",
+        "velocity_feature": "MEAN_MAGNITUDE"
+      },
+      "position": [
+        900.0,
+        0.0
+      ],
+      "size": null,
+      "type_id": "synmachine.synesthesia.optical_flow",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65100000-0000-0000-0000-000000000005",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        1240.0,
+        0.0
+      ],
+      "size": null,
+      "type_id": "synmachine.visualization.note_visualizer",
+      "ui_state": {},
+      "user_label": null
+    }
+  ],
+  "schema_version": 1,
+  "ui_state": {}
+}

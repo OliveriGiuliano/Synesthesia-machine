@@ -1,0 +1,292 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "2026-08-08T09:28:11.800520+00:00",
+  "git_commit": "7428d5c89c6f85a987c0a8380916aa8fbe07926c",
+  "git_working_tree_dirty": true,
+  "environment": {
+    "generated_at_utc": "2026-08-08T09:28:11.800520+00:00",
+    "python_version": "3.12.13",
+    "python_executable": "C:\\MY_FILES\\SORTING_THINGS\\_code\\synesthesia_machine\\.venv\\Scripts\\python.exe",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "machine": "AMD64",
+    "cpu_physical": 24,
+    "cpu_logical": 32,
+    "memory_total_bytes": 102834245632,
+    "memory_available_bytes": 80034275328,
+    "process_id": 22516,
+    "process_rss_bytes": 83050496,
+    "dependencies": {
+      "av": "18.0.0",
+      "mido": "1.3.3",
+      "numpy": "2.5.1",
+      "opencv-python": "4.13.0.92",
+      "psutil": "7.2.2",
+      "pyside6": "6.10.3",
+      "python-rtmidi": "1.5.8",
+      "sounddevice": "0.5.5",
+      "pyright": "1.1.411",
+      "pytest": "9.1.1",
+      "ruff": "0.14.14"
+    }
+  },
+  "methodology": {
+    "scope": "Direct Qt-free Phase 6 algorithm calls over pre-built immutable synthetic fixtures; fixture creation and JSON serialization are outside timed regions.",
+    "input_resolution": [
+      500,
+      500
+    ],
+    "timer": "time.perf_counter_ns; elapsed samples reported in milliseconds",
+    "criteria": [
+      "Each of the four required algorithms runs on a 500x500 input.",
+      "Every warm-up and measured invocation returns the same non-empty MIDI note state.",
+      "All measured durations are finite and non-negative.",
+      "Fourier reuses one shape cache across warm-up and measured invocations."
+    ],
+    "limitations": [
+      "This is per-algorithm microbenchmark evidence, not a full graph throughput test.",
+      "It does not include decoder, scheduler, process transport, UI preview, audio, or MIDI hardware costs.",
+      "It does not implement the architecture section 18.6 release methodology of a five-second warm-up, 30-second measurement, source/processed FPS, drop and latency telemetry, and median comparison across three runs.",
+      "Wall-clock timings vary by hardware, power mode, OS scheduling, and concurrent load; deterministic output states, not timing equality, are the correctness gate."
+    ]
+  },
+  "benchmarks": [
+    {
+      "algorithm": "Scanline",
+      "fixture": "Finite normalized horizontal gradient with deterministic impulses; middle five-row mean band.",
+      "fixture_sha256": "c89a9b19d0d94961ac600fde49513aeebc66ab3135fe1b29f84a343f9b51fc06",
+      "input_shape": [
+        500,
+        500
+      ],
+      "warmup_runs": 3,
+      "measured_runs": 10,
+      "output_notes": [
+        {
+          "channel_1_based": 1,
+          "note": 64,
+          "velocity": 37
+        },
+        {
+          "channel_1_based": 1,
+          "note": 65,
+          "velocity": 46
+        },
+        {
+          "channel_1_based": 1,
+          "note": 66,
+          "velocity": 54
+        },
+        {
+          "channel_1_based": 1,
+          "note": 67,
+          "velocity": 64
+        },
+        {
+          "channel_1_based": 1,
+          "note": 68,
+          "velocity": 73
+        },
+        {
+          "channel_1_based": 1,
+          "note": 69,
+          "velocity": 84
+        },
+        {
+          "channel_1_based": 1,
+          "note": 70,
+          "velocity": 94
+        },
+        {
+          "channel_1_based": 1,
+          "note": 71,
+          "velocity": 105
+        }
+      ],
+      "output_state_stable": true,
+      "timing": {
+        "median_ms": 0.05505,
+        "p95_ms": 0.062595,
+        "minimum_ms": 0.052,
+        "maximum_ms": 0.063,
+        "samples_ms": [
+          0.0621,
+          0.063,
+          0.0581,
+          0.0577,
+          0.0537,
+          0.0531,
+          0.052,
+          0.0547,
+          0.0554,
+          0.0527
+        ]
+      },
+      "diagnostic": null
+    },
+    {
+      "algorithm": "Edges to Pitch",
+      "fixture": "Finite binary edge mask containing two rectangles, one circle, and one ellipse.",
+      "fixture_sha256": "605833de5c9f7dffcba564141aea6243c4dee5cd383048b55c36f32cec3785a2",
+      "input_shape": [
+        500,
+        500
+      ],
+      "warmup_runs": 3,
+      "measured_runs": 10,
+      "output_notes": [
+        {
+          "channel_1_based": 1,
+          "note": 62,
+          "velocity": 110
+        },
+        {
+          "channel_1_based": 1,
+          "note": 64,
+          "velocity": 110
+        },
+        {
+          "channel_1_based": 1,
+          "note": 68,
+          "velocity": 110
+        }
+      ],
+      "output_state_stable": true,
+      "timing": {
+        "median_ms": 1.5476999999999999,
+        "p95_ms": 1.6321750000000002,
+        "minimum_ms": 1.4811,
+        "maximum_ms": 1.6603,
+        "samples_ms": [
+          1.5927,
+          1.6603,
+          1.5548,
+          1.5406,
+          1.5606,
+          1.5978,
+          1.4985,
+          1.4861,
+          1.526,
+          1.4811
+        ]
+      },
+      "diagnostic": null
+    },
+    {
+      "algorithm": "Fourier",
+      "fixture": "Finite normalized 8-cycle horizontal sinusoid with a 3-cycle vertical term.",
+      "fixture_sha256": "427ef3638d39c9672b2a619998dc1f86b52673b39b95a524683f231e78055fbd",
+      "input_shape": [
+        500,
+        500
+      ],
+      "warmup_runs": 3,
+      "measured_runs": 10,
+      "output_notes": [
+        {
+          "channel_1_based": 1,
+          "note": 60,
+          "velocity": 96
+        },
+        {
+          "channel_1_based": 1,
+          "note": 61,
+          "velocity": 32
+        },
+        {
+          "channel_1_based": 1,
+          "note": 65,
+          "velocity": 38
+        },
+        {
+          "channel_1_based": 1,
+          "note": 66,
+          "velocity": 97
+        },
+        {
+          "channel_1_based": 1,
+          "note": 67,
+          "velocity": 104
+        },
+        {
+          "channel_1_based": 1,
+          "note": 68,
+          "velocity": 97
+        },
+        {
+          "channel_1_based": 1,
+          "note": 69,
+          "velocity": 38
+        },
+        {
+          "channel_1_based": 1,
+          "note": 70,
+          "velocity": 31
+        }
+      ],
+      "output_state_stable": true,
+      "timing": {
+        "median_ms": 10.7711,
+        "p95_ms": 11.394275,
+        "minimum_ms": 10.082,
+        "maximum_ms": 11.4008,
+        "samples_ms": [
+          10.082,
+          11.2376,
+          10.0825,
+          11.2661,
+          10.9574,
+          10.1674,
+          11.4008,
+          10.3187,
+          11.3863,
+          10.5848
+        ]
+      },
+      "diagnostic": "Fourier shape-cache misses=1, hits=12."
+    },
+    {
+      "algorithm": "Optical Flow",
+      "fixture": "Seeded blurred texture translated four pixels right with reflected borders; reference-to-current flow.",
+      "fixture_sha256": "7deefede563000888203fe5274f30772773eb4c44a1c89e9ac0128aad9f4276e",
+      "input_shape": [
+        500,
+        500
+      ],
+      "warmup_runs": 3,
+      "measured_runs": 10,
+      "output_notes": [
+        {
+          "channel_1_based": 1,
+          "note": 60,
+          "velocity": 65
+        },
+        {
+          "channel_1_based": 1,
+          "note": 71,
+          "velocity": 65
+        }
+      ],
+      "output_state_stable": true,
+      "timing": {
+        "median_ms": 48.92275,
+        "p95_ms": 50.125960000000006,
+        "minimum_ms": 47.5457,
+        "maximum_ms": 50.392,
+        "samples_ms": [
+          48.3599,
+          47.5457,
+          48.8727,
+          48.8195,
+          48.9728,
+          48.5616,
+          49.2155,
+          49.1642,
+          49.8008,
+          50.392
+        ]
+      },
+      "diagnostic": null
+    }
+  ],
+  "passed": true
+}
