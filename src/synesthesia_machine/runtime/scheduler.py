@@ -25,6 +25,7 @@ from synesthesia_machine.nodes.base import (
 from synesthesia_machine.runtime.execution_plan import ExecutionPlan, PortKey, ScalarConversion
 
 type TimingHook = Callable[[UUID, int], None]
+type ProfilingHook = Callable[[UUID, int, Mapping[str, RuntimeValue], bool], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,10 +47,12 @@ class Scheduler:
         plan: ExecutionPlan,
         *,
         timing_hook: TimingHook | None = None,
+        profiling_hook: ProfilingHook | None = None,
         reusable_runtimes: Mapping[UUID, NodeRuntime] | None = None,
     ) -> None:
         self.plan = plan
         self._timing_hook = timing_hook
+        self._profiling_hook = profiling_hook
         reusable = reusable_runtimes or {}
         self._runtimes: dict[UUID, NodeRuntime] = {}
         self._borrowed_runtime_ids: set[UUID] = set()
@@ -73,6 +76,7 @@ class Scheduler:
         previous: Scheduler | None,
         *,
         timing_hook: TimingHook | None = None,
+        profiling_hook: ProfilingHook | None = None,
         preserve_state: bool = True,
     ) -> Scheduler:
         reusable: dict[UUID, NodeRuntime] = {}
@@ -96,7 +100,12 @@ class Scheduler:
                     and node.node_id in previous._runtimes
                 ):
                     reusable[node.node_id] = previous._runtimes[node.node_id]
-        return cls(plan, timing_hook=timing_hook, reusable_runtimes=reusable)
+        return cls(
+            plan,
+            timing_hook=timing_hook,
+            profiling_hook=profiling_hook,
+            reusable_runtimes=reusable,
+        )
 
     @property
     def borrowed_runtime_ids(self) -> frozenset[UUID]:
@@ -130,7 +139,10 @@ class Scheduler:
             ):
                 outputs = {port_id: NoData for port_id in node.output_types}
             else:
-                started = time.perf_counter_ns()
+                collect_timing = self._timing_hook is not None or self._profiling_hook is not None
+                started = time.perf_counter_ns() if collect_timing else None
+                failed = False
+                outputs: dict[str, RuntimeValue] = {}
                 invocations[node.node_id] = invocations.get(node.node_id, 0) + 1
                 try:
                     outputs = dict(
@@ -139,6 +151,7 @@ class Scheduler:
                         )
                     )
                 except ExpectedNodeError as error:
+                    failed = True
                     errors.append(
                         NodeExecutionError(
                             node.node_id,
@@ -151,6 +164,7 @@ class Scheduler:
                     )
                     outputs = {port_id: NoData for port_id in node.output_types}
                 except Exception as error:  # Scheduler boundary converts unexpected node failures.
+                    failed = True
                     errors.append(
                         NodeExecutionError(
                             node.node_id,
@@ -163,8 +177,12 @@ class Scheduler:
                     )
                     outputs = {port_id: NoData for port_id in node.output_types}
                 finally:
-                    if self._timing_hook is not None:
-                        self._timing_hook(node.node_id, time.perf_counter_ns() - started)
+                    if started is not None:
+                        duration_ns = time.perf_counter_ns() - started
+                        if self._timing_hook is not None:
+                            self._timing_hook(node.node_id, duration_ns)
+                        if self._profiling_hook is not None:
+                            self._profiling_hook(node.node_id, duration_ns, outputs, failed)
             for port_id in node.output_types:
                 values[PortKey(node.node_id, port_id)] = outputs.get(port_id, NoData)
             if node.is_static:

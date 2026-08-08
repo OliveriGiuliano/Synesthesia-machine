@@ -13,7 +13,7 @@ from synesthesia_machine.graph.model import GraphSnapshot
 from synesthesia_machine.nodes.base import ResetReason
 from synesthesia_machine.nodes.registry import NodeRegistry
 from synesthesia_machine.runtime.execution_plan import ExecutionPlan, PortKey
-from synesthesia_machine.runtime.scheduler import Scheduler, TickResult, TimingHook
+from synesthesia_machine.runtime.scheduler import ProfilingHook, Scheduler, TickResult, TimingHook
 
 
 @dataclass(slots=True)
@@ -35,9 +35,16 @@ class PreparedEngineActivation:
 
 
 class EngineFacade:
-    def __init__(self, registry: NodeRegistry, *, timing_hook: TimingHook | None = None) -> None:
+    def __init__(
+        self,
+        registry: NodeRegistry,
+        *,
+        timing_hook: TimingHook | None = None,
+        profiling_hook: ProfilingHook | None = None,
+    ) -> None:
         self._compiler = GraphCompiler(registry)
         self._timing_hook = timing_hook
+        self._profiling_hook = profiling_hook
         self._plan: ExecutionPlan | None = None
         self._scheduler: Scheduler | None = None
 
@@ -75,6 +82,7 @@ class EngineFacade:
             result.plan,
             self._scheduler,
             timing_hook=self._timing_hook,
+            profiling_hook=self._profiling_hook,
             preserve_state=reset_reason is ResetReason.PLAN_REPLACED,
         )
         return PreparedEngineActivation(result, replacement)

@@ -7,6 +7,7 @@ same protocol without changing transport or widget code.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -144,6 +145,39 @@ class NodeMemoryDiagnostic:
 
 
 @dataclass(frozen=True, slots=True)
+class NodeProfile:
+    """Compact rolling node profile safe to transport across the process boundary."""
+
+    node_id: UUID
+    invocation_count: int = 0
+    error_count: int = 0
+    window_size: int = 0
+    last_duration_ms: float = 0.0
+    ema_duration_ms: float = 0.0
+    p50_duration_ms: float = 0.0
+    p95_duration_ms: float = 0.0
+    max_duration_ms: float = 0.0
+    output_summary: str = "no outputs"
+    output_bytes: int = 0
+
+    def __post_init__(self) -> None:
+        counters = (self.invocation_count, self.error_count, self.window_size, self.output_bytes)
+        durations = (
+            self.last_duration_ms,
+            self.ema_duration_ms,
+            self.p50_duration_ms,
+            self.p95_duration_ms,
+            self.max_duration_ms,
+        )
+        if any(value < 0 for value in counters):
+            raise ValueError("node profile counters cannot be negative")
+        if self.error_count > self.invocation_count or self.window_size > self.invocation_count:
+            raise ValueError("node profile counters are inconsistent")
+        if any(not math.isfinite(value) or value < 0.0 for value in durations):
+            raise ValueError("node profile durations must be finite and non-negative")
+
+
+@dataclass(frozen=True, slots=True)
 class EngineMetrics:
     state: EngineState = EngineState.STOPPED
     graph_revision: int | None = None
@@ -260,6 +294,10 @@ class EngineClient(Protocol):
     def node_memory_diagnostics(
         self, node_id: UUID | None = None
     ) -> tuple[NodeMemoryDiagnostic, ...]: ...
+
+    def node_profiles(self) -> tuple[NodeProfile, ...]: ...
+
+    def reset_profiling(self) -> None: ...
 
     def metrics(self) -> EngineMetrics: ...
 

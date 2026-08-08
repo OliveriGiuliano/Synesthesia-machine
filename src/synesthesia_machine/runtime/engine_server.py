@@ -36,6 +36,7 @@ from synesthesia_machine.contracts.engine_messages import (
     MetricsResponse,
     MidiOutputStatusResponse,
     NodeMemoryDiagnosticsResponse,
+    NodeProfilesResponse,
     NotePreviewsPublished,
     Panic,
     Ping,
@@ -47,7 +48,9 @@ from synesthesia_machine.contracts.engine_messages import (
     QueryMetrics,
     QueryMidiOutputStatus,
     QueryNodeMemoryDiagnostics,
+    QueryNodeProfiles,
     QuerySourceStatus,
+    ResetProfiling,
     SharedFrameReady,
     Shutdown,
     ShutdownAcknowledged,
@@ -91,6 +94,8 @@ _COMMAND_TYPES = (
     QuerySourceStatus,
     QueryMidiOutputStatus,
     QueryNodeMemoryDiagnostics,
+    QueryNodeProfiles,
+    ResetProfiling,
     QueryMetrics,
     WaitUntilIdle,
     ConfigurePreviewSlot,
@@ -392,6 +397,15 @@ class EngineServer:
                 self._graph_revision,
                 self._engine.node_memory_diagnostics(command.node_id),
             )
+        if isinstance(command, QueryNodeProfiles):
+            return NodeProfilesResponse(
+                command.request_id,
+                self._graph_revision,
+                self._engine.node_profiles(),
+            )
+        if isinstance(command, ResetProfiling):
+            self._engine.reset_profiling()
+            return CommandAcknowledged(command.request_id, self._graph_revision)
         if isinstance(command, QueryMetrics):
             metrics = self._engine.metrics()
             metrics = replace(

@@ -12,6 +12,7 @@ from synesthesia_machine.contracts.engine_client import (
     EngineMetrics,
     MidiOutputStatus,
     NodeMemoryDiagnostic,
+    NodeProfile,
     NotePreview,
     SourceStatus,
 )
@@ -21,7 +22,7 @@ from synesthesia_machine.nodes.base import ResetReason
 if TYPE_CHECKING:
     from synesthesia_machine.graph.model import GraphSnapshot
 
-ENGINE_PROTOCOL_VERSION = 6
+ENGINE_PROTOCOL_VERSION = 7
 
 type SnapshotLiteral = str | int | float | bool | ColorValue | NumericMatrix | None
 
@@ -240,6 +241,28 @@ class NodeMemoryDiagnosticsResponse:
 
 
 @dataclass(frozen=True, slots=True)
+class QueryNodeProfiles:
+    request_id: str
+    graph_revision: int | None
+    protocol_version: int = ENGINE_PROTOCOL_VERSION
+
+
+@dataclass(frozen=True, slots=True)
+class NodeProfilesResponse:
+    request_id: str
+    graph_revision: int | None
+    profiles: tuple[NodeProfile, ...]
+    protocol_version: int = ENGINE_PROTOCOL_VERSION
+
+
+@dataclass(frozen=True, slots=True)
+class ResetProfiling:
+    request_id: str
+    graph_revision: int | None
+    protocol_version: int = ENGINE_PROTOCOL_VERSION
+
+
+@dataclass(frozen=True, slots=True)
 class QueryMetrics:
     request_id: str
     graph_revision: int | None
@@ -403,6 +426,8 @@ EngineCommand = (
     | QuerySourceStatus
     | QueryMidiOutputStatus
     | QueryNodeMemoryDiagnostics
+    | QueryNodeProfiles
+    | ResetProfiling
     | QueryMetrics
     | WaitUntilIdle
     | ConfigurePreviewSlot
@@ -416,6 +441,7 @@ EngineResponse = (
     | SourceStatusResponse
     | MidiOutputStatusResponse
     | NodeMemoryDiagnosticsResponse
+    | NodeProfilesResponse
     | MetricsResponse
     | IdleResponse
     | PreviewSlotConfigured

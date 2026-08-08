@@ -25,6 +25,7 @@ from synesthesia_machine.contracts.engine_client import (
     ImagePreview,
     MidiOutputStatus,
     NodeMemoryDiagnostic,
+    NodeProfile,
     NotePreview,
     SourceStatus,
 )
@@ -47,6 +48,7 @@ from synesthesia_machine.contracts.engine_messages import (
     MetricsResponse,
     MidiOutputStatusResponse,
     NodeMemoryDiagnosticsResponse,
+    NodeProfilesResponse,
     NotePreviewsPublished,
     Panic,
     PreviewFormatChanged,
@@ -55,7 +57,9 @@ from synesthesia_machine.contracts.engine_messages import (
     QueryMetrics,
     QueryMidiOutputStatus,
     QueryNodeMemoryDiagnostics,
+    QueryNodeProfiles,
     QuerySourceStatus,
+    ResetProfiling,
     Shutdown,
     ShutdownAcknowledged,
     SourceStatusResponse,
@@ -107,6 +111,7 @@ _RESPONSE_TYPES = (
     SourceStatusResponse,
     MidiOutputStatusResponse,
     NodeMemoryDiagnosticsResponse,
+    NodeProfilesResponse,
     MetricsResponse,
     IdleResponse,
     PreviewSlotConfigured,
@@ -292,6 +297,20 @@ class ProcessEngineClient:
         )
         self._accept_revision(response.graph_revision)
         return response.diagnostics
+
+    def node_profiles(self) -> tuple[NodeProfile, ...]:
+        response = self._request(
+            QueryNodeProfiles(uuid4().hex, self._graph_revision),
+            NodeProfilesResponse,
+        )
+        self._accept_revision(response.graph_revision)
+        return response.profiles
+
+    def reset_profiling(self) -> None:
+        self._request(
+            ResetProfiling(uuid4().hex, self._graph_revision),
+            CommandAcknowledged,
+        )
 
     def metrics(self) -> EngineMetrics:
         status = self.status()

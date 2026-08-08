@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Protocol
 from uuid import UUID
 
-import numpy as np
 import psutil
 
 from synesthesia_machine.contracts import (
@@ -25,6 +24,7 @@ from synesthesia_machine.contracts import (
     ImagePreview,
     MidiOutputStatus,
     NodeMemoryDiagnostic,
+    NodeProfile,
     NotePreview,
     SourceState,
     SourceStatus,
@@ -38,6 +38,7 @@ from synesthesia_machine.nodes.registry import NodeRegistry
 from synesthesia_machine.runtime.engine_facade import EngineFacade
 from synesthesia_machine.runtime.execution_plan import CompiledNode, ExecutionPlan, PortKey
 from synesthesia_machine.runtime.previews import PreviewBroker
+from synesthesia_machine.runtime.profiling import RuntimeProfiler
 from synesthesia_machine.runtime.scheduler import TickResult
 
 
@@ -400,9 +401,8 @@ class InProcessEngineClient:
         worker_clock: Callable[[], int] = time.perf_counter_ns,
     ) -> None:
         self._lock = threading.RLock()
-        self._timing_lock = threading.Lock()
-        self._node_times_ns: deque[int] = deque(maxlen=20_000)
-        self._facade = EngineFacade(registry, timing_hook=self._record_node_time)
+        self._profiler = RuntimeProfiler()
+        self._facade = EngineFacade(registry, profiling_hook=self._profiler.record)
         self._video_source_factory = video_source_factory or VideoSourceService
         self._camera_source_factory = camera_source_factory or CameraSourceService
         self._worker_clock = worker_clock
@@ -498,8 +498,7 @@ class InProcessEngineClient:
             self._latest_valid_snapshot = snapshot
             self._latest_demand_roots = roots
             self._state = previous_state if old_plan is not None else EngineState.STOPPED
-            with self._timing_lock:
-                self._node_times_ns.clear()
+            self._profiler.reset()
             for node_id, source in previous_sources.items():
                 if node_id not in reusable_sources:
                     with suppress(Exception):
@@ -590,6 +589,12 @@ class InProcessEngineClient:
             self._ensure_open()
             return self._facade.node_memory_diagnostics(node_id)
 
+    def node_profiles(self) -> tuple[NodeProfile, ...]:
+        return self._profiler.profiles()
+
+    def reset_profiling(self) -> None:
+        self._profiler.reset()
+
     def metrics(self) -> EngineMetrics:
         with self._lock:
             if self._state is EngineState.CLOSED:
@@ -600,13 +605,7 @@ class InProcessEngineClient:
             processed_ticks = worker.processed_ticks if worker is not None else 0
             elapsed_s = worker.elapsed_s if worker is not None else 0.0
             processed_fps = processed_ticks / elapsed_s if elapsed_s > 0.0 else 0.0
-            with self._timing_lock:
-                timings = tuple(self._node_times_ns)
-            p95_ms = (
-                float(np.percentile(np.asarray(timings, dtype=np.float64), 95)) / 1_000_000
-                if timings
-                else 0.0
-            )
+            p95_ms = self._profiler.global_p95_ms()
             return EngineMetrics(
                 state=state,
                 graph_revision=self._graph_revision,
@@ -776,11 +775,6 @@ class InProcessEngineClient:
             self._worker.close()
             self._worker = None
         self._preview_broker.clear()
-
-    def _record_node_time(self, node_id: UUID, elapsed_ns: int) -> None:
-        del node_id
-        with self._timing_lock:
-            self._node_times_ns.append(elapsed_ns)
 
     def _effective_state(
         self,

@@ -9,6 +9,7 @@ from synesthesia_machine.runtime.execution_plan import (
     PortKey,
     ScalarConversion,
 )
+from synesthesia_machine.runtime.profiling import RuntimeProfiler
 from synesthesia_machine.runtime.scheduler import Scheduler, TickResult
 
 if TYPE_CHECKING:
@@ -37,6 +38,7 @@ __all__ = [
     "PortKey",
     "PreviewBroker",
     "ProcessEngineClient",
+    "RuntimeProfiler",
     "ScalarConversion",
     "Scheduler",
     "TickResult",
