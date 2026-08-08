@@ -31,6 +31,7 @@ from synesthesia_machine.diagnostics import collect_hardware_snapshot, dependenc
 from synesthesia_machine.graph import GraphDocument
 from synesthesia_machine.persistence import save_graph
 from synesthesia_machine.runtime import ProcessEngineClient
+from synesthesia_machine.runtime.engine_server import MAX_OPENCV_THREADS
 from synesthesia_machine.ui.main_window import MainWindow
 from tools.generate_test_video import generate_hue_test_video
 
@@ -321,6 +322,12 @@ def run_benchmark(
         environment={
             "hardware": asdict(hardware),
             "dependencies": dependency_versions(),
+            "opencv_thread_policy": {
+                "maximum_threads": MAX_OPENCV_THREADS,
+                "selected_threads": max(
+                    1, min(MAX_OPENCV_THREADS, hardware.cpu_physical or hardware.cpu_logical or 1)
+                ),
+            },
             "qt_platform": QGuiApplication.platformName(),
             "windows_power_scheme": _windows_power_scheme(),
             "parent_process_id": os.getpid(),

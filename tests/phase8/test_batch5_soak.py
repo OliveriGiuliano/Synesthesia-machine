@@ -6,9 +6,18 @@ import json
 from pathlib import Path
 from uuid import UUID
 
+import numpy as np
 from tools.phase8_soak import run_phase8_soak
 
-from synesthesia_machine.contracts import FrameContext
+from synesthesia_machine.contracts import (
+    AlphaMode,
+    ChannelFrame,
+    ChannelSemantic,
+    ColorSpace,
+    FrameContext,
+    FrameProvenance,
+    ImageFrame,
+)
 
 
 def test_fast_soak_bounds_memory_profiler_window_and_clears_overloaded_midi(
@@ -47,3 +56,37 @@ def test_frame_context_construction_is_stable_across_a_long_running_session() ->
 
     assert context is not None
     assert context.tick_index == 500_000
+
+
+def test_runtime_frame_construction_is_stable_at_reference_graph_hourly_volume() -> None:
+    source_id = UUID("88000000-0000-0000-0000-000000000011")
+    context = FrameContext(source_id, 1, 0, 0.0, 1, None, False)
+    provenance = FrameProvenance(source_id, "phase8-constructor-soak")
+    image_data = np.zeros((1, 1, 3), dtype=np.float32)
+    image_data.flags.writeable = False
+    channel_data = image_data[..., 0]
+    image: ImageFrame | None = None
+    channel: ChannelFrame | None = None
+
+    for _ in range(500_000):
+        image = ImageFrame(
+            image_data,
+            ColorSpace.SRGB,
+            ("R", "G", "B"),
+            AlphaMode.NONE,
+            context,
+            provenance,
+        )
+        channel = ChannelFrame(
+            channel_data,
+            ChannelSemantic.RED,
+            0.0,
+            1.0,
+            False,
+            context,
+        )
+
+    assert image is not None
+    assert channel is not None
+    assert not image.data.flags.writeable
+    assert not channel.data.flags.writeable

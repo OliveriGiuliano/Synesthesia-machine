@@ -139,7 +139,7 @@ def read_only_float32(data: NDArray[np.float32]) -> NDArray[np.float32]:
     return result
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class ImageFrame:
     data: NDArray[np.float32]
     color_space: ColorSpace
@@ -147,6 +147,23 @@ class ImageFrame:
     alpha_mode: AlphaMode
     context: FrameContext
     provenance: FrameProvenance
+
+    def __init__(
+        self,
+        data: NDArray[np.float32],
+        color_space: ColorSpace,
+        channel_names: tuple[str, ...],
+        alpha_mode: AlphaMode,
+        context: FrameContext,
+        provenance: FrameProvenance,
+    ) -> None:
+        object.__setattr__(self, "data", data)
+        object.__setattr__(self, "color_space", color_space)
+        object.__setattr__(self, "channel_names", channel_names)
+        object.__setattr__(self, "alpha_mode", alpha_mode)
+        object.__setattr__(self, "context", context)
+        object.__setattr__(self, "provenance", provenance)
+        self.__post_init__()
 
     def __post_init__(self) -> None:
         _validate_read_only_float32(self.data, dimensions=3)
@@ -161,7 +178,7 @@ class ImageFrame:
             raise ValueError(msg)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class ChannelFrame:
     data: NDArray[np.float32]
     semantic: ChannelSemantic
@@ -169,6 +186,23 @@ class ChannelFrame:
     nominal_max: float
     cyclic: bool
     context: FrameContext
+
+    def __init__(
+        self,
+        data: NDArray[np.float32],
+        semantic: ChannelSemantic,
+        nominal_min: float,
+        nominal_max: float,
+        cyclic: bool,
+        context: FrameContext,
+    ) -> None:
+        object.__setattr__(self, "data", data)
+        object.__setattr__(self, "semantic", semantic)
+        object.__setattr__(self, "nominal_min", nominal_min)
+        object.__setattr__(self, "nominal_max", nominal_max)
+        object.__setattr__(self, "cyclic", cyclic)
+        object.__setattr__(self, "context", context)
+        self.__post_init__()
 
     def __post_init__(self) -> None:
         _validate_read_only_float32(self.data, dimensions=2)

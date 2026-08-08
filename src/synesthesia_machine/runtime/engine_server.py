@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Protocol
 from uuid import UUID
 
+import cv2
 import numpy as np
 import psutil
 
@@ -67,6 +68,16 @@ from synesthesia_machine.runtime.shared_previews import AttachedPreviewSlot
 
 HEARTBEAT_INTERVAL_S = 0.25
 PREVIEW_POLL_INTERVAL_S = 1.0 / 60.0
+MAX_OPENCV_THREADS = 16
+
+
+def configure_opencv_threads() -> int:
+    """Bound native parallelism so OpenCV does not oversubscribe the engine process."""
+
+    available = psutil.cpu_count(logical=False) or psutil.cpu_count(logical=True) or 1
+    thread_count = max(1, min(MAX_OPENCV_THREADS, available))
+    cv2.setNumThreads(thread_count)
+    return thread_count
 
 
 class DuplexConnection(Protocol):
@@ -490,6 +501,7 @@ def engine_server_main(
     """Top-level Windows-spawn target; never imports or creates Qt objects."""
 
     try:
+        configure_opencv_threads()
         EngineServer(connection, event_queue).run()
     except BaseException:
         if crash_log_path is not None:
@@ -508,4 +520,9 @@ def _write_crash_log(path: Path, detail: str) -> None:
         path.write_text(detail, encoding="utf-8")
 
 
-__all__ = ["EngineServer", "engine_server_main"]
+__all__ = [
+    "MAX_OPENCV_THREADS",
+    "EngineServer",
+    "configure_opencv_threads",
+    "engine_server_main",
+]
