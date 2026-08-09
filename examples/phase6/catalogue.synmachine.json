@@ -865,6 +865,34 @@
       "id": "65000000-0000-0000-0000-000000000043",
       "implementation_version": 1,
       "parameters": {
+        "activation_threshold": 0.5,
+        "custom_scale_mask": "111111111111",
+        "grid_columns": 4,
+        "grid_rows": 4,
+        "maximum_polyphony": 16,
+        "maximum_velocity": 127,
+        "metric": "BRIGHTNESS",
+        "midi_channel": 1,
+        "midi_maximum": 127,
+        "midi_minimum": 0,
+        "minimum_velocity": 1,
+        "root_pitch_class": "C",
+        "scale": "chromatic"
+      },
+      "position": [
+        0.0,
+        1820.0
+      ],
+      "size": null,
+      "type_id": "synmachine.synesthesia.region_grid",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000044",
+      "implementation_version": 1,
+      "parameters": {
         "activation_threshold": 0.0,
         "advance_rows": 1,
         "aggregation": "MEAN",
@@ -882,7 +910,7 @@
         "velocity_curve_exponent": 1.0
       },
       "position": [
-        0.0,
+        320.0,
         1820.0
       ],
       "size": null,
@@ -892,7 +920,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000044",
+      "id": "65000000-0000-0000-0000-000000000045",
       "implementation_version": 1,
       "parameters": {
         "ignore_non_finite": true,
@@ -900,7 +928,7 @@
         "statistic": "MEAN"
       },
       "position": [
-        320.0,
+        640.0,
         1820.0
       ],
       "size": null,
@@ -910,7 +938,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000045",
+      "id": "65000000-0000-0000-0000-000000000046",
       "implementation_version": 1,
       "parameters": {
         "absolute_tolerance": 1e-09,
@@ -918,7 +946,7 @@
         "relative_tolerance": 1e-09
       },
       "position": [
-        640.0,
+        960.0,
         1820.0
       ],
       "size": null,
@@ -928,11 +956,11 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000046",
+      "id": "65000000-0000-0000-0000-000000000047",
       "implementation_version": 1,
       "parameters": {},
       "position": [
-        960.0,
+        1280.0,
         1820.0
       ],
       "size": null,
@@ -942,13 +970,13 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000047",
+      "id": "65000000-0000-0000-0000-000000000048",
       "implementation_version": 1,
       "parameters": {
         "mode": "ROUND"
       },
       "position": [
-        1280.0,
+        1600.0,
         1820.0
       ],
       "size": null,
@@ -958,14 +986,14 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000048",
+      "id": "65000000-0000-0000-0000-000000000049",
       "implementation_version": 1,
       "parameters": {
         "operation": "AND"
       },
       "position": [
-        1600.0,
-        1820.0
+        0.0,
+        2080.0
       ],
       "size": null,
       "type_id": "synmachine.utility.logic",
@@ -974,13 +1002,13 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000049",
+      "id": "65000000-0000-0000-0000-000000000050",
       "implementation_version": 1,
       "parameters": {
         "operation": "ADD"
       },
       "position": [
-        0.0,
+        320.0,
         2080.0
       ],
       "size": null,
@@ -990,11 +1018,11 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000050",
+      "id": "65000000-0000-0000-0000-000000000051",
       "implementation_version": 1,
       "parameters": {},
       "position": [
-        320.0,
+        640.0,
         2080.0
       ],
       "size": null,
@@ -1004,13 +1032,13 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000051",
+      "id": "65000000-0000-0000-0000-000000000052",
       "implementation_version": 1,
       "parameters": {
         "factor": 1.0
       },
       "position": [
-        640.0,
+        960.0,
         2080.0
       ],
       "size": null,
@@ -1020,7 +1048,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000052",
+      "id": "65000000-0000-0000-0000-000000000053",
       "implementation_version": 1,
       "parameters": {
         "float_value": 0.0,
@@ -1028,7 +1056,7 @@
         "number_type": "FLOAT"
       },
       "position": [
-        960.0,
+        1280.0,
         2080.0
       ],
       "size": null,
@@ -1038,11 +1066,11 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000053",
+      "id": "65000000-0000-0000-0000-000000000054",
       "implementation_version": 1,
       "parameters": {},
       "position": [
-        1280.0,
+        1600.0,
         2080.0
       ],
       "size": null,
@@ -1052,7 +1080,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000054",
+      "id": "65000000-0000-0000-0000-000000000055",
       "implementation_version": 1,
       "parameters": {
         "clamp": false,
@@ -1062,8 +1090,8 @@
         "output_minimum": 0.0
       },
       "position": [
-        1600.0,
-        2080.0
+        0.0,
+        2340.0
       ],
       "size": null,
       "type_id": "synmachine.utility.remap_number",
@@ -1072,13 +1100,13 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000055",
+      "id": "65000000-0000-0000-0000-000000000056",
       "implementation_version": 1,
       "parameters": {
         "semitones": 0
       },
       "position": [
-        0.0,
+        320.0,
         2340.0
       ],
       "size": null,
@@ -1088,7 +1116,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000056",
+      "id": "65000000-0000-0000-0000-000000000057",
       "implementation_version": 1,
       "parameters": {
         "fit_mode": "CONTAIN",
@@ -1098,7 +1126,7 @@
         "value_display_mode": "NOMINAL_RANGE"
       },
       "position": [
-        320.0,
+        640.0,
         2340.0
       ],
       "size": null,
@@ -1108,7 +1136,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000057",
+      "id": "65000000-0000-0000-0000-000000000058",
       "implementation_version": 1,
       "parameters": {
         "checkerboard_alpha": true,
@@ -1119,7 +1147,7 @@
         "value_display_mode": "DISPLAY_TRANSFORM"
       },
       "position": [
-        640.0,
+        960.0,
         2340.0
       ],
       "size": null,
@@ -1129,11 +1157,11 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000058",
+      "id": "65000000-0000-0000-0000-000000000059",
       "implementation_version": 1,
       "parameters": {},
       "position": [
-        960.0,
+        1280.0,
         2340.0
       ],
       "size": null,

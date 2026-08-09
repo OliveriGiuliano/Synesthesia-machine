@@ -53,6 +53,7 @@ from synesthesia_machine.ui.parameter_editors import (
     create_parameter_editor,
 )
 from synesthesia_machine.ui.theme import DEFAULT_THEME, node_category_color
+from synesthesia_machine.ui.tooltips import TOOLTIP_LINE_WIDTH, format_tooltip
 from synesthesia_machine.ui.view_models import ParameterViewModel
 from synesthesia_machine.ui.widgets import NodeLibrary, NodeSearchDialog, SearchCandidate
 
@@ -533,6 +534,51 @@ def test_node_parameter_rows_have_contextual_hover_help(window: MainWindow) -> N
     assert node_help == item.view_model.description
     assert "float value" in parameter_help.lower()
     assert parameter_help != node_help
+
+
+def test_long_hover_help_uses_bounded_multiline_rich_text(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    del qapp
+    registry = create_application_registry()
+    full_window = MainWindow(
+        registry,
+        paths_for(tmp_path),
+        InProcessEngineClient(registry),
+        settings=settings_for(tmp_path),
+        offer_recovery=False,
+    )
+    try:
+        node_id = full_window.session.add_node("synmachine.synesthesia.region_grid", (80.0, 120.0))
+        item = full_window.scene.node_items[node_id]
+
+        node_help = item._tooltip_for_position(QPointF(20.0, 10.0))
+        metric_help = item._tooltip_for_position(QPointF(20.0, item._parameter_rows["metric"]))
+
+        assert node_help.startswith("<qt>") and "<br>" in node_help
+        assert metric_help.startswith("<qt>") and "<br>" in metric_help
+    finally:
+        full_window.session.new_document()
+        full_window.close()
+
+
+def test_tooltip_formatter_preserves_short_help_and_escapes_long_help() -> None:
+    assert format_tooltip("Short contextual help.") == "Short contextual help."
+    long_help = (
+        "A <metric> explanation with safely escaped markup and bounded lines. " * 4
+    ).strip()
+    formatted = format_tooltip(long_help)
+
+    assert formatted.startswith("<qt>")
+    assert "&lt;metric&gt;" in formatted
+    assert "<metric>" not in formatted
+    assert "<br>" in formatted
+    assert all(
+        len(line.replace("&lt;", "<").replace("&gt;", ">")) <= TOOLTIP_LINE_WIDTH
+        for line in formatted.removeprefix('<qt><div style="white-space: nowrap;">')
+        .removesuffix("</div></qt>")
+        .split("<br>")
+    )
 
 
 def test_video_file_path_editor_browses_and_commits_selected_path(

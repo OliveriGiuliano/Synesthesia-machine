@@ -7,8 +7,8 @@ live MIDI note states through a typed visual node graph.
 runtime execution, bounded shared-memory previews, camera capture, MIDI output, debug audio, and
 profiling. The editor now adds groups/comments, deterministic layout tools, preferences/recent files,
 atomic backups, forced-crash recovery, fingerprinted missing-media relinking, migrations, navigable
-validation, source-scoped transport, and large-graph detail scaling. The built-in registry remains at
-58 definitions. Live camera behavior is covered with deterministic simulation because no physical
+validation, source-scoped transport, and large-graph detail scaling. The built-in registry now contains
+59 definitions. Live camera behavior is covered with deterministic simulation because no physical
 camera was available; an explicitly selected loopMIDI port was exercised separately from automated
 tests.
 
@@ -83,7 +83,7 @@ tests, limitations, and measurements.
 ### Phase 6 synesthesia examples and catalogue
 
 [`examples/phase6`](examples/phase6) contains hardware-safe Motion Grid, Edge Ensemble, Scanning Score,
-and Spatial Spectrum graphs plus the current exact 58-node catalogue. The examples use the included
+and Spatial Spectrum graphs plus the current exact 59-node catalogue. The examples use the included
 deterministic video and Note Visualizer or disabled Generate Audio sinks; none opens a MIDI port.
 
 The repeatable Phase 6 diagnostic times all four synthesis algorithms on deterministic 500×500

@@ -107,16 +107,22 @@ SYNESTHESIA_DESCRIPTION_DETAILS = {
         "grid cells",
         "previous or held frame",
     ),
+    "synmachine.synesthesia.region_grid": (
+        "row-major order",
+        "rms contrast",
+        "activation threshold",
+        "controls velocity",
+    ),
 }
 
 
-def test_phase6_catalogue_is_the_exact_current_58_definition_registry() -> None:
+def test_phase6_catalogue_is_the_exact_current_59_definition_registry() -> None:
     registry = create_application_registry()
     snapshot = load_graph(CATALOGUE_PATH, registry)
     expected = tuple(definition.type_id for definition in registry.definitions())
     actual = tuple(node.type_id for node in snapshot.nodes)
 
-    assert len(expected) == len(actual) == len(set(actual)) == 58
+    assert len(expected) == len(actual) == len(set(actual)) == 59
     assert actual == expected
     assert not snapshot.connections
 

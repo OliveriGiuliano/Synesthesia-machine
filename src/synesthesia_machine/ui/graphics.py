@@ -36,6 +36,7 @@ from synesthesia_machine.graph import (
 )
 from synesthesia_machine.ui.parameter_editors import create_parameter_editor, parameter_tooltip
 from synesthesia_machine.ui.theme import Theme, node_category_color, port_color_name
+from synesthesia_machine.ui.tooltips import format_tooltip
 from synesthesia_machine.ui.view_models import (
     ConnectionViewModel,
     NodeViewModel,
@@ -48,9 +49,9 @@ type ParameterChangeHandler = Callable[[UUID, str, LiteralValue], None]
 
 def _diagnostic_tooltip(description: str, issues: tuple[ValidationIssue, ...]) -> str:
     if not issues:
-        return description
+        return format_tooltip(description)
     details = "\n".join(f"{issue.severity} · {issue.message} ({issue.code})" for issue in issues)
-    return f"{description}\n\n{details}"
+    return format_tooltip(f"{description}\n\n{details}")
 
 
 class GroupGraphicsItem(QGraphicsObject):
@@ -76,7 +77,7 @@ class GroupGraphicsItem(QGraphicsObject):
         )
         self.setPos(*model.position)
         self.setZValue(-3.0 if model.kind is GroupKind.GROUP else -0.75)
-        self.setToolTip(model.text or model.title)
+        self.setToolTip(format_tooltip(model.text or model.title))
         self.setAcceptHoverEvents(True)
 
     def boundingRect(self) -> QRectF:
@@ -567,7 +568,7 @@ class NodeGraphicsItem(QGraphicsObject):
         )
         for parameter in self.view_model.parameters:
             if y <= position.y() < y + self.theme.metrics.row_height:
-                return parameter_tooltip(parameter.spec)
+                return format_tooltip(parameter_tooltip(parameter.spec))
             y += self.theme.metrics.row_height
         return node_help
 

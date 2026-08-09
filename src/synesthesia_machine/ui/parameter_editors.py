@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 from synesthesia_machine.contracts import ColorValue, NumericMatrix, PortType
 from synesthesia_machine.graph import LiteralValue
 from synesthesia_machine.nodes import ParameterEditorHint, ParameterSpec
+from synesthesia_machine.ui.tooltips import format_tooltip
 from synesthesia_machine.ui.view_models import ParameterViewModel
 
 type ParameterChanged = Callable[[LiteralValue], None]
@@ -69,8 +70,9 @@ def create_parameter_editor(
 
     editor.setObjectName(f"parameter_{spec.id}")
     editor.setAccessibleName(spec.label)
-    editor.setToolTip(parameter_tooltip(spec))
-    editor.setStatusTip(editor.toolTip())
+    help_text = parameter_tooltip(spec)
+    editor.setToolTip(format_tooltip(help_text))
+    editor.setStatusTip(help_text)
     editor.setEnabled(not parameter.connected)
     if compact:
         editor.setMaximumHeight(23)

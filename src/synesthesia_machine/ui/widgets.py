@@ -38,6 +38,7 @@ from synesthesia_machine.ui.musical_controls import MusicalParameterEditor
 from synesthesia_machine.ui.parameter_editors import create_parameter_editor, parameter_tooltip
 from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.theme import node_category_color
+from synesthesia_machine.ui.tooltips import format_tooltip
 from synesthesia_machine.ui.view_models import ConnectionViewModel, NodeViewModel
 
 _TYPE_ROLE = int(Qt.ItemDataRole.UserRole)
@@ -185,7 +186,7 @@ class NodeLibrary(QWidget):
             item.setForeground(0, QBrush(node_category_color(definition.category)))
             item.setData(0, _TYPE_ROLE, definition.type_id)
             item.setData(0, _CATEGORY_ROLE, definition.category)
-            item.setToolTip(0, definition.description)
+            item.setToolTip(0, format_tooltip(definition.description))
             item.setStatusTip(0, definition.description)
             if definition.type_id == selected:
                 self.tree.setCurrentItem(item)
@@ -302,7 +303,7 @@ class NodeSearchDialog(QDialog):
             suffix = f"  ·  {candidate.port_id}" if candidate.port_id is not None else ""
             item = QListWidgetItem(f"{definition.display_name}  —  {definition.category}{suffix}")
             item.setData(_INDEX_ROLE, index)
-            item.setToolTip(definition.description)
+            item.setToolTip(format_tooltip(definition.description))
             self.results.addItem(item)
         if self.results.count():
             self.results.setCurrentRow(0)
@@ -442,7 +443,7 @@ class InspectorPanel(QWidget):
             editor = create_parameter_editor(parameter, callback)
             label = QLabel(parameter.spec.label, self.form_container)
             help_text = parameter_tooltip(parameter.spec)
-            label.setToolTip(help_text)
+            label.setToolTip(format_tooltip(help_text))
             label.setAccessibleDescription(help_text)
             self.form.addRow(label, editor)
             if parameter.spec.help_text:
