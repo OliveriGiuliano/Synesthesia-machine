@@ -363,7 +363,14 @@ def create_optical_flow_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Optical Flow",
             "Synesthesia",
-            "Map fixed-normalized dense image motion into scale-constrained desired MIDI state.",
+            (
+                "Calculate dense Farnebäck motion from the Reference image to the Current image; "
+                "both inputs must share dimensions and a source clock. Motion below the minimum "
+                "magnitude is ignored, then vectors are summarized by grid cells or a global "
+                "histogram. Direction, position, or magnitude selects pitch, while motion strength "
+                "or moving-pixel coverage controls velocity before scale and polyphony limits are "
+                "applied. A previous or held frame is a typical Reference input."
+            ),
             (
                 InputPortSpec("current", "Current", PortType.IMAGE),
                 InputPortSpec("reference", "Reference", PortType.IMAGE),

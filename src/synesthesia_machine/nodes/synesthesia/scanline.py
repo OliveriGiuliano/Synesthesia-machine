@@ -190,7 +190,13 @@ def create_scanline_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Scanline",
             "Synesthesia",
-            "Scan horizontal channel rows into scale-constrained desired MIDI state.",
+            (
+                "Move a horizontal band through the channel once per processed frame. The band "
+                "is averaged or maximized, then resampled left-to-right across the allowed notes; "
+                "values above the activation threshold become notes and control their velocity. "
+                "Direction, row advance, and thickness shape the scan, while resets restart its "
+                "position."
+            ),
             (InputPortSpec("value", "Value", PortType.CHANNEL),),
             (OutputPortSpec("midi", "MIDI state", PortType.MIDI_STATE),),
             (

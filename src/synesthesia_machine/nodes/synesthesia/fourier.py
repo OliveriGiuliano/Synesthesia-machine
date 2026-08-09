@@ -304,7 +304,14 @@ def create_fourier_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Fourier",
             "Synesthesia",
-            "Map cached spatial-frequency bands into scale-constrained desired MIDI state.",
+            (
+                "Analyze the channel's two-dimensional spatial frequencies with an FFT after "
+                "optional mean removal and windowing. Radial, horizontal, or vertical frequency "
+                "cells are grouped into one band per allowed note; each band's mean or percentile "
+                "log magnitude controls velocity after the floor, ceiling, and activation "
+                "threshold are applied. DC exclusion removes constant or very broad image "
+                "structure; the cache affects performance only, not musical history."
+            ),
             (InputPortSpec("value", "Value", PortType.CHANNEL),),
             (OutputPortSpec("midi", "MIDI state", PortType.MIDI_STATE),),
             (

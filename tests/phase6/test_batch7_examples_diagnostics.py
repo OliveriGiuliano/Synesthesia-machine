@@ -76,6 +76,39 @@ EXPECTED_TYPE_IDS = {
     ),
 }
 
+SYNESTHESIA_DESCRIPTION_DETAILS = {
+    "synmachine.synesthesia.channel_to_pitch": (
+        "histogram",
+        "parameter a/b",
+        "occupancy controls velocity",
+        "polyphony limit",
+    ),
+    "synmachine.synesthesia.scanline": (
+        "processed frame",
+        "left-to-right",
+        "activation threshold",
+        "resets restart",
+    ),
+    "synmachine.synesthesia.edges_to_pitch": (
+        "contours",
+        "nested shapes",
+        "orientation",
+        "explicit ranges",
+    ),
+    "synmachine.synesthesia.fourier": (
+        "fft",
+        "spatial frequencies",
+        "one band per allowed note",
+        "cache affects performance only",
+    ),
+    "synmachine.synesthesia.optical_flow": (
+        "farnebäck",
+        "reference image",
+        "grid cells",
+        "previous or held frame",
+    ),
+}
+
 
 def test_phase6_catalogue_is_the_exact_current_58_definition_registry() -> None:
     registry = create_application_registry()
@@ -93,6 +126,18 @@ def test_phase6_catalogue_is_the_exact_current_58_definition_registry() -> None:
         "required_input_missing",
         "unresolved_generic_type",
     }
+
+
+def test_complex_synesthesia_nodes_have_explanatory_hover_descriptions() -> None:
+    registry = create_application_registry()
+
+    for type_id, expected_details in SYNESTHESIA_DESCRIPTION_DETAILS.items():
+        definition = registry.require(type_id)
+        description = definition.description.casefold()
+
+        assert definition.category == "Synesthesia"
+        assert len(definition.description) >= 250
+        assert all(detail in description for detail in expected_details)
 
 
 def test_frozen_phase5_catalogue_remains_an_exact_51_node_historical_subset() -> None:
