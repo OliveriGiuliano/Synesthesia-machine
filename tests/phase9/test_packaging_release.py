@@ -28,7 +28,7 @@ def test_release_configuration_is_standalone_versioned_and_console_free() -> Non
 
     assert parser.get("nuitka", "mode") == "standalone"
     assert parser.get("app", "input_file") == "SynesthesiaMachine.py"
-    assert parser.get("python", "packages") == "Nuitka==4.1"
+    assert parser.get("python", "packages") == "Nuitka==4.1.3"
     extra_args = parser.get("nuitka", "extra_args")
     assert "--windows-console-mode=disable" in extra_args
     assert "--include-module=av.utils" in extra_args
