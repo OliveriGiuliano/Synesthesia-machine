@@ -475,6 +475,15 @@ def test_node_category_palette_is_unique_and_applied_to_library_names(
         if category.startswith("Image / ")
     }
     assert max(image_hues) - min(image_hues) < 40
+
+    dialog = NodeSearchDialog(SearchCandidate(definition) for definition in registry.definitions())
+    dialog.search.setText("region grid notes")
+    assert dialog.results.count() == 1
+    result = dialog.results.item(0)
+    candidate = dialog.selected_candidate()
+    assert candidate is not None
+    assert result.foreground().color() == node_category_color(candidate.definition.category)
+    dialog.close()
     library.close()
 
 

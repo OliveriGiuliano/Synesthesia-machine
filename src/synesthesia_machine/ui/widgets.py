@@ -302,6 +302,7 @@ class NodeSearchDialog(QDialog):
                 continue
             suffix = f"  ·  {candidate.port_id}" if candidate.port_id is not None else ""
             item = QListWidgetItem(f"{definition.display_name}  —  {definition.category}{suffix}")
+            item.setForeground(QBrush(node_category_color(definition.category)))
             item.setData(_INDEX_ROLE, index)
             item.setToolTip(format_tooltip(definition.description))
             self.results.addItem(item)
