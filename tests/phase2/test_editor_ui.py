@@ -145,6 +145,24 @@ def test_palette_and_graph_search_index_registry_aliases(window: MainWindow) -> 
     assert selected.definition.type_id == "synmachine.utility.math"
 
 
+def test_library_double_click_signal_pair_adds_exactly_one_node(window: MainWindow) -> None:
+    matches = window.library.tree.findItems(
+        "Number",
+        Qt.MatchFlag.MatchExactly | Qt.MatchFlag.MatchRecursive,
+        0,
+    )
+    assert len(matches) == 1
+    item = matches[0]
+    count_before = len(window.session.document.nodes)
+
+    # QTreeWidget emits both signals for a mouse double-click on Windows.
+    window.library.tree.itemDoubleClicked.emit(item, 0)
+    window.library.tree.itemActivated.emit(item, 0)
+
+    assert len(window.session.document.nodes) == count_before + 1
+    assert len(window.scene.node_items) == count_before + 1
+
+
 def test_scene_parameter_edit_duplicate_copy_paste_and_undo(
     window: MainWindow, qapp: QApplication
 ) -> None:

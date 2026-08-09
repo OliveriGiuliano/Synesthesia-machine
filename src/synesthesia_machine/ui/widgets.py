@@ -151,7 +151,8 @@ class NodeLibrary(QWidget):
         layout.addWidget(self.search)
         layout.addWidget(self.tree)
         self.search.textChanged.connect(self._populate)
-        self.tree.itemDoubleClicked.connect(self._activate_item)
+        # itemActivated already covers double-click and keyboard activation. Connecting both
+        # signals makes one physical double-click emit nodeActivated twice.
         self.tree.itemActivated.connect(self._activate_item)
         self._populate("")
 
