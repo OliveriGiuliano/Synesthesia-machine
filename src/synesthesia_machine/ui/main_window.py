@@ -30,6 +30,7 @@ from synesthesia_machine.contracts import (
     EngineClient,
     EngineConnectionState,
     EngineStatus,
+    MidiOutputConnectionState,
     SourceState,
 )
 from synesthesia_machine.diagnostics import create_diagnostic_bundle
@@ -132,6 +133,7 @@ class MainWindow(QMainWindow):
         self._engine_closed = False
         self._engine_failure_signature: tuple[object, ...] | None = None
         self._source_error_signature: tuple[tuple[UUID, str], ...] = ()
+        self._midi_error_signature: tuple[tuple[UUID, str, tuple[str, ...]], ...] = ()
         self._autosave_timer = QTimer(self)
         self._autosave_timer.setSingleShot(True)
         self._autosave_timer.setInterval(self.preferences.autosave_delay_seconds * 1000)
@@ -1070,6 +1072,7 @@ class MainWindow(QMainWindow):
         try:
             metrics = self.engine_client.metrics()
             sources = self.engine_client.source_status()
+            midi_outputs = self.engine_client.midi_output_status()
             selected_nodes = self.scene.selected_node_ids()
             diagnostic = None
             if len(selected_nodes) == 1:
@@ -1084,19 +1087,50 @@ class MainWindow(QMainWindow):
             for status in sources
             if status.state is SourceState.ERROR
         )
-        if source_errors:
-            error_detail = "\n".join(
-                f"Source {str(node_id)[:8]}: {message}" for node_id, message in source_errors
+        midi_errors = tuple(
+            (
+                status.node_id,
+                status.last_error or "MIDI output is unavailable",
+                status.available_ports,
             )
-            self._engine_status.setToolTip(error_detail)
-            if source_errors != self._source_error_signature:
-                self.statusBar().showMessage(error_detail, 10000)
+            for status in midi_outputs
+            if status.connection_state
+            in {MidiOutputConnectionState.ERROR, MidiOutputConnectionState.UNAVAILABLE}
+        )
+        diagnostic_lines = [
+            f"Source {str(node_id)[:8]}: {message}" for node_id, message in source_errors
+        ]
+        diagnostic_lines.extend(
+            f"MIDI {str(node_id)[:8]}: {message}. Available outputs: {', '.join(ports) or 'none'}"
+            for node_id, message, ports in midi_errors
+        )
+        if diagnostic_lines:
+            diagnostic_detail = "\n".join(diagnostic_lines)
+            self._engine_status.setToolTip(diagnostic_detail)
+            if (
+                source_errors != self._source_error_signature
+                or midi_errors != self._midi_error_signature
+            ):
+                self.statusBar().showMessage(diagnostic_detail, 10000)
+        elif midi_outputs:
+            self._engine_status.setToolTip(
+                "\n".join(
+                    f"MIDI {status.selected_port or 'unselected'}: "
+                    f"{status.connection_state.value}, {status.active_note_count} active note(s)"
+                    for status in midi_outputs
+                )
+            )
         else:
             self._engine_status.setToolTip("Live engine and source performance")
         self._source_error_signature = source_errors
+        self._midi_error_signature = midi_errors
         memory_mib = metrics.memory_bytes / (1024 * 1024)
+        midi_text = (
+            ", ".join(status.connection_state.value for status in midi_outputs) or "no output"
+        )
         self._engine_status.setText(
             f"Engine {metrics.state.value} · source {source_text} · "
+            f"MIDI {midi_text} · "
             f"{metrics.processed_ticks} ticks · "
             f"in/process/preview {metrics.input_fps:.1f}/{metrics.processed_fps:.1f}/"
             f"{metrics.preview_fps:.1f} FPS · "

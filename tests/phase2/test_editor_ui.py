@@ -6,6 +6,7 @@ from uuid import UUID
 
 import pytest
 from PySide6.QtCore import QPoint, QPointF, QSettings, Qt, QTimer
+from PySide6.QtGui import QBrush, QImage, QPainter
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSpinBox,
+    QStyleOptionGraphicsItem,
 )
 
 from synesthesia_machine.app.registry import create_application_registry
@@ -41,7 +43,7 @@ from synesthesia_machine.nodes import (
 from synesthesia_machine.nodes.utility import create_utility_registry
 from synesthesia_machine.persistence import save_graph
 from synesthesia_machine.runtime import InProcessEngineClient
-from synesthesia_machine.ui.graphics import NodeGraphicsItem
+from synesthesia_machine.ui.graphics import NodeGraphicsItem, TemporaryConnectionGraphicsItem
 from synesthesia_machine.ui.main_window import MainWindow
 from synesthesia_machine.ui.parameter_editors import (
     DirectDragSlider,
@@ -241,6 +243,51 @@ def test_cable_drop_on_empty_emits_origin_and_position(window: MainWindow) -> No
 
     assert dropped == [(source.view_model, empty_position)]
     assert window.session.document.connections == ()
+
+
+def test_right_click_cancels_active_connection_drag_without_leaving_a_frozen_cable(
+    window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    source_id = window.session.add_node("synmachine.utility.number", (0.0, 0.0))
+    target_id = window.session.add_node("synmachine.utility.math", (320.0, 0.0))
+    source = window.scene.port_item(source_id, "value", True)
+    target = window.scene.port_item(target_id, "a", False)
+    assert source is not None and target is not None
+    window.resize(900, 600)
+    window.show()
+    window.view.centerOn(source)
+    qapp.processEvents()
+
+    window.scene.begin_connection_drag(source, source.scenePos() + QPointF(120.0, 40.0))
+    assert window.scene.connection_drag_active
+    assert target.compatible is True
+
+    QTest.mouseClick(
+        window.view.viewport(),
+        Qt.MouseButton.RightButton,
+        pos=window.view.mapFromScene(source.scenePos() + QPointF(120.0, 40.0)),
+    )
+    qapp.processEvents()
+
+    assert not window.scene.connection_drag_active
+    assert window.scene._temporary is None
+    assert source.compatible is None
+    assert target.compatible is None
+
+
+def test_temporary_connection_explicitly_disables_path_fill() -> None:
+    item = TemporaryConnectionGraphicsItem(DEFAULT_THEME)
+    item.set_endpoints(QPointF(10.0, 10.0), QPointF(190.0, 90.0))
+    image = QImage(200, 100, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    painter.setBrush(QBrush(Qt.GlobalColor.red))
+
+    item.paint(painter, QStyleOptionGraphicsItem())
+
+    assert painter.brush().style() is Qt.BrushStyle.NoBrush
+    painter.end()
 
 
 def test_scalar_editor_factory_supports_all_phase_2_literal_types() -> None:

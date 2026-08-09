@@ -125,8 +125,9 @@ def create_midi_output_definitions(
                     PortType.STRING,
                     "",
                     help_text=(
-                        "Exact enumerated port name. Empty opens no port; missing names are never "
-                        "replaced automatically."
+                        "Enumerated MIDI output name. On Windows, the numeric WinMM device index "
+                        "is hidden, so a loopMIDI port can use its friendly name (for example, "
+                        "'loopMIDI Port'). Empty opens no port."
                     ),
                     update_mode=ParameterUpdateMode.RECOMPILE,
                 ),

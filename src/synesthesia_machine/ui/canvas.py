@@ -319,6 +319,7 @@ class GraphScene(QGraphicsScene):
         self.session.move_nodes(old_positions, positions)
 
     def begin_connection_drag(self, port: PortGraphicsItem, position: QPointF) -> None:
+        self.cancel_connection_drag()
         self._drag_port = port
         self._temporary = TemporaryConnectionGraphicsItem(self.theme)
         self.addItem(self._temporary)
@@ -341,6 +342,19 @@ class GraphScene(QGraphicsScene):
     def update_connection_drag(self, position: QPointF) -> None:
         if self._drag_port is not None and self._temporary is not None:
             self._temporary.set_endpoints(self._drag_port.scenePos(), position)
+
+    @property
+    def connection_drag_active(self) -> bool:
+        return self._drag_port is not None
+
+    def cancel_connection_drag(self) -> None:
+        if self._temporary is not None and self._temporary.scene() is self:
+            self.removeItem(self._temporary)
+        for node in self.node_items.values():
+            for port in node.ports.values():
+                port.set_compatible(None)
+        self._temporary = None
+        self._drag_port = None
 
     def end_connection_drag(self, position: QPointF) -> None:
         origin = self._drag_port
@@ -367,13 +381,7 @@ class GraphScene(QGraphicsScene):
 
         # A successful command refreshes and clears the scene synchronously, so
         # release all gesture-owned graphics before mutating the document.
-        if self._temporary is not None:
-            self.removeItem(self._temporary)
-        for node in self.node_items.values():
-            for port in node.ports.values():
-                port.set_compatible(None)
-        self._temporary = None
-        self._drag_port = None
+        self.cancel_connection_drag()
 
         if connection is not None:
             self.session.add_connection(*connection)
@@ -437,6 +445,10 @@ class GraphView(QGraphicsView):
         event.accept()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Escape and self.graph_scene.connection_drag_active:
+            self.graph_scene.cancel_connection_drag()
+            event.accept()
+            return
         if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
             self._space_pressed = True
             self._space_pan_used = False
@@ -468,6 +480,10 @@ class GraphView(QGraphicsView):
         super().keyReleaseEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() is Qt.MouseButton.RightButton and self.graph_scene.connection_drag_active:
+            self.graph_scene.cancel_connection_drag()
+            event.accept()
+            return
         if event.button() is Qt.MouseButton.MiddleButton or (
             event.button() is Qt.MouseButton.LeftButton and self._space_pressed
         ):

@@ -22,6 +22,7 @@ from synesthesia_machine.contracts import (
     EngineState,
     EngineStatus,
     ImagePreview,
+    MidiOutputConnectionState,
     MidiOutputStatus,
     NodeMemoryDiagnostic,
     NoteActivity,
@@ -38,6 +39,7 @@ SOURCE_A = UUID("00000000-0000-0000-0000-000000000701")
 SOURCE_B = UUID("00000000-0000-0000-0000-000000000702")
 IMAGE_NODE = UUID("00000000-0000-0000-0000-000000000703")
 NOTE_NODE = UUID("00000000-0000-0000-0000-000000000704")
+MIDI_OUTPUT_NODE = UUID("00000000-0000-0000-0000-000000000705")
 
 
 def _snapshot_list() -> list[GraphSnapshot]:
@@ -60,6 +62,7 @@ class _RecordingEngineClient:
     image_previews: tuple[ImagePreview, ...] = ()
     note_previews: tuple[NotePreview, ...] = ()
     memory_diagnostics: tuple[NodeMemoryDiagnostic, ...] = ()
+    midi_statuses: tuple[MidiOutputStatus, ...] = ()
     closed: bool = False
 
     def activate(
@@ -100,8 +103,9 @@ class _RecordingEngineClient:
     def midi_output_status(
         self, output_node_id: UUID | None = None
     ) -> tuple[MidiOutputStatus, ...]:
-        del output_node_id
-        return ()
+        if output_node_id is None:
+            return self.midi_statuses
+        return tuple(status for status in self.midi_statuses if status.node_id == output_node_id)
 
     def node_memory_diagnostics(
         self, node_id: UUID | None = None
@@ -369,6 +373,29 @@ def test_source_error_detail_is_visible_in_status_bar_and_engine_tooltip(
     expected = f"Source {str(source_id)[:8]}: {error}"
     assert window.statusBar().currentMessage() == expected
     assert window._engine_status.toolTip() == expected
+
+
+def test_midi_output_error_lists_friendly_available_ports_in_runtime_feedback(
+    runtime_window: tuple[MainWindow, _RecordingEngineClient],
+) -> None:
+    window, client = runtime_window
+    error = "MIDI output 'Missing port' is not currently available"
+    client.midi_statuses = (
+        MidiOutputStatus(
+            MIDI_OUTPUT_NODE,
+            MidiOutputConnectionState.UNAVAILABLE,
+            "Missing port",
+            ("loopMIDI Port", "Microsoft GS Wavetable Synth"),
+            last_error=error,
+        ),
+    )
+
+    window._refresh_engine_status()
+
+    assert "MIDI UNAVAILABLE" in window._engine_status.text()
+    assert error in window._engine_status.toolTip()
+    assert "loopMIDI Port" in window._engine_status.toolTip()
+    assert error in window.statusBar().currentMessage()
 
 
 def test_inspector_choice_commit_waits_for_popup_signal_before_rebuilding_editor(

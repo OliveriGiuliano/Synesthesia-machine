@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import re
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -121,21 +123,55 @@ class _MidoPortAdapter:
 
 
 class MidoRtMidiBackend:
-    """Real Mido/python-rtmidi adapter; enumeration never opens an output."""
+    """Real Mido/python-rtmidi adapter with stable Windows port display names."""
 
-    def __init__(self, backend: _MidoBackendFacade | None = None) -> None:
+    def __init__(
+        self,
+        backend: _MidoBackendFacade | None = None,
+        *,
+        normalize_windows_names: bool | None = None,
+    ) -> None:
         self._backend = backend or cast(
             _MidoBackendFacade,
             mido.Backend("mido.backends.rtmidi"),  # pyright: ignore[reportUnknownMemberType]
         )
+        self._normalize_windows_names = (
+            os.name == "nt" if normalize_windows_names is None else normalize_windows_names
+        )
 
     def output_names(self) -> Sequence[str]:
-        return tuple(self._backend.get_output_names())
+        return tuple(display_name for display_name, _raw_name in self._output_entries())
 
     def open_output(self, name: str) -> MidiOutputPort:
-        if name not in self.output_names():
+        entries = self._output_entries()
+        raw_name = next((raw for display, raw in entries if display == name), None)
+        if raw_name is None:
+            # Continue to accept raw RtMidi names saved by earlier application versions.
+            raw_name = next((raw for _display, raw in entries if raw == name), None)
+        if raw_name is None:
             raise MidiPortUnavailableError(f"MIDI output {name!r} is not currently available")
-        return _MidoPortAdapter(self._backend.open_output(name))
+        return _MidoPortAdapter(self._backend.open_output(raw_name))
+
+    def _output_entries(self) -> tuple[tuple[str, str], ...]:
+        raw_names = tuple(dict.fromkeys(self._backend.get_output_names()))
+        if not self._normalize_windows_names:
+            return tuple((name, name) for name in raw_names)
+        aliases = tuple(_windows_midi_display_name(name) for name in raw_names)
+        alias_counts: dict[str, int] = {}
+        for alias in aliases:
+            key = alias.casefold()
+            alias_counts[key] = alias_counts.get(key, 0) + 1
+        return tuple(
+            (alias if alias_counts[alias.casefold()] == 1 else raw, raw)
+            for alias, raw in zip(aliases, raw_names, strict=True)
+        )
+
+
+def _windows_midi_display_name(raw_name: str) -> str:
+    """Hide the WinMM device index RtMidi appends to otherwise friendly names."""
+
+    friendly = re.sub(r"\s+\d+$", "", raw_name).strip()
+    return friendly or raw_name
 
 
 def _message_list() -> list[MidiMessage]:

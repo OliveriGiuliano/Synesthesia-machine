@@ -58,6 +58,7 @@ class GroupGraphicsItem(QGraphicsObject):
 
     _RESIZE_MARGIN = 8.0
     _MINIMUM_SIZE = (120.0, 80.0)
+    _PAINT_MARGIN = 5.0
 
     def __init__(self, model: GroupModel, theme: Theme) -> None:
         super().__init__()
@@ -79,6 +80,14 @@ class GroupGraphicsItem(QGraphicsObject):
         self.setAcceptHoverEvents(True)
 
     def boundingRect(self) -> QRectF:
+        return self._body_rect().adjusted(
+            -self._PAINT_MARGIN,
+            -self._PAINT_MARGIN,
+            self._PAINT_MARGIN,
+            self._PAINT_MARGIN,
+        )
+
+    def _body_rect(self) -> QRectF:
         return QRectF(0.0, 0.0, self._display_size[0], self._display_size[1])
 
     def paint(
@@ -88,7 +97,7 @@ class GroupGraphicsItem(QGraphicsObject):
         widget: QWidget | None = None,
     ) -> None:
         del option, widget
-        body = self.boundingRect()
+        body = self._body_rect()
         fill = QColor(self.model.color)
         fill.setAlpha(42 if self.model.kind is GroupKind.GROUP else 78)
         border = self.theme.color("selection") if self.isSelected() else QColor(self.model.color)
@@ -122,7 +131,7 @@ class GroupGraphicsItem(QGraphicsObject):
                 )
 
     def _edges_at(self, position: QPointF) -> tuple[bool, bool, bool, bool] | None:
-        body = self.boundingRect()
+        body = self._body_rect()
         if not body.adjusted(
             -self._RESIZE_MARGIN,
             -self._RESIZE_MARGIN,
@@ -676,6 +685,7 @@ class TemporaryConnectionGraphicsItem(QGraphicsObject):
         pen.setWidthF(self.theme.metrics.cable_width)
         pen.setStyle(Qt.PenStyle.DashLine)
         painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawPath(self.path)
 
 

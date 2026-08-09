@@ -705,6 +705,38 @@ def test_mido_adapter_enumerates_without_opening_and_preserves_wire_shape() -> N
     assert fake.port.close_count == 1
 
 
+def test_windows_rtmidi_indices_are_hidden_and_friendly_loopmidi_name_opens_raw_port() -> None:
+    fake = _FakeMidoBackend()
+    fake.names = ("loopMIDI Port 1 2", "loopMIDI Port 3")
+    backend = MidoRtMidiBackend(fake, normalize_windows_names=True)
+
+    assert backend.output_names() == ("loopMIDI Port 1", "loopMIDI Port")
+    assert fake.opened == []
+
+    service = MidiOutputService(backend, refresh_interval_s=3600.0)
+    try:
+        _wait(service)
+        service.publish(_frame({(0, 60): 100}), _configuration("loopMIDI Port"))
+        _wait(service)
+
+        status = service.status()
+        assert status.connection_state is MidiOutputConnectionState.CONNECTED
+        assert status.selected_port == "loopMIDI Port"
+        assert status.available_ports == ("loopMIDI Port 1", "loopMIDI Port")
+        assert fake.opened == ["loopMIDI Port 3"]
+        assert fake.port.messages[-1] == mido.Message("note_on", channel=0, note=60, velocity=100)
+    finally:
+        service.close()
+
+
+def test_windows_midi_alias_collisions_keep_unambiguous_raw_names() -> None:
+    fake = _FakeMidoBackend()
+    fake.names = ("Device 1", "Device 2")
+    backend = MidoRtMidiBackend(fake, normalize_windows_names=True)
+
+    assert backend.output_names() == fake.names
+
+
 def _published_states() -> list[tuple[MidiStateFrame, MidiOutputConfiguration]]:
     return []
 

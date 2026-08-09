@@ -180,6 +180,10 @@ def test_group_border_drag_resizes_and_is_undoable(qapp: QApplication) -> None:
         size=(300.0, 120.0),
     )
     item = scene.group_items[group_id]
+    item.setSelected(True)
+    bounds = item.boundingRect()
+    assert bounds.contains(QPointF(-3.0, -3.0))
+    assert bounds.contains(QPointF(303.0, 123.0))
     view = GraphView(scene, DEFAULT_THEME)
     view.resize(800, 500)
     view.show()
