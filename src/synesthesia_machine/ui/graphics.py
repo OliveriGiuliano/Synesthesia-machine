@@ -47,11 +47,18 @@ from synesthesia_machine.ui.view_models import (
 type ParameterChangeHandler = Callable[[UUID, str, LiteralValue], None]
 
 
+def _issue_tooltip(issues: tuple[ValidationIssue, ...]) -> str:
+    return format_tooltip(_issue_text(issues))
+
+
 def _diagnostic_tooltip(description: str, issues: tuple[ValidationIssue, ...]) -> str:
     if not issues:
         return format_tooltip(description)
-    details = "\n".join(f"{issue.severity} · {issue.message} ({issue.code})" for issue in issues)
-    return format_tooltip(f"{description}\n\n{details}")
+    return format_tooltip(f"{description}\n\n{_issue_text(issues)}")
+
+
+def _issue_text(issues: tuple[ValidationIssue, ...]) -> str:
+    return "\n".join(f"{issue.severity} · {issue.message} ({issue.code})" for issue in issues)
 
 
 class GroupGraphicsItem(QGraphicsObject):
@@ -333,7 +340,7 @@ class NodeGraphicsItem(QGraphicsObject):
         self.setCacheMode(QGraphicsItem.CacheMode.DeviceCoordinateCache)
         self.setAcceptHoverEvents(True)
         self.setPos(*view_model.position)
-        self.setToolTip(_diagnostic_tooltip(view_model.description, view_model.issues))
+        self.setToolTip(format_tooltip(view_model.description))
         self._create_ports_and_editors()
 
     @property
@@ -382,6 +389,13 @@ class NodeGraphicsItem(QGraphicsObject):
 
     def _editor_left(self) -> float:
         return self._width - self._EDITOR_WIDTH - self._EDITOR_RIGHT_MARGIN
+
+    def _issue_badge_rect(self) -> QRectF:
+        center = QPointF(self._width - 17.0, self.theme.metrics.header_height / 2.0)
+        return QRectF(center.x() - 6.0, center.y() - 6.0, 12.0, 12.0)
+
+    def _issue_badge_hit_rect(self) -> QRectF:
+        return self._issue_badge_rect().adjusted(-4.0, -4.0, 4.0, 4.0)
 
     def _create_ports_and_editors(self) -> None:
         metrics = self.theme.metrics
@@ -499,7 +513,14 @@ class NodeGraphicsItem(QGraphicsObject):
             )
             painter.setBrush(QBrush(self.theme.color(token)))
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawEllipse(QPointF(self._width - 17.0, metrics.header_height / 2.0), 6.0, 6.0)
+            badge = self._issue_badge_rect()
+            painter.drawEllipse(badge)
+            badge_font = self.theme.body_font()
+            badge_font.setBold(True)
+            badge_font.setPointSizeF(8.0)
+            painter.setFont(badge_font)
+            painter.setPen(self.theme.color("text"))
+            painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, "!")
         level_of_detail = option.levelOfDetailFromTransform(painter.worldTransform())
         if self.view_model.collapsed or not self._detail_visible or level_of_detail < 0.35:
             return
@@ -557,7 +578,9 @@ class NodeGraphicsItem(QGraphicsObject):
             )
 
     def _tooltip_for_position(self, position: QPointF) -> str:
-        node_help = _diagnostic_tooltip(self.view_model.description, self.view_model.issues)
+        node_help = format_tooltip(self.view_model.description)
+        if self.view_model.issues and self._issue_badge_hit_rect().contains(position):
+            return _issue_tooltip(self.view_model.issues)
         if position.y() < self.theme.metrics.header_height:
             return node_help
         if position.x() > self._editor_left() - self._LABEL_EDITOR_GAP:
@@ -577,7 +600,7 @@ class NodeGraphicsItem(QGraphicsObject):
         super().hoverMoveEvent(event)
 
     def hoverLeaveEvent(self, event: QGraphicsSceneHoverEvent) -> None:
-        self.setToolTip(_diagnostic_tooltip(self.view_model.description, self.view_model.issues))
+        self.setToolTip(format_tooltip(self.view_model.description))
         super().hoverLeaveEvent(event)
 
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value: object) -> object:

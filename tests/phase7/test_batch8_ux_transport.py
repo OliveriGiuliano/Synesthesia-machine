@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from PySide6.QtCore import QPointF
 from PySide6.QtGui import QFontMetricsF
 from PySide6.QtWidgets import QApplication, QLabel
 
@@ -56,7 +57,7 @@ def test_validation_panel_exposes_actionable_detail_and_navigation_signal(
     assert activated == [issue]
 
 
-def test_node_tooltip_includes_issue_message_and_stable_code(qapp: QApplication) -> None:
+def test_node_title_and_error_badge_have_separate_tooltips(qapp: QApplication) -> None:
     del qapp
     registry = create_application_registry()
     session = DocumentSession(registry)
@@ -65,8 +66,14 @@ def test_node_tooltip_includes_issue_message_and_stable_code(qapp: QApplication)
     item = NodeGraphicsItem(node, DEFAULT_THEME, session.set_parameter)
 
     assert node.issues
-    assert node.issues[0].message in item.toolTip()
-    assert node.issues[0].code in item.toolTip()
+    title_help = item._tooltip_for_position(QPointF(20.0, 10.0))
+    issue_help = item._tooltip_for_position(item._issue_badge_rect().center())
+
+    assert node.description in title_help
+    assert node.issues[0].message not in title_help
+    assert node.issues[0].message in issue_help
+    assert node.issues[0].code in issue_help
+    assert node.description not in issue_help
 
 
 def test_node_width_accounts_for_long_parameter_labels(qapp: QApplication) -> None:

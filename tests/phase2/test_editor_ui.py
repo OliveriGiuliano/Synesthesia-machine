@@ -563,6 +563,30 @@ def test_node_parameter_rows_have_contextual_hover_help(window: MainWindow) -> N
     assert parameter_help != node_help
 
 
+def test_error_badge_paints_red_dot_with_visible_exclamation(window: MainWindow) -> None:
+    node_id = window.session.add_node("synmachine.utility.math", (80.0, 120.0))
+    item = window.scene.node_items[node_id]
+    assert item.view_model.issues
+    image = QImage(
+        round(item.node_width),
+        round(DEFAULT_THEME.metrics.header_height),
+        QImage.Format.Format_ARGB32_Premultiplied,
+    )
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    item.paint(painter, QStyleOptionGraphicsItem())
+    painter.end()
+
+    badge = item._issue_badge_rect()
+    pixels = [
+        image.pixelColor(x, y)
+        for y in range(round(badge.top()), round(badge.bottom()) + 1)
+        for x in range(round(badge.left()), round(badge.right()) + 1)
+    ]
+    assert any(color.red() > 200 and color.green() < 150 for color in pixels)
+    assert any(color.green() > 170 and color.blue() > 170 for color in pixels)
+
+
 def test_long_hover_help_uses_bounded_multiline_rich_text(
     qapp: QApplication, tmp_path: Path
 ) -> None:
