@@ -41,6 +41,7 @@ from synesthesia_machine.graph import (
     ValidationIssue,
 )
 from synesthesia_machine.nodes import ExecutionKind, NodeRegistry
+from synesthesia_machine.nodes.visualization import NOTE_VISUALIZER_TYPE_ID
 from synesthesia_machine.persistence import (
     GraphPersistenceError,
     RelinkMatch,
@@ -58,7 +59,7 @@ from synesthesia_machine.ui.application_settings import (
     PreferencesDialog,
 )
 from synesthesia_machine.ui.canvas import GraphScene, GraphView
-from synesthesia_machine.ui.previews import RuntimePreviewPanel
+from synesthesia_machine.ui.previews import ImagePreviewPanel, NotePreviewPanel
 from synesthesia_machine.ui.profiler import ProfilerPanel, profile_heat_levels
 from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.theme import DEFAULT_THEME, Theme
@@ -121,7 +122,8 @@ class MainWindow(QMainWindow):
         self.library = NodeLibrary(registry, self)
         self.inspector = InspectorPanel(self.session, self)
         self.issues_panel = ValidationIssuePanel(self)
-        self.preview_panel = RuntimePreviewPanel(self)
+        self.image_preview_panel = ImagePreviewPanel(self)
+        self.note_preview_panel = NotePreviewPanel(self)
         self.profiler_panel = ProfilerPanel(self)
         self.recent_menu = QMenu("Open &Recent", self)
         self._recent_paths = self._load_recent_paths()
@@ -189,15 +191,24 @@ class MainWindow(QMainWindow):
         self.inspector_dock.setWidget(self.inspector)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.inspector_dock)
 
-        self.preview_dock = QDockWidget("Runtime Previews", self)
-        self.preview_dock.setObjectName("runtime_preview_dock")
-        self.preview_dock.setAllowedAreas(
+        preview_areas = (
             Qt.DockWidgetArea.BottomDockWidgetArea
             | Qt.DockWidgetArea.LeftDockWidgetArea
             | Qt.DockWidgetArea.RightDockWidgetArea
         )
-        self.preview_dock.setWidget(self.preview_panel)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.preview_dock)
+        self.image_preview_dock = QDockWidget("Image Preview", self)
+        self.image_preview_dock.setObjectName("image_preview_dock")
+        self.image_preview_dock.setAllowedAreas(preview_areas)
+        self.image_preview_dock.setWidget(self.image_preview_panel)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.image_preview_dock)
+
+        self.note_preview_dock = QDockWidget("Note Visualizer", self)
+        self.note_preview_dock.setObjectName("note_preview_dock")
+        self.note_preview_dock.setAllowedAreas(preview_areas)
+        self.note_preview_dock.setWidget(self.note_preview_panel)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.note_preview_dock)
+        self.tabifyDockWidget(self.image_preview_dock, self.note_preview_dock)
+        self.image_preview_dock.raise_()
 
         self.profiler_dock = QDockWidget("Runtime Profiler", self)
         self.profiler_dock.setObjectName("runtime_profiler_dock")
@@ -380,9 +391,14 @@ class MainWindow(QMainWindow):
             status_tip="Show or hide the inspector",
         )
         self.action_registry.register(
-            "toggle_previews",
-            self.preview_dock.toggleViewAction(),
-            status_tip="Show or hide runtime previews",
+            "toggle_image_preview",
+            self.image_preview_dock.toggleViewAction(),
+            status_tip="Show or hide the image preview",
+        )
+        self.action_registry.register(
+            "toggle_note_preview",
+            self.note_preview_dock.toggleViewAction(),
+            status_tip="Show or hide the note velocity visualizer",
         )
         self.action_registry.register(
             "toggle_profiler",
@@ -445,7 +461,8 @@ class MainWindow(QMainWindow):
         view_menu.addSeparator()
         view_menu.addAction(self.action_registry.require("toggle_library"))
         view_menu.addAction(self.action_registry.require("toggle_inspector"))
-        view_menu.addAction(self.action_registry.require("toggle_previews"))
+        view_menu.addAction(self.action_registry.require("toggle_image_preview"))
+        view_menu.addAction(self.action_registry.require("toggle_note_preview"))
         view_menu.addAction(self.action_registry.require("toggle_profiler"))
         view_menu.addAction(self.action_registry.require("toggle_issues"))
 
@@ -505,7 +522,8 @@ class MainWindow(QMainWindow):
         self._autosave_timer.timeout.connect(self._autosave)
         self._activation_timer.timeout.connect(self._activate_graph)
         self._preview_timer.timeout.connect(self._poll_previews)
-        self.preview_dock.visibilityChanged.connect(self._on_preview_visibility_changed)
+        self.image_preview_dock.visibilityChanged.connect(self._on_image_preview_visibility_changed)
+        self.note_preview_dock.visibilityChanged.connect(self._on_note_preview_visibility_changed)
         self._metrics_timer.timeout.connect(self._refresh_engine_status)
         self._profiler_timer.timeout.connect(self._refresh_profiles)
         self.profiler_dock.visibilityChanged.connect(self._on_profiler_visibility_changed)
@@ -971,39 +989,61 @@ class MainWindow(QMainWindow):
         )
 
     def _runtime_demand_roots(self, snapshot: GraphSnapshot) -> tuple[UUID, ...]:
-        include_visualizers = self.preview_dock.isVisible()
+        include_images = self.image_preview_dock.isVisible()
+        include_notes = self.note_preview_dock.isVisible()
         roots = (
             node.id
             for node in snapshot.nodes
             if (
                 (kind := self.registry.require(node.type_id).execution_kind) is ExecutionKind.SINK
-                or (include_visualizers and kind is ExecutionKind.VISUALIZER)
+                or (
+                    kind is ExecutionKind.VISUALIZER
+                    and (
+                        (node.type_id == NOTE_VISUALIZER_TYPE_ID and include_notes)
+                        or (node.type_id != NOTE_VISUALIZER_TYPE_ID and include_images)
+                    )
+                )
             )
         )
         return tuple(sorted(roots, key=str))
 
     @Slot(bool)
-    def _on_preview_visibility_changed(self, visible: bool) -> None:
+    def _on_image_preview_visibility_changed(self, visible: bool) -> None:
         if not visible:
             self._image_sequences.clear()
+        self._schedule_engine_activation()
+
+    @Slot(bool)
+    def _on_note_preview_visibility_changed(self, visible: bool) -> None:
+        if not visible:
             self._note_sequences.clear()
         self._schedule_engine_activation()
 
     @Slot()
     def _poll_previews(self) -> None:
-        if self._engine_closed or not self.preview_dock.isVisible():
+        if self._engine_closed:
+            return
+        image_visible = self.image_preview_dock.isVisible()
+        note_visible = self.note_preview_dock.isVisible()
+        if not image_visible and not note_visible:
             return
         try:
-            image_previews = self.engine_client.poll_image_previews(self._image_sequences)
-            note_previews = self.engine_client.poll_note_previews(self._note_sequences)
+            image_previews = (
+                self.engine_client.poll_image_previews(self._image_sequences)
+                if image_visible
+                else ()
+            )
+            note_previews = (
+                self.engine_client.poll_note_previews(self._note_sequences) if note_visible else ()
+            )
         except (RuntimeError, TimeoutError):
             return
         for preview in image_previews:
             self._image_sequences[preview.node_id] = preview.sequence
-            self.preview_panel.show_image_preview(preview)
+            self.image_preview_panel.show_preview(preview)
         for preview in note_previews:
             self._note_sequences[preview.node_id] = preview.sequence
-            self.preview_panel.show_note_preview(preview)
+            self.note_preview_panel.show_preview(preview)
 
     @Slot()
     def _refresh_engine_status(self) -> None:

@@ -7,7 +7,7 @@ from dataclasses import replace
 from uuid import UUID
 
 import pytest
-from PySide6.QtWidgets import QApplication, QComboBox, QLineEdit
+from PySide6.QtWidgets import QApplication, QComboBox, QLineEdit, QSpinBox
 
 from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.contracts import (
@@ -47,7 +47,6 @@ from synesthesia_machine.persistence import (
 )
 from synesthesia_machine.runtime import PortKey, Scheduler
 from synesthesia_machine.ui.musical_controls import MusicalParameterEditor
-from synesthesia_machine.ui.parameter_editors import IntRangeParameterEditor
 from synesthesia_machine.ui.view_models import project_graph
 
 SOURCE_A = UUID("00000000-0000-0000-0000-000000000601")
@@ -355,9 +354,9 @@ def test_shared_musical_view_model_and_editor_cover_ranges_custom_mode_and_edits
     assert isinstance(root, QComboBox)
     assert isinstance(scale, QComboBox)
     assert isinstance(custom, QLineEdit) and not custom.isEnabled()
-    assert isinstance(midi_minimum, IntRangeParameterEditor) and midi_minimum.minimum() == 0
+    assert isinstance(midi_minimum, QSpinBox) and midi_minimum.minimum() == 0
     assert midi_minimum.maximum() == 127
-    assert isinstance(midi_channel, IntRangeParameterEditor) and midi_channel.minimum() == 1
+    assert isinstance(midi_channel, QSpinBox) and midi_channel.minimum() == 1
     assert midi_channel.maximum() == 16
 
     scale.setCurrentIndex(scale.findData(CUSTOM_SCALE_ID))

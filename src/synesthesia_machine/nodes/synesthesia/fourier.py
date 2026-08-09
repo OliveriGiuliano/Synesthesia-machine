@@ -24,6 +24,7 @@ from synesthesia_machine.nodes import (
     InputPortSpec,
     NodeDefinition,
     OutputPortSpec,
+    ParameterEditorHint,
     ParameterSpec,
     ResetReason,
 )
@@ -324,6 +325,7 @@ def create_fourier_definitions() -> tuple[NodeDefinition, ...]:
                     0.0,
                     minimum=0.0,
                     maximum=1.0,
+                    editor_hint=ParameterEditorHint.SLIDER,
                 ),
                 ParameterSpec(
                     "frequency_maximum",
@@ -332,6 +334,7 @@ def create_fourier_definitions() -> tuple[NodeDefinition, ...]:
                     1.0,
                     minimum=0.0,
                     maximum=1.0,
+                    editor_hint=ParameterEditorHint.SLIDER,
                 ),
                 ParameterSpec("amplitude_floor", "Amplitude floor", PortType.FLOAT, 0.0),
                 ParameterSpec("amplitude_ceiling", "Amplitude ceiling", PortType.FLOAT, 10.0),
@@ -342,6 +345,7 @@ def create_fourier_definitions() -> tuple[NodeDefinition, ...]:
                     0.0,
                     minimum=0.0,
                     maximum=1.0,
+                    editor_hint=ParameterEditorHint.SLIDER,
                 ),
                 ParameterSpec(
                     "band_aggregation",
@@ -351,7 +355,13 @@ def create_fourier_definitions() -> tuple[NodeDefinition, ...]:
                     choices=BAND_AGGREGATIONS,
                 ),
                 ParameterSpec(
-                    "percentile", "Percentile", PortType.FLOAT, 90.0, minimum=0.0, maximum=100.0
+                    "percentile",
+                    "Percentile",
+                    PortType.FLOAT,
+                    90.0,
+                    minimum=0.0,
+                    maximum=100.0,
+                    editor_hint=ParameterEditorHint.SLIDER,
                 ),
                 ParameterSpec(
                     "activation_threshold",
@@ -360,6 +370,7 @@ def create_fourier_definitions() -> tuple[NodeDefinition, ...]:
                     0.0,
                     minimum=0.0,
                     maximum=1.0,
+                    editor_hint=ParameterEditorHint.SLIDER,
                 ),
             ),
             ExecutionKind.STATEFUL,

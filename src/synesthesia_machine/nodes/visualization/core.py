@@ -155,7 +155,7 @@ def create_visualization_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Note Visualizer",
             "Visualization",
-            "Publish compact active-note summaries for a UI-rendered MIDI key strip.",
+            "Publish compact active-note summaries for a UI-rendered velocity chart.",
             (InputPortSpec("midi", "MIDI State", PortType.MIDI_STATE),),
             (),
             (),

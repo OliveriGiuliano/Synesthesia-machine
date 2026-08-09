@@ -28,6 +28,7 @@ from synesthesia_machine.nodes import (
     ExpectedNodeError,
     InputPortSpec,
     NodeDefinition,
+    ParameterEditorHint,
     ParameterSpec,
     ResetReason,
 )
@@ -132,13 +133,31 @@ def create_output_definitions(
                     choices=tuple(waveform.value for waveform in SynthWaveform),
                 ),
                 ParameterSpec(
-                    "volume", "Master volume", PortType.FLOAT, 0.15, minimum=0.0, maximum=1.0
+                    "volume",
+                    "Master volume",
+                    PortType.FLOAT,
+                    0.15,
+                    minimum=0.0,
+                    maximum=1.0,
+                    editor_hint=ParameterEditorHint.SLIDER,
                 ),
                 ParameterSpec(
-                    "attack_ms", "Attack (ms)", PortType.FLOAT, 10.0, minimum=0.0, maximum=2000.0
+                    "attack_ms",
+                    "Attack (ms)",
+                    PortType.FLOAT,
+                    10.0,
+                    minimum=0.0,
+                    maximum=2000.0,
+                    editor_hint=ParameterEditorHint.SLIDER,
                 ),
                 ParameterSpec(
-                    "release_ms", "Release (ms)", PortType.FLOAT, 80.0, minimum=0.0, maximum=5000.0
+                    "release_ms",
+                    "Release (ms)",
+                    PortType.FLOAT,
+                    80.0,
+                    minimum=0.0,
+                    maximum=5000.0,
+                    editor_hint=ParameterEditorHint.SLIDER,
                 ),
                 ParameterSpec(
                     "max_voices", "Maximum voices", PortType.INT, 32, minimum=1, maximum=128

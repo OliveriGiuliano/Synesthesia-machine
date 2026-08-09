@@ -5,7 +5,8 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
-from PySide6.QtCore import QPointF, QSettings, Qt, QTimer
+from PySide6.QtCore import QPoint, QPointF, QSettings, Qt, QTimer
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
 )
 
+from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.app.settings import ApplicationPaths
 from synesthesia_machine.contracts import (
     ColorValue,
@@ -32,6 +34,7 @@ from synesthesia_machine.nodes import (
     ExecutionKind,
     NodeDefinition,
     NodeRegistry,
+    ParameterEditorHint,
     ParameterSpec,
     ResetReason,
 )
@@ -41,13 +44,15 @@ from synesthesia_machine.runtime import InProcessEngineClient
 from synesthesia_machine.ui.graphics import NodeGraphicsItem
 from synesthesia_machine.ui.main_window import MainWindow
 from synesthesia_machine.ui.parameter_editors import (
+    DirectDragSlider,
     FilePathParameterEditor,
     FloatRangeParameterEditor,
     IntRangeParameterEditor,
     create_parameter_editor,
 )
+from synesthesia_machine.ui.theme import node_category_color
 from synesthesia_machine.ui.view_models import ParameterViewModel
-from synesthesia_machine.ui.widgets import NodeSearchDialog, SearchCandidate
+from synesthesia_machine.ui.widgets import NodeLibrary, NodeSearchDialog, SearchCandidate
 
 
 class _NoopRuntime:
@@ -134,7 +139,9 @@ def test_palette_and_graph_search_index_registry_aliases(window: MainWindow) -> 
     assert selected.definition.type_id == "synmachine.utility.math"
 
 
-def test_scene_parameter_edit_duplicate_copy_paste_and_undo(window: MainWindow) -> None:
+def test_scene_parameter_edit_duplicate_copy_paste_and_undo(
+    window: MainWindow, qapp: QApplication
+) -> None:
     node_id = window.session.add_node("synmachine.utility.number", (80.0, 120.0))
     item = window.scene.node_items[node_id]
     assert isinstance(item, NodeGraphicsItem)
@@ -145,6 +152,7 @@ def test_scene_parameter_edit_duplicate_copy_paste_and_undo(window: MainWindow) 
     assert isinstance(editor, QDoubleSpinBox)
     editor.setValue(6.5)
     editor.editingFinished.emit()
+    qapp.processEvents()
     assert window.session.document.node(node_id).parameters["float_value"] == 6.5  # type: ignore[union-attr]
 
     window.scene.select_node_ids({node_id})
@@ -260,27 +268,136 @@ def test_scalar_editor_factory_supports_all_phase_2_literal_types() -> None:
         assert editor.accessibleName() == spec.label
 
 
-def test_bounded_numeric_metadata_uses_sliders_and_commits_values(
+def test_slider_hint_is_explicit_and_sliders_display_and_drag_their_value(
     qapp: QApplication,
 ) -> None:
     edits: list[object] = []
-    float_spec = ParameterSpec("gain", "Gain", PortType.FLOAT, 0.25, minimum=0.0, maximum=1.0)
+    float_spec = ParameterSpec(
+        "gain",
+        "Gain",
+        PortType.FLOAT,
+        0.25,
+        minimum=0.0,
+        maximum=1.0,
+        editor_hint=ParameterEditorHint.SLIDER,
+    )
     float_editor = create_parameter_editor(
         ParameterViewModel(float_spec, 0.25, False), edits.append
     )
     assert isinstance(float_editor, FloatRangeParameterEditor)
+    assert isinstance(float_editor.slider, DirectDragSlider)
     assert (float_editor.minimum(), float_editor.maximum()) == (0.0, 1.0)
+    assert float_editor.value_label.text() == "0.25"
     float_editor.setValue(0.75)
     qapp.processEvents()
     assert edits[-1] == pytest.approx(0.75)
+    assert float_editor.value_label.text() == "0.75"
 
-    int_spec = ParameterSpec("voices", "Voices", PortType.INT, 4, minimum=1, maximum=16)
+    float_editor.resize(220, 24)
+    float_editor.show()
+    qapp.processEvents()
+    QTest.mousePress(
+        float_editor.slider,
+        Qt.MouseButton.LeftButton,
+        pos=QPoint(12, float_editor.slider.height() // 2),
+    )
+    QTest.mouseMove(
+        float_editor.slider,
+        QPoint(float_editor.slider.width() - 12, float_editor.slider.height() // 2),
+    )
+    QTest.mouseRelease(
+        float_editor.slider,
+        Qt.MouseButton.LeftButton,
+        pos=QPoint(float_editor.slider.width() - 12, float_editor.slider.height() // 2),
+    )
+    qapp.processEvents()
+    assert float_editor.value() > 0.9
+
+    int_spec = ParameterSpec(
+        "voices",
+        "Voices",
+        PortType.INT,
+        4,
+        minimum=1,
+        maximum=16,
+        editor_hint=ParameterEditorHint.SLIDER,
+    )
     int_editor = create_parameter_editor(ParameterViewModel(int_spec, 4, False), edits.append)
     assert isinstance(int_editor, IntRangeParameterEditor)
     assert (int_editor.minimum(), int_editor.maximum()) == (1, 16)
     int_editor.setValue(12)
     qapp.processEvents()
     assert edits[-1] == 12
+
+    technical_spec = ParameterSpec(
+        "preview_fps", "Preview FPS", PortType.INT, 30, minimum=5, maximum=30
+    )
+    technical_editor = create_parameter_editor(
+        ParameterViewModel(technical_spec, 30, False), edits.append
+    )
+    assert isinstance(technical_editor, QSpinBox)
+
+
+def test_builtin_slider_metadata_reserves_sliders_for_continuous_spectra() -> None:
+    registry = create_application_registry()
+    technical_parameters = (
+        ("synmachine.visualization.channel_display", "preview_fps"),
+        ("synmachine.visualization.channel_display", "max_dimension"),
+        ("synmachine.synesthesia.channel_to_pitch", "midi_channel"),
+        ("synmachine.synesthesia.channel_to_pitch", "maximum_polyphony"),
+    )
+    for type_id, parameter_id in technical_parameters:
+        spec = registry.require(type_id).parameter(parameter_id)
+        assert spec is not None
+        editor = create_parameter_editor(
+            ParameterViewModel(spec, spec.default, False), lambda _value: None
+        )
+        assert isinstance(editor, QSpinBox)
+
+    volume = registry.require("synmachine.output.generate_audio").parameter("volume")
+    assert volume is not None
+    volume_editor = create_parameter_editor(
+        ParameterViewModel(volume, volume.default, False), lambda _value: None
+    )
+    assert isinstance(volume_editor, FloatRangeParameterEditor)
+
+
+def test_node_category_palette_is_unique_and_applied_to_library_names(
+    qapp: QApplication,
+) -> None:
+    registry = create_application_registry()
+    categories = {definition.category for definition in registry.definitions()}
+    colors = {node_category_color(category).name() for category in categories}
+    assert len(colors) == len(categories)
+
+    library = NodeLibrary(registry)
+    library.show()
+    qapp.processEvents()
+    for group_index in range(library.tree.topLevelItemCount()):
+        group = library.tree.topLevelItem(group_index)
+        expected = node_category_color(group.text(0))
+        assert group.foreground(0).color() == expected
+        for child_index in range(group.childCount()):
+            assert group.child(child_index).foreground(0).color() == expected
+    library.close()
+
+
+def test_pressing_enter_in_embedded_numeric_editor_commits_without_destroying_signal_sender(
+    window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    node_id = window.session.add_node("synmachine.utility.number", (80.0, 120.0))
+    editor = window.scene.node_items[node_id].parameter_editors["float_value"].widget()
+    assert isinstance(editor, QDoubleSpinBox)
+    editor.setFocus()
+    editor.selectAll()
+    QTest.keyClicks(editor, "12.5")
+    QTest.keyClick(editor, Qt.Key.Key_Return)
+    qapp.processEvents()
+
+    assert window.session.document.node(node_id).parameters["float_value"] == 12.5  # type: ignore[union-attr]
+    replacement = window.scene.node_items[node_id].parameter_editors["float_value"].widget()
+    assert replacement is not None and replacement is not editor
 
 
 def test_video_file_path_editor_browses_and_commits_selected_path(

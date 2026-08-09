@@ -92,6 +92,13 @@ class ParameterUpdateMode(StrEnum):
     RESTART_SOURCE = "RESTART_SOURCE"
 
 
+class ParameterEditorHint(StrEnum):
+    """Optional UI intent kept separate from validation bounds."""
+
+    DEFAULT = "DEFAULT"
+    SLIDER = "SLIDER"
+
+
 @dataclass(frozen=True, slots=True)
 class ParameterSpec:
     id: str
@@ -105,6 +112,7 @@ class ParameterSpec:
     connectable: bool = False
     connected_port_type: PortType | None = None
     update_mode: ParameterUpdateMode = ParameterUpdateMode.LIVE
+    editor_hint: ParameterEditorHint = ParameterEditorHint.DEFAULT
 
     def __post_init__(self) -> None:
         _validate_stable_id(self.id, "parameter")

@@ -8,7 +8,7 @@ from functools import partial
 from uuid import UUID
 
 from PySide6.QtCore import QByteArray, QMimeData, Qt, QTimer, Signal, Slot
-from PySide6.QtGui import QDrag, QKeyEvent
+from PySide6.QtGui import QBrush, QDrag, QKeyEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -37,6 +37,7 @@ from synesthesia_machine.ui.canvas import NODE_MIME_TYPE
 from synesthesia_machine.ui.musical_controls import MusicalParameterEditor
 from synesthesia_machine.ui.parameter_editors import create_parameter_editor
 from synesthesia_machine.ui.session import DocumentSession
+from synesthesia_machine.ui.theme import node_category_color
 from synesthesia_machine.ui.view_models import ConnectionViewModel, NodeViewModel
 
 _TYPE_ROLE = int(Qt.ItemDataRole.UserRole)
@@ -145,8 +146,10 @@ class NodeLibrary(QWidget):
             if group is None:
                 group = QTreeWidgetItem(self.tree, [definition.category])
                 group.setFlags(group.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
+                group.setForeground(0, QBrush(node_category_color(definition.category)))
                 groups[definition.category] = group
             item = QTreeWidgetItem(group, [definition.display_name])
+            item.setForeground(0, QBrush(node_category_color(definition.category)))
             item.setData(0, _TYPE_ROLE, definition.type_id)
             item.setToolTip(0, definition.description)
             item.setStatusTip(0, definition.description)

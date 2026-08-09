@@ -274,9 +274,9 @@ class _PerformanceRun(QObject):
             image_previews = self._client.poll_image_previews()
             note_previews = self._client.poll_note_previews()
             for preview in image_previews:
-                self._window.preview_panel.show_image_preview(preview)
+                self._window.image_preview_panel.show_preview(preview)
             for preview in note_previews:
-                self._window.preview_panel.show_note_preview(preview)
+                self._window.note_preview_panel.show_preview(preview)
             self._application.processEvents()
             self._screenshot_path.parent.mkdir(parents=True, exist_ok=True)
             if not self._window.grab().save(str(self._screenshot_path), "PNG"):
@@ -306,8 +306,8 @@ class _PerformanceRun(QObject):
         p95_ms = _percentile_ms(intervals, 95)
         maximum_ms = max(intervals, default=0) / 1_000_000.0
         responsive = callback_ratio >= 0.9 and p95_ms <= 100.0 and maximum_ms <= 250.0
-        image_preview = self._window.preview_panel.image_widget.latest_preview
-        note_preview = self._window.preview_panel.note_widget.latest_preview
+        image_preview = self._window.image_preview_panel.image_widget.latest_preview
+        note_preview = self._window.note_preview_panel.note_widget.latest_preview
         peak_memory = max(
             (sample.memory_bytes for sample in self._samples),
             default=metrics.memory_bytes,
@@ -506,7 +506,8 @@ def run_diagnostic(
         if not window.open_path(runtime_graph_path):
             client.close()
             raise RuntimeError("Could not open the temporary Phase 4 diagnostic graph")
-        window.preview_dock.show()
+        window.image_preview_dock.show()
+        window.note_preview_dock.show()
         window.view.frame_all()
         application.processEvents()
         controller = _PerformanceRun(

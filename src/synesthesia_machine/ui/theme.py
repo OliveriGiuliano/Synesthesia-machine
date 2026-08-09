@@ -90,13 +90,13 @@ class Theme:
                 color: {colors.text}; border: 1px solid {colors.border};
                 selection-background-color: {colors.accent}; selection-color: {colors.canvas};
                 outline: 0; }}
-            QSlider::groove:horizontal {{ height: 6px; background: {colors.canvas};
-                border: 1px solid {colors.border}; border-radius: 3px; }}
+            QSlider::groove:horizontal {{ height: 4px; background: {colors.canvas};
+                border: 1px solid {colors.border}; border-radius: 2px; }}
             QSlider::sub-page:horizontal {{ background: {colors.accent};
-                border-radius: 3px; }}
-            QSlider::handle:horizontal {{ width: 14px; margin: -5px 0;
+                border-radius: 2px; }}
+            QSlider::handle:horizontal {{ width: 8px; margin: -4px 0;
                 background: {colors.text}; border: 1px solid {colors.accent};
-                border-radius: 7px; }}
+                border-radius: 4px; }}
             QSlider::handle:horizontal:hover {{ background: {colors.selection}; }}
             QMenu::item {{ padding: 5px 24px 5px 9px; background: transparent; }}
             QMenu::item:selected {{ background: {colors.accent}; color: {colors.canvas}; }}
@@ -123,6 +123,38 @@ class Theme:
 
 
 DEFAULT_THEME = Theme()
+
+
+_NODE_CATEGORY_COLORS = {
+    "Input": "#68b6ff",
+    "Image / Adjustment": "#ffb55a",
+    "Image / Analysis": "#ff8a80",
+    "Image / Channel": "#63d5dc",
+    "Image / Compositing": "#ffd166",
+    "Image / Dimension": "#7ed6b3",
+    "Image / Filter": "#b8e986",
+    "Image / Utility": "#a8b3c7",
+    "Synesthesia": "#ce93d8",
+    "Utility": "#90a4ae",
+    "Utility / Channel": "#80cbc4",
+    "Utility / MIDI": "#c5e1a5",
+    "Utility / Scalar": "#9fa8da",
+    "Output / Audio": "#f48fb1",
+    "Output / MIDI": "#b39ddb",
+    "Visualization": "#ffcc80",
+}
+
+
+def node_category_color(category: str) -> QColor:
+    """Return a calm, readable and stable color for one node-library group."""
+
+    known = _NODE_CATEGORY_COLORS.get(category)
+    if known is not None:
+        return QColor(known)
+    # Plugins can introduce categories without coordinating with the built-in palette.
+    # A stable character sum keeps those colors repeatable between processes.
+    hue = sum((index + 1) * ord(character) for index, character in enumerate(category)) % 360
+    return QColor.fromHsv(hue, 105, 225)
 
 
 def port_color_name(type_name: str) -> str:

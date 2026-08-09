@@ -22,6 +22,7 @@ from synesthesia_machine.nodes.base import (
     InputPortSpec,
     NodeDefinition,
     OutputPortSpec,
+    ParameterEditorHint,
     ParameterSpec,
     ResetReason,
 )
@@ -187,6 +188,7 @@ def create_synesthesia_definitions() -> tuple[NodeDefinition, ...]:
                     0.0,
                     minimum=0.0,
                     maximum=100.0,
+                    editor_hint=ParameterEditorHint.SLIDER,
                 ),
                 ParameterSpec(
                     "minimum_a",

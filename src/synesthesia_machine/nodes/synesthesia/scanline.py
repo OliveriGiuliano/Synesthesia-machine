@@ -23,6 +23,7 @@ from synesthesia_machine.nodes import (
     InputPortSpec,
     NodeDefinition,
     OutputPortSpec,
+    ParameterEditorHint,
     ParameterSpec,
     ResetReason,
 )
@@ -217,6 +218,7 @@ def create_scanline_definitions() -> tuple[NodeDefinition, ...]:
                     0.0,
                     minimum=0.0,
                     maximum=1.0,
+                    editor_hint=ParameterEditorHint.SLIDER,
                 ),
                 ParameterSpec(
                     "velocity_curve_exponent",
@@ -225,6 +227,7 @@ def create_scanline_definitions() -> tuple[NodeDefinition, ...]:
                     1.0,
                     minimum=0.01,
                     maximum=16.0,
+                    editor_hint=ParameterEditorHint.SLIDER,
                 ),
             ),
             ExecutionKind.STATEFUL,

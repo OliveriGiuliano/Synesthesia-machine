@@ -35,7 +35,7 @@ from synesthesia_machine.graph import (
     ValidationSeverity,
 )
 from synesthesia_machine.ui.parameter_editors import create_parameter_editor
-from synesthesia_machine.ui.theme import Theme, port_color_name
+from synesthesia_machine.ui.theme import Theme, node_category_color, port_color_name
 from synesthesia_machine.ui.view_models import (
     ConnectionViewModel,
     NodeViewModel,
@@ -355,15 +355,16 @@ class NodeGraphicsItem(QGraphicsObject):
         del widget
         metrics = self.theme.metrics
         body = QRectF(0.0, 0.0, self._width, self._height)
-        border_color = self.theme.color("border")
-        border_width = 1.0
+        category_color = node_category_color(self.view_model.category)
+        border_color = category_color
+        border_width = 1.4
         if self._heat_level is not None:
             border_color = _interpolate_color(
-                self.theme.color("accent"), self.theme.color("error"), self._heat_level
+                category_color, self.theme.color("error"), self._heat_level
             )
             border_width = 1.5 + self._heat_level * 2.5
         if self.isSelected():
-            border_color = self.theme.color("selection")
+            border_color = border_color.lighter(120)
             border_width = max(border_width, 2.2)
         pen = QPen(border_color)
         pen.setWidthF(border_width)
@@ -376,7 +377,7 @@ class NodeGraphicsItem(QGraphicsObject):
             metrics.node_radius,
             metrics.node_radius,
         )
-        painter.setPen(self.theme.color("text"))
+        painter.setPen(category_color)
         painter.setFont(self.theme.title_font())
         painter.drawText(
             QRectF(12.0, 0.0, self._width - 38.0, metrics.header_height),

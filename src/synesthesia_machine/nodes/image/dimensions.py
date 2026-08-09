@@ -30,6 +30,7 @@ from synesthesia_machine.nodes import (
     InputPortSpec,
     NodeDefinition,
     OutputPortSpec,
+    ParameterEditorHint,
     ParameterSpec,
 )
 from synesthesia_machine.nodes.image.runtime_support import (
@@ -285,6 +286,7 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
                     maximum=1.0,
                     connectable=True,
                     connected_port_type=PortType.FLOAT,
+                    editor_hint=ParameterEditorHint.SLIDER,
                 ),
                 ParameterSpec(
                     "centre_y",
@@ -295,6 +297,7 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
                     maximum=1.0,
                     connectable=True,
                     connected_port_type=PortType.FLOAT,
+                    editor_hint=ParameterEditorHint.SLIDER,
                 ),
                 ParameterSpec("expand_canvas", "Expand canvas", PortType.BOOL, False),
                 ParameterSpec(

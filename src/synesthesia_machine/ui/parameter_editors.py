@@ -6,8 +6,8 @@ import json
 from collections.abc import Callable
 from typing import cast
 
-from PySide6.QtCore import Qt, QTimer, Slot
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QPointF, Qt, QTimer, Slot
+from PySide6.QtGui import QColor, QMouseEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QColorDialog,
@@ -21,11 +21,14 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSlider,
     QSpinBox,
+    QStyle,
+    QStyleOptionSlider,
     QWidget,
 )
 
 from synesthesia_machine.contracts import ColorValue, NumericMatrix, PortType
 from synesthesia_machine.graph import LiteralValue
+from synesthesia_machine.nodes import ParameterEditorHint
 from synesthesia_machine.ui.view_models import ParameterViewModel
 
 type ParameterChanged = Callable[[LiteralValue], None]
@@ -42,11 +45,11 @@ def create_parameter_editor(
     spec = parameter.spec
     if spec.choices:
         editor: QWidget = ChoiceParameterEditor(parameter, on_changed)
-    elif spec.value_type is PortType.FLOAT and _has_finite_range(parameter):
+    elif spec.value_type is PortType.FLOAT and _uses_slider(parameter):
         editor = FloatRangeParameterEditor(parameter, on_changed)
     elif spec.value_type is PortType.FLOAT:
         editor = FloatParameterEditor(parameter, on_changed)
-    elif spec.value_type is PortType.INT and _has_finite_range(parameter):
+    elif spec.value_type is PortType.INT and _uses_slider(parameter):
         editor = IntRangeParameterEditor(parameter, on_changed)
     elif spec.value_type is PortType.INT:
         editor = IntParameterEditor(parameter, on_changed)
@@ -73,9 +76,74 @@ def create_parameter_editor(
     return editor
 
 
-def _has_finite_range(parameter: ParameterViewModel) -> bool:
+def _uses_slider(parameter: ParameterViewModel) -> bool:
     spec = parameter.spec
-    return spec.minimum is not None and spec.maximum is not None
+    return (
+        spec.editor_hint is ParameterEditorHint.SLIDER
+        and spec.minimum is not None
+        and spec.maximum is not None
+    )
+
+
+class DirectDragSlider(QSlider):
+    """Slider whose groove supports direct, continuous click-and-drag input."""
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() is not Qt.MouseButton.LeftButton:
+            super().mousePressEvent(event)
+            return
+        self.setSliderDown(True)
+        self._set_position_from_pointer(event.position())
+        event.accept()
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self.isSliderDown() and event.buttons() & Qt.MouseButton.LeftButton:
+            self._set_position_from_pointer(event.position())
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() is Qt.MouseButton.LeftButton and self.isSliderDown():
+            self._set_position_from_pointer(event.position())
+            self.setSliderDown(False)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def _set_position_from_pointer(self, position: QPointF) -> None:
+        option = QStyleOptionSlider()
+        self.initStyleOption(option)
+        style = self.style()
+        groove = style.subControlRect(
+            QStyle.ComplexControl.CC_Slider,
+            option,
+            QStyle.SubControl.SC_SliderGroove,
+            self,
+        )
+        handle = style.subControlRect(
+            QStyle.ComplexControl.CC_Slider,
+            option,
+            QStyle.SubControl.SC_SliderHandle,
+            self,
+        )
+        if self.orientation() is Qt.Orientation.Horizontal:
+            slider_minimum = groove.x()
+            slider_maximum = groove.right() - handle.width() + 1
+            pointer = round(position.x() - handle.width() / 2.0)
+        else:
+            slider_minimum = groove.y()
+            slider_maximum = groove.bottom() - handle.height() + 1
+            pointer = round(position.y() - handle.height() / 2.0)
+        available = max(0, slider_maximum - slider_minimum)
+        value = QStyle.sliderValueFromPosition(
+            self.minimum(),
+            self.maximum(),
+            pointer - slider_minimum,
+            available,
+            option.upsideDown,
+        )
+        self.setSliderPosition(value)
 
 
 class _RangeParameterEditor(QWidget):
@@ -84,7 +152,7 @@ class _RangeParameterEditor(QWidget):
     def __init__(self, parameter: ParameterViewModel, on_changed: ParameterChanged) -> None:
         super().__init__()
         self._on_changed = on_changed
-        self.slider = QSlider(Qt.Orientation.Horizontal, self)
+        self.slider = DirectDragSlider(Qt.Orientation.Horizontal, self)
         self.slider.setObjectName(f"parameter_{parameter.spec.id}_slider")
         self.slider.setAccessibleName(f"{parameter.spec.label} slider")
         self.value_label = QLabel(self)
@@ -220,10 +288,20 @@ class FloatParameterEditor(QDoubleSpinBox):
         self.setKeyboardTracking(False)
         if isinstance(parameter.value, float):
             self.setValue(parameter.value)
+        self._commit_timer = QTimer(self)
+        self._commit_timer.setSingleShot(True)
+        self._commit_timer.timeout.connect(self._flush_commit)
         self.editingFinished.connect(self._commit)
 
     @Slot()
     def _commit(self) -> None:
+        if self.graphicsProxyWidget() is not None:
+            self._commit_timer.start(0)
+            return
+        self._flush_commit()
+
+    @Slot()
+    def _flush_commit(self) -> None:
         self._on_changed(float(self.value()))
 
 
@@ -238,10 +316,20 @@ class IntParameterEditor(QSpinBox):
         self.setKeyboardTracking(False)
         if isinstance(parameter.value, int) and not isinstance(parameter.value, bool):
             self.setValue(parameter.value)
+        self._commit_timer = QTimer(self)
+        self._commit_timer.setSingleShot(True)
+        self._commit_timer.timeout.connect(self._flush_commit)
         self.editingFinished.connect(self._commit)
 
     @Slot()
     def _commit(self) -> None:
+        if self.graphicsProxyWidget() is not None:
+            self._commit_timer.start(0)
+            return
+        self._flush_commit()
+
+    @Slot()
+    def _flush_commit(self) -> None:
         self._on_changed(int(self.value()))
 
 
@@ -249,13 +337,25 @@ class BoolParameterEditor(QCheckBox):
     def __init__(self, parameter: ParameterViewModel, on_changed: ParameterChanged) -> None:
         super().__init__()
         self._on_changed = on_changed
+        self._pending_value = False
+        self._commit_timer = QTimer(self)
+        self._commit_timer.setSingleShot(True)
+        self._commit_timer.timeout.connect(self._flush_commit)
         if isinstance(parameter.value, bool):
             self.setChecked(parameter.value)
         self.toggled.connect(self._commit)
 
     @Slot(bool)
     def _commit(self, checked: bool) -> None:
-        self._on_changed(checked)
+        self._pending_value = checked
+        if self.graphicsProxyWidget() is not None:
+            self._commit_timer.start(0)
+            return
+        self._flush_commit()
+
+    @Slot()
+    def _flush_commit(self) -> None:
+        self._on_changed(self._pending_value)
 
 
 class StringParameterEditor(QLineEdit):
@@ -264,10 +364,20 @@ class StringParameterEditor(QLineEdit):
         self._on_changed = on_changed
         if isinstance(parameter.value, str):
             self.setText(parameter.value)
+        self._commit_timer = QTimer(self)
+        self._commit_timer.setSingleShot(True)
+        self._commit_timer.timeout.connect(self._flush_commit)
         self.editingFinished.connect(self._commit)
 
     @Slot()
     def _commit(self) -> None:
+        if self.graphicsProxyWidget() is not None:
+            self._commit_timer.start(0)
+            return
+        self._flush_commit()
+
+    @Slot()
+    def _flush_commit(self) -> None:
         self._on_changed(self.text())
 
 
@@ -348,10 +458,20 @@ class MatrixParameterEditor(QLineEdit):
         self._on_changed = on_changed
         if isinstance(parameter.value, NumericMatrix):
             self.setText(json.dumps(parameter.value.rows, separators=(",", ":")))
+        self._commit_timer = QTimer(self)
+        self._commit_timer.setSingleShot(True)
+        self._commit_timer.timeout.connect(self._flush_commit)
         self.editingFinished.connect(self._commit)
 
     @Slot()
     def _commit(self) -> None:
+        if self.graphicsProxyWidget() is not None:
+            self._commit_timer.start(0)
+            return
+        self._flush_commit()
+
+    @Slot()
+    def _flush_commit(self) -> None:
         try:
             raw = cast(object, json.loads(self.text()))
             matrix = NumericMatrix(_numeric_matrix_rows(raw))
@@ -439,6 +559,9 @@ class ColorParameterEditor(QPushButton):
         self._value = (
             parameter.value if isinstance(parameter.value, ColorValue) else ColorValue(0, 0, 0)
         )
+        self._commit_timer = QTimer(self)
+        self._commit_timer.setSingleShot(True)
+        self._commit_timer.timeout.connect(self._flush_commit)
         self._update_swatch()
         self.clicked.connect(self._choose)
 
@@ -458,6 +581,13 @@ class ColorParameterEditor(QPushButton):
             selected.redF(), selected.greenF(), selected.blueF(), selected.alphaF()
         )
         self._update_swatch()
+        if self.graphicsProxyWidget() is not None:
+            self._commit_timer.start(0)
+            return
+        self._flush_commit()
+
+    @Slot()
+    def _flush_commit(self) -> None:
         self._on_changed(self._value)
 
     def _update_swatch(self) -> None:

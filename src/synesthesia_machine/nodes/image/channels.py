@@ -29,6 +29,7 @@ from synesthesia_machine.nodes import (
     InputPortSpec,
     NodeDefinition,
     OutputPortSpec,
+    ParameterEditorHint,
     ParameterSpec,
     ParameterUpdateMode,
 )
@@ -157,6 +158,7 @@ def create_channel_definitions() -> tuple[NodeDefinition, ...]:
             maximum=1.0,
             connectable=True,
             connected_port_type=PortType.FLOAT,
+            editor_hint=ParameterEditorHint.SLIDER,
         ),
         ParameterSpec(
             "alpha_policy",

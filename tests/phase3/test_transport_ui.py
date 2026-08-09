@@ -32,6 +32,7 @@ from synesthesia_machine.contracts import (
 )
 from synesthesia_machine.graph import GraphSnapshot, ValidationReport
 from synesthesia_machine.ui.main_window import MainWindow
+from synesthesia_machine.ui.previews import NotePreviewWidget, note_rainbow_color
 
 SOURCE_A = UUID("00000000-0000-0000-0000-000000000701")
 SOURCE_B = UUID("00000000-0000-0000-0000-000000000702")
@@ -275,17 +276,78 @@ def test_preview_and_metrics_polling_update_ui_with_sequence_coalescing(
     window._poll_previews()
     window._refresh_engine_status()
 
-    assert window.preview_panel.image_widget.latest_preview is image
-    assert window.preview_panel.note_widget.latest_preview is notes
-    assert window.preview_panel.splitter.count() == 2
-    assert window.preview_panel.image_widget.isVisible()
-    assert window.preview_panel.note_widget.isVisible()
-    assert "sequence 1" in window.preview_panel.image_caption.text()
+    assert window.image_preview_panel.image_widget.latest_preview is image
+    assert window.note_preview_panel.note_widget.latest_preview is notes
+    assert window.image_preview_dock is not window.note_preview_dock
+    assert window.image_preview_panel.image_widget.isVisible()
+    assert window.note_preview_panel.note_widget.isVisible()
+    assert "sequence 1" in window.image_preview_panel.image_caption.text()
     assert window._image_sequences == {IMAGE_NODE: 1}
     assert window._note_sequences == {NOTE_NODE: 1}
     assert "42 ticks" in window._engine_status.text()
     assert "in/process/preview 0.0/29.5/0.0 FPS" in window._engine_status.text()
     assert "drops 3" in window._engine_status.text()
+
+
+def test_image_and_note_visualizers_have_independent_dock_tabs_and_demand_roots(
+    runtime_window: tuple[MainWindow, _RecordingEngineClient],
+    qapp: QApplication,
+) -> None:
+    window, _client = runtime_window
+    image_id = window.session.add_node("synmachine.visualization.display_image_data", (0.0, 0.0))
+    note_id = window.session.add_node("synmachine.visualization.note_visualizer", (300.0, 0.0))
+    snapshot = window.session.document.snapshot()
+
+    assert window.image_preview_dock.isVisible()
+    assert window.note_preview_dock.isVisible()
+    assert set(window._runtime_demand_roots(snapshot)) == {image_id, note_id}
+
+    window.note_preview_dock.hide()
+    qapp.processEvents()
+    assert set(window._runtime_demand_roots(snapshot)) == {image_id}
+    assert window.image_preview_dock.isVisible()
+
+    window.note_preview_dock.show()
+    window.image_preview_dock.hide()
+    qapp.processEvents()
+    assert set(window._runtime_demand_roots(snapshot)) == {note_id}
+    assert window.note_preview_dock.isVisible()
+
+
+def test_note_velocity_chart_uses_rainbow_bars_and_adapts_to_aspect_ratio(
+    qapp: QApplication,
+) -> None:
+    widget = NotePreviewWidget()
+    widget.resize(560, 180)
+    widget.set_preview(
+        NotePreview(
+            NOTE_NODE,
+            1,
+            7,
+            (NoteActivity(0, 36, 28), NoteActivity(0, 84, 118)),
+        )
+    )
+    widget.show()
+    qapp.processEvents()
+
+    assert widget.note_axis_orientation() is Qt.Orientation.Horizontal
+    colors = {note_rainbow_color(note).name() for note in range(128)}
+    assert len(colors) == 128
+    image = widget.grab().toImage()
+    low_color = note_rainbow_color(36).rgb()
+    high_color = note_rainbow_color(84).rgb()
+    low_pixels = sum(
+        image.pixel(x, y) == low_color for x in range(image.width()) for y in range(image.height())
+    )
+    high_pixels = sum(
+        image.pixel(x, y) == high_color for x in range(image.width()) for y in range(image.height())
+    )
+    assert high_pixels > low_pixels > 0
+
+    widget.resize(180, 560)
+    qapp.processEvents()
+    assert widget.note_axis_orientation() is Qt.Orientation.Vertical
+    widget.close()
 
 
 def test_source_error_detail_is_visible_in_status_bar_and_engine_tooltip(

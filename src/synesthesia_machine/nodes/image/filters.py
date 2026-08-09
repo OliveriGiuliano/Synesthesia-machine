@@ -41,6 +41,7 @@ from synesthesia_machine.nodes import (
     NodeDefinition,
     NodeRuntime,
     OutputPortSpec,
+    ParameterEditorHint,
     ParameterSpec,
 )
 from synesthesia_machine.nodes.image.runtime_support import (
@@ -331,6 +332,7 @@ def _float_parameter(
     connectable: bool = False,
     minimum: float | None = None,
     maximum: float | None = None,
+    editor_hint: ParameterEditorHint = ParameterEditorHint.DEFAULT,
 ) -> ParameterSpec:
     return ParameterSpec(
         parameter_id,
@@ -341,6 +343,7 @@ def _float_parameter(
         maximum=maximum,
         connectable=connectable,
         connected_port_type=PortType.FLOAT if connectable else None,
+        editor_hint=editor_hint,
     )
 
 
@@ -525,8 +528,22 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
         _float_parameter("maximum", "Maximum", 1.0, connectable=True),
     )
     canny_parameters = (
-        _float_parameter("low_threshold", "Low threshold", 0.1, minimum=0.0, maximum=1.0),
-        _float_parameter("high_threshold", "High threshold", 0.3, minimum=0.0, maximum=1.0),
+        _float_parameter(
+            "low_threshold",
+            "Low threshold",
+            0.1,
+            minimum=0.0,
+            maximum=1.0,
+            editor_hint=ParameterEditorHint.SLIDER,
+        ),
+        _float_parameter(
+            "high_threshold",
+            "High threshold",
+            0.3,
+            minimum=0.0,
+            maximum=1.0,
+            editor_hint=ParameterEditorHint.SLIDER,
+        ),
         ParameterSpec("aperture_size", "Aperture size", PortType.INT, 3, choices=(3, 5, 7)),
         ParameterSpec("l2_gradient", "L2 gradient", PortType.BOOL, False),
         _float_parameter("pre_blur_sigma", "Pre-blur sigma", 0.0, minimum=0.0),

@@ -370,7 +370,8 @@ def _run_once(
     try:
         window.resize(1500, 900)
         window.show()
-        window.preview_dock.show()
+        window.image_preview_dock.show()
+        window.note_preview_dock.show()
         if not window.open_path(graph_path):
             raise RuntimeError("could not open the Phase 8 reference graph")
         if not _wait_until(application, lambda: _source_is_available(client), 10.0):

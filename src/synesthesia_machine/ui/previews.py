@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage, QPainter, QPaintEvent, QPixmap
-from PySide6.QtWidgets import QLabel, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage, QPainter, QPaintEvent, QPen, QPixmap
+from PySide6.QtWidgets import QLabel, QTabWidget, QVBoxLayout, QWidget
 
 from synesthesia_machine.contracts import ImagePreview, NotePreview
 
@@ -69,16 +69,14 @@ class ImagePreviewWidget(QWidget):
 
 
 class NotePreviewWidget(QWidget):
-    """Render a compact 128-key activity strip; no graph rendering runs in the engine."""
-
-    _BLACK_PITCH_CLASSES = frozenset({1, 3, 6, 8, 10})
+    """Render active note velocities as an adaptive rainbow bar chart."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.latest_preview: NotePreview | None = None
         self.setObjectName("note_preview_widget")
-        self.setAccessibleName("MIDI note activity preview")
-        self.setMinimumSize(260, 90)
+        self.setAccessibleName("MIDI note velocity chart")
+        self.setMinimumSize(180, 120)
 
     def sizeHint(self) -> QSize:
         return QSize(560, 130)
@@ -87,87 +85,184 @@ class NotePreviewWidget(QWidget):
         self.latest_preview = preview
         self.update()
 
+    def note_axis_orientation(self) -> Qt.Orientation:
+        """Return the chart orientation used at the current widget aspect ratio."""
+
+        return (
+            Qt.Orientation.Horizontal if self.width() >= self.height() else Qt.Orientation.Vertical
+        )
+
     def paintEvent(self, event: QPaintEvent) -> None:
         del event
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         painter.fillRect(self.rect(), QColor("#161a22"))
-        keyboard = self.rect().adjusted(8, 22, -8, -22)
-        key_width = keyboard.width() / 128.0
         active: dict[int, int] = {}
         for activity in self.latest_preview.notes if self.latest_preview is not None else ():
             active[activity.note] = max(active.get(activity.note, 0), activity.velocity, 1)
-        for note in range(128):
-            key = QRectF(
-                keyboard.left() + note * key_width,
-                keyboard.top(),
-                max(1.0, key_width),
-                keyboard.height(),
-            )
-            velocity = active.get(note)
-            if velocity is not None:
-                strength = velocity / 127.0
-                colour = QColor.fromHsvF(0.48, 0.75, 0.55 + 0.45 * strength)
-            elif note % 12 in self._BLACK_PITCH_CLASSES:
-                colour = QColor("#343a46")
-            else:
-                colour = QColor("#dce1e8")
-            painter.fillRect(key, colour)
-        painter.setPen(QColor("#8d96a8"))
+
+        orientation = self.note_axis_orientation()
+        chart = (
+            QRectF(self.rect().adjusted(34, 28, -12, -24))
+            if orientation is Qt.Orientation.Horizontal
+            else QRectF(self.rect().adjusted(34, 28, -32, -22))
+        )
+        if chart.width() <= 0.0 or chart.height() <= 0.0:
+            return
+        self._paint_grid(painter, chart, orientation)
+        if orientation is Qt.Orientation.Horizontal:
+            self._paint_horizontal_bars(painter, chart, active)
+        else:
+            self._paint_vertical_note_axis_bars(painter, chart, active)
+
+        painter.setPen(QColor("#a8b3c7"))
         count = len(active)
-        label = f"{count} active note{'s' if count != 1 else ''}"
-        painter.drawText(8, 16, label)
+        label = f"{count} active note{'s' if count != 1 else ''} · velocity 0-127"
+        painter.drawText(8, 18, label)
+
+    @staticmethod
+    def _paint_grid(
+        painter: QPainter,
+        chart: QRectF,
+        orientation: Qt.Orientation,
+    ) -> None:
+        painter.setPen(QPen(QColor("#36404d"), 1.0))
+        for fraction in (0.0, 0.5, 1.0):
+            if orientation is Qt.Orientation.Horizontal:
+                coordinate = chart.bottom() - chart.height() * fraction
+                painter.drawLine(
+                    QPointF(chart.left(), coordinate), QPointF(chart.right(), coordinate)
+                )
+            else:
+                coordinate = chart.left() + chart.width() * fraction
+                painter.drawLine(
+                    QPointF(coordinate, chart.top()), QPointF(coordinate, chart.bottom())
+                )
+        painter.setPen(QColor("#7f8b99"))
+        if orientation is Qt.Orientation.Horizontal:
+            for velocity, fraction in ((0, 0.0), (64, 0.5), (127, 1.0)):
+                coordinate = chart.bottom() - chart.height() * fraction
+                painter.drawText(
+                    QRectF(0.0, coordinate - 8.0, chart.left() - 4.0, 16.0),
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                    str(velocity),
+                )
+            for note, fraction, alignment in (
+                (0, 0.0, Qt.AlignmentFlag.AlignLeft),
+                (64, 0.5, Qt.AlignmentFlag.AlignHCenter),
+                (127, 1.0, Qt.AlignmentFlag.AlignRight),
+            ):
+                coordinate = chart.left() + chart.width() * fraction
+                painter.drawText(
+                    QRectF(coordinate - 22.0, chart.bottom() + 3.0, 44.0, 18.0),
+                    alignment | Qt.AlignmentFlag.AlignTop,
+                    str(note),
+                )
+        else:
+            for note, fraction in ((0, 0.0), (64, 0.5), (127, 1.0)):
+                coordinate = chart.bottom() - chart.height() * fraction
+                painter.drawText(
+                    QRectF(0.0, coordinate - 8.0, chart.left() - 4.0, 16.0),
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                    str(note),
+                )
+            for velocity, fraction, alignment in (
+                (0, 0.0, Qt.AlignmentFlag.AlignLeft),
+                (64, 0.5, Qt.AlignmentFlag.AlignHCenter),
+                (127, 1.0, Qt.AlignmentFlag.AlignRight),
+            ):
+                coordinate = chart.left() + chart.width() * fraction
+                painter.drawText(
+                    QRectF(coordinate - 22.0, chart.bottom() + 3.0, 44.0, 18.0),
+                    alignment | Qt.AlignmentFlag.AlignTop,
+                    str(velocity),
+                )
+
+    @staticmethod
+    def _paint_horizontal_bars(
+        painter: QPainter,
+        chart: QRectF,
+        active: dict[int, int],
+    ) -> None:
+        slot = chart.width() / 128.0
+        painter.setPen(Qt.PenStyle.NoPen)
+        for note, velocity in active.items():
+            bar_height = chart.height() * velocity / 127.0
+            bar_width = max(1.0, slot * 0.82)
+            bar = QRectF(
+                chart.left() + note * slot + (slot - bar_width) / 2.0,
+                chart.bottom() - bar_height,
+                bar_width,
+                bar_height,
+            )
+            painter.fillRect(bar, note_rainbow_color(note))
+
+    @staticmethod
+    def _paint_vertical_note_axis_bars(
+        painter: QPainter,
+        chart: QRectF,
+        active: dict[int, int],
+    ) -> None:
+        slot = chart.height() / 128.0
+        painter.setPen(Qt.PenStyle.NoPen)
+        for note, velocity in active.items():
+            bar_height = max(1.0, slot * 0.82)
+            bar_width = chart.width() * velocity / 127.0
+            bar = QRectF(
+                chart.left(),
+                chart.bottom() - (note + 1) * slot + (slot - bar_height) / 2.0,
+                bar_width,
+                bar_height,
+            )
+            painter.fillRect(bar, note_rainbow_color(note))
 
 
-class RuntimePreviewPanel(QWidget):
-    """Simultaneously visible image and note preview surface."""
+def note_rainbow_color(note: int) -> QColor:
+    """Map MIDI note 0..127 onto a readable red-to-violet rainbow gradient."""
+
+    clamped = min(127, max(0, note))
+    return QColor.fromHsvF(0.78 * clamped / 127.0, 0.68, 0.95)
+
+
+class ImagePreviewPanel(QWidget):
+    """Self-contained image preview page suitable for its own dock or tab."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setObjectName("runtime_preview_panel")
-        self.setAccessibleName("Runtime previews")
+        self.setObjectName("image_preview_panel")
+        self.setAccessibleName("Image preview")
         self.image_widget = ImagePreviewWidget(self)
-        self.note_widget = NotePreviewWidget(self)
         self.image_caption = QLabel("Waiting for Display Image Data…", self)
-        self.note_caption = QLabel("Waiting for Note Visualizer…", self)
         self.image_caption.setObjectName("image_preview_caption")
-        self.note_caption.setObjectName("note_preview_caption")
-
-        image_page = QWidget(self)
-        image_page.setObjectName("image_preview_page")
-        image_page.setAccessibleName("Image preview section")
-        image_layout = QVBoxLayout(image_page)
-        image_layout.setContentsMargins(4, 4, 4, 4)
-        image_layout.addWidget(self.image_caption)
-        image_layout.addWidget(self.image_widget, 1)
-
-        note_page = QWidget(self)
-        note_page.setObjectName("note_preview_page")
-        note_page.setAccessibleName("Note preview section")
-        note_layout = QVBoxLayout(note_page)
-        note_layout.setContentsMargins(4, 4, 4, 4)
-        note_layout.addWidget(self.note_caption)
-        note_layout.addWidget(self.note_widget, 1)
-
-        self.splitter = QSplitter(Qt.Orientation.Horizontal, self)
-        self.splitter.setObjectName("runtime_preview_splitter")
-        self.splitter.setAccessibleName("Image and note previews")
-        self.splitter.setChildrenCollapsible(False)
-        self.splitter.addWidget(image_page)
-        self.splitter.addWidget(note_page)
-        self.splitter.setStretchFactor(0, 3)
-        self.splitter.setStretchFactor(1, 2)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.splitter)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.addWidget(self.image_caption)
+        layout.addWidget(self.image_widget, 1)
 
-    def show_image_preview(self, preview: ImagePreview) -> None:
+    def show_preview(self, preview: ImagePreview) -> None:
         self.image_widget.set_preview(preview)
         self.image_caption.setText(
             f"Node {str(preview.node_id)[:8]} · tick {preview.tick_index} · "
             f"{preview.width}x{preview.height} · sequence {preview.sequence}"
         )
 
-    def show_note_preview(self, preview: NotePreview) -> None:
+
+class NotePreviewPanel(QWidget):
+    """Self-contained note velocity page suitable for its own dock or tab."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("note_preview_panel")
+        self.setAccessibleName("Note visualizer")
+        self.note_widget = NotePreviewWidget(self)
+        self.note_caption = QLabel("Waiting for Note Visualizer…", self)
+        self.note_caption.setObjectName("note_preview_caption")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.addWidget(self.note_caption)
+        layout.addWidget(self.note_widget, 1)
+
+    def show_preview(self, preview: NotePreview) -> None:
         self.note_widget.set_preview(preview)
         self.note_caption.setText(
             f"Node {str(preview.node_id)[:8]} · tick {preview.tick_index} · "
@@ -175,4 +270,40 @@ class RuntimePreviewPanel(QWidget):
         )
 
 
-__all__ = ["ImagePreviewWidget", "NotePreviewWidget", "RuntimePreviewPanel"]
+class RuntimePreviewPanel(QWidget):
+    """Tabbed compatibility surface composed from independent preview pages."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("runtime_preview_panel")
+        self.setAccessibleName("Runtime previews")
+        self.image_panel = ImagePreviewPanel(self)
+        self.note_panel = NotePreviewPanel(self)
+        self.image_widget = self.image_panel.image_widget
+        self.note_widget = self.note_panel.note_widget
+        self.image_caption = self.image_panel.image_caption
+        self.note_caption = self.note_panel.note_caption
+        self.tabs = QTabWidget(self)
+        self.tabs.setObjectName("runtime_preview_tabs")
+        self.tabs.setAccessibleName("Image and note preview tabs")
+        self.tabs.addTab(self.image_panel, "Image Preview")
+        self.tabs.addTab(self.note_panel, "Note Visualizer")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.tabs)
+
+    def show_image_preview(self, preview: ImagePreview) -> None:
+        self.image_panel.show_preview(preview)
+
+    def show_note_preview(self, preview: NotePreview) -> None:
+        self.note_panel.show_preview(preview)
+
+
+__all__ = [
+    "ImagePreviewPanel",
+    "ImagePreviewWidget",
+    "NotePreviewPanel",
+    "NotePreviewWidget",
+    "RuntimePreviewPanel",
+    "note_rainbow_color",
+]
