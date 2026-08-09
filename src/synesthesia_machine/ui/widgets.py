@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from functools import partial
 from uuid import UUID
 
-from PySide6.QtCore import QByteArray, QMimeData, Qt, QTimer, Signal, Slot
-from PySide6.QtGui import QBrush, QDrag, QKeyEvent
+from PySide6.QtCore import QByteArray, QMimeData, QSize, Qt, QTimer, Signal, Slot
+from PySide6.QtGui import QBrush, QColor, QDrag, QKeyEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -43,6 +43,25 @@ from synesthesia_machine.ui.view_models import ConnectionViewModel, NodeViewMode
 _TYPE_ROLE = int(Qt.ItemDataRole.UserRole)
 _INDEX_ROLE = _TYPE_ROLE + 1
 _ISSUE_ROLE = _INDEX_ROLE + 1
+_CATEGORY_ROLE = _ISSUE_ROLE + 1
+_GROUP_DEPTH_ROLE = _CATEGORY_ROLE + 1
+
+_LIBRARY_ROOT_ORDER = {
+    "Input": 0,
+    "Image": 1,
+    "Synesthesia": 2,
+    "Output": 3,
+    "Visualization": 4,
+    "Utility": 5,
+}
+_LIBRARY_ROOT_LABELS = {"Input": "Inputs", "Output": "Outputs"}
+_LIBRARY_SUBGROUP_LABELS = {
+    "Adjustment": "Adjustments",
+    "Channel": "Channels",
+    "Dimension": "Dimensions",
+    "Filter": "Filters",
+    "Utility": "Utilities",
+}
 
 
 class ValidationIssuePanel(QWidget):
@@ -106,7 +125,7 @@ class NodeTreeWidget(QTreeWidget):
 
 
 class NodeLibrary(QWidget):
-    """Searchable and category-grouped projection of NodeRegistry definitions."""
+    """Searchable, ordered category/subcategory projection of registry definitions."""
 
     nodeActivated = Signal(str)
 
@@ -123,6 +142,9 @@ class NodeLibrary(QWidget):
         self.tree.setHeaderHidden(True)
         self.tree.setDragEnabled(True)
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.tree.setIndentation(18)
+        self.tree.setAnimated(True)
+        self.tree.setRootIsDecorated(True)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.addWidget(self.search)
@@ -136,21 +158,33 @@ class NodeLibrary(QWidget):
     def _populate(self, query: str) -> None:
         selected = self.selected_type_id()
         self.tree.clear()
-        groups: dict[str, QTreeWidgetItem] = {}
+        groups: dict[tuple[str, ...], QTreeWidgetItem] = {}
         normalized = query.strip().casefold()
-        for definition in self.registry.definitions():
+        definitions = sorted(self.registry.definitions(), key=_library_sort_key)
+        for definition in definitions:
             haystack = _definition_search_text(definition)
             if normalized and not all(token in haystack for token in normalized.split()):
                 continue
-            group = groups.get(definition.category)
-            if group is None:
-                group = QTreeWidgetItem(self.tree, [definition.category])
-                group.setFlags(group.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
-                group.setForeground(0, QBrush(node_category_color(definition.category)))
-                groups[definition.category] = group
-            item = QTreeWidgetItem(group, [definition.display_name])
+            category_path = _category_path(definition.category)
+            parent: QTreeWidgetItem | None = None
+            for depth in range(1, len(category_path) + 1):
+                path = category_path[:depth]
+                group = groups.get(path)
+                if group is None:
+                    label = _library_group_label(path)
+                    group = (
+                        QTreeWidgetItem(self.tree, [label])
+                        if parent is None
+                        else QTreeWidgetItem(parent, [label])
+                    )
+                    _style_library_group(group, " / ".join(path), depth - 1)
+                    groups[path] = group
+                parent = group
+            assert parent is not None
+            item = QTreeWidgetItem(parent, [definition.display_name])
             item.setForeground(0, QBrush(node_category_color(definition.category)))
             item.setData(0, _TYPE_ROLE, definition.type_id)
+            item.setData(0, _CATEGORY_ROLE, definition.category)
             item.setToolTip(0, definition.description)
             item.setStatusTip(0, definition.description)
             if definition.type_id == selected:
@@ -171,6 +205,46 @@ class NodeLibrary(QWidget):
         item = selected[0]
         value = item.data(0, _TYPE_ROLE)
         return value if isinstance(value, str) else None
+
+
+def _category_path(category: str) -> tuple[str, ...]:
+    parts = tuple(part.strip() for part in category.split("/") if part.strip())
+    return parts or ("Other",)
+
+
+def _library_group_label(path: tuple[str, ...]) -> str:
+    name = path[-1]
+    if len(path) == 1:
+        return _LIBRARY_ROOT_LABELS.get(name, name)
+    return _LIBRARY_SUBGROUP_LABELS.get(name, name)
+
+
+def _library_sort_key(definition: NodeDefinition) -> tuple[object, ...]:
+    path = _category_path(definition.category)
+    root = path[0]
+    return (
+        _LIBRARY_ROOT_ORDER.get(root, len(_LIBRARY_ROOT_ORDER)),
+        root.casefold(),
+        *(part.casefold() for part in path[1:]),
+        definition.display_name.casefold(),
+    )
+
+
+def _style_library_group(item: QTreeWidgetItem, category: str, depth: int) -> None:
+    color = node_category_color(category)
+    background = QColor(color)
+    background.setAlpha(52 if depth == 0 else 30)
+    font = item.font(0)
+    font.setBold(True)
+    if depth == 0:
+        font.setPointSizeF(font.pointSizeF() + 0.75)
+    item.setFont(0, font)
+    item.setForeground(0, QBrush(color))
+    item.setBackground(0, QBrush(background))
+    item.setSizeHint(0, QSize(0, 29 if depth == 0 else 25))
+    item.setData(0, _CATEGORY_ROLE, category)
+    item.setData(0, _GROUP_DEPTH_ROLE, depth)
+    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
 
 
 @dataclass(frozen=True, slots=True)

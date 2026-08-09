@@ -73,7 +73,17 @@ class Theme:
         return f"""
             QMainWindow, QDialog {{ background: {colors.window}; color: {colors.text}; }}
             QWidget {{ color: {colors.text}; font-size: {self.body_points}pt; }}
-            QDockWidget, QMenuBar, QMenu, QStatusBar {{ background: {colors.panel}; }}
+            QDockWidget, QMenuBar, QMenu, QStatusBar {{ background: {colors.panel};
+                color: {colors.text}; }}
+            QDockWidget::title {{ background: {colors.node_header}; color: {colors.text};
+                border: 1px solid {colors.border}; padding: 5px 8px; }}
+            QTabWidget::pane {{ background: {colors.panel}; border: 1px solid {colors.border}; }}
+            QTabBar::tab {{ background: {colors.node_header}; color: {colors.text};
+                border: 1px solid {colors.border}; border-bottom: 0;
+                padding: 6px 11px; min-width: 72px; }}
+            QTabBar::tab:selected {{ background: {colors.accent}; color: {colors.canvas}; }}
+            QTabBar::tab:hover:!selected {{ background: {colors.border};
+                color: {colors.text}; }}
             QWidget#inspector_panel, QScrollArea#inspector_scroll_area,
             QWidget#inspector_scroll_viewport, QWidget#inspector_form_container {{
                 background: {colors.panel}; color: {colors.text}; }}
@@ -112,6 +122,9 @@ class Theme:
             QSlider::handle:horizontal:hover {{ background: {colors.selection}; }}
             QLabel[parameterValue="true"] {{ color: {colors.text}; background: {colors.canvas};
                 border: 1px solid {colors.border}; border-radius: 3px; padding: 1px 4px; }}
+            QSpinBox[parameterValueInput="true"],
+            QDoubleSpinBox[parameterValueInput="true"] {{ color: {colors.text};
+                background: {colors.canvas}; padding: 2px 4px; }}
             QMenu::item {{ padding: 5px 24px 5px 9px; background: transparent; }}
             QMenu::item:selected {{ background: {colors.accent}; color: {colors.canvas}; }}
             QPushButton {{ background: {colors.node_header}; border: 1px solid {colors.border};
@@ -140,22 +153,24 @@ DEFAULT_THEME = Theme()
 
 
 _NODE_CATEGORY_COLORS = {
-    "Input": "#68b6ff",
-    "Image / Adjustment": "#ffb55a",
-    "Image / Analysis": "#ff8a80",
-    "Image / Channel": "#63d5dc",
-    "Image / Compositing": "#ffd166",
-    "Image / Dimension": "#7ed6b3",
-    "Image / Filter": "#b8e986",
-    "Image / Utility": "#a8b3c7",
-    "Synesthesia": "#ce93d8",
-    "Utility": "#90a4ae",
-    "Utility / Channel": "#80cbc4",
-    "Utility / MIDI": "#c5e1a5",
-    "Utility / Scalar": "#9fa8da",
-    "Output / Audio": "#f48fb1",
-    "Output / MIDI": "#b39ddb",
-    "Visualization": "#ffcc80",
+    "Input": "#62b6ff",
+    "Image": "#ff9664",
+    "Image / Adjustment": "#ffad66",
+    "Image / Analysis": "#ff796f",
+    "Image / Channel": "#f89b5b",
+    "Image / Compositing": "#ffc067",
+    "Image / Dimension": "#ef8a5f",
+    "Image / Filter": "#ffa45f",
+    "Image / Utility": "#d77e5d",
+    "Synesthesia": "#c38be0",
+    "Output": "#ed8bb2",
+    "Output / Audio": "#f08daf",
+    "Output / MIDI": "#d38bc4",
+    "Visualization": "#61d2d8",
+    "Utility": "#94a7b0",
+    "Utility / Channel": "#79b8b4",
+    "Utility / MIDI": "#98b78c",
+    "Utility / Scalar": "#9da8c7",
 }
 
 

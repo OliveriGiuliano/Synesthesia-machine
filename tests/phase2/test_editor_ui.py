@@ -113,6 +113,9 @@ def test_shell_has_fixed_structure_actions_and_accessible_controls(window: MainW
     assert window.library.tree.accessibleName()
     assert window.inspector.validation.accessibleName()
     assert window.devicePixelRatioF() > 0.0
+    style_sheet = DEFAULT_THEME.style_sheet()
+    assert "QDockWidget::title" in style_sheet
+    assert "QTabBar::tab:selected" in style_sheet
 
     for action in window.action_registry.values():
         assert action.objectName().startswith("action_")
@@ -334,13 +337,22 @@ def test_slider_hint_is_explicit_and_sliders_display_and_drag_their_value(
     assert isinstance(float_editor, FloatRangeParameterEditor)
     assert isinstance(float_editor.slider, DirectDragSlider)
     assert (float_editor.minimum(), float_editor.maximum()) == (0.0, 1.0)
-    assert float_editor.value_label.text() == "0.25"
-    assert float_editor.value_label.property("parameterValue") is True
-    assert 'QLabel[parameterValue="true"]' in DEFAULT_THEME.style_sheet()
+    assert isinstance(float_editor.value_editor, QDoubleSpinBox)
+    assert float_editor.value_editor.value() == pytest.approx(0.25)
+    assert float_editor.value_editor.property("parameterValueInput") is True
+    assert 'QDoubleSpinBox[parameterValueInput="true"]' in DEFAULT_THEME.style_sheet()
     float_editor.setValue(0.75)
     qapp.processEvents()
     assert edits[-1] == pytest.approx(0.75)
-    assert float_editor.value_label.text() == "0.75"
+    assert float_editor.value_editor.value() == pytest.approx(0.75)
+
+    float_editor.value_editor.setFocus()
+    float_editor.value_editor.selectAll()
+    QTest.keyClicks(float_editor.value_editor, "0.625")
+    QTest.keyClick(float_editor.value_editor, Qt.Key.Key_Return)
+    qapp.processEvents()
+    assert edits[-1] == pytest.approx(0.625)
+    assert float_editor.value() == pytest.approx(0.625)
 
     float_editor.resize(220, 24)
     float_editor.show()
@@ -377,6 +389,13 @@ def test_slider_hint_is_explicit_and_sliders_display_and_drag_their_value(
     int_editor.setValue(12)
     qapp.processEvents()
     assert edits[-1] == 12
+    int_editor.value_editor.setFocus()
+    int_editor.value_editor.selectAll()
+    QTest.keyClicks(int_editor.value_editor, "7")
+    QTest.keyClick(int_editor.value_editor, Qt.Key.Key_Return)
+    qapp.processEvents()
+    assert edits[-1] == 7
+    assert int_editor.slider.value() == 7
 
     technical_spec = ParameterSpec(
         "preview_fps", "Preview FPS", PortType.INT, 30, minimum=5, maximum=30
@@ -422,12 +441,39 @@ def test_node_category_palette_is_unique_and_applied_to_library_names(
     library = NodeLibrary(registry)
     library.show()
     qapp.processEvents()
-    for group_index in range(library.tree.topLevelItemCount()):
-        group = library.tree.topLevelItem(group_index)
-        expected = node_category_color(group.text(0))
-        assert group.foreground(0).color() == expected
-        for child_index in range(group.childCount()):
-            assert group.child(child_index).foreground(0).color() == expected
+    roots = [library.tree.topLevelItem(index) for index in range(library.tree.topLevelItemCount())]
+    assert [root.text(0) for root in roots] == [
+        "Inputs",
+        "Image",
+        "Synesthesia",
+        "Outputs",
+        "Visualization",
+        "Utility",
+    ]
+    assert roots[0].foreground(0).color() == node_category_color("Input")
+
+    image = roots[1]
+    assert [image.child(index).text(0) for index in range(image.childCount())] == [
+        "Adjustments",
+        "Analysis",
+        "Channels",
+        "Compositing",
+        "Dimensions",
+        "Filters",
+        "Utilities",
+    ]
+    adjustment = image.child(0)
+    assert adjustment.foreground(0).color() == node_category_color("Image / Adjustment")
+    assert adjustment.background(0).color().alpha() > 0
+    adjustment_names = [adjustment.child(index).text(0) for index in range(adjustment.childCount())]
+    assert "Image Add Scalar" in adjustment_names
+
+    image_hues = {
+        node_category_color(category).hsvHue()
+        for category in categories
+        if category.startswith("Image / ")
+    }
+    assert max(image_hues) - min(image_hues) < 40
     library.close()
 
 

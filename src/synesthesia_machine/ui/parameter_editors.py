@@ -9,6 +9,7 @@ from typing import cast
 from PySide6.QtCore import QPointF, Qt, QTimer, Slot
 from PySide6.QtGui import QColor, QMouseEvent
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QApplication,
     QCheckBox,
     QColorDialog,
@@ -16,7 +17,6 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QPushButton,
     QSizePolicy,
@@ -176,43 +176,65 @@ class DirectDragSlider(QSlider):
 
 
 class _RangeParameterEditor(QWidget):
-    """Shared slider/value surface for parameters with finite metadata bounds."""
+    """Shared slider and editable value surface for finite metadata bounds."""
 
-    def __init__(self, parameter: ParameterViewModel, on_changed: ParameterChanged) -> None:
+    def __init__(
+        self,
+        parameter: ParameterViewModel,
+        on_changed: ParameterChanged,
+        value_editor: QSpinBox | QDoubleSpinBox,
+    ) -> None:
         super().__init__()
         self._on_changed = on_changed
         self.slider = DirectDragSlider(Qt.Orientation.Horizontal, self)
         self.slider.setObjectName(f"parameter_{parameter.spec.id}_slider")
         self.slider.setAccessibleName(f"{parameter.spec.label} slider")
-        self.value_label = QLabel(self)
-        self.value_label.setObjectName(f"parameter_{parameter.spec.id}_value")
-        self.value_label.setProperty("parameterValue", True)
-        self.value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.value_label.setMinimumWidth(48)
+        self.value_editor = value_editor
+        self.value_editor.setParent(self)
+        self.value_editor.setObjectName(f"parameter_{parameter.spec.id}_value")
+        self.value_editor.setAccessibleName(f"{parameter.spec.label} value")
+        self.value_editor.setProperty("parameterValue", True)
+        self.value_editor.setProperty("parameterValueInput", True)
+        self.value_editor.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.value_editor.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self.value_editor.setKeyboardTracking(False)
+        self.value_editor.setMinimumWidth(68)
+        self.value_editor.setMaximumWidth(92)
+        # Kept as a compatibility alias for integrations that used the old read-only label.
+        self.value_label = self.value_editor
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
         layout.addWidget(self.slider, 1)
-        layout.addWidget(self.value_label)
+        layout.addWidget(self.value_editor)
         self._commit_timer = QTimer(self)
         self._commit_timer.setSingleShot(True)
         self._commit_timer.timeout.connect(self._commit)
         self.slider.valueChanged.connect(self._value_changed)
         self.slider.sliderReleased.connect(self._schedule_commit)
+        self.value_editor.valueChanged.connect(self._field_value_changed)
 
     @Slot(int)
     def _value_changed(self, position: int) -> None:
         del position
-        self._update_value_label()
+        self._update_value_editor()
         if not self.slider.isSliderDown():
             self._schedule_commit()
+
+    @Slot()
+    def _field_value_changed(self) -> None:
+        self._update_slider_from_editor()
+        self._schedule_commit()
 
     @Slot()
     def _schedule_commit(self) -> None:
         self._commit_timer.start(0)
 
-    def _update_value_label(self) -> None:
+    def _update_value_editor(self) -> None:
+        raise NotImplementedError
+
+    def _update_slider_from_editor(self) -> None:
         raise NotImplementedError
 
     def _commit(self) -> None:
@@ -229,13 +251,16 @@ class FloatRangeParameterEditor(_RangeParameterEditor):
         assert spec.minimum is not None and spec.maximum is not None
         self._minimum = float(spec.minimum)
         self._maximum = float(spec.maximum)
-        super().__init__(parameter, on_changed)
+        value_editor = QDoubleSpinBox()
+        value_editor.setDecimals(6)
+        value_editor.setRange(self._minimum, self._maximum)
+        super().__init__(parameter, on_changed, value_editor)
         self.slider.blockSignals(True)
         self.slider.setRange(0, self._STEPS if self._maximum > self._minimum else 0)
         value = float(parameter.value) if isinstance(parameter.value, float) else self._minimum
         self.slider.setValue(self._position_for_value(value))
         self.slider.blockSignals(False)
-        self._update_value_label()
+        self._set_editor_value(value)
 
     def minimum(self) -> float:
         return self._minimum
@@ -244,10 +269,7 @@ class FloatRangeParameterEditor(_RangeParameterEditor):
         return self._maximum
 
     def value(self) -> float:
-        if self._maximum <= self._minimum:
-            return self._minimum
-        ratio = self.slider.value() / self._STEPS
-        return self._minimum + ratio * (self._maximum - self._minimum)
+        return float(self.value_editor.value())
 
     def setValue(self, value: float) -> None:
         self.slider.setValue(self._position_for_value(value))
@@ -258,8 +280,26 @@ class FloatRangeParameterEditor(_RangeParameterEditor):
         clamped = min(self._maximum, max(self._minimum, value))
         return round((clamped - self._minimum) * self._STEPS / (self._maximum - self._minimum))
 
-    def _update_value_label(self) -> None:
-        self.value_label.setText(f"{self.value():.6g}")
+    def _value_for_position(self) -> float:
+        if self._maximum <= self._minimum:
+            return self._minimum
+        ratio = self.slider.value() / self._STEPS
+        return self._minimum + ratio * (self._maximum - self._minimum)
+
+    def _set_editor_value(self, value: float) -> None:
+        blocked = self.value_editor.blockSignals(True)
+        cast(QDoubleSpinBox, self.value_editor).setValue(
+            min(self._maximum, max(self._minimum, value))
+        )
+        self.value_editor.blockSignals(blocked)
+
+    def _update_value_editor(self) -> None:
+        self._set_editor_value(self._value_for_position())
+
+    def _update_slider_from_editor(self) -> None:
+        blocked = self.slider.blockSignals(True)
+        self.slider.setValue(self._position_for_value(self.value()))
+        self.slider.blockSignals(blocked)
 
     @Slot()
     def _commit(self) -> None:
@@ -274,7 +314,9 @@ class IntRangeParameterEditor(_RangeParameterEditor):
         assert spec.minimum is not None and spec.maximum is not None
         self._minimum = int(spec.minimum)
         self._maximum = int(spec.maximum)
-        super().__init__(parameter, on_changed)
+        value_editor = QSpinBox()
+        value_editor.setRange(self._minimum, self._maximum)
+        super().__init__(parameter, on_changed, value_editor)
         self.slider.blockSignals(True)
         self.slider.setRange(self._minimum, self._maximum)
         value = (
@@ -284,7 +326,7 @@ class IntRangeParameterEditor(_RangeParameterEditor):
         )
         self.slider.setValue(value)
         self.slider.blockSignals(False)
-        self._update_value_label()
+        self._set_editor_value(value)
 
     def minimum(self) -> int:
         return self._minimum
@@ -293,13 +335,23 @@ class IntRangeParameterEditor(_RangeParameterEditor):
         return self._maximum
 
     def value(self) -> int:
-        return self.slider.value()
+        return int(self.value_editor.value())
 
     def setValue(self, value: int) -> None:
         self.slider.setValue(value)
 
-    def _update_value_label(self) -> None:
-        self.value_label.setText(str(self.value()))
+    def _set_editor_value(self, value: int) -> None:
+        blocked = self.value_editor.blockSignals(True)
+        self.value_editor.setValue(min(self._maximum, max(self._minimum, value)))
+        self.value_editor.blockSignals(blocked)
+
+    def _update_value_editor(self) -> None:
+        self._set_editor_value(self.slider.value())
+
+    def _update_slider_from_editor(self) -> None:
+        blocked = self.slider.blockSignals(True)
+        self.slider.setValue(self.value())
+        self.slider.blockSignals(blocked)
 
     @Slot()
     def _commit(self) -> None:
