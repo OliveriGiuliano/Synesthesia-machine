@@ -277,11 +277,12 @@ def test_engine_crash_keeps_document_and_undo_history_then_restart_rebuilds(
         assert (
             "Engine CRASHED · STOPPED · exit 7" in window._engine_status.text()  # pyright: ignore[reportPrivateUsage]
         )
-        assert str(crash_log) in window._engine_status.text()  # pyright: ignore[reportPrivateUsage]
+        assert "no crash report file" in window._engine_status.text()  # pyright: ignore[reportPrivateUsage]
         assert len(messages) == 1
         assert "remains open and editable" in messages[0][1]
-        assert str(crash_log) in messages[0][1]
-        assert "forced termination may not produce" in messages[0][1]
+        assert str(crash_log) not in messages[0][1]
+        assert "No crash-report file was produced" in messages[0][1]
+        assert "Native termination" in messages[0][1]
 
         window._refresh_engine_status()  # pyright: ignore[reportPrivateUsage]
         assert len(messages) == 1

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import faulthandler
 import os
 import queue
 import threading
@@ -500,14 +501,39 @@ def engine_server_main(
 ) -> None:
     """Top-level Windows-spawn target; never imports or creates Qt objects."""
 
+    crash_path = None if crash_log_path is None else Path(crash_log_path)
+    crash_capture_path = None if crash_path is None else Path(f"{crash_path}.pending")
+    crash_stream = None
+    completed_normally = False
     try:
+        if crash_capture_path is not None:
+            crash_capture_path.parent.mkdir(parents=True, exist_ok=True)
+            crash_stream = crash_capture_path.open("w", encoding="utf-8")
+            faulthandler.enable(file=crash_stream, all_threads=True)
         configure_opencv_threads()
         EngineServer(connection, event_queue).run()
+        completed_normally = True
     except BaseException:
-        if crash_log_path is not None:
-            _write_crash_log(Path(crash_log_path), traceback.format_exc())
+        detail = traceback.format_exc()
+        if crash_stream is not None:
+            with suppress(OSError):
+                crash_stream.write(detail)
+                crash_stream.flush()
+        elif crash_path is not None:
+            _write_crash_log(crash_path, detail)
         raise
     finally:
+        if crash_stream is not None:
+            with suppress(RuntimeError):
+                faulthandler.disable()
+            with suppress(OSError):
+                crash_stream.close()
+            if completed_normally and crash_capture_path is not None:
+                with suppress(OSError):
+                    crash_capture_path.unlink(missing_ok=True)
+            elif crash_path is not None and crash_capture_path is not None:
+                with suppress(OSError):
+                    crash_capture_path.replace(crash_path)
         connection.close()
         event_queue.close()
 

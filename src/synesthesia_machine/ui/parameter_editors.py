@@ -9,6 +9,7 @@ from typing import cast
 from PySide6.QtCore import QPointF, Qt, QTimer, Slot
 from PySide6.QtGui import QColor, QMouseEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QColorDialog,
     QComboBox,
@@ -28,7 +29,7 @@ from PySide6.QtWidgets import (
 
 from synesthesia_machine.contracts import ColorValue, NumericMatrix, PortType
 from synesthesia_machine.graph import LiteralValue
-from synesthesia_machine.nodes import ParameterEditorHint
+from synesthesia_machine.nodes import ParameterEditorHint, ParameterSpec
 from synesthesia_machine.ui.view_models import ParameterViewModel
 
 type ParameterChanged = Callable[[LiteralValue], None]
@@ -68,12 +69,40 @@ def create_parameter_editor(
 
     editor.setObjectName(f"parameter_{spec.id}")
     editor.setAccessibleName(spec.label)
-    editor.setToolTip(spec.help_text or f"{spec.label} ({spec.value_type.value})")
+    editor.setToolTip(parameter_tooltip(spec))
     editor.setStatusTip(editor.toolTip())
     editor.setEnabled(not parameter.connected)
     if compact:
         editor.setMaximumHeight(23)
     return editor
+
+
+def parameter_tooltip(spec: ParameterSpec) -> str:
+    """Build concise inline help even when a node has no authored help text."""
+
+    if spec.help_text.strip():
+        return spec.help_text.strip()
+    label = spec.label.casefold()
+    if spec.value_type is PortType.BOOL:
+        summary = f"Turns {label} on or off."
+    elif spec.id == "file_path":
+        summary = "Selects the video file this source decodes."
+    elif spec.choices:
+        summary = f"Selects the {label} setting."
+    else:
+        summary = f"Sets {label}."
+    details: list[str] = []
+    if spec.minimum is not None and spec.maximum is not None:
+        details.append(f"Range: {spec.minimum} to {spec.maximum}.")
+    elif spec.minimum is not None:
+        details.append(f"Minimum: {spec.minimum}.")
+    elif spec.maximum is not None:
+        details.append(f"Maximum: {spec.maximum}.")
+    if spec.choices and len(spec.choices) <= 8:
+        details.append("Options: " + ", ".join(str(value) for value in spec.choices) + ".")
+    if spec.connectable:
+        details.append("A connected input overrides this value.")
+    return " ".join((summary, *details))
 
 
 def _uses_slider(parameter: ParameterViewModel) -> bool:
@@ -157,6 +186,7 @@ class _RangeParameterEditor(QWidget):
         self.slider.setAccessibleName(f"{parameter.spec.label} slider")
         self.value_label = QLabel(self)
         self.value_label.setObjectName(f"parameter_{parameter.spec.id}_value")
+        self.value_label.setProperty("parameterValue", True)
         self.value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.value_label.setMinimumWidth(48)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -291,6 +321,7 @@ class FloatParameterEditor(QDoubleSpinBox):
         self._commit_timer = QTimer(self)
         self._commit_timer.setSingleShot(True)
         self._commit_timer.timeout.connect(self._flush_commit)
+        self.valueChanged.connect(self._commit)
         self.editingFinished.connect(self._commit)
 
     @Slot()
@@ -319,6 +350,7 @@ class IntParameterEditor(QSpinBox):
         self._commit_timer = QTimer(self)
         self._commit_timer.setSingleShot(True)
         self._commit_timer.timeout.connect(self._flush_commit)
+        self.valueChanged.connect(self._commit)
         self.editingFinished.connect(self._commit)
 
     @Slot()
@@ -438,11 +470,14 @@ class FilePathParameterEditor(QWidget):
     @Slot(bool)
     def _browse(self, checked: bool = False) -> None:
         del checked
+        active_window = QApplication.activeWindow()
+        dialog_parent = active_window if active_window is not None else None
         selected, _selected_filter = QFileDialog.getOpenFileName(
-            self,
+            dialog_parent,
             "Choose video file",
             self.path_edit.text(),
             self.VIDEO_FILTER,
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if not selected:
             return

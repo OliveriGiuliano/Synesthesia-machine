@@ -35,7 +35,7 @@ from synesthesia_machine.graph import (
 from synesthesia_machine.nodes import NodeDefinition, NodeRegistry
 from synesthesia_machine.ui.canvas import NODE_MIME_TYPE
 from synesthesia_machine.ui.musical_controls import MusicalParameterEditor
-from synesthesia_machine.ui.parameter_editors import create_parameter_editor
+from synesthesia_machine.ui.parameter_editors import create_parameter_editor, parameter_tooltip
 from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.theme import node_category_color
 from synesthesia_machine.ui.view_models import ConnectionViewModel, NodeViewModel
@@ -367,12 +367,11 @@ class InspectorPanel(QWidget):
             callback = partial(self._set_parameter, node.node_id, parameter.spec.id)
             editor = create_parameter_editor(parameter, callback)
             label = QLabel(parameter.spec.label, self.form_container)
-            help_text = parameter.spec.help_text
-            if help_text:
-                label.setToolTip(help_text)
-                label.setAccessibleDescription(help_text)
+            help_text = parameter_tooltip(parameter.spec)
+            label.setToolTip(help_text)
+            label.setAccessibleDescription(help_text)
             self.form.addRow(label, editor)
-            if help_text:
+            if parameter.spec.help_text:
                 help_label = QLabel(help_text, self.form_container)
                 help_label.setObjectName(f"parameter_help_{parameter.spec.id}")
                 help_label.setWordWrap(True)

@@ -7,13 +7,15 @@ from dataclasses import replace
 from uuid import UUID
 
 import pytest
+from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QUndoStack
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from synesthesia_machine.graph import GraphDocument, GroupKind, GroupModel
 from synesthesia_machine.nodes.utility import create_utility_registry
 from synesthesia_machine.persistence import graph_from_json, graph_to_json
-from synesthesia_machine.ui.canvas import GraphScene
+from synesthesia_machine.ui.canvas import GraphScene, GraphView
 from synesthesia_machine.ui.commands import (
     AddGroupCommand,
     DeleteGroupsCommand,
@@ -166,3 +168,37 @@ def test_session_scene_projects_selects_moves_and_deletes_groups(qapp: QApplicat
     assert session.document.group(group_id) is None
     session.undo_stack.undo()
     assert session.document.group(group_id) is not None
+
+
+def test_group_border_drag_resizes_and_is_undoable(qapp: QApplication) -> None:
+    session = DocumentSession(create_utility_registry())
+    scene = GraphScene(session, DEFAULT_THEME)
+    group_id = session.add_group(
+        GroupKind.GROUP,
+        (0.0, 0.0),
+        title="Resizable",
+        size=(300.0, 120.0),
+    )
+    item = scene.group_items[group_id]
+    view = GraphView(scene, DEFAULT_THEME)
+    view.resize(800, 500)
+    view.show()
+    view.centerOn(item)
+    qapp.processEvents()
+
+    right_edge = view.mapFromScene(QPointF(299.0, 60.0))
+    destination = QPoint(right_edge.x() + 80, right_edge.y())
+    QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=right_edge)
+    QTest.mouseMove(view.viewport(), destination, delay=20)
+    QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=destination)
+    qapp.processEvents()
+
+    resized = session.document.group(group_id)
+    assert resized is not None
+    assert resized.size[0] >= 375.0
+    assert resized.size[1] == pytest.approx(120.0)
+    session.undo_stack.undo()
+    restored = session.document.group(group_id)
+    assert restored is not None
+    assert restored.size == (300.0, 120.0)
+    view.close()

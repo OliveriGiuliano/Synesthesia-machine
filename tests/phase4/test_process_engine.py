@@ -21,6 +21,7 @@ from synesthesia_machine.graph import GraphDocument
 from synesthesia_machine.graph.validation import ValidationReport
 from synesthesia_machine.nodes import ResetReason
 from synesthesia_machine.runtime import EngineProtocolError, ProcessEngineClient
+from synesthesia_machine.runtime import engine_client as engine_client_module
 from synesthesia_machine.runtime import engine_server as engine_server_module
 from synesthesia_machine.runtime.engine_server import EngineServer
 
@@ -145,7 +146,9 @@ def test_forced_crash_fails_boundedly_and_restart_rebuilds_latest_valid_graph(
     assert crashed.exit_code is not None
     assert crashed.last_error is not None
     assert crashed.crash_log_path is not None
-    assert not Path(crashed.crash_log_path).exists()
+    crash_report = Path(crashed.crash_log_path)
+    assert crash_report.is_file()
+    assert "parent process supervisor" in crash_report.read_text(encoding="utf-8")
     assert _wait_until(lambda: not psutil.pid_exists(original_process_id))
     started = time.monotonic()
     with pytest.raises(RuntimeError, match=r"not connected|disconnected|exited"):
@@ -165,6 +168,13 @@ def test_forced_crash_fails_boundedly_and_restart_rebuilds_latest_valid_graph(
     assert restarted.crash_log_path == crashed.crash_log_path
     assert restarted.child_process_id is not None
     assert restarted.child_process_id != original_process_id
+
+
+def test_windows_native_access_violation_exit_code_is_explained() -> None:
+    detail = engine_client_module._exit_code_description(3221225477)  # pyright: ignore[reportPrivateUsage]
+
+    assert "0xC0000005" in detail
+    assert "access violation" in detail
 
 
 def test_start_clears_stale_crash_log_and_reports_configured_path(tmp_path: Path) -> None:

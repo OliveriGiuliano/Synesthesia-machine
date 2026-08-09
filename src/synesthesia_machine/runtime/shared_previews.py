@@ -163,14 +163,16 @@ class AttachedPreviewSlot:
             descriptor.height,
             descriptor.channels,
         )
-        target = np.ndarray(
-            (descriptor.height, descriptor.width, descriptor.channels),
-            dtype=np.uint8,
-            buffer=buffer,
-            offset=_HEADER.size,
-        )
-        np.copyto(target, preview.data, casting="no")
-        del target
+        # Keep NumPy arrays away from the lifetime of the cross-process mapping. Windows
+        # reported the old np.copyto(shared-memory ndarray, ...) path as a native
+        # _multiarray_umath access violation. ImagePreview guarantees a contiguous uint8
+        # payload, so a bounded buffer copy is both sufficient and safer during shutdown.
+        payload = memoryview(preview.data).cast("B")
+        try:
+            payload_end = _HEADER.size + len(payload)
+            buffer[_HEADER.size : payload_end] = payload
+        finally:
+            payload.release()
         self._write_version += 1
         _HEADER.pack_into(
             buffer,

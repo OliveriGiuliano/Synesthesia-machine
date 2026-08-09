@@ -80,6 +80,18 @@ class Theme:
             QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QListWidget, QTreeWidget,
             QPlainTextEdit {{ background: {colors.canvas}; border: 1px solid {colors.border};
                 border-radius: 3px; padding: 4px; selection-background-color: {colors.accent}; }}
+            QSpinBox, QDoubleSpinBox {{ padding-right: 20px; }}
+            QSpinBox::up-button, QDoubleSpinBox::up-button {{
+                subcontrol-origin: border; subcontrol-position: top right; width: 18px;
+                background: {colors.node_header}; border-left: 1px solid {colors.border};
+                border-bottom: 1px solid {colors.border}; border-top-right-radius: 3px; }}
+            QSpinBox::down-button, QDoubleSpinBox::down-button {{
+                subcontrol-origin: border; subcontrol-position: bottom right; width: 18px;
+                background: {colors.node_header}; border-left: 1px solid {colors.border};
+                border-bottom-right-radius: 3px; }}
+            QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+            QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{
+                background: {colors.border}; }}
             QComboBox QAbstractItemView {{ background: {colors.canvas}; color: {colors.text};
                 border: 1px solid {colors.border}; selection-background-color: {colors.accent};
                 selection-color: {colors.canvas}; outline: 0; }}
@@ -98,6 +110,8 @@ class Theme:
                 background: {colors.text}; border: 1px solid {colors.accent};
                 border-radius: 4px; }}
             QSlider::handle:horizontal:hover {{ background: {colors.selection}; }}
+            QLabel[parameterValue="true"] {{ color: {colors.text}; background: {colors.canvas};
+                border: 1px solid {colors.border}; border-radius: 3px; padding: 1px 4px; }}
             QMenu::item {{ padding: 5px 24px 5px 9px; background: transparent; }}
             QMenu::item:selected {{ background: {colors.accent}; color: {colors.canvas}; }}
             QPushButton {{ background: {colors.node_header}; border: 1px solid {colors.border};

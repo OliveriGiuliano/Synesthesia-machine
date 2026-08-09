@@ -50,7 +50,7 @@ from synesthesia_machine.ui.parameter_editors import (
     IntRangeParameterEditor,
     create_parameter_editor,
 )
-from synesthesia_machine.ui.theme import node_category_color
+from synesthesia_machine.ui.theme import DEFAULT_THEME, node_category_color
 from synesthesia_machine.ui.view_models import ParameterViewModel
 from synesthesia_machine.ui.widgets import NodeLibrary, NodeSearchDialog, SearchCandidate
 
@@ -288,6 +288,8 @@ def test_slider_hint_is_explicit_and_sliders_display_and_drag_their_value(
     assert isinstance(float_editor.slider, DirectDragSlider)
     assert (float_editor.minimum(), float_editor.maximum()) == (0.0, 1.0)
     assert float_editor.value_label.text() == "0.25"
+    assert float_editor.value_label.property("parameterValue") is True
+    assert 'QLabel[parameterValue="true"]' in DEFAULT_THEME.style_sheet()
     float_editor.setValue(0.75)
     qapp.processEvents()
     assert edits[-1] == pytest.approx(0.75)
@@ -400,15 +402,61 @@ def test_pressing_enter_in_embedded_numeric_editor_commits_without_destroying_si
     assert replacement is not None and replacement is not editor
 
 
+def test_embedded_spinbox_arrow_buttons_commit_both_directions(
+    window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    node_id = window.session.add_node("synmachine.utility.number", (80.0, 120.0))
+    editor = window.scene.node_items[node_id].parameter_editors["int_value"].widget()
+    assert isinstance(editor, QSpinBox)
+    original = editor.value()
+
+    QTest.mouseClick(
+        editor,
+        Qt.MouseButton.LeftButton,
+        pos=QPoint(editor.width() - 8, 5),
+    )
+    qapp.processEvents()
+    assert window.session.document.node(node_id).parameters["int_value"] == original + 1  # type: ignore[union-attr]
+
+    replacement = window.scene.node_items[node_id].parameter_editors["int_value"].widget()
+    assert isinstance(replacement, QSpinBox)
+    QTest.mouseClick(
+        replacement,
+        Qt.MouseButton.LeftButton,
+        pos=QPoint(replacement.width() - 8, replacement.height() - 5),
+    )
+    qapp.processEvents()
+    assert window.session.document.node(node_id).parameters["int_value"] == original  # type: ignore[union-attr]
+
+
+def test_node_parameter_rows_have_contextual_hover_help(window: MainWindow) -> None:
+    node_id = window.session.add_node("synmachine.utility.number", (80.0, 120.0))
+    item = window.scene.node_items[node_id]
+
+    node_help = item._tooltip_for_position(QPointF(20.0, 10.0))
+    parameter_help = item._tooltip_for_position(QPointF(20.0, item._parameter_rows["float_value"]))
+
+    assert node_help == item.view_model.description
+    assert "float value" in parameter_help.lower()
+    assert parameter_help != node_help
+
+
 def test_video_file_path_editor_browses_and_commits_selected_path(
     qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     del qapp
     selected = "C:/media/example.mkv"
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def choose_file(*args: object, **kwargs: object) -> tuple[str, str]:
+        calls.append((args, kwargs))
+        return selected, "Video files"
+
     monkeypatch.setattr(
         QFileDialog,
         "getOpenFileName",
-        lambda *_args, **_kwargs: (selected, "Video files"),
+        choose_file,
     )
     edits: list[object] = []
     spec = ParameterSpec("file_path", "File path", PortType.STRING, "")
@@ -419,6 +467,7 @@ def test_video_file_path_editor_browses_and_commits_selected_path(
     editor.browse_button.click()
     assert editor.text() == selected
     assert edits == [selected]
+    assert calls[0][1]["options"] == QFileDialog.Option.DontUseNativeDialog
 
 
 def test_matrix_editor_commits_valid_nested_json_and_marks_invalid_input(

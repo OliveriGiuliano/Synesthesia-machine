@@ -930,6 +930,7 @@ class MainWindow(QMainWindow):
             and definition.execution_kind is ExecutionKind.SOURCE
         )
         transport = resolve_transport_target(sources, self.scene.selected_node_ids())
+        selected = self.scene.selected_node_ids()
         for key, verb in (
             ("play", "Play or resume"),
             ("pause", "Pause"),
@@ -939,7 +940,7 @@ class MainWindow(QMainWindow):
             action = self.action_registry.require(key)
             action.setEnabled(transport.target is not None)
             action.setToolTip(
-                f"{verb} {transport.message.removeprefix('Targeting ').lower()}"
+                f"{verb} the {'selected' if transport.target in selected else 'only'} source"
                 if transport.target is not None
                 else transport.message
             )
@@ -1152,8 +1153,13 @@ class MainWindow(QMainWindow):
     def _show_engine_failure(self, status: EngineStatus) -> None:
         state = status.connection_state.value
         exit_text = "" if status.exit_code is None else f" · exit {status.exit_code}"
+        crash_report = (
+            None
+            if status.crash_log_path is None or not Path(status.crash_log_path).is_file()
+            else status.crash_log_path
+        )
         log_text = (
-            "" if status.crash_log_path is None else f" · crash log path {status.crash_log_path}"
+            " · no crash report file" if crash_report is None else f" · crash report {crash_report}"
         )
         self._engine_status.setText(f"Engine {state} · STOPPED{exit_text}{log_text}")
         detail = status.last_error or "The engine process stopped unexpectedly."
@@ -1174,9 +1180,11 @@ class MainWindow(QMainWindow):
         )
         if status.exit_code is not None:
             message += f"\nExit code: {status.exit_code}"
-        if status.crash_log_path is not None:
-            message += f"\nCrash-log path: {status.crash_log_path}"
-            message += "\nA forced termination may not produce a Python traceback file."
+        if crash_report is not None:
+            message += f"\nCrash report: {crash_report}"
+        else:
+            message += "\nNo crash-report file was produced."
+            message += " Native termination can occur before Python can write a traceback."
         message += "\n\nUse Graph → Restart Engine to rebuild the latest valid runtime."
         QMessageBox.critical(self, "Engine stopped", message)
 

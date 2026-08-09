@@ -34,7 +34,7 @@ from synesthesia_machine.graph import (
     ValidationIssue,
     ValidationSeverity,
 )
-from synesthesia_machine.ui.parameter_editors import create_parameter_editor
+from synesthesia_machine.ui.parameter_editors import create_parameter_editor, parameter_tooltip
 from synesthesia_machine.ui.theme import Theme, node_category_color, port_color_name
 from synesthesia_machine.ui.view_models import (
     ConnectionViewModel,
@@ -56,11 +56,19 @@ def _diagnostic_tooltip(description: str, issues: tuple[ValidationIssue, ...]) -
 class GroupGraphicsItem(QGraphicsObject):
     """Movable persisted group/comment projection rendered behind graph nodes."""
 
+    _RESIZE_MARGIN = 8.0
+    _MINIMUM_SIZE = (120.0, 80.0)
+
     def __init__(self, model: GroupModel, theme: Theme) -> None:
         super().__init__()
         self.model = model
         self.theme = theme
         self._drag_origin: dict[UUID, tuple[float, float]] = {}
+        self._display_size = model.size
+        self._resize_edges: tuple[bool, bool, bool, bool] | None = None
+        self._resize_start_scene = QPointF()
+        self._resize_start_position = model.position
+        self._resize_start_size = model.size
         self.setFlags(
             QGraphicsItem.GraphicsItemFlag.ItemIsMovable
             | QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
@@ -68,9 +76,10 @@ class GroupGraphicsItem(QGraphicsObject):
         self.setPos(*model.position)
         self.setZValue(-3.0 if model.kind is GroupKind.GROUP else -0.75)
         self.setToolTip(model.text or model.title)
+        self.setAcceptHoverEvents(True)
 
     def boundingRect(self) -> QRectF:
-        return QRectF(0.0, 0.0, self.model.size[0], self.model.size[1])
+        return QRectF(0.0, 0.0, self._display_size[0], self._display_size[1])
 
     def paint(
         self,
@@ -103,13 +112,98 @@ class GroupGraphicsItem(QGraphicsObject):
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
                 self.model.text,
             )
+        if self.isSelected():
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(self.theme.color("selection")))
+            handle = 6.0
+            for point in (body.topLeft(), body.topRight(), body.bottomLeft(), body.bottomRight()):
+                painter.drawRect(
+                    QRectF(point.x() - handle / 2.0, point.y() - handle / 2.0, handle, handle)
+                )
+
+    def _edges_at(self, position: QPointF) -> tuple[bool, bool, bool, bool] | None:
+        body = self.boundingRect()
+        if not body.adjusted(
+            -self._RESIZE_MARGIN,
+            -self._RESIZE_MARGIN,
+            self._RESIZE_MARGIN,
+            self._RESIZE_MARGIN,
+        ).contains(position):
+            return None
+        left = abs(position.x() - body.left()) <= self._RESIZE_MARGIN
+        top = abs(position.y() - body.top()) <= self._RESIZE_MARGIN
+        right = abs(position.x() - body.right()) <= self._RESIZE_MARGIN
+        bottom = abs(position.y() - body.bottom()) <= self._RESIZE_MARGIN
+        edges = (left, top, right, bottom)
+        return edges if any(edges) else None
+
+    def hoverMoveEvent(self, event: QGraphicsSceneHoverEvent) -> None:
+        edges = self._edges_at(event.pos())
+        if edges is None:
+            self.unsetCursor()
+        elif (edges[0] and edges[1]) or (edges[2] and edges[3]):
+            self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+        elif (edges[2] and edges[1]) or (edges[0] and edges[3]):
+            self.setCursor(Qt.CursorShape.SizeBDiagCursor)
+        elif edges[0] or edges[2]:
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
+        else:
+            self.setCursor(Qt.CursorShape.SizeVerCursor)
+        super().hoverMoveEvent(event)
+
+    def hoverLeaveEvent(self, event: QGraphicsSceneHoverEvent) -> None:
+        if self._resize_edges is None:
+            self.unsetCursor()
+        super().hoverLeaveEvent(event)
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        edges = self._edges_at(event.pos())
+        if event.button() is Qt.MouseButton.LeftButton and edges is not None:
+            self.setSelected(True)
+            self._resize_edges = edges
+            self._resize_start_scene = event.scenePos()
+            self._resize_start_position = (self.pos().x(), self.pos().y())
+            self._resize_start_size = self._display_size
+            event.accept()
+            return
         super().mousePressEvent(event)
         scene = cast("GraphSceneProtocol", self.scene())
         self._drag_origin = scene.selected_group_positions()
 
+    def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        if self._resize_edges is None:
+            super().mouseMoveEvent(event)
+            return
+        delta = event.scenePos() - self._resize_start_scene
+        left, top = self._resize_start_position
+        right = left + self._resize_start_size[0]
+        bottom = top + self._resize_start_size[1]
+        resize_left, resize_top, resize_right, resize_bottom = self._resize_edges
+        if resize_left:
+            left = min(right - self._MINIMUM_SIZE[0], left + delta.x())
+        if resize_top:
+            top = min(bottom - self._MINIMUM_SIZE[1], top + delta.y())
+        if resize_right:
+            right = max(left + self._MINIMUM_SIZE[0], right + delta.x())
+        if resize_bottom:
+            bottom = max(top + self._MINIMUM_SIZE[1], bottom + delta.y())
+        self.prepareGeometryChange()
+        self._display_size = (right - left, bottom - top)
+        self.setPos(left, top)
+        self.update()
+        event.accept()
+
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        if self._resize_edges is not None:
+            self._resize_edges = None
+            position = (self.pos().x(), self.pos().y())
+            size = self._display_size
+            self.unsetCursor()
+            cast("GraphSceneProtocol", self.scene()).commit_group_resize(
+                self.model.id, position, size
+            )
+            event.accept()
+            return
         super().mouseReleaseEvent(event)
         scene = cast("GraphSceneProtocol", self.scene())
         scene.commit_group_move(self._drag_origin)
@@ -227,6 +321,7 @@ class NodeGraphicsItem(QGraphicsObject):
             | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges
         )
         self.setCacheMode(QGraphicsItem.CacheMode.DeviceCoordinateCache)
+        self.setAcceptHoverEvents(True)
         self.setPos(*view_model.position)
         self.setToolTip(_diagnostic_tooltip(view_model.description, view_model.issues))
         self._create_ports_and_editors()
@@ -451,6 +546,30 @@ class NodeGraphicsItem(QGraphicsObject):
                 detail,
             )
 
+    def _tooltip_for_position(self, position: QPointF) -> str:
+        node_help = _diagnostic_tooltip(self.view_model.description, self.view_model.issues)
+        if position.y() < self.theme.metrics.header_height:
+            return node_help
+        if position.x() > self._editor_left() - self._LABEL_EDITOR_GAP:
+            return node_help
+        y = self.theme.metrics.header_height
+        y += sum(not port.is_parameter for port in self.view_model.inputs) * (
+            self.theme.metrics.row_height
+        )
+        for parameter in self.view_model.parameters:
+            if y <= position.y() < y + self.theme.metrics.row_height:
+                return parameter_tooltip(parameter.spec)
+            y += self.theme.metrics.row_height
+        return node_help
+
+    def hoverMoveEvent(self, event: QGraphicsSceneHoverEvent) -> None:
+        self.setToolTip(self._tooltip_for_position(event.pos()))
+        super().hoverMoveEvent(event)
+
+    def hoverLeaveEvent(self, event: QGraphicsSceneHoverEvent) -> None:
+        self.setToolTip(_diagnostic_tooltip(self.view_model.description, self.view_model.issues))
+        super().hoverLeaveEvent(event)
+
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value: object) -> object:
         if change is QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged and bool(value):
             self.ensure_parameter_editors()
@@ -578,4 +697,10 @@ class GraphSceneProtocol:
     def commit_node_move(self, origins: dict[UUID, tuple[float, float]]) -> None: ...
     def selected_group_positions(self) -> dict[UUID, tuple[float, float]]: ...
     def commit_group_move(self, origins: dict[UUID, tuple[float, float]]) -> None: ...
+    def commit_group_resize(
+        self,
+        group_id: UUID,
+        position: tuple[float, float],
+        size: tuple[float, float],
+    ) -> None: ...
     def edit_group(self, group_id: UUID) -> None: ...

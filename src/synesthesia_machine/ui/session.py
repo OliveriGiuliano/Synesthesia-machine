@@ -172,6 +172,7 @@ class DocumentSession(QObject):
         *,
         title: str | None = None,
         text: str | None = None,
+        position: tuple[float, float] | None = None,
         size: tuple[float, float] | None = None,
         color: str | None = None,
     ) -> None:
@@ -182,6 +183,7 @@ class DocumentSession(QObject):
             group,
             title=group.title if title is None else title,
             text=group.text if text is None else text,
+            position=group.position if position is None else position,
             size=group.size if size is None else size,
             color=group.color if color is None else color,
         )

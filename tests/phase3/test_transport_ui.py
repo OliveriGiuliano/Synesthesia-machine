@@ -250,6 +250,7 @@ def test_transport_toolbar_has_named_visible_hover_press_controls_and_click_feed
         assert button.property("transportControl") is True
         assert button.accessibleName() == action.text().replace("&", "")
         assert button.isEnabled()
+        assert str(source_id)[:8] not in action.toolTip()
 
     style_sheet = window.styleSheet()
     assert 'QToolButton[transportControl="true"]:hover' in style_sheet

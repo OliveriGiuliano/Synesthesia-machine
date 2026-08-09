@@ -235,6 +235,14 @@ class GraphScene(QGraphicsScene):
         }
         self.session.move_groups(origins, current)
 
+    def commit_group_resize(
+        self,
+        group_id: UUID,
+        position: tuple[float, float],
+        size: tuple[float, float],
+    ) -> None:
+        self.session.update_group(group_id, position=position, size=size)
+
     def configure_grid_snap(self, *, enabled: bool, spacing: float) -> None:
         if not math.isfinite(spacing) or spacing <= 0.0:
             raise ValueError("Grid snap spacing must be finite and positive")
