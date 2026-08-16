@@ -31,7 +31,7 @@ def test_catalogue_preserves_every_frozen_phase5_definition_exactly_once() -> No
     expected = tuple(definition.type_id for definition in registry.definitions())
     actual = tuple(node.type_id for node in snapshot.nodes)
 
-    assert len(actual) == len(set(actual)) == 51
+    assert len(actual) == len(set(actual)) == 50
     assert set(actual) <= set(expected)
     assert not snapshot.connections
 
@@ -96,6 +96,12 @@ def test_reference_graph_loads_and_compiles_with_exact_phase5_branches() -> None
 
 def test_phase5_examples_have_canonical_schema_round_trips() -> None:
     registry = create_application_registry()
-    for path in (CATALOGUE_PATH, REFERENCE_PATH):
-        text = path.read_text(encoding="utf-8")
-        assert graph_to_json(graph_from_json(text, registry)) == text
+    reference_text = REFERENCE_PATH.read_text(encoding="utf-8")
+    assert graph_to_json(graph_from_json(reference_text, registry)) == reference_text
+
+    historical_text = CATALOGUE_PATH.read_text(encoding="utf-8")
+    migrated_text = graph_to_json(graph_from_json(historical_text, registry))
+    migrated_snapshot = graph_from_json(migrated_text, registry)
+    hue = next(node for node in migrated_snapshot.nodes if node.type_id == "synmachine.image.hue")
+    assert hue.implementation_version == 2
+    assert graph_to_json(migrated_snapshot) == migrated_text

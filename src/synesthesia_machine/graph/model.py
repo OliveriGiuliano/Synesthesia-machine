@@ -276,26 +276,36 @@ class GraphDocument:
     ) -> UUID:
         self._require_node(source_node_id)
         self._require_node(destination_node_id)
-        if replace_existing:
-            self._connections = {
-                identifier: connection
-                for identifier, connection in self._connections.items()
-                if not (
-                    connection.destination_node_id == destination_node_id
-                    and connection.destination_port_id == destination_port_id
-                )
-            }
         identifier = connection_id or uuid4()
-        if identifier in self._connections:
+        collision = self._connections.get(identifier)
+        if collision is not None and not (
+            replace_existing
+            and collision.destination_node_id == destination_node_id
+            and collision.destination_port_id == destination_port_id
+        ):
             msg = f"Connection already exists: {identifier}"
             raise ValueError(msg)
-        self._connections[identifier] = ConnectionModel(
+        candidate = ConnectionModel(
             id=identifier,
             source_node_id=source_node_id,
             source_port_id=source_port_id,
             destination_node_id=destination_node_id,
             destination_port_id=destination_port_id,
         )
+        connections = self._connections
+        if replace_existing:
+            connections = {
+                identifier: connection
+                for identifier, connection in connections.items()
+                if not (
+                    connection.destination_node_id == destination_node_id
+                    and connection.destination_port_id == destination_port_id
+                )
+            }
+        else:
+            connections = dict(connections)
+        connections[identifier] = candidate
+        self._connections = connections
         self._touch()
         return identifier
 

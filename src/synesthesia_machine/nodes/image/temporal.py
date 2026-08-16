@@ -28,6 +28,7 @@ from synesthesia_machine.nodes import (
 )
 
 HOLD_IMAGE_TYPE_ID = "synmachine.image.hold_image"
+POSTERIZE_TIME_TYPE_ID = "synmachine.image.posterize_time"
 _MEBIBYTE = 1024 * 1024
 type _FrameSignature = tuple[object, ...]
 
@@ -112,6 +113,47 @@ class HoldImageRuntime:
         self._signature = None
 
 
+class PosterizeTimeRuntime:
+    """Hold the latest sampled frame for a configurable number of input cycles."""
+
+    def __init__(self, node_id: UUID) -> None:
+        self.node_id = node_id
+        self._lock = Lock()
+        self._held: ImageFrame | None = None
+        self._phase = 0
+
+    def process(
+        self,
+        inputs: Mapping[str, RuntimeValue],
+        parameters: Mapping[str, ParameterValue],
+        context: FrameContext,
+    ) -> Mapping[str, RuntimeValue]:
+        del context
+        image = inputs["image"]
+        if not isinstance(image, ImageFrame):
+            raise ExpectedNodeError("invalid_image", "Posterize Time requires an image input")
+        interval = _integer(parameters["interval_frames"], "interval_frames")
+        with self._lock:
+            if (
+                self._held is None
+                or self._phase == 0
+                or _frame_signature(self._held) != _frame_signature(image)
+            ):
+                self._held = image
+            result = self._held
+            self._phase = (self._phase + 1) % interval
+        return {"image": result}
+
+    def reset(self, reason: ResetReason) -> None:
+        del reason
+        with self._lock:
+            self._held = None
+            self._phase = 0
+
+    def close(self) -> None:
+        self.reset(ResetReason.ENGINE_RESTARTED)
+
+
 def _frame_signature(image: ImageFrame) -> _FrameSignature:
     return (
         image.data.shape,
@@ -167,7 +209,35 @@ def create_temporal_definitions() -> tuple[NodeDefinition, ...]:
             HoldImageRuntime,
             aliases=("delay image", "previous frame", "frame history"),
         ),
+        NodeDefinition(
+            POSTERIZE_TIME_TYPE_ID,
+            1,
+            "Posterize Time",
+            "Image / Utility",
+            "Sample an image every N frames and hold it between samples.",
+            (InputPortSpec("image", "Image", PortType.IMAGE),),
+            (OutputPortSpec("image", "Image", PortType.IMAGE),),
+            (
+                ParameterSpec(
+                    "interval_frames",
+                    "Interval frames",
+                    PortType.INT,
+                    2,
+                    minimum=1,
+                    maximum=600,
+                ),
+            ),
+            ExecutionKind.STATEFUL,
+            PosterizeTimeRuntime,
+            aliases=("temporal posterize", "frame sample and hold", "time quantize"),
+        ),
     )
 
 
-__all__ = ["HOLD_IMAGE_TYPE_ID", "HoldImageRuntime", "create_temporal_definitions"]
+__all__ = [
+    "HOLD_IMAGE_TYPE_ID",
+    "POSTERIZE_TIME_TYPE_ID",
+    "HoldImageRuntime",
+    "PosterizeTimeRuntime",
+    "create_temporal_definitions",
+]

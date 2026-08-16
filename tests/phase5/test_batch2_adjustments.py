@@ -17,7 +17,12 @@ from synesthesia_machine.contracts import (
     read_only_float32,
 )
 from synesthesia_machine.media import color_space_descriptor
-from synesthesia_machine.nodes import ExecutionKind, ExpectedNodeError, NodeDefinition
+from synesthesia_machine.nodes import (
+    ExecutionKind,
+    ExpectedNodeError,
+    NodeDefinition,
+    ParameterEditorHint,
+)
 from synesthesia_machine.nodes.image import create_image_definitions
 from tests.phase5.conformance import assert_image_conformance, assert_scheduler_propagates_no_data
 
@@ -71,7 +76,7 @@ PARAMETER_IDS = {
 CONNECTABLE_IDS: Mapping[str, frozenset[str]] = {
     "synmachine.image.brightness": frozenset({"offset"}),
     "synmachine.image.contrast": frozenset({"factor", "pivot"}),
-    "synmachine.image.clamp": frozenset({"minimum", "maximum"}),
+    "synmachine.image.clamp": frozenset({"minimum", "maximum", "include_alpha"}),
     "synmachine.image.colour_levels": frozenset(
         {
             "input_black",
@@ -83,13 +88,15 @@ CONNECTABLE_IDS: Mapping[str, frozenset[str]] = {
     ),
     "synmachine.image.hue": frozenset({"turns"}),
     "synmachine.image.saturation": frozenset({"factor"}),
-    "synmachine.image.invert_colour": frozenset(),
+    "synmachine.image.invert_colour": frozenset({"invert_alpha"}),
     "synmachine.image.opacity": frozenset({"factor"}),
-    "synmachine.image.stretch_contrast": frozenset(),
+    "synmachine.image.stretch_contrast": frozenset(
+        {"lower_percentile", "upper_percentile", "ignore_non_finite"}
+    ),
     "synmachine.image.gamma": frozenset({"gamma"}),
     "synmachine.image.add_scalar": frozenset({"value"}),
     "synmachine.image.multiply_scalar": frozenset({"value"}),
-    "synmachine.image.divide_scalar": frozenset({"value"}),
+    "synmachine.image.divide_scalar": frozenset({"value", "epsilon"}),
 }
 
 
@@ -163,6 +170,13 @@ def test_batch2_metadata_has_stable_complete_ids_and_connectability() -> None:
         assert {
             parameter.id for parameter in definition.parameters if parameter.connectable
         } == CONNECTABLE_IDS[definition.type_id]
+
+    hue = _definition("synmachine.image.hue")
+    turns = hue.parameter("turns")
+    assert hue.implementation_version == 2
+    assert turns is not None
+    assert (turns.minimum, turns.maximum) == (0.0, 1.0)
+    assert turns.editor_hint is ParameterEditorHint.SLIDER
 
 
 def test_brightness_uses_connected_offset_and_selected_channel(rgba_image: ImageFrame) -> None:

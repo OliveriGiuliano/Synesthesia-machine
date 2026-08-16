@@ -6,12 +6,19 @@ from collections.abc import Mapping, MutableMapping
 from typing import cast
 from uuid import UUID
 
+import numpy as np
+
 from synesthesia_machine.contracts import (
+    AlphaMode,
+    ColorSpace,
     FrameContext,
+    FrameProvenance,
+    ImageFrame,
     NoData,
     ParameterValue,
     PortType,
     RuntimeValue,
+    read_only_float32,
 )
 from synesthesia_machine.graph import GraphCompiler, GraphDocument
 from synesthesia_machine.nodes import (
@@ -22,7 +29,13 @@ from synesthesia_machine.nodes import (
     OutputPortSpec,
 )
 from synesthesia_machine.nodes.utility import create_utility_registry
-from synesthesia_machine.runtime import EngineFacade, PortKey, Scheduler
+from synesthesia_machine.runtime import (
+    CompiledNode,
+    EngineFacade,
+    ExecutionPlan,
+    PortKey,
+    Scheduler,
+)
 from tests.phase1.helpers import ProbeRuntime, RuntimeCounters, frame_context, make_definition
 
 CLOCK_ID = UUID("00000000-0000-0000-0000-000000000100")
@@ -372,3 +385,84 @@ def test_timing_hook_and_immutable_inputs_are_exposed_at_runtime_boundary() -> N
     assert result.errors[0].code == "unexpected_node_error"
     assert result.values[PortKey(mutating, "value")] is NoData
     assert timings[0][0] == mutating and timings[0][1] >= 0
+
+
+def test_scheduler_rejects_wrong_unknown_and_clock_mismatched_outputs() -> None:
+    wrong_document = GraphDocument()
+    wrong_node = wrong_document.add_node("test.wrong_output", node_id=NODE_A)
+    wrong_plan = (
+        GraphCompiler(NodeRegistry((make_definition("test.wrong_output", output=True),)))
+        .compile(wrong_document.snapshot())
+        .plan
+    )
+    assert wrong_plan is not None
+    wrong = Scheduler(wrong_plan).execute_tick(frame_context(clock_id=CLOCK_ID))
+    assert wrong.errors[0].code == "invalid_node_output"
+    assert wrong.values[PortKey(wrong_node, "value")] is NoData
+
+    class UnknownOutputRuntime(ProbeRuntime):
+        def process(
+            self,
+            inputs: Mapping[str, RuntimeValue],
+            parameters: Mapping[str, ParameterValue],
+            context: FrameContext,
+        ) -> Mapping[str, RuntimeValue]:
+            result = dict(super().process(inputs, parameters, context))
+            result["extra"] = 1.0
+            return result
+
+    counters: dict[UUID, RuntimeCounters] = {}
+    unknown_definition = NodeDefinition(
+        "test.unknown_output",
+        1,
+        "Unknown output",
+        "Test",
+        "Returns an undeclared output.",
+        (),
+        (OutputPortSpec("value", "Value", PortType.FLOAT),),
+        (),
+        ExecutionKind.STATELESS,
+        lambda node_id: UnknownOutputRuntime(node_id, counters),
+    )
+    unknown_document = GraphDocument()
+    unknown_node = unknown_document.add_node("test.unknown_output", node_id=NODE_B)
+    unknown_plan = (
+        GraphCompiler(NodeRegistry((unknown_definition,))).compile(unknown_document.snapshot()).plan
+    )
+    assert unknown_plan is not None
+    unknown = Scheduler(unknown_plan).execute_tick(frame_context(clock_id=CLOCK_ID))
+    assert unknown.errors[0].code == "invalid_node_output"
+    assert "unknown output" in unknown.errors[0].message
+    assert unknown.values[PortKey(unknown_node, "value")] is NoData
+
+    foreign_context = frame_context(clock_id=NODE_D)
+    foreign_image = ImageFrame(
+        read_only_float32(np.zeros((1, 1, 3), dtype=np.float32)),
+        ColorSpace.SRGB,
+        ("R", "G", "B"),
+        AlphaMode.NONE,
+        foreign_context,
+        FrameProvenance(NODE_D, "test"),
+    )
+    clock_definition = make_definition(
+        "test.clock_output", output_type=PortType.IMAGE, output=foreign_image
+    )
+    clock_node = NODE_C
+    clock_plan = ExecutionPlan(
+        CLOCK_ID,
+        1,
+        (
+            CompiledNode(
+                clock_node,
+                clock_definition,
+                output_types={"value": PortType.IMAGE},
+                clock_id=CLOCK_ID,
+                is_static=False,
+            ),
+        ),
+        frozenset({clock_node}),
+    )
+    clock_result = Scheduler(clock_plan).execute_tick(frame_context(clock_id=CLOCK_ID))
+    assert clock_result.errors[0].code == "invalid_node_output"
+    assert "uses clock" in clock_result.errors[0].message
+    assert clock_result.values[PortKey(clock_node, "value")] is NoData

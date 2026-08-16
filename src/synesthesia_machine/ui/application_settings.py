@@ -10,6 +10,7 @@ from typing import cast
 from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -19,6 +20,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from synesthesia_machine.ui.translations import UiLanguage, tr
+
 
 @dataclass(frozen=True, slots=True)
 class EditorPreferences:
@@ -26,6 +29,7 @@ class EditorPreferences:
     grid_snap_enabled: bool = False
     grid_size: float = 24.0
     recent_file_limit: int = 8
+    language: UiLanguage = UiLanguage.ENGLISH
 
     def __post_init__(self) -> None:
         if not 10 <= self.autosave_delay_seconds <= 3600:
@@ -66,6 +70,7 @@ class ApplicationSettingsStore:
                 minimum=1,
                 maximum=20,
             ),
+            language=_language(self.settings.value("editor/language"), defaults.language),
         )
 
     def save_preferences(self, preferences: EditorPreferences) -> None:
@@ -73,6 +78,7 @@ class ApplicationSettingsStore:
         self.settings.setValue("editor/gridSnapEnabled", preferences.grid_snap_enabled)
         self.settings.setValue("editor/gridSize", preferences.grid_size)
         self.settings.setValue("editor/recentFileLimit", preferences.recent_file_limit)
+        self.settings.setValue("editor/language", preferences.language.value)
         self.settings.sync()
 
     def load_recent_files(self, limit: int) -> list[Path]:
@@ -111,13 +117,13 @@ class PreferencesDialog(QDialog):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Preferences")
+        self.setWindowTitle(tr("Preferences"))
         self.setModal(True)
         self.autosave_delay = QSpinBox(self)
         self.autosave_delay.setRange(10, 3600)
         self.autosave_delay.setSuffix(" s")
         self.autosave_delay.setValue(preferences.autosave_delay_seconds)
-        self.grid_snap = QCheckBox("Snap moved nodes and groups to the grid", self)
+        self.grid_snap = QCheckBox(tr("Snap moved nodes and groups to the grid"), self)
         self.grid_snap.setChecked(preferences.grid_snap_enabled)
         self.grid_size = QDoubleSpinBox(self)
         self.grid_size.setRange(8.0, 128.0)
@@ -126,11 +132,18 @@ class PreferencesDialog(QDialog):
         self.recent_limit = QSpinBox(self)
         self.recent_limit.setRange(1, 20)
         self.recent_limit.setValue(preferences.recent_file_limit)
+        self.language_combo = QComboBox(self)
+        self.language_combo.addItem("English", UiLanguage.ENGLISH.value)
+        self.language_combo.addItem("Français", UiLanguage.FRENCH.value)
+        self.language_combo.setCurrentIndex(
+            self.language_combo.findData(preferences.language.value)
+        )
 
         form = QFormLayout()
-        form.addRow("Autosave after inactivity", self.autosave_delay)
-        form.addRow("Grid spacing", self.grid_size)
-        form.addRow("Recent graphs", self.recent_limit)
+        form.addRow(tr("Language"), self.language_combo)
+        form.addRow(tr("Autosave after inactivity"), self.autosave_delay)
+        form.addRow(tr("Grid spacing"), self.grid_size)
+        form.addRow(tr("Recent graphs"), self.recent_limit)
         form.addRow(self.grid_snap)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
@@ -138,6 +151,7 @@ class PreferencesDialog(QDialog):
         )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(tr("Cancel"))
         layout = QVBoxLayout(self)
         layout.addLayout(form)
         layout.addWidget(buttons)
@@ -148,6 +162,7 @@ class PreferencesDialog(QDialog):
             grid_snap_enabled=self.grid_snap.isChecked(),
             grid_size=self.grid_size.value(),
             recent_file_limit=self.recent_limit.value(),
+            language=UiLanguage(str(self.language_combo.currentData())),
         )
 
 
@@ -181,3 +196,10 @@ def _boolean(value: object, default: bool) -> bool:
         if normalized in {"false", "0", "no", "off"}:
             return False
     return default
+
+
+def _language(value: object, default: UiLanguage) -> UiLanguage:
+    try:
+        return UiLanguage(str(value))
+    except ValueError:
+        return default

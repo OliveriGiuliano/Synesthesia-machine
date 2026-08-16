@@ -109,6 +109,12 @@ def test_packaged_smoke_report_fails_closed_and_records_skips(
     )
 
 
+def test_release_smoke_graph_round_trip_uses_current_schema_and_compiles(tmp_path: Path) -> None:
+    detail = release_smoke._graph_round_trip(tmp_path)  # pyright: ignore[reportPrivateUsage]
+
+    assert detail == "saved, opened, and compiled 1 node"
+
+
 def test_inventory_covers_locked_native_runtime_and_licence_files() -> None:
     inventory, _ = phase9_release.dependency_inventory()
     packages = {item["name"]: item for item in inventory["packages"]}

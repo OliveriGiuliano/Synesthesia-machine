@@ -54,6 +54,17 @@ DEFAULTS = {
     "synmachine.image.add_noise": ("GAUSSIAN", 0.05, 0, False, False, "COLOUR"),
     "synmachine.image.posterize": (4, True, "COLOUR"),
 }
+CONNECTABLE_IDS = {
+    "synmachine.image.gaussian_blur": {
+        "kernel_width",
+        "kernel_height",
+        "sigma_x",
+        "sigma_y",
+    },
+    "synmachine.image.sharpen": {"amount", "sigma", "threshold"},
+    "synmachine.image.add_noise": {"amount", "seed", "monochrome", "animate_seed"},
+    "synmachine.image.posterize": {"levels", "clamp_input"},
+}
 
 
 def _definition(type_id: str) -> NodeDefinition:
@@ -122,7 +133,7 @@ def test_batch3_defaults_conform_without_mutating_rgba(
     )
 
 
-def test_batch3_metadata_has_stable_ids_defaults_and_non_connectable_parameters() -> None:
+def test_batch3_metadata_has_stable_ids_defaults_and_scalar_parameter_inputs() -> None:
     definitions = [item for item in create_image_definitions() if item.type_id in BATCH3_IDS]
     assert tuple(item.type_id for item in definitions) == BATCH3_IDS
     for definition in definitions:
@@ -138,7 +149,9 @@ def test_batch3_metadata_has_stable_ids_defaults_and_non_connectable_parameters(
             tuple(parameter.default for parameter in definition.parameters)
             == DEFAULTS[definition.type_id]
         )
-        assert not any(parameter.connectable for parameter in definition.parameters)
+        assert {
+            parameter.id for parameter in definition.parameters if parameter.connectable
+        } == CONNECTABLE_IDS[definition.type_id]
 
     noise = _definition("synmachine.image.add_noise")
     noise_type = noise.parameter("noise_type")

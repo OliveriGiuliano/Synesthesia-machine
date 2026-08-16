@@ -16,14 +16,18 @@ from synesthesia_machine.contracts import (
     ChannelFrame,
     ChannelSemantic,
     ColorSpace,
+    ColorValue,
+    FrameContext,
     FrameProvenance,
     ImageFrame,
     MidiNoteKey,
     MidiStateFrame,
     NoData,
     NoDataType,
+    PortType,
     read_only_float32,
 )
+from synesthesia_machine.nodes import ParameterSpec
 from tests.phase1.helpers import frame_context
 
 CLOCK_ID = UUID("00000000-0000-0000-0000-000000000101")
@@ -86,3 +90,26 @@ def test_runtime_values_reject_writeable_arrays_and_copy_midi_notes() -> None:
     mutable_notes = cast(MutableMapping[MidiNoteKey, int], state.notes)
     with pytest.raises(TypeError):
         mutable_notes[MidiNoteKey(0, 62)] = 80
+
+
+@pytest.mark.parametrize("source_time", [float("nan"), float("inf"), float("-inf")])
+def test_frame_context_rejects_non_finite_source_time(source_time: float) -> None:
+    with pytest.raises(ValueError, match="finite"):
+        FrameContext(CLOCK_ID, 1, 0, source_time, 1, None, False)
+
+
+def test_scalar_descriptors_and_parameters_reject_non_finite_values() -> None:
+    context = frame_context(clock_id=CLOCK_ID)
+    data = read_only_float32(np.ones((1, 1), dtype=np.float32))
+    with pytest.raises(ValueError, match="nominal range must be finite"):
+        ChannelFrame(data, ChannelSemantic.GENERIC, float("nan"), 1.0, False, context)
+    with pytest.raises(ValueError, match="finite"):
+        ColorValue(float("nan"), 0.0, 0.0)
+    with pytest.raises(ValueError, match="Invalid default"):
+        ParameterSpec("gain", "Gain", PortType.FLOAT, float("nan"))
+
+    spec = ParameterSpec("gain", "Gain", PortType.FLOAT, 1.0, connectable=True)
+    for invalid in (float("nan"), float("inf"), float("-inf")):
+        assert spec.validate(invalid) == "must be finite"
+        with pytest.raises(ValueError, match="finite"):
+            spec.connected_value(invalid)

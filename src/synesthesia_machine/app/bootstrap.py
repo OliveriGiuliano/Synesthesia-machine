@@ -82,7 +82,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         exit_code = application.exec()
     finally:
-        engine_client.close()
+        try:
+            engine_client.close()
+        except (RuntimeError, TimeoutError):
+            logger.exception("Engine cleanup did not complete before UI shutdown")
     logger.info("UI stopped", extra={"exit_code": exit_code})
     return exit_code
 

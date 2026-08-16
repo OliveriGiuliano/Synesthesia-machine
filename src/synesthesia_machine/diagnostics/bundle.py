@@ -141,11 +141,7 @@ def _bounded_logs(
     if not directory.is_dir():
         return ()
     candidates = sorted(
-        (
-            path
-            for path in directory.iterdir()
-            if path.is_file() and path.suffix.lower() in {".log", ".txt"}
-        ),
+        (path for path in directory.iterdir() if path.is_file() and _is_log_file(path)),
         key=lambda path: path.stat().st_mtime_ns,
         reverse=True,
     )[:MAX_LOG_FILES]
@@ -157,6 +153,11 @@ def _bounded_logs(
             text = _redact_log_lines(text)
         logs.append((f"logs/{index:02d}-{path.name}", text))
     return tuple(logs)
+
+
+def _is_log_file(path: Path) -> bool:
+    name = path.name.casefold()
+    return bool(re.search(r"\.(?:log|txt|jsonl)(?:\.\d+)?$", name))
 
 
 def _redact_log_lines(text: str) -> str:

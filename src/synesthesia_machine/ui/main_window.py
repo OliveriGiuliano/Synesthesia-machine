@@ -3,13 +3,26 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import suppress
+from dataclasses import dataclass
 from enum import Enum, auto
 from functools import partial
 from pathlib import Path
 from typing import cast
 from uuid import UUID
 
-from PySide6.QtCore import QByteArray, QMimeData, QPointF, QSettings, Qt, QTimer, Slot
+from PySide6.QtCore import (
+    QByteArray,
+    QMimeData,
+    QObject,
+    QPointF,
+    QSettings,
+    Qt,
+    QTimer,
+    Signal,
+    Slot,
+)
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -27,11 +40,16 @@ from PySide6.QtWidgets import (
 from synesthesia_machine import __version__
 from synesthesia_machine.app.settings import ApplicationPaths
 from synesthesia_machine.contracts import (
+    EngineActivation,
     EngineClient,
     EngineConnectionState,
+    EngineMetrics,
     EngineStatus,
     MidiOutputConnectionState,
+    MidiOutputStatus,
+    NodeMemoryDiagnostic,
     SourceState,
+    SourceStatus,
 )
 from synesthesia_machine.diagnostics import create_diagnostic_bundle
 from synesthesia_machine.graph import (
@@ -40,9 +58,14 @@ from synesthesia_machine.graph import (
     GraphSnapshot,
     GroupKind,
     ValidationIssue,
+    generate_random_graph,
 )
 from synesthesia_machine.nodes import ExecutionKind, NodeRegistry
-from synesthesia_machine.nodes.visualization import NOTE_VISUALIZER_TYPE_ID
+from synesthesia_machine.nodes.visualization import (
+    CHANNEL_DISPLAY_TYPE_ID,
+    DISPLAY_IMAGE_DATA_TYPE_ID,
+    NOTE_VISUALIZER_TYPE_ID,
+)
 from synesthesia_machine.persistence import (
     GraphPersistenceError,
     RelinkMatch,
@@ -64,6 +87,7 @@ from synesthesia_machine.ui.previews import ImagePreviewPanel, NotePreviewPanel
 from synesthesia_machine.ui.profiler import ProfilerPanel, profile_heat_levels
 from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.theme import DEFAULT_THEME, Theme
+from synesthesia_machine.ui.translations import set_language, tr, trf
 from synesthesia_machine.ui.transport import resolve_transport_target
 from synesthesia_machine.ui.view_models import PortViewModel
 from synesthesia_machine.ui.widgets import (
@@ -82,6 +106,19 @@ class _ReplacementDecision(Enum):
     PROCEED = auto()
     DISCARD = auto()
     CANCEL = auto()
+
+
+@dataclass(frozen=True, slots=True)
+class _EngineRefreshSnapshot:
+    metrics: EngineMetrics
+    sources: tuple[SourceStatus, ...]
+    midi_outputs: tuple[MidiOutputStatus, ...]
+    diagnostic: NodeMemoryDiagnostic | None
+
+
+class _EngineTaskSignals(QObject):
+    completed = Signal(str, object)
+    failed = Signal(str, object)
 
 
 def _clipboard_mime_data() -> QMimeData | None:
@@ -111,6 +148,7 @@ class MainWindow(QMainWindow):
         self.settings = settings or QSettings("Synesthesia Machine", "Synesthesia Machine")
         self.settings_store = ApplicationSettingsStore(self.settings)
         self.preferences = self.settings_store.load_preferences()
+        set_language(self.preferences.language)
         self.session = DocumentSession(registry, self)
         self.autosave_store = AutosaveStore(paths.recovery)
         self.action_registry = ActionRegistry(self)
@@ -126,7 +164,7 @@ class MainWindow(QMainWindow):
         self.image_preview_panel = ImagePreviewPanel(self)
         self.note_preview_panel = NotePreviewPanel(self)
         self.profiler_panel = ProfilerPanel(self)
-        self.recent_menu = QMenu("Open &Recent", self)
+        self.recent_menu = QMenu(tr("Open &Recent"), self)
         self._recent_paths = self._load_recent_paths()
         self._image_sequences: dict[UUID, int] = {}
         self._note_sequences: dict[UUID, int] = {}
@@ -134,6 +172,14 @@ class MainWindow(QMainWindow):
         self._engine_failure_signature: tuple[object, ...] | None = None
         self._source_error_signature: tuple[tuple[UUID, str], ...] = ()
         self._midi_error_signature: tuple[tuple[UUID, str, tuple[str, ...]], ...] = ()
+        self._runtime_error_signature: tuple[tuple[UUID, str, str], ...] = ()
+        self._engine_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="synmachine-ui-engine",
+        )
+        self._engine_task_signals = _EngineTaskSignals(self)
+        self._engine_tasks_inflight: set[str] = set()
+        self._pending_activation: tuple[GraphSnapshot, tuple[UUID, ...]] | None = None
         self._autosave_timer = QTimer(self)
         self._autosave_timer.setSingleShot(True)
         self._autosave_timer.setInterval(self.preferences.autosave_delay_seconds * 1000)
@@ -151,8 +197,8 @@ class MainWindow(QMainWindow):
         self._engine_status = QLabel(self)
 
         self.setObjectName("main_window")
-        self.setAccessibleName("Synesthesia Machine graph editor")
-        self.setWindowTitle("Untitled[*] — Synesthesia Machine")
+        self.setAccessibleName(tr("Synesthesia Machine graph editor"))
+        self.setWindowTitle(f"{tr('Untitled')}[*] — Synesthesia Machine")
         self.setWindowModified(False)
         self.resize(1280, 760)
         self.setMinimumSize(900, 560)
@@ -168,6 +214,8 @@ class MainWindow(QMainWindow):
         self._create_status_bar()
         self._connect_signals()
         self._restore_window_state()
+        # Profiling is opt-in every launch even when an older saved layout left the dock visible.
+        self.profiler_dock.hide()
         self._refresh_recent_menu()
         self._refresh_document_ui()
         self._refresh_selection_ui()
@@ -177,7 +225,7 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self._offer_recovery)
 
     def _create_docks(self) -> None:
-        self.library_dock = QDockWidget("Node Library", self)
+        self.library_dock = QDockWidget(tr("Node Library"), self)
         self.library_dock.setObjectName("node_library_dock")
         self.library_dock.setAllowedAreas(
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
@@ -185,7 +233,7 @@ class MainWindow(QMainWindow):
         self.library_dock.setWidget(self.library)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.library_dock)
 
-        self.inspector_dock = QDockWidget("Inspector", self)
+        self.inspector_dock = QDockWidget(tr("Inspector"), self)
         self.inspector_dock.setObjectName("inspector_dock")
         self.inspector_dock.setAllowedAreas(
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
@@ -198,13 +246,13 @@ class MainWindow(QMainWindow):
             | Qt.DockWidgetArea.LeftDockWidgetArea
             | Qt.DockWidgetArea.RightDockWidgetArea
         )
-        self.image_preview_dock = QDockWidget("Image Preview", self)
+        self.image_preview_dock = QDockWidget(tr("Image Preview"), self)
         self.image_preview_dock.setObjectName("image_preview_dock")
         self.image_preview_dock.setAllowedAreas(preview_areas)
         self.image_preview_dock.setWidget(self.image_preview_panel)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.image_preview_dock)
 
-        self.note_preview_dock = QDockWidget("Note Visualizer", self)
+        self.note_preview_dock = QDockWidget(tr("Note Visualizer"), self)
         self.note_preview_dock.setObjectName("note_preview_dock")
         self.note_preview_dock.setAllowedAreas(preview_areas)
         self.note_preview_dock.setWidget(self.note_preview_panel)
@@ -212,8 +260,13 @@ class MainWindow(QMainWindow):
         self.tabifyDockWidget(self.image_preview_dock, self.note_preview_dock)
         self.image_preview_dock.raise_()
 
-        self.profiler_dock = QDockWidget("Runtime Profiler", self)
+        self.profiler_dock = QDockWidget(tr("Runtime Profiler"), self)
         self.profiler_dock.setObjectName("runtime_profiler_dock")
+        self.profiler_dock.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetClosable
+            | QDockWidget.DockWidgetFeature.DockWidgetMovable
+            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        )
         self.profiler_dock.setAllowedAreas(
             Qt.DockWidgetArea.BottomDockWidgetArea
             | Qt.DockWidgetArea.LeftDockWidgetArea
@@ -223,7 +276,7 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.profiler_dock)
         self.profiler_dock.hide()
 
-        self.issues_dock = QDockWidget("Validation Issues", self)
+        self.issues_dock = QDockWidget(tr("Validation Issues"), self)
         self.issues_dock.setObjectName("validation_issues_dock")
         self.issues_dock.setAllowedAreas(
             Qt.DockWidgetArea.BottomDockWidgetArea
@@ -270,12 +323,16 @@ class MainWindow(QMainWindow):
             self.edit_preferences,
         )
 
-        undo = self.session.undo_stack.createUndoAction(self, "&Undo")
+        undo = self.session.undo_stack.createUndoAction(self, tr("&Undo"))
         undo.setShortcut(QKeySequence.StandardKey.Undo)
-        self.action_registry.register("undo", undo, status_tip="Undo the last graph edit")
-        redo = self.session.undo_stack.createRedoAction(self, "&Redo")
+        self.action_registry.register(
+            "undo", undo, status_tip="Undo the last graph edit", source_text="&Undo"
+        )
+        redo = self.session.undo_stack.createRedoAction(self, tr("&Redo"))
         redo.setShortcut(QKeySequence.StandardKey.Redo)
-        self.action_registry.register("redo", redo, status_tip="Redo the last graph edit")
+        self.action_registry.register(
+            "redo", redo, status_tip="Redo the last graph edit", source_text="&Redo"
+        )
         create(
             ActionSpec("copy", "&Copy", "Copy selected nodes", QKeySequence.StandardKey.Copy),
             self.copy_selection,
@@ -309,6 +366,24 @@ class MainWindow(QMainWindow):
         create(
             ActionSpec("add_node", "&Add Node…", "Search for a node to add", "Ctrl+Space"),
             self.search_at_center,
+        )
+        create(
+            ActionSpec(
+                "randomize_parameters",
+                "Randomize &Parameters",
+                "Randomize parameters on the selected nodes",
+                "Ctrl+Shift+P",
+            ),
+            self.randomize_parameters,
+        )
+        create(
+            ActionSpec(
+                "randomize_nodes",
+                "Randomize &Nodes",
+                "Replace selected nodes with a valid randomized subgraph",
+                "Ctrl+Shift+R",
+            ),
+            self.randomize_nodes,
         )
         create(
             ActionSpec("add_group", "Add &Group", "Add an organizational group to the canvas"),
@@ -368,7 +443,7 @@ class MainWindow(QMainWindow):
                 "restart_engine",
                 "Restart &Engine",
                 "Restart the child engine and rebuild the latest valid runtime",
-                "Ctrl+Shift+R",
+                "Ctrl+Alt+R",
             ),
             self.restart_engine,
         )
@@ -386,37 +461,43 @@ class MainWindow(QMainWindow):
             "toggle_library",
             self.library_dock.toggleViewAction(),
             status_tip="Show or hide the node library",
+            source_text="Node Library",
         )
         self.action_registry.register(
             "toggle_inspector",
             self.inspector_dock.toggleViewAction(),
             status_tip="Show or hide the inspector",
+            source_text="Inspector",
         )
         self.action_registry.register(
             "toggle_image_preview",
             self.image_preview_dock.toggleViewAction(),
             status_tip="Show or hide the image preview",
+            source_text="Image Preview",
         )
         self.action_registry.register(
             "toggle_note_preview",
             self.note_preview_dock.toggleViewAction(),
             status_tip="Show or hide the note velocity visualizer",
+            source_text="Note Visualizer",
         )
         self.action_registry.register(
             "toggle_profiler",
             self.profiler_dock.toggleViewAction(),
             status_tip="Show or hide per-node runtime profiling",
+            source_text="Runtime Profiler",
         )
         self.action_registry.register(
             "toggle_issues",
             self.issues_dock.toggleViewAction(),
             status_tip="Show or hide the graph validation issue list",
+            source_text="Validation Issues",
         )
 
     def _create_toolbar(self) -> None:
-        toolbar = QToolBar("Transport", self)
+        toolbar = QToolBar(tr("Transport"), self)
         toolbar.setObjectName("transport_toolbar")
-        toolbar.setAccessibleName("Source transport and panic")
+        toolbar.setAccessibleName(tr("Source transport and panic"))
         toolbar.setMovable(False)
         toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         for key in ("play", "pause", "stop", "reload"):
@@ -429,11 +510,20 @@ class MainWindow(QMainWindow):
                 button.setAccessibleName(action.text().replace("&", ""))
         toolbar.addSeparator()
         toolbar.addAction(self.action_registry.require("panic"))
+        toolbar.addSeparator()
+        for key in ("randomize_parameters", "randomize_nodes"):
+            random_action = self.action_registry.require(key)
+            toolbar.addAction(random_action)
+            random_button = toolbar.widgetForAction(random_action)
+            if isinstance(random_button, QToolButton):
+                random_button.setObjectName(f"{key}_button")
+                random_button.setProperty("transportControl", True)
+                random_button.setAccessibleName(random_action.text().replace("&", ""))
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
         self.transport_toolbar = toolbar
 
     def _create_menus(self) -> None:
-        file_menu = self.menuBar().addMenu("&File")
+        file_menu = self.menuBar().addMenu(tr("&File"))
         file_menu.addAction(self.action_registry.require("new"))
         file_menu.addAction(self.action_registry.require("open"))
         file_menu.addMenu(self.recent_menu)
@@ -444,7 +534,7 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(self.action_registry.require("exit"))
 
-        edit_menu = self.menuBar().addMenu("&Edit")
+        edit_menu = self.menuBar().addMenu(tr("&Edit"))
         edit_menu.addAction(self.action_registry.require("undo"))
         edit_menu.addAction(self.action_registry.require("redo"))
         edit_menu.addSeparator()
@@ -457,7 +547,7 @@ class MainWindow(QMainWindow):
         edit_menu.addSeparator()
         edit_menu.addAction(self.action_registry.require("preferences"))
 
-        view_menu = self.menuBar().addMenu("&View")
+        view_menu = self.menuBar().addMenu(tr("&View"))
         view_menu.addAction(self.action_registry.require("frame_selection"))
         view_menu.addAction(self.action_registry.require("frame_all"))
         view_menu.addSeparator()
@@ -468,11 +558,13 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.action_registry.require("toggle_profiler"))
         view_menu.addAction(self.action_registry.require("toggle_issues"))
 
-        graph_menu = self.menuBar().addMenu("&Graph")
+        graph_menu = self.menuBar().addMenu(tr("&Graph"))
         graph_menu.addAction(self.action_registry.require("add_node"))
         graph_menu.addAction(self.action_registry.require("add_group"))
         graph_menu.addAction(self.action_registry.require("add_comment"))
-        arrange_menu = graph_menu.addMenu("&Arrange Selection")
+        graph_menu.addAction(self.action_registry.require("randomize_parameters"))
+        graph_menu.addAction(self.action_registry.require("randomize_nodes"))
+        arrange_menu = graph_menu.addMenu(tr("&Arrange Selection"))
         for key in (
             "align_left",
             "align_hcenter",
@@ -493,18 +585,27 @@ class MainWindow(QMainWindow):
         graph_menu.addSeparator()
         graph_menu.addAction(self.action_registry.require("restart_engine"))
 
-        midi_menu = self.menuBar().addMenu("&MIDI")
+        midi_menu = self.menuBar().addMenu(tr("&MIDI"))
         midi_menu.addAction(self.action_registry.require("panic"))
 
-        help_menu = self.menuBar().addMenu("&Help")
+        help_menu = self.menuBar().addMenu(tr("&Help"))
         help_menu.addAction(self.action_registry.require("export_diagnostics"))
         help_menu.addSeparator()
         help_menu.addAction(self.action_registry.require("about"))
+        self._menus = {
+            "file": file_menu,
+            "edit": edit_menu,
+            "view": view_menu,
+            "graph": graph_menu,
+            "arrange": arrange_menu,
+            "midi": midi_menu,
+            "help": help_menu,
+        }
 
     def _create_status_bar(self) -> None:
-        self.statusBar().showMessage("Ready")
-        self._engine_status.setText("Engine STOPPED · 0 ticks")
-        self._engine_status.setAccessibleName("Engine runtime status")
+        self.statusBar().showMessage(tr("Ready"))
+        self._engine_status.setText(tr("Engine STOPPED · 0 ticks"))
+        self._engine_status.setAccessibleName(tr("Engine runtime status"))
         self.statusBar().addPermanentWidget(self._engine_status, 1)
         self.statusBar().addPermanentWidget(self._validation_status)
         self.statusBar().addPermanentWidget(self._node_count)
@@ -519,6 +620,7 @@ class MainWindow(QMainWindow):
         self.issues_panel.issueActivated.connect(self._focus_validation_issue)
         self.scene.selectionChanged.connect(self._refresh_selection_ui)
         self.scene.connectionDroppedOnEmpty.connect(self._search_compatible_node)
+        self.scene.connectionInspectRequested.connect(self._inspect_connection)
         self.view.requestSearch.connect(self._search_nodes)
         self.library.nodeActivated.connect(self._add_library_node)
         self._autosave_timer.timeout.connect(self._autosave)
@@ -532,6 +634,8 @@ class MainWindow(QMainWindow):
         self.profiler_panel.resetRequested.connect(self._reset_profiling)
         self.profiler_panel.heatmapChanged.connect(self._update_profiler_heatmap)
         QApplication.clipboard().dataChanged.connect(self._refresh_action_states)
+        self._engine_task_signals.completed.connect(self._on_engine_task_completed)
+        self._engine_task_signals.failed.connect(self._on_engine_task_failed)
 
     @Slot()
     def play(self) -> None:
@@ -547,9 +651,11 @@ class MainWindow(QMainWindow):
                 self.engine_client.play(target)
                 verb = "Playing"
         except (KeyError, RuntimeError, TimeoutError, IndexError) as error:
-            self.statusBar().showMessage(f"Could not play source: {error}", 5000)
+            self.statusBar().showMessage(trf("Could not play source: {error}", error=error), 5000)
             return
-        self.statusBar().showMessage(f"{verb} source {str(target)[:8]}", 3000)
+        self.statusBar().showMessage(
+            trf("{verb} source {source}", verb=tr(verb), source=str(target)[:8]), 3000
+        )
 
     @Slot()
     def pause(self) -> None:
@@ -568,21 +674,21 @@ class MainWindow(QMainWindow):
         try:
             self.engine_client.panic()
         except (RuntimeError, TimeoutError) as error:
-            self.statusBar().showMessage(f"Could not send panic: {error}", 5000)
+            self.statusBar().showMessage(trf("Could not send panic: {error}", error=error), 5000)
             return
-        self.statusBar().showMessage("Panic sent", 3000)
+        self.statusBar().showMessage(tr("Panic sent"), 3000)
 
     @Slot()
     def restart_engine(self) -> None:
         if self._engine_closed:
             return
         self.action_registry.require("restart_engine").setEnabled(False)
-        self.statusBar().showMessage("Restarting engine…")
+        self.statusBar().showMessage(tr("Restarting engine…"))
         QApplication.processEvents()
         try:
             activation = self.engine_client.restart()
         except (RuntimeError, TimeoutError) as error:
-            self.statusBar().showMessage(f"Engine restart failed: {error}", 8000)
+            self.statusBar().showMessage(trf("Engine restart failed: {error}", error=error), 8000)
             self._refresh_engine_status()
             return
         self._image_sequences.clear()
@@ -595,18 +701,18 @@ class MainWindow(QMainWindow):
                     activation = self.engine_client.activate(snapshot)
                 except (RuntimeError, TimeoutError) as error:
                     self.statusBar().showMessage(
-                        f"Engine restarted but graph rebuild failed: {error}",
+                        trf("Engine restarted but graph rebuild failed: {error}", error=error),
                         8000,
                     )
                     self._refresh_engine_status()
                     return
         if activation is not None and not activation.activated:
             self.statusBar().showMessage(
-                "Engine restarted; current invalid graph was not activated",
+                tr("Engine restarted; current invalid graph was not activated"),
                 8000,
             )
         else:
-            self.statusBar().showMessage("Engine restarted", 5000)
+            self.statusBar().showMessage(tr("Engine restarted"), 5000)
         self._refresh_engine_status()
 
     def _invoke_transport(self, operation: Callable[[UUID | None], None], past_tense: str) -> None:
@@ -616,9 +722,18 @@ class MainWindow(QMainWindow):
         try:
             operation(target)
         except (KeyError, RuntimeError, TimeoutError) as error:
-            self.statusBar().showMessage(f"Could not control source: {error}", 5000)
+            self.statusBar().showMessage(
+                trf("Could not control source: {error}", error=error), 5000
+            )
             return
-        self.statusBar().showMessage(f"{past_tense} source {str(target)[:8]}", 3000)
+        self.statusBar().showMessage(
+            trf(
+                "{verb} source {source}",
+                verb=tr(past_tense),
+                source=str(target)[:8],
+            ),
+            3000,
+        )
 
     def _transport_target(self) -> UUID | None:
         sources = tuple(
@@ -629,7 +744,7 @@ class MainWindow(QMainWindow):
         )
         resolution = resolve_transport_target(sources, self.scene.selected_node_ids())
         if resolution.target is None:
-            self.statusBar().showMessage(resolution.message, 4000)
+            self.statusBar().showMessage(tr(resolution.message), 4000)
         return resolution.target
 
     @Slot()
@@ -641,11 +756,82 @@ class MainWindow(QMainWindow):
         self.session.new_document()
         if decision is _ReplacementDecision.DISCARD:
             self.autosave_store.discard(previous_id)
-        self.statusBar().showMessage("Created new graph", 3000)
+        self.statusBar().showMessage(tr("Created new graph"), 3000)
+
+    @Slot()
+    def randomize_parameters(self) -> None:
+        selected = self.scene.selected_node_ids()
+        if not selected:
+            self.statusBar().showMessage(
+                tr("Select one or more nodes to randomize their parameters"),
+                4000,
+            )
+            return
+        try:
+            node_count, parameter_count = self.session.randomize_parameters(selected)
+        except (KeyError, RuntimeError, ValueError) as error:
+            self._show_error("Could not randomize parameters", str(error))
+            return
+        if not node_count:
+            self.statusBar().showMessage(
+                tr("The selected nodes have no parameters that can be randomized"),
+                4000,
+            )
+            return
+        self.scene.select_node_ids(selected)
+        self.statusBar().showMessage(
+            trf(
+                "Randomized {parameters} parameter(s) across {nodes} selected node(s)",
+                parameters=parameter_count,
+                nodes=node_count,
+            ),
+            4000,
+        )
+
+    @Slot()
+    def randomize_nodes(self) -> None:
+        selected = self.scene.selected_node_ids()
+        if not selected:
+            previous_id = self.session.document.document_id
+            decision = self._confirm_document_replacement()
+            if decision is _ReplacementDecision.CANCEL:
+                return
+            try:
+                snapshot = generate_random_graph(self.registry)
+            except (KeyError, RuntimeError, ValueError) as error:
+                self._show_error("Could not generate random graph", str(error))
+                return
+            self.session.replace_with_snapshot(snapshot)
+            if decision is _ReplacementDecision.DISCARD:
+                self.autosave_store.discard(previous_id)
+            self.scene.select_node_ids(set())
+            QTimer.singleShot(0, self.view.frame_all)
+            self.statusBar().showMessage(
+                trf(
+                    "Generated a complete randomized graph with {nodes} nodes",
+                    nodes=len(snapshot.nodes),
+                ),
+                4000,
+            )
+            return
+        try:
+            replacement_ids = self.session.randomize_nodes(selected)
+        except (KeyError, RuntimeError, ValueError) as error:
+            self._show_error("Could not randomize nodes", str(error))
+            return
+        self.scene.select_node_ids(set(replacement_ids))
+        self.statusBar().showMessage(
+            trf(
+                "Replaced {selected} selected node(s) with {replacements} randomized node(s)",
+                selected=len(selected),
+                replacements=len(replacement_ids),
+            ),
+            4000,
+        )
 
     @Slot()
     def open_document(self) -> None:
-        selected, _ = QFileDialog.getOpenFileName(self, "Open Graph", "", GRAPH_FILE_FILTER)
+        selected, _ = QFileDialog.getOpenFileName(self, tr("Open Graph"), "", tr(GRAPH_FILE_FILTER))
         if selected:
             self.open_path(Path(selected))
 
@@ -665,12 +851,16 @@ class MainWindow(QMainWindow):
         missing_count = len(find_missing_media(self.session.document.snapshot()))
         if missing_count:
             self.statusBar().showMessage(
-                f"Opened {path.name} · {missing_count} missing media file(s); "
-                "use File → Locate Missing Media",
+                trf(
+                    "Opened {name} · {count} missing media file(s); "
+                    "use File → Locate Missing Media",
+                    name=path.name,
+                    count=missing_count,
+                ),
                 8000,
             )
         else:
-            self.statusBar().showMessage(f"Opened {path.name}", 4000)
+            self.statusBar().showMessage(trf("Opened {name}", name=path.name), 4000)
         return True
 
     @Slot()
@@ -682,14 +872,14 @@ class MainWindow(QMainWindow):
         )
         candidates = selected_references or references
         if not candidates:
-            self.statusBar().showMessage("No missing media files were found", 4000)
+            self.statusBar().showMessage(tr("No missing media files were found"), 4000)
             return
         reference = candidates[0]
         selected, _ = QFileDialog.getOpenFileName(
             self,
-            "Locate Missing Video",
+            tr("Locate Missing Video"),
             str(reference.missing_path.parent),
-            "Video files (*.mp4 *.mov *.mkv *.avi *.webm);;All files (*)",
+            tr("Video files (*.mp4 *.mov *.mkv *.avi *.webm);;All files (*)"),
         )
         if not selected:
             return
@@ -697,8 +887,11 @@ class MainWindow(QMainWindow):
         if verification.match is RelinkMatch.MISMATCH:
             choice = QMessageBox.warning(
                 self,
-                "Media identity differs",
-                f"{verification.message}\n\nUse this explicitly selected file anyway?",
+                tr("Media identity differs"),
+                trf(
+                    "{message}\n\nUse this explicitly selected file anyway?",
+                    message=verification.message,
+                ),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel,
             )
@@ -712,7 +905,11 @@ class MainWindow(QMainWindow):
         self.scene.select_node_ids({reference.node_id})
         remaining = len(find_missing_media(self.session.document.snapshot()))
         self.statusBar().showMessage(
-            f"Relinked {Path(selected).name} · {remaining} missing media file(s) remain",
+            trf(
+                "Relinked {name} · {count} missing media file(s) remain",
+                name=Path(selected).name,
+                count=remaining,
+            ),
             5000,
         )
 
@@ -724,8 +921,12 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def save_document_as(self) -> bool:
-        initial = str(self.session.current_path or Path.home() / "Untitled.synmachine.json")
-        selected, _ = QFileDialog.getSaveFileName(self, "Save Graph", initial, GRAPH_FILE_FILTER)
+        initial = str(
+            self.session.current_path or Path.home() / f"{tr('Untitled')}.synmachine.json"
+        )
+        selected, _ = QFileDialog.getSaveFileName(
+            self, tr("Save Graph"), initial, tr(GRAPH_FILE_FILTER)
+        )
         if not selected:
             return False
         path = Path(selected)
@@ -742,7 +943,7 @@ class MainWindow(QMainWindow):
             return False
         self.autosave_store.discard(document_id)
         self._remember_recent(saved)
-        self.statusBar().showMessage(f"Saved {saved.name}", 4000)
+        self.statusBar().showMessage(trf("Saved {name}", name=saved.name), 4000)
         return True
 
     @Slot()
@@ -755,7 +956,7 @@ class MainWindow(QMainWindow):
         payload.setData(CLIPBOARD_MIME_TYPE, QByteArray(text.encode("utf-8")))
         payload.setText(text)
         QApplication.clipboard().setMimeData(payload)
-        self.statusBar().showMessage(f"Copied {len(node_ids)} node(s)", 2500)
+        self.statusBar().showMessage(trf("Copied {count} node(s)", count=len(node_ids)), 2500)
 
     @Slot()
     def paste_selection(self) -> None:
@@ -771,7 +972,7 @@ class MainWindow(QMainWindow):
             return
         node_ids = self.session.paste(fragment)
         self.scene.select_node_ids(node_ids)
-        self.statusBar().showMessage(f"Pasted {len(node_ids)} node(s)", 2500)
+        self.statusBar().showMessage(trf("Pasted {count} node(s)", count=len(node_ids)), 2500)
 
     @Slot()
     def duplicate_selection(self) -> None:
@@ -794,7 +995,7 @@ class MainWindow(QMainWindow):
         if not isinstance(value, QPointF):
             return
         candidates = (SearchCandidate(definition) for definition in self.registry.definitions())
-        dialog = NodeSearchDialog(candidates, self, title="Add Node")
+        dialog = NodeSearchDialog(candidates, self, title=tr("Add Node"))
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         selected = dialog.selected_candidate()
@@ -818,9 +1019,9 @@ class MainWindow(QMainWindow):
             SearchCandidate(definition, port_id) for definition, port_id in compatible
         )
         if not candidates:
-            self.statusBar().showMessage("No compatible node types are registered", 3500)
+            self.statusBar().showMessage(tr("No compatible node types are registered"), 3500)
             return
-        dialog = NodeSearchDialog(candidates, self, title="Add Compatible Node")
+        dialog = NodeSearchDialog(candidates, self, title=tr("Add Compatible Node"))
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         selected = dialog.selected_candidate()
@@ -842,13 +1043,70 @@ class MainWindow(QMainWindow):
         node_id = self.session.add_node(type_id, (center.x(), center.y()))
         self.scene.select_node_ids({node_id})
 
+    @Slot(object)
+    def _inspect_connection(self, value: object) -> None:
+        if not isinstance(value, UUID):
+            return
+        connection = next(
+            (
+                connection
+                for connection in self.session.view_model.connections
+                if connection.connection_id == value
+            ),
+            None,
+        )
+        model = self.session.document.connection(value)
+        if connection is None or model is None:
+            return
+        visualizers = {
+            "IMAGE": (DISPLAY_IMAGE_DATA_TYPE_ID, "image", self.image_preview_dock),
+            "CHANNEL": (CHANNEL_DISPLAY_TYPE_ID, "channel", self.image_preview_dock),
+            "MIDI_STATE": (NOTE_VISUALIZER_TYPE_ID, "midi", self.note_preview_dock),
+        }
+        target = visualizers.get(connection.type_name)
+        if target is not None:
+            type_id, input_port, dock = target
+            destination = self.session.document.node(model.destination_node_id)
+            position = destination.position if destination is not None else (0.0, 0.0)
+            self.session.undo_stack.beginMacro(tr("Inspect connection"))
+            try:
+                inspector_id = self.session.add_node(
+                    type_id,
+                    (position[0], position[1] + 260.0),
+                )
+                self.session.add_connection(
+                    model.source_node_id,
+                    model.source_port_id,
+                    inspector_id,
+                    input_port,
+                )
+            finally:
+                self.session.undo_stack.endMacro()
+            self.scene.select_node_ids({inspector_id})
+            dock.show()
+            dock.raise_()
+            self.statusBar().showMessage(
+                trf(
+                    "Attached a live {type_name} inspector",
+                    type_name=connection.type_name.lower(),
+                ),
+                4000,
+            )
+            return
+        self.profiler_dock.show()
+        self.profiler_dock.raise_()
+        self.scene.select_node_ids({model.source_node_id})
+        self.statusBar().showMessage(
+            tr("Live value is shown in the source node's Output column"), 5000
+        )
+
     @Slot()
     def add_group_at_center(self) -> None:
         center = self.view.mapToScene(self.view.viewport().rect().center())
         group_id = self.session.add_group(
             GroupKind.GROUP,
             (center.x() - 240.0, center.y() - 160.0),
-            title="Group",
+            title=tr("Group"),
         )
         self.scene.select_group_ids({group_id})
 
@@ -858,8 +1116,8 @@ class MainWindow(QMainWindow):
         group_id = self.session.add_group(
             GroupKind.COMMENT,
             (center.x() - 160.0, center.y() - 80.0),
-            title="Comment",
-            text="Double-click to edit this comment.",
+            title=tr("Comment"),
+            text=tr("Double-click to edit this comment."),
             size=(320.0, 160.0),
             color="#5a4f36",
         )
@@ -868,23 +1126,29 @@ class MainWindow(QMainWindow):
     @Slot()
     def _refresh_document_ui(self) -> None:
         path = self.session.current_path
-        name = path.name if path is not None else "Untitled"
+        name = path.name if path is not None else tr("Untitled")
         self.setWindowTitle(f"{name}[*] — Synesthesia Machine {__version__}")
         self.setWindowModified(self.session.is_dirty)
         snapshot = self.session.document.snapshot()
         self._node_count.setText(
-            f"{len(snapshot.nodes)} node(s) · {len(snapshot.connections)} cable(s) · "
-            f"{len(snapshot.groups)} group/comment(s)"
+            trf(
+                "{nodes} node(s) · {cables} cable(s) · {groups} group/comment(s)",
+                nodes=len(snapshot.nodes),
+                cables=len(snapshot.connections),
+                groups=len(snapshot.groups),
+            )
         )
         errors = len(self.session.report.errors)
         warnings = len(self.session.report.warnings)
-        self._validation_status.setText(f"{errors} error(s) · {warnings} warning(s)")
+        self._validation_status.setText(
+            trf("{errors} error(s) · {warnings} warning(s)", errors=errors, warnings=warnings)
+        )
         self._validation_status.setToolTip(
             "\n".join(
-                f"{issue.severity}: {issue.message} ({issue.code})"
+                f"{tr(str(issue.severity))}: {tr(issue.message)} ({issue.code})"
                 for issue in self.session.report.issues[:8]
             )
-            or "Graph is valid"
+            or tr("Graph is valid")
         )
         self._refresh_action_states()
 
@@ -942,9 +1206,13 @@ class MainWindow(QMainWindow):
             action = self.action_registry.require(key)
             action.setEnabled(transport.target is not None)
             action.setToolTip(
-                f"{verb} the {'selected' if transport.target in selected else 'only'} source"
+                trf(
+                    "{verb} the {target} source",
+                    verb=tr(verb),
+                    target=tr("selected" if transport.target in selected else "only"),
+                )
                 if transport.target is not None
-                else transport.message
+                else tr(transport.message)
             )
 
     @Slot(object)
@@ -959,35 +1227,94 @@ class MainWindow(QMainWindow):
             item = self.scene.connection_items.get(issue.connection_id)
             if item is not None:
                 self.view.ensureVisible(item, 80, 80)
-        self.statusBar().showMessage(f"{issue.code}: {issue.message}", 6000)
+        self.statusBar().showMessage(f"{issue.code}: {tr(issue.message)}", 6000)
 
     @Slot()
     def _schedule_engine_activation(self) -> None:
         if not self._engine_closed:
             self._activation_timer.start()
 
+    def _submit_engine_task(self, kind: str, operation: Callable[[], object]) -> bool:
+        if self._engine_closed or kind in self._engine_tasks_inflight:
+            return False
+        self._engine_tasks_inflight.add(kind)
+        future = self._engine_executor.submit(operation)
+        future.add_done_callback(partial(self._publish_engine_task_result, kind))
+        return True
+
+    def _publish_engine_task_result(self, kind: str, future: Future[object]) -> None:
+        try:
+            result = future.result()
+        except BaseException as error:
+            with suppress(RuntimeError):
+                self._engine_task_signals.failed.emit(kind, error)
+            return
+        with suppress(RuntimeError):
+            self._engine_task_signals.completed.emit(kind, result)
+
+    @Slot(str, object)
+    def _on_engine_task_completed(self, kind: str, result: object) -> None:
+        self._engine_tasks_inflight.discard(kind)
+        if self._engine_closed:
+            return
+        if kind == "activation":
+            if not isinstance(result, EngineActivation):
+                raise TypeError("Engine activation task returned an invalid result")
+            self._apply_engine_activation(result)
+            self._start_pending_activation()
+        elif kind == "refresh":
+            if not isinstance(result, _EngineRefreshSnapshot):
+                raise TypeError("Engine refresh task returned an invalid result")
+            self._apply_engine_refresh(result)
+
+    @Slot(str, object)
+    def _on_engine_task_failed(self, kind: str, error: object) -> None:
+        self._engine_tasks_inflight.discard(kind)
+        if self._engine_closed:
+            return
+        detail = str(error)
+        if kind == "activation":
+            self.statusBar().showMessage(
+                trf("Engine activation failed: {error}", error=detail), 5000
+            )
+            self._start_pending_activation()
+
+    def _start_pending_activation(self) -> None:
+        if self._pending_activation is None or "activation" in self._engine_tasks_inflight:
+            return
+        snapshot, demand_roots = self._pending_activation
+        self._pending_activation = None
+        self._submit_engine_task(
+            "activation",
+            lambda: self.engine_client.activate(snapshot, demand_roots=demand_roots),
+        )
+
     @Slot()
     def _activate_graph(self) -> None:
         if self._engine_closed:
             return
         snapshot = self.session.document.snapshot()
-        try:
-            activation = self.engine_client.activate(
-                snapshot, demand_roots=self._runtime_demand_roots(snapshot)
-            )
-        except (RuntimeError, TimeoutError) as error:
-            self.statusBar().showMessage(f"Engine activation failed: {error}", 5000)
-            return
+        self._pending_activation = (snapshot, self._runtime_demand_roots(snapshot))
+        self._start_pending_activation()
+
+    def _apply_engine_activation(self, activation: EngineActivation) -> None:
         if activation.activated:
             self._image_sequences.clear()
             self._note_sequences.clear()
             self.statusBar().showMessage(
-                f"Activated graph revision {activation.graph_revision}", 3000
+                trf(
+                    "Activated graph revision {revision}",
+                    revision=activation.graph_revision,
+                ),
+                3000,
             )
             return
         count = len(activation.report.errors)
         self.statusBar().showMessage(
-            f"Graph has {count} error(s); previous valid runtime remains active",
+            trf(
+                "Graph has {count} error(s); previous valid runtime remains active",
+                count=count,
+            ),
             5000,
         )
 
@@ -1067,42 +1394,70 @@ class MainWindow(QMainWindow):
             return
         self._engine_failure_signature = None
         if engine_status.connection_state is EngineConnectionState.RESTARTING:
-            self._engine_status.setText("Engine RESTARTING")
+            self._engine_status.setText(tr("Engine RESTARTING"))
             return
-        try:
-            metrics = self.engine_client.metrics()
-            sources = self.engine_client.source_status()
-            midi_outputs = self.engine_client.midi_output_status()
-            selected_nodes = self.scene.selected_node_ids()
-            diagnostic = None
-            if len(selected_nodes) == 1:
-                diagnostics = self.engine_client.node_memory_diagnostics(next(iter(selected_nodes)))
-                diagnostic = diagnostics[0] if diagnostics else None
-        except (RuntimeError, TimeoutError):
-            return
-        self.inspector.set_memory_diagnostic(diagnostic)
-        source_text = ", ".join(status.state.value for status in sources) or "no source"
+        selected_nodes = self.scene.selected_node_ids()
+        selected_node = next(iter(selected_nodes)) if len(selected_nodes) == 1 else None
+        self._submit_engine_task(
+            "refresh",
+            partial(self._load_engine_refresh, selected_node),
+        )
+
+    def _load_engine_refresh(self, selected_node: UUID | None) -> _EngineRefreshSnapshot:
+        metrics = self.engine_client.metrics()
+        sources = self.engine_client.source_status()
+        midi_outputs = self.engine_client.midi_output_status()
+        diagnostic = None
+        if selected_node is not None:
+            diagnostics = self.engine_client.node_memory_diagnostics(selected_node)
+            diagnostic = diagnostics[0] if diagnostics else None
+        return _EngineRefreshSnapshot(metrics, sources, midi_outputs, diagnostic)
+
+    def _apply_engine_refresh(self, refresh: _EngineRefreshSnapshot) -> None:
+        metrics = refresh.metrics
+        sources = refresh.sources
+        midi_outputs = refresh.midi_outputs
+        self.inspector.set_memory_diagnostic(refresh.diagnostic)
+        source_text = ", ".join(tr(status.state.value) for status in sources) or tr("no source")
         source_errors = tuple(
-            (status.node_id, status.last_error or "Unknown source error")
+            (status.node_id, status.last_error or tr("Unknown source error"))
             for status in sources
             if status.state is SourceState.ERROR
         )
         midi_errors = tuple(
             (
                 status.node_id,
-                status.last_error or "MIDI output is unavailable",
+                status.last_error or tr("MIDI output is unavailable"),
                 status.available_ports,
             )
             for status in midi_outputs
             if status.connection_state
             in {MidiOutputConnectionState.ERROR, MidiOutputConnectionState.UNAVAILABLE}
         )
+        runtime_errors = tuple(
+            (error.node_id, error.code, error.message) for error in metrics.runtime_errors
+        )
         diagnostic_lines = [
-            f"Source {str(node_id)[:8]}: {message}" for node_id, message in source_errors
+            trf("Source {node}: {message}", node=str(node_id)[:8], message=message)
+            for node_id, message in source_errors
         ]
         diagnostic_lines.extend(
-            f"MIDI {str(node_id)[:8]}: {message}. Available outputs: {', '.join(ports) or 'none'}"
+            trf(
+                "MIDI {node}: {message}. Available outputs: {outputs}",
+                node=str(node_id)[:8],
+                message=message,
+                outputs=", ".join(ports) or tr("none"),
+            )
             for node_id, message, ports in midi_errors
+        )
+        diagnostic_lines.extend(
+            trf(
+                "Node {node}: {message} ({code})",
+                node=str(node_id)[:8],
+                message=message,
+                code=code,
+            )
+            for node_id, code, message in runtime_errors
         )
         if diagnostic_lines:
             diagnostic_detail = "\n".join(diagnostic_lines)
@@ -1110,26 +1465,37 @@ class MainWindow(QMainWindow):
             if (
                 source_errors != self._source_error_signature
                 or midi_errors != self._midi_error_signature
+                or runtime_errors != self._runtime_error_signature
             ):
                 self.statusBar().showMessage(diagnostic_detail, 10000)
         elif midi_outputs:
             self._engine_status.setToolTip(
                 "\n".join(
-                    f"MIDI {status.selected_port or 'unselected'}: "
-                    f"{status.connection_state.value}, {status.active_note_count} active note(s)"
+                    trf(
+                        "MIDI {port}: {state}, {count} active note(s)",
+                        port=status.selected_port or tr("unselected"),
+                        state=tr(status.connection_state.value),
+                        count=status.active_note_count,
+                    )
                     for status in midi_outputs
                 )
             )
         else:
-            self._engine_status.setToolTip("Live engine and source performance")
+            self._engine_status.setToolTip(tr("Live engine and source performance"))
         self._source_error_signature = source_errors
         self._midi_error_signature = midi_errors
+        self._runtime_error_signature = runtime_errors
         memory_mib = metrics.memory_bytes / (1024 * 1024)
-        midi_text = (
-            ", ".join(status.connection_state.value for status in midi_outputs) or "no output"
+        midi_text = ", ".join(tr(status.connection_state.value) for status in midi_outputs) or tr(
+            "no output"
         )
         self._engine_status.setText(
-            f"Engine {metrics.state.value} · source {source_text} · "
+            trf(
+                "Engine {state} · source {source}",
+                state=tr(metrics.state.value),
+                source=source_text,
+            )
+            + " · "
             f"MIDI {midi_text} · "
             f"{metrics.processed_ticks} ticks · "
             f"in/process/preview {metrics.input_fps:.1f}/{metrics.processed_fps:.1f}/"
@@ -1146,7 +1512,7 @@ class MainWindow(QMainWindow):
             try:
                 self.engine_client.set_profiling_enabled(visible)
             except (RuntimeError, TimeoutError):
-                self.statusBar().showMessage("Could not change runtime profiling state", 3000)
+                self.statusBar().showMessage(tr("Could not change runtime profiling state"), 3000)
                 return
         if visible and not self._engine_closed:
             self._profiler_timer.start()
@@ -1174,10 +1540,10 @@ class MainWindow(QMainWindow):
         try:
             self.engine_client.reset_profiling()
         except (RuntimeError, TimeoutError):
-            self.statusBar().showMessage("Could not reset runtime profiling", 3000)
+            self.statusBar().showMessage(tr("Could not reset runtime profiling"), 3000)
             return
         self.scene.set_node_heatmap(None)
-        self.statusBar().showMessage("Runtime profiling reset", 2000)
+        self.statusBar().showMessage(tr("Runtime profiling reset"), 2000)
 
     @Slot(bool)
     def _update_profiler_heatmap(self, enabled: bool) -> None:
@@ -1193,11 +1559,22 @@ class MainWindow(QMainWindow):
             else status.crash_log_path
         )
         log_text = (
-            " · no crash report file" if crash_report is None else f" · crash report {crash_report}"
+            tr(" · no crash report file")
+            if crash_report is None
+            else trf(" · crash report {path}", path=crash_report)
         )
-        self._engine_status.setText(f"Engine {state} · STOPPED{exit_text}{log_text}")
-        detail = status.last_error or "The engine process stopped unexpectedly."
-        self.statusBar().showMessage(f"Engine {state.lower()}: {detail}")
+        self._engine_status.setText(
+            trf(
+                "Engine {state} · STOPPED{exit_text}{log_text}",
+                state=tr(state),
+                exit_text=exit_text,
+                log_text=log_text,
+            )
+        )
+        detail = status.last_error or tr("The engine process stopped unexpectedly.")
+        self.statusBar().showMessage(
+            trf("Engine {state}: {detail}", state=tr(state.lower()), detail=detail)
+        )
         signature = (
             status.connection_state,
             status.child_process_id,
@@ -1208,37 +1585,41 @@ class MainWindow(QMainWindow):
         if signature == self._engine_failure_signature:
             return
         self._engine_failure_signature = signature
-        message = (
-            f"The engine is {state.lower()}. The graph document remains open and editable.\n\n"
-            f"Details: {detail}"
+        message = trf(
+            "The engine is {state}. The graph document remains open and editable.\n\n"
+            "Details: {detail}",
+            state=tr(state.lower()),
+            detail=detail,
         )
         if status.exit_code is not None:
-            message += f"\nExit code: {status.exit_code}"
+            message += trf("\nExit code: {code}", code=status.exit_code)
         if crash_report is not None:
-            message += f"\nCrash report: {crash_report}"
+            message += trf("\nCrash report: {path}", path=crash_report)
         else:
-            message += "\nNo crash-report file was produced."
-            message += " Native termination can occur before Python can write a traceback."
-        message += "\n\nUse Graph → Restart Engine to rebuild the latest valid runtime."
-        QMessageBox.critical(self, "Engine stopped", message)
+            message += tr("\nNo crash-report file was produced.")
+            message += tr(" Native termination can occur before Python can write a traceback.")
+        message += tr("\n\nUse Graph → Restart Engine to rebuild the latest valid runtime.")
+        QMessageBox.critical(self, tr("Engine stopped"), message)
 
     @Slot()
     def export_diagnostic_bundle(self) -> None:
         destination, _ = QFileDialog.getSaveFileName(
             self,
-            "Export Diagnostic Bundle",
+            tr("Export Diagnostic Bundle"),
             str(self.paths.data / "synmachine-diagnostics.zip"),
-            "ZIP archives (*.zip)",
+            tr("ZIP archives (*.zip)"),
         )
         if not destination:
             return
         include_paths = (
             QMessageBox.question(
                 self,
-                "Include filesystem paths?",
-                "Filesystem paths can contain personal information. "
-                "Include them in this bundle?\n\n"
-                "Choose No for the recommended redacted bundle.",
+                tr("Include filesystem paths?"),
+                tr(
+                    "Filesystem paths can contain personal information. "
+                    "Include them in this bundle?\n\n"
+                    "Choose No for the recommended redacted bundle."
+                ),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
@@ -1264,16 +1645,19 @@ class MainWindow(QMainWindow):
         except OSError as error:
             self._show_error("Could not export diagnostics", str(error))
             return
-        privacy = "with paths" if include_paths else "with paths redacted"
-        self.statusBar().showMessage(f"Exported diagnostic bundle {privacy}: {result.path}", 6000)
+        privacy = tr("with paths" if include_paths else "with paths redacted")
+        self.statusBar().showMessage(
+            trf("Exported diagnostic bundle {privacy}: {path}", privacy=privacy, path=result.path),
+            6000,
+        )
 
     @Slot()
     def _show_about(self) -> None:
         QMessageBox.about(
             self,
-            "About Synesthesia Machine",
+            tr("About Synesthesia Machine"),
             f"Synesthesia Machine {__version__}\n\n"
-            "Video and image processing mapped to visualized MIDI state.",
+            + tr("Video and image processing mapped to visualized MIDI state."),
         )
 
     @Slot(bool)
@@ -1299,9 +1683,9 @@ class MainWindow(QMainWindow):
                 explicit_path=self.session.current_path,
             )
         except OSError as error:
-            self.statusBar().showMessage(f"Autosave failed: {error}", 5000)
+            self.statusBar().showMessage(trf("Autosave failed: {error}", error=error), 5000)
             return
-        self.statusBar().showMessage(f"Recovery saved to {path.name}", 3500)
+        self.statusBar().showMessage(trf("Recovery saved to {name}", name=path.name), 3500)
 
     def _confirm_document_replacement(self) -> _ReplacementDecision:
         if not self.session.is_dirty:
@@ -1309,8 +1693,8 @@ class MainWindow(QMainWindow):
         self._autosave()
         choice = QMessageBox.warning(
             self,
-            "Unsaved graph",
-            "Save changes before continuing?",
+            tr("Unsaved graph"),
+            tr("Save changes before continuing?"),
             QMessageBox.StandardButton.Save
             | QMessageBox.StandardButton.Discard
             | QMessageBox.StandardButton.Cancel,
@@ -1334,10 +1718,16 @@ class MainWindow(QMainWindow):
                 continue
             choice = QMessageBox.warning(
                 self,
-                "Recover autosaved graph",
-                "A newer autosave was found. Restore it now?\n\n"
-                f"Recovery: {record.path.name}"
-                + (f"\nOriginal: {explicit_path}" if explicit_path is not None else ""),
+                tr("Recover autosaved graph"),
+                trf(
+                    "A newer autosave was found. Restore it now?\n\nRecovery: {name}",
+                    name=record.path.name,
+                )
+                + (
+                    trf("\nOriginal: {path}", path=explicit_path)
+                    if explicit_path is not None
+                    else ""
+                ),
                 QMessageBox.StandardButton.Open
                 | QMessageBox.StandardButton.Discard
                 | QMessageBox.StandardButton.Cancel,
@@ -1353,7 +1743,7 @@ class MainWindow(QMainWindow):
             except (GraphPersistenceError, OSError, ValueError) as error:
                 self._show_error("Could not recover graph", str(error))
                 return
-            self.statusBar().showMessage(f"Recovered {record.path.name}", 5000)
+            self.statusBar().showMessage(trf("Recovered {name}", name=record.path.name), 5000)
             return
 
     def _explicit_path_for(self, record: RecoveryRecord) -> Path | None:
@@ -1382,7 +1772,7 @@ class MainWindow(QMainWindow):
     def _refresh_recent_menu(self) -> None:
         self.recent_menu.clear()
         if not self._recent_paths:
-            empty = QAction("No recent graphs", self.recent_menu)
+            empty = QAction(tr("No recent graphs"), self.recent_menu)
             empty.setEnabled(False)
             self.recent_menu.addAction(empty)
             return
@@ -1392,7 +1782,7 @@ class MainWindow(QMainWindow):
             action.triggered.connect(partial(self.open_path, path))
             self.recent_menu.addAction(action)
         self.recent_menu.addSeparator()
-        clear_action = QAction("&Clear Recent Graphs", self.recent_menu)
+        clear_action = QAction(tr("&Clear Recent Graphs"), self.recent_menu)
         clear_action.triggered.connect(self._clear_recent)
         self.recent_menu.addAction(clear_action)
 
@@ -1409,8 +1799,11 @@ class MainWindow(QMainWindow):
             self.apply_preferences(dialog.preferences())
 
     def apply_preferences(self, preferences: EditorPreferences) -> None:
+        language_changed = preferences.language is not self.preferences.language
         self.preferences = preferences
         self.settings_store.save_preferences(preferences)
+        if language_changed:
+            set_language(preferences.language)
         self._autosave_timer.setInterval(preferences.autosave_delay_seconds * 1000)
         self.scene.configure_grid_snap(
             enabled=preferences.grid_snap_enabled,
@@ -1418,7 +1811,54 @@ class MainWindow(QMainWindow):
         )
         self._recent_paths = self._recent_paths[: preferences.recent_file_limit]
         self.settings.setValue("recentFiles", [str(path) for path in self._recent_paths])
+        if language_changed:
+            self._retranslate_ui()
+        else:
+            self._refresh_recent_menu()
+
+    def _retranslate_ui(self) -> None:
+        """Apply a new English/French preference without rebuilding the document session."""
+
+        self.setAccessibleName(tr("Synesthesia Machine graph editor"))
+        for dock, source in (
+            (self.library_dock, "Node Library"),
+            (self.inspector_dock, "Inspector"),
+            (self.image_preview_dock, "Image Preview"),
+            (self.note_preview_dock, "Note Visualizer"),
+            (self.profiler_dock, "Runtime Profiler"),
+            (self.issues_dock, "Validation Issues"),
+        ):
+            dock.setWindowTitle(tr(source))
+        self.recent_menu.setTitle(tr("Open &Recent"))
+        self.transport_toolbar.setWindowTitle(tr("Transport"))
+        self.transport_toolbar.setAccessibleName(tr("Source transport and panic"))
+        for key, source in (
+            ("file", "&File"),
+            ("edit", "&Edit"),
+            ("view", "&View"),
+            ("graph", "&Graph"),
+            ("arrange", "&Arrange Selection"),
+            ("midi", "&MIDI"),
+            ("help", "&Help"),
+        ):
+            self._menus[key].setTitle(tr(source))
+        self.action_registry.retranslate()
+        for action in self.action_registry.values():
+            button = self.transport_toolbar.widgetForAction(action)
+            if isinstance(button, QToolButton):
+                button.setAccessibleName(action.text().replace("&", ""))
+        self.library.retranslate()
+        self.scene.sync_from_session()
+        self.inspector.retranslate()
+        self.issues_panel.set_report(self.session.report)
+        self.image_preview_panel.retranslate()
+        self.note_preview_panel.retranslate()
+        self.profiler_panel.retranslate()
+        self._engine_status.setAccessibleName(tr("Engine runtime status"))
+        self.statusBar().showMessage(tr("Ready"))
         self._refresh_recent_menu()
+        self._refresh_document_ui()
+        self._refresh_selection_ui()
 
     def _restore_window_state(self) -> None:
         geometry = cast(object, self.settings.value("windowGeometry"))
@@ -1434,7 +1874,7 @@ class MainWindow(QMainWindow):
         self.settings.sync()
 
     def _show_error(self, title: str, detail: str) -> None:
-        QMessageBox.critical(self, title, detail)
+        QMessageBox.critical(self, tr(title), detail)
         self.statusBar().showMessage(detail, 5000)
 
     def closeEvent(self, event: QCloseEvent) -> None:
@@ -1447,8 +1887,11 @@ class MainWindow(QMainWindow):
             self._metrics_timer.stop()
             self._profiler_timer.stop()
             if not self._engine_closed:
-                self.engine_client.close()
                 self._engine_closed = True
+                self._pending_activation = None
+                self._engine_executor.shutdown(wait=True, cancel_futures=True)
+                with suppress(RuntimeError, TimeoutError):
+                    self.engine_client.close()
             self._save_window_state()
             event.accept()
             return

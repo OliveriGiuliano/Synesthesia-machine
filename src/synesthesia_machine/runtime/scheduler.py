@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 import traceback
 from collections.abc import Callable, Mapping
@@ -11,7 +12,19 @@ from types import MappingProxyType
 from uuid import UUID
 
 from synesthesia_machine.contracts.engine_client import MidiOutputStatus, NodeMemoryDiagnostic
-from synesthesia_machine.contracts.runtime_values import FrameContext, NoData, RuntimeValue
+from synesthesia_machine.contracts.runtime_values import (
+    ChannelFrame,
+    ColorValue,
+    FrameContext,
+    ImageFrame,
+    MidiStateFrame,
+    NoData,
+    ParameterValue,
+    PortType,
+    RuntimeValue,
+    ValueArray,
+    clock_id_of,
+)
 from synesthesia_machine.nodes.base import (
     ExecutionKind,
     ExpectedNodeError,
@@ -22,10 +35,21 @@ from synesthesia_machine.nodes.base import (
     PanicCapableRuntime,
     ResetReason,
 )
-from synesthesia_machine.runtime.execution_plan import ExecutionPlan, PortKey, ScalarConversion
+from synesthesia_machine.runtime.execution_plan import (
+    CompiledNode,
+    ExecutionPlan,
+    PortKey,
+    ScalarConversion,
+)
 
 type TimingHook = Callable[[UUID, int], None]
 type ProfilingHook = Callable[[UUID, int, Mapping[str, RuntimeValue], bool], None]
+
+_LOGGER = logging.getLogger("synesthesia_machine.engine")
+
+
+class _InvalidNodeOutput(ValueError):
+    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,11 +179,15 @@ class Scheduler:
                 outputs: dict[str, RuntimeValue] = {}
                 invocations[node.node_id] = invocations.get(node.node_id, 0) + 1
                 try:
+                    effective_parameters = _effective_parameters(node, inputs)
                     outputs = dict(
                         self._runtimes[node.node_id].process(
-                            MappingProxyType(inputs), node.parameters, context
+                            MappingProxyType(inputs),
+                            MappingProxyType(effective_parameters),
+                            context,
                         )
                     )
+                    _validate_outputs(node, outputs)
                 except ExpectedNodeError as error:
                     failed = True
                     errors.append(
@@ -173,8 +201,25 @@ class Scheduler:
                         )
                     )
                     outputs = {port_id: NoData for port_id in node.output_types}
+                except _InvalidNodeOutput as error:
+                    failed = True
+                    errors.append(
+                        NodeExecutionError(
+                            node.node_id,
+                            "invalid_node_output",
+                            str(error),
+                            None,
+                            False,
+                            context.tick_index,
+                        )
+                    )
+                    outputs = {port_id: NoData for port_id in node.output_types}
                 except Exception as error:  # Scheduler boundary converts unexpected node failures.
                     failed = True
+                    _LOGGER.exception(
+                        "Unexpected node execution failure",
+                        extra={"node_id": str(node.node_id), "tick_index": context.tick_index},
+                    )
                     errors.append(
                         NodeExecutionError(
                             node.node_id,
@@ -278,3 +323,87 @@ class Scheduler:
         self._runtimes.clear()
         self._borrowed_runtime_ids.clear()
         self._static_cache.clear()
+
+
+def _effective_parameters(
+    node: CompiledNode, inputs: dict[str, RuntimeValue]
+) -> dict[str, ParameterValue]:
+    """Overlay connected parameter values without mutating the compiled literal defaults."""
+
+    values = dict(node.parameters)
+    overridden = False
+    try:
+        for parameter in node.definition.parameters:
+            if not parameter.connectable or parameter.id not in inputs:
+                continue
+            overridden = True
+            connected = parameter.connected_value(inputs[parameter.id])
+            values[parameter.id] = connected
+            # Legacy runtimes that explicitly consult the parameter input receive the same coerced
+            # value as runtimes that read only the effective parameter mapping.
+            inputs[parameter.id] = connected
+        if overridden and node.definition.parameter_validator is not None:
+            errors = node.definition.parameter_validator(values)
+            if errors:
+                raise ValueError("; ".join(errors))
+    except (TypeError, ValueError) as error:
+        raise ExpectedNodeError(
+            "invalid_dynamic_parameter",
+            f"Invalid live parameter value: {error}",
+        ) from error
+    return values
+
+
+def _validate_outputs(node: CompiledNode, outputs: Mapping[str, RuntimeValue]) -> None:
+    unknown = tuple(sorted(set(outputs) - set(node.output_types)))
+    if unknown:
+        raise _InvalidNodeOutput(f"Runtime returned unknown output port(s): {', '.join(unknown)}")
+    for port_id, value in outputs.items():
+        if value is NoData:
+            continue
+        expected = node.output_types[port_id]
+        if not _runtime_value_matches(value, expected):
+            raise _InvalidNodeOutput(
+                f"Output {port_id!r} expected {expected.value}, got {type(value).__name__}"
+            )
+        output_clock = clock_id_of(value)
+        if node.clock_id is not None and output_clock is not None and output_clock != node.clock_id:
+            raise _InvalidNodeOutput(
+                f"Output {port_id!r} uses clock {output_clock}, expected {node.clock_id}"
+            )
+        if isinstance(value, ValueArray):
+            clocks = {
+                item_clock for item in value.values if (item_clock := clock_id_of(item)) is not None
+            }
+            if len(clocks) > 1:
+                raise _InvalidNodeOutput(
+                    f"Output {port_id!r} contains values from multiple source clocks"
+                )
+
+
+def _runtime_value_matches(value: RuntimeValue, expected: PortType) -> bool:
+    if expected is PortType.IMAGE:
+        return isinstance(value, ImageFrame)
+    if expected is PortType.CHANNEL:
+        return isinstance(value, ChannelFrame)
+    if expected is PortType.FLOAT:
+        return isinstance(value, float)
+    if expected is PortType.INT:
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected is PortType.BOOL:
+        return isinstance(value, bool)
+    if expected is PortType.COLOR:
+        return isinstance(value, ColorValue)
+    if expected is PortType.MIDI_STATE:
+        return isinstance(value, MidiStateFrame)
+    if expected is PortType.STRING:
+        return isinstance(value, str)
+    if not isinstance(value, ValueArray):
+        return False
+    if expected is PortType.SCALAR_ARRAY:
+        return value.item_type in {PortType.FLOAT, PortType.INT}
+    if expected is PortType.IMAGE_ARRAY:
+        return value.item_type is PortType.IMAGE
+    if expected is PortType.CHANNEL_ARRAY:
+        return value.item_type is PortType.CHANNEL
+    return False

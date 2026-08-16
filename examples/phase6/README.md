@@ -1,6 +1,6 @@
 # Phase 6 reference graphs
 
-This directory contains the current 59-node catalogue plus four persisted examples for the Phase 6
+This directory contains the current 65-node catalogue plus four persisted examples for the Phase 6
 synesthesia algorithms. Every executable graph uses the deterministic video already committed at
 `../phase5/media/phase5_reference.mp4`, loops it through the production Load Video source, and can be
 opened directly in Synesthesia Machine.

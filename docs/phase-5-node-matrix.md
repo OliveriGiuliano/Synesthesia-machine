@@ -50,7 +50,7 @@ this document are persistent identities.
 | 2 | `synmachine.image.contrast` | `image: IMAGE -> image: IMAGE` | `factor=1`, `pivot=0.5` (connectable FLOAT), `channels=COLOUR` | Preserves alpha by default; IEEE propagation. |
 | 2 | `synmachine.image.clamp` | `image: IMAGE -> image: IMAGE` | `minimum=0`, `maximum=1` (connectable FLOAT), `channels=COLOUR`, `include_alpha=false` | Alpha optional; NumPy clamp leaves NaN as NaN and maps infinities to selected bounds. |
 | 2 | `synmachine.image.colour_levels` | `image: IMAGE -> image: IMAGE` | `input_black=0`, `input_white=1`, `gamma=1`, `output_black=0`, `output_white=1` (connectable FLOAT), `channels=COLOUR` | Preserves alpha by default; rejects invalid ranges/gamma; IEEE propagation. |
-| 2 | `synmachine.image.hue` | `image: IMAGE -> image: IMAGE` | `turns=0` (connectable FLOAT) | Preserves alpha; wraps hue modulo one; finite colour input required for OpenCV conversion. |
+| 2 | `synmachine.image.hue` | `image: IMAGE -> image: IMAGE` | `turns=0` (connectable FLOAT, 0–1 slider) | Preserves alpha; wraps hue modulo one; finite colour input required for OpenCV conversion. |
 | 2 | `synmachine.image.saturation` | `image: IMAGE -> image: IMAGE` | `factor=1` (connectable non-negative FLOAT) | Preserves alpha; finite colour input required for conversion. |
 | 2 | `synmachine.image.invert_colour` | `image: IMAGE -> image: IMAGE` | `invert_alpha=false` | Preserves alpha unless enabled; IEEE propagation. |
 | 2 | `synmachine.image.opacity` | `image: IMAGE -> image: IMAGE` | `factor=1` (connectable non-negative FLOAT) | Creates straight alpha when absent and multiplies existing alpha; IEEE propagation. |

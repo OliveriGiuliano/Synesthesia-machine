@@ -6,6 +6,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from uuid import UUID
 
+from synesthesia_machine.ui.translations import tr, trf
+
 
 @dataclass(frozen=True, slots=True)
 class TransportTargetResolution:
@@ -22,15 +24,19 @@ def resolve_transport_target(
     selected_sources = tuple(source_id for source_id in sources if source_id in selected)
     if len(selected_sources) == 1:
         target = selected_sources[0]
-        return TransportTargetResolution(target, f"Targeting selected source {str(target)[:8]}")
+        return TransportTargetResolution(
+            target, trf("Targeting selected source {source}", source=str(target)[:8])
+        )
     if len(selected_sources) > 1:
-        return TransportTargetResolution(None, "Select exactly one source for transport")
+        return TransportTargetResolution(None, tr("Select exactly one source for transport"))
     if len(sources) == 1:
         target = sources[0]
-        return TransportTargetResolution(target, f"Targeting sole source {str(target)[:8]}")
+        return TransportTargetResolution(
+            target, trf("Targeting sole source {source}", source=str(target)[:8])
+        )
     if not sources:
-        return TransportTargetResolution(None, "Add a source node before using transport")
-    return TransportTargetResolution(None, "Select one source node for transport")
+        return TransportTargetResolution(None, tr("Add a source node before using transport"))
+    return TransportTargetResolution(None, tr("Select one source node for transport"))
 
 
 __all__ = ["TransportTargetResolution", "resolve_transport_target"]

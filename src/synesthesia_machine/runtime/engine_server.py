@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import faulthandler
+import logging
 import os
 import queue
 import threading
@@ -63,7 +64,12 @@ from synesthesia_machine.contracts.engine_messages import (
     WaitUntilIdle,
     WriteSharedFrame,
 )
+from synesthesia_machine.diagnostics.logging_setup import (
+    ENGINE_LOGGER_NAME,
+    configure_logging,
+)
 from synesthesia_machine.nodes.composition import create_builtin_registry
+from synesthesia_machine.runtime.graph_payload import payload_to_snapshot
 from synesthesia_machine.runtime.in_process_engine import InProcessEngineClient
 from synesthesia_machine.runtime.shared_previews import AttachedPreviewSlot
 
@@ -115,6 +121,12 @@ _COMMAND_TYPES = (
     ConfigurePreviewSlot,
     Shutdown,
 )
+
+_REVISION_EXEMPT_COMMANDS = (Ping, WriteSharedFrame, Handshake, ActivateGraph, Shutdown)
+
+
+class StaleGraphRevisionError(RuntimeError):
+    pass
 
 
 class _EventPublisher:
@@ -355,12 +367,23 @@ class EngineServer:
 
     def _dispatch(self, command: EngineCommand) -> bool:
         try:
+            self._validate_graph_revision(command)
             response = self._handle(command)
         except Exception as error:
             self._send_failure(command.request_id, error)
             return False
         self._connection.send(response)
         return isinstance(command, Shutdown)
+
+    def _validate_graph_revision(self, command: EngineCommand) -> None:
+        if isinstance(command, _REVISION_EXEMPT_COMMANDS):
+            return
+        command_revision = command.graph_revision
+        if command_revision != self._graph_revision:
+            raise StaleGraphRevisionError(
+                f"Command graph revision {command_revision} is stale; "
+                f"active revision is {self._graph_revision}"
+            )
 
     def _handle(self, command: EngineCommand) -> EngineResponse:
         if isinstance(command, Ping):
@@ -375,7 +398,7 @@ class EngineServer:
             )
         if isinstance(command, ActivateGraph):
             activation = self._engine.activate(
-                command.snapshot.to_snapshot(),
+                payload_to_snapshot(command.snapshot),
                 demand_roots=command.demand_roots,
                 reset_reason=command.reset_reason,
             )
@@ -498,6 +521,7 @@ def engine_server_main(
     connection: DuplexConnection,
     event_queue: EventQueueWriter,
     crash_log_path: str | None = None,
+    log_directory: str | None = None,
 ) -> None:
     """Top-level Windows-spawn target; never imports or creates Qt objects."""
 
@@ -505,7 +529,16 @@ def engine_server_main(
     crash_capture_path = None if crash_path is None else Path(f"{crash_path}.pending")
     crash_stream = None
     completed_normally = False
+    logger = logging.getLogger(ENGINE_LOGGER_NAME)
     try:
+        if log_directory is not None:
+            session = configure_logging(
+                Path(log_directory),
+                session_id=f"engine-{os.getpid()}",
+                console=False,
+                process_name="engine",
+            )
+            logger.info("Engine process starting", extra={"session_id": session.session_id})
         if crash_capture_path is not None:
             crash_capture_path.parent.mkdir(parents=True, exist_ok=True)
             crash_stream = crash_capture_path.open("w", encoding="utf-8")
@@ -515,6 +548,7 @@ def engine_server_main(
         completed_normally = True
     except BaseException:
         detail = traceback.format_exc()
+        logger.exception("Engine process failed")
         if crash_stream is not None:
             with suppress(OSError):
                 crash_stream.write(detail)
@@ -523,6 +557,8 @@ def engine_server_main(
             _write_crash_log(crash_path, detail)
         raise
     finally:
+        if completed_normally:
+            logger.info("Engine process stopped")
         if crash_stream is not None:
             with suppress(RuntimeError):
                 faulthandler.disable()
@@ -549,6 +585,7 @@ def _write_crash_log(path: Path, detail: str) -> None:
 __all__ = [
     "MAX_OPENCV_THREADS",
     "EngineServer",
+    "StaleGraphRevisionError",
     "configure_opencv_threads",
     "engine_server_main",
 ]

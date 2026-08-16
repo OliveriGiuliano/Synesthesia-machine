@@ -10,6 +10,7 @@ from uuid import UUID
 import pytest
 
 from synesthesia_machine.contracts import (
+    EngineState,
     FrameContext,
     ParameterValue,
     PortType,
@@ -31,7 +32,11 @@ from synesthesia_machine.nodes import (
 from synesthesia_machine.nodes.input import create_input_definitions
 from synesthesia_machine.nodes.registry import NodeRegistry
 from synesthesia_machine.runtime.engine_facade import EngineFacade
-from synesthesia_machine.runtime.execution_plan import CompiledNode, ExecutionPlan, PortKey
+from synesthesia_machine.runtime.execution_plan import (
+    CompiledNode,
+    ExecutionPlan,
+    PortKey,
+)
 from synesthesia_machine.runtime.in_process_engine import InProcessEngineClient
 from synesthesia_machine.runtime.scheduler import Scheduler
 from tests.phase1.helpers import frame_context
@@ -306,6 +311,70 @@ def test_source_clock_change_replaces_only_clock_incompatible_state() -> None:
         facade.close()
 
 
+def test_same_clock_input_rewire_replaces_temporal_runtime_history() -> None:
+    source_factory = _TrackingRuntimeFactory()
+    branch_factory = _TrackingRuntimeFactory()
+    state_factory = _TrackingRuntimeFactory()
+    registry = NodeRegistry(
+        (
+            _definition(
+                "test.atomic.source",
+                source_factory,
+                execution_kind=ExecutionKind.SOURCE,
+                has_input=False,
+            ),
+            _definition("test.atomic.branch", branch_factory),
+            _definition("test.atomic.state", state_factory),
+        )
+    )
+    document = GraphDocument(document_id=DOCUMENT_ID)
+    document.add_node("test.atomic.source", node_id=SOURCE_A)
+    document.add_node("test.atomic.branch", node_id=CANDIDATE_GOOD)
+    document.add_node("test.atomic.branch", node_id=CANDIDATE_FAIL)
+    document.add_node("test.atomic.state", node_id=STATE_NODE)
+    document.add_connection(SOURCE_A, "value", CANDIDATE_GOOD, "value")
+    document.add_connection(SOURCE_A, "value", CANDIDATE_FAIL, "value")
+    document.add_connection(CANDIDATE_GOOD, "value", STATE_NODE, "value")
+    facade = EngineFacade(registry)
+    try:
+        assert facade.activate(document.snapshot(), demand_roots=(STATE_NODE,)).plan is not None
+        old_state = state_factory.records[STATE_NODE][0]
+        document.add_connection(CANDIDATE_FAIL, "value", STATE_NODE, "value")
+
+        assert facade.activate(document.snapshot(), demand_roots=(STATE_NODE,)).plan is not None
+
+        assert len(state_factory.records[STATE_NODE]) == 2
+        assert old_state.reset_reasons == [ResetReason.PLAN_REPLACED]
+        assert old_state.close_count == 1
+    finally:
+        facade.close()
+
+
+def test_demand_lifecycle_change_prevents_stale_runtime_reuse() -> None:
+    factory = _TrackingRuntimeFactory()
+    definition = _definition("test.atomic.demand", factory, has_input=False)
+    demanded = CompiledNode(
+        STATE_NODE,
+        definition,
+        clock_id=SOURCE_A,
+        is_static=False,
+        is_demanded=True,
+    )
+    inactive = replace(demanded, is_demanded=False)
+    old_scheduler = Scheduler(ExecutionPlan(DOCUMENT_ID, 1, (demanded,), frozenset({STATE_NODE})))
+    replacement = Scheduler.prepare_replacement(
+        ExecutionPlan(DOCUMENT_ID, 2, (inactive,), frozenset()),
+        old_scheduler,
+    )
+    try:
+        assert demanded.state_retention_key != inactive.state_retention_key
+        assert replacement.borrowed_runtime_ids == frozenset()
+        assert len(factory.records[STATE_NODE]) == 2
+    finally:
+        replacement.close()
+        old_scheduler.close()
+
+
 def test_implementation_version_change_is_not_runtime_compatible() -> None:
     factory = _TrackingRuntimeFactory()
     old_definition = _definition(
@@ -518,6 +587,41 @@ def test_source_controller_retention_restart_and_new_source_start_policy() -> No
         statuses = {status.node_id: status for status in client.source_status()}
         assert statuses[source_id].state is SourceState.PLAYING
         assert statuses[new_source_id].state is SourceState.READY
+    finally:
+        client.close()
+
+
+def test_source_scoped_transport_preserves_other_sources_and_aggregate_state() -> None:
+    factory = _FakeVideoFactory()
+    client = InProcessEngineClient(
+        NodeRegistry(create_input_definitions()),
+        video_source_factory=factory,
+    )
+    document, source_a = _video_document()
+    source_b = document.add_node(
+        "synmachine.input.load_video",
+        node_id=SOURCE_B,
+        parameters={"file_path": "second.mp4"},
+    )
+    try:
+        assert client.activate(document.snapshot()).activated
+        client.play(source_a)
+        client.play(source_b)
+
+        client.pause(source_a)
+        statuses = {status.node_id: status.state for status in client.source_status()}
+        assert statuses == {source_a: SourceState.PAUSED, source_b: SourceState.PLAYING}
+        assert client.metrics().state is EngineState.RUNNING
+
+        client.stop(source_b)
+        statuses = {status.node_id: status.state for status in client.source_status()}
+        assert statuses == {source_a: SourceState.PAUSED, source_b: SourceState.STOPPED}
+        assert client.metrics().state is EngineState.PAUSED
+
+        client.reload(source_a)
+        statuses = {status.node_id: status.state for status in client.source_status()}
+        assert statuses == {source_a: SourceState.READY, source_b: SourceState.STOPPED}
+        assert client.metrics().state is EngineState.STOPPED
     finally:
         client.close()
 

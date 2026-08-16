@@ -225,12 +225,19 @@ class VideoSourceService:
         self.node_id = node_id
         self._process_every_nth_frame = process_every_nth_frame
         self._loop = loop
-        self._stream_index = stream_index
         self._on_frame = on_frame
         self._on_reset = on_reset
         self._clock = clock or SystemPlaybackClock()
         self._max_decode_failures = max_decode_failures
-        self._metadata = inspect_video(file_path, stream_index=stream_index)
+        try:
+            self._metadata = inspect_video(file_path, stream_index=stream_index)
+            stream_fallback = False
+        except ValueError as error:
+            if stream_index == 0 or "is unavailable; found" not in str(error):
+                raise
+            self._metadata = inspect_video(file_path, stream_index=0)
+            stream_fallback = True
+        self._stream_index = self._metadata.stream_index
 
         self._lock = threading.RLock()
         self._decode_queue: queue.Queue[_DecodeItem] = queue.Queue(decode_queue_size)
@@ -244,7 +251,7 @@ class VideoSourceService:
         self._source_frame_index: int | None = None
         self._processed_index = 0
         self._skipped_by_selection = 0
-        self._warnings = 0
+        self._warnings = int(stream_fallback)
         self._last_error: str | None = None
 
     @property
@@ -385,6 +392,14 @@ class VideoSourceService:
         for thread in threads:
             if thread is not None and thread is not current and thread.is_alive():
                 thread.join(timeout=5.0)
+        survivors = tuple(
+            thread
+            for thread in threads
+            if thread is not None and thread is not current and thread.is_alive()
+        )
+        if survivors:
+            names = ", ".join(thread.name for thread in survivors)
+            raise TimeoutError(f"Video worker(s) did not stop within 5 seconds: {names}")
         with self._lock:
             if self._decode_thread is not current:
                 self._decode_thread = None
@@ -500,7 +515,10 @@ class VideoSourceService:
         while not self._stop_event.is_set():
             if not self._wait_until_playing():
                 return None
+            self._wake_event.clear()
             with self._lock:
+                if self._stop_event.is_set():
+                    return None
                 now_ns = self._clock.monotonic_ns()
                 target_ns = self._timeline.target_ns(pts_seconds, now_ns)
                 if self._state is not SourceState.PLAYING:
@@ -508,18 +526,19 @@ class VideoSourceService:
             remaining_ns = target_ns - self._clock.monotonic_ns()
             if remaining_ns <= 0:
                 return target_ns
-            self._wake_event.clear()
             self._clock.wait(self._wake_event, remaining_ns / _NANOSECONDS_PER_SECOND)
         return None
 
     def _wait_until_playing(self) -> bool:
         while not self._stop_event.is_set():
+            self._wake_event.clear()
             with self._lock:
+                if self._stop_event.is_set():
+                    return False
                 if self._state is SourceState.PLAYING:
                     return True
                 if self._state is not SourceState.PAUSED:
                     return False
-            self._wake_event.clear()
             self._clock.wait(self._wake_event, None)
         return False
 

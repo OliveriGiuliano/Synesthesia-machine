@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QSettings
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QDialogButtonBox
 
 from synesthesia_machine.app.settings import ApplicationPaths
 from synesthesia_machine.nodes.utility import create_utility_registry
@@ -13,11 +13,13 @@ from synesthesia_machine.runtime import InProcessEngineClient
 from synesthesia_machine.ui.application_settings import (
     ApplicationSettingsStore,
     EditorPreferences,
+    PreferencesDialog,
 )
 from synesthesia_machine.ui.canvas import GraphScene
 from synesthesia_machine.ui.main_window import MainWindow
 from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.theme import DEFAULT_THEME
+from synesthesia_machine.ui.translations import UiLanguage
 
 
 def _settings(path: Path) -> QSettings:
@@ -43,6 +45,7 @@ def test_preferences_round_trip_and_invalid_values_fall_back(tmp_path: Path) -> 
     broken.setValue("editor/gridSnapEnabled", "maybe")
     broken.setValue("editor/gridSize", float("nan"))
     broken.setValue("editor/recentFileLimit", 200)
+    broken.setValue("editor/language", "de")
     broken.sync()
     assert ApplicationSettingsStore(_settings(path)).load_preferences() == EditorPreferences()
 
@@ -113,6 +116,62 @@ def test_main_window_applies_persisted_preferences_and_exposes_action(
         assert window.scene.grid_snap_enabled
         assert window.scene.grid_spacing == 30.0
         assert window.action_registry.require("preferences").isEnabled()
+    finally:
+        window.session.new_document()
+        window.close()
+
+
+def test_french_preference_translates_startup_and_can_switch_live(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    del qapp
+    settings = _settings(tmp_path / "french.ini")
+    store = ApplicationSettingsStore(settings)
+    french = EditorPreferences(language=UiLanguage.FRENCH)
+    store.save_preferences(french)
+    assert ApplicationSettingsStore(_settings(tmp_path / "french.ini")).load_preferences() == french
+
+    paths = ApplicationPaths(tmp_path / "data", tmp_path / "logs", tmp_path / "recovery")
+    registry = create_utility_registry()
+    window = MainWindow(
+        registry,
+        paths,
+        InProcessEngineClient(registry),
+        settings=settings,
+        offer_recovery=False,
+    )
+    try:
+        menus = tuple(action.text().replace("&", "") for action in window.menuBar().actions())
+        assert menus == ("Fichier", "Édition", "Affichage", "Graphe", "MIDI", "Aide")
+        assert window.library_dock.windowTitle() == "Bibliothèque de nœuds"
+        assert window.library.search.placeholderText() == "Rechercher des nœuds…"
+        assert window.inspector.title.text() == "Aucune sélection"
+        assert window.action_registry.require("open").text().replace("&", "") == "Ouvrir…"
+        number_id = window.session.add_node("synmachine.utility.number", (0.0, 0.0))
+        assert window.scene.node_items[number_id].view_model.title == "Nombre"
+        standard_buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+        )
+        assert (
+            standard_buttons.button(QDialogButtonBox.StandardButton.Save).text().replace("&", "")
+            == "Enregistrer"
+        )
+        assert (
+            standard_buttons.button(QDialogButtonBox.StandardButton.Cancel).text().replace("&", "")
+            == "Annuler"
+        )
+
+        dialog = PreferencesDialog(window.preferences, window)
+        assert dialog.windowTitle() == "Préférences"
+        assert dialog.language_combo.currentData() == UiLanguage.FRENCH.value
+        dialog.close()
+
+        window.apply_preferences(EditorPreferences(language=UiLanguage.ENGLISH))
+        menus = tuple(action.text().replace("&", "") for action in window.menuBar().actions())
+        assert menus == ("File", "Edit", "View", "Graph", "MIDI", "Help")
+        assert window.library_dock.windowTitle() == "Node Library"
+        assert window.inspector.title.text() == "Nothing selected"
+        assert window.scene.node_items[number_id].view_model.title == "Number"
     finally:
         window.session.new_document()
         window.close()

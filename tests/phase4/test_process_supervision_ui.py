@@ -162,9 +162,11 @@ class _SupervisionClient:
         self.closed = True
 
 
+@pytest.mark.parametrize("close_error", [None, TimeoutError("engine still stopping")])
 def test_production_bootstrap_uses_process_client_and_freeze_support(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    close_error: TimeoutError | None,
 ) -> None:
     events: list[object] = []
     paths = _paths(tmp_path)
@@ -183,6 +185,8 @@ def test_production_bootstrap_uses_process_client_and_freeze_support(
 
         def close(self) -> None:
             events.append("close")
+            if close_error is not None:
+                raise close_error
 
     class _Window:
         def __init__(

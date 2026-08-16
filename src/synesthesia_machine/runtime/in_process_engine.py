@@ -312,6 +312,8 @@ class LatestFrameGraphWorker:
             self._condition.notify_all()
         if self._thread is not threading.current_thread():
             self._thread.join(timeout=5.0)
+            if self._thread.is_alive():
+                raise TimeoutError("Graph worker did not stop within 5 seconds")
 
     def _run(self) -> None:
         while True:
@@ -578,37 +580,39 @@ class InProcessEngineClient:
             sources = self._selected_sources(source_node_id)
             for source in sources:
                 source.play()
-            self._state = EngineState.RUNNING
+            self._refresh_transport_state()
 
     def pause(self, source_node_id: UUID | None = None) -> None:
         with self._lock:
             sources = self._selected_sources(source_node_id)
             for source in sources:
                 source.pause()
-            self._state = EngineState.PAUSED
+            self._refresh_transport_state()
 
     def resume(self, source_node_id: UUID | None = None) -> None:
         with self._lock:
             sources = self._selected_sources(source_node_id)
             for source in sources:
                 source.resume()
-            self._state = EngineState.RUNNING
+            self._refresh_transport_state()
 
     def stop(self, source_node_id: UUID | None = None) -> None:
         with self._lock:
             sources = self._selected_sources(source_node_id)
             for source in sources:
                 source.stop()
-            self._facade.panic()
-            self._state = EngineState.STOPPED
+            if source_node_id is None:
+                self._facade.panic()
+            self._refresh_transport_state()
 
     def reload(self, source_node_id: UUID | None = None) -> None:
         with self._lock:
             sources = self._selected_sources(source_node_id)
             for source in sources:
                 source.reload()
-            self._facade.panic()
-            self._state = EngineState.STOPPED
+            if source_node_id is None:
+                self._facade.panic()
+            self._refresh_transport_state()
 
     def seek(self, source_node_id: UUID, source_time_s: float) -> None:
         with self._lock:
@@ -706,6 +710,7 @@ class InProcessEngineClient:
                 p95_graph_execution_ms=graph_p95,
                 p99_graph_execution_ms=graph_p99,
                 max_graph_execution_ms=graph_max,
+                runtime_errors=(worker.last_result.errors if worker and worker.last_result else ()),
             )
 
     def poll_image_previews(
@@ -851,6 +856,17 @@ class InProcessEngineClient:
             raise KeyError(f"Unknown source node: {source_node_id}")
         return (source,)
 
+    def _refresh_transport_state(self) -> None:
+        """Derive aggregate transport state after a source-scoped command."""
+
+        states = tuple(source.status().state for source in self._sources.values())
+        if any(state in {SourceState.PLAYING, SourceState.RECONNECTING} for state in states):
+            self._state = EngineState.RUNNING
+        elif any(state is SourceState.PAUSED for state in states):
+            self._state = EngineState.PAUSED
+        else:
+            self._state = EngineState.STOPPED
+
     def _close_runtime(self) -> None:
         sources = tuple(self._sources.values())
         self._sources = {}
@@ -866,8 +882,12 @@ class InProcessEngineClient:
         statuses: tuple[SourceStatus, ...],
         worker: LatestFrameGraphWorker | None,
     ) -> EngineState:
-        if worker is not None and worker.last_error is not None:
-            return EngineState.ERROR
+        if worker is not None:
+            if worker.last_error is not None:
+                return EngineState.ERROR
+            result = worker.last_result
+            if result is not None and result.errors:
+                return EngineState.ERROR
         if any(status.state is SourceState.ERROR for status in statuses):
             return EngineState.ERROR
         if statuses and all(status.state is SourceState.ENDED for status in statuses):

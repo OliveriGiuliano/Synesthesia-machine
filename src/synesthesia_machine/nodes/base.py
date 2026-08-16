@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 from uuid import UUID
 
-from synesthesia_machine.contracts.engine_client import MidiOutputStatus, NodeMemoryDiagnostic
+from synesthesia_machine.contracts.engine_client import (
+    MidiOutputStatus,
+    NodeMemoryDiagnostic,
+    ResetReason,
+)
+from synesthesia_machine.contracts.engine_client import (
+    NodeExecutionError as NodeExecutionError,
+)
 from synesthesia_machine.contracts.runtime_values import (
     ColorValue,
     FrameContext,
@@ -26,6 +34,7 @@ _TYPE_ID = re.compile(r"^[a-z][a-z0-9_.]*$")
 @dataclass(frozen=True, slots=True)
 class TypeVariable:
     name: str
+    allowed_types: frozenset[PortType] = frozenset()
 
     def __post_init__(self) -> None:
         if not re.fullmatch(r"[A-Z][A-Z0-9_]*", self.name):
@@ -33,7 +42,18 @@ class TypeVariable:
             raise ValueError(msg)
 
 
-type PortTypeExpression = PortType | TypeVariable
+@dataclass(frozen=True, slots=True)
+class ArrayTypeVariable:
+    """Array counterpart of a node-local type variable (T[])."""
+
+    name: str
+    allowed_types: frozenset[PortType] = frozenset()
+
+    def __post_init__(self) -> None:
+        TypeVariable(self.name, self.allowed_types)
+
+
+type PortTypeExpression = PortType | TypeVariable | ArrayTypeVariable
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,10 +129,11 @@ class ParameterSpec:
     minimum: float | int | None = None
     maximum: float | int | None = None
     choices: tuple[ParameterValue, ...] = ()
-    connectable: bool = False
+    connectable: bool | None = None
     connected_port_type: PortType | None = None
     update_mode: ParameterUpdateMode = ParameterUpdateMode.LIVE
     editor_hint: ParameterEditorHint = ParameterEditorHint.DEFAULT
+    applicable_input_types: tuple[PortType, ...] = ()
 
     def __post_init__(self) -> None:
         _validate_stable_id(self.id, "parameter")
@@ -120,9 +141,14 @@ class ParameterSpec:
         if error is not None:
             msg = f"Invalid default for parameter {self.id!r}: {error}"
             raise ValueError(msg)
-        if self.connectable and self.connected_port_type is None:
-            msg = f"Connectable parameter {self.id!r} requires connected_port_type"
-            raise ValueError(msg)
+        if self.connectable is True and self.connected_port_type is None:
+            if self.value_type in {PortType.FLOAT, PortType.INT}:
+                object.__setattr__(self, "connected_port_type", PortType.FLOAT)
+            elif self.value_type is PortType.BOOL:
+                object.__setattr__(self, "connected_port_type", PortType.BOOL)
+            else:
+                msg = f"Connectable parameter {self.id!r} requires connected_port_type"
+                raise ValueError(msg)
 
     def validate(self, value: object) -> str | None:
         if not _matches_port_type(value, self.value_type):
@@ -130,11 +156,55 @@ class ParameterSpec:
         if self.choices and value not in self.choices:
             return f"expected one of {self.choices!r}"
         if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if isinstance(value, float) and not math.isfinite(value):
+                return "must be finite"
             if self.minimum is not None and value < self.minimum:
                 return f"must be at least {self.minimum}"
             if self.maximum is not None and value > self.maximum:
                 return f"must be at most {self.maximum}"
         return None
+
+    def connected_value(self, value: object) -> float | int | bool:
+        """Coerce and bound a live socket value to this parameter's literal contract."""
+
+        converted: float | int | bool
+        if self.value_type is PortType.FLOAT:
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise ValueError(f"expected numeric scalar, got {type(value).__name__}")
+            converted = float(value)
+            if not math.isfinite(converted):
+                raise ValueError("expected a finite numeric scalar")
+        elif self.value_type is PortType.INT:
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise ValueError(f"expected numeric scalar, got {type(value).__name__}")
+            numeric = float(value)
+            if not math.isfinite(numeric):
+                raise ValueError("expected a finite numeric scalar")
+            converted = round(numeric)
+        elif self.value_type is PortType.BOOL:
+            if not isinstance(value, bool):
+                raise ValueError(f"expected BOOL, got {type(value).__name__}")
+            converted = value
+        else:
+            raise ValueError(f"{self.value_type.value} parameters do not accept live scalar input")
+
+        if not isinstance(converted, bool):
+            if self.minimum is not None and converted < self.minimum:
+                converted = self.minimum
+            if self.maximum is not None and converted > self.maximum:
+                converted = self.maximum
+            converted = int(converted) if self.value_type is PortType.INT else float(converted)
+            numeric_choices = tuple(
+                choice
+                for choice in self.choices
+                if isinstance(choice, (int, float)) and not isinstance(choice, bool)
+            )
+            if numeric_choices:
+                converted = min(numeric_choices, key=lambda choice: abs(float(choice) - converted))
+        error = self.validate(converted)
+        if error is not None:
+            raise ValueError(error)
+        return converted
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,15 +236,6 @@ class CachePolicy(StrEnum):
     AUTO = "AUTO"
     NEVER = "NEVER"
     STATIC = "STATIC"
-
-
-class ResetReason(StrEnum):
-    PLAN_REPLACED = "PLAN_REPLACED"
-    SOURCE_RESTARTED = "SOURCE_RESTARTED"
-    SEEK = "SEEK"
-    PARAMETER_CHANGED = "PARAMETER_CHANGED"
-    CLOCK_CHANGED = "CLOCK_CHANGED"
-    ENGINE_RESTARTED = "ENGINE_RESTARTED"
 
 
 class NodeRuntime(Protocol):
@@ -240,6 +301,14 @@ class NodeDefinition:
         if self.implementation_version < 1:
             msg = "implementation_version must be at least 1"
             raise ValueError(msg)
+        object.__setattr__(
+            self,
+            "parameters",
+            tuple(
+                _resolve_parameter_socket(parameter, self.execution_kind, self.cache_policy)
+                for parameter in self.parameters
+            ),
+        )
         _ensure_unique((port.id for port in self.inputs), "input port")
         _ensure_unique((port.id for port in self.outputs), "output port")
         _ensure_unique((parameter.id for parameter in self.parameters), "parameter")
@@ -315,7 +384,10 @@ class NodeDefinition:
             value = literals.get(parameter.id, parameter.default)
             error = parameter.validate(value)
             if error is not None:
-                errors.append(f"parameter {parameter.id!r} {error}")
+                if error == "must be finite":
+                    errors.append(f"parameter {parameter.id!r}: {parameter.id} must be finite")
+                else:
+                    errors.append(f"parameter {parameter.id!r} {error}")
                 values[parameter.id] = parameter.default
                 continue
             values[parameter.id] = _as_parameter_value(value)
@@ -351,16 +423,6 @@ class NodeDefinition:
         return frozenset(required)
 
 
-@dataclass(frozen=True, slots=True)
-class NodeExecutionError:
-    node_id: UUID
-    code: str
-    message: str
-    details: str | None
-    recoverable: bool
-    tick_index: int | None
-
-
 class ExpectedNodeError(Exception):
     """Recoverable node failure that should produce structured ``NoData`` output."""
 
@@ -384,6 +446,39 @@ def _ensure_unique(values: Iterable[str], kind: str) -> None:
             msg = f"Duplicate {kind} ID: {value!r}"
             raise ValueError(msg)
         seen.add(value)
+
+
+def _resolve_parameter_socket(
+    parameter: ParameterSpec,
+    execution_kind: ExecutionKind,
+    cache_policy: CachePolicy,
+) -> ParameterSpec:
+    """Expose live scalar controls while excluding structural and configuration settings."""
+
+    connectable = parameter.connectable
+    if connectable is None:
+        connectable = (
+            parameter.value_type in {PortType.FLOAT, PortType.INT, PortType.BOOL}
+            and parameter.update_mode is ParameterUpdateMode.LIVE
+            and execution_kind not in {ExecutionKind.SOURCE, ExecutionKind.VISUALIZER}
+            and cache_policy is not CachePolicy.STATIC
+        )
+    connected_port_type = parameter.connected_port_type
+    if connectable:
+        if parameter.value_type in {PortType.FLOAT, PortType.INT}:
+            # Numeric parameter cables intentionally share one modulation type. INT literals are
+            # rounded after transport, which lets every numeric scalar output drive every numeric
+            # control without littering graphs with conversion nodes.
+            connected_port_type = PortType.FLOAT
+        elif parameter.value_type is PortType.BOOL:
+            connected_port_type = PortType.BOOL
+    else:
+        connected_port_type = None
+    return replace(
+        parameter,
+        connectable=connectable,
+        connected_port_type=connected_port_type,
+    )
 
 
 def _matches_port_type(value: object, value_type: PortType) -> bool:

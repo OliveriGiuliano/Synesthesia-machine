@@ -106,8 +106,8 @@
         "target_colour_space": "HSV"
       },
       "position": [
-        1600.0,
-        0.0
+        0.0,
+        260.0
       ],
       "size": null,
       "type_id": "synmachine.image.change_colour_space",
@@ -125,7 +125,7 @@
         "minimum": 0.0
       },
       "position": [
-        0.0,
+        320.0,
         260.0
       ],
       "size": null,
@@ -146,7 +146,7 @@
         "output_white": 1.0
       },
       "position": [
-        320.0,
+        640.0,
         260.0
       ],
       "size": null,
@@ -162,7 +162,7 @@
         "target_colour_space": "SRGB"
       },
       "position": [
-        640.0,
+        960.0,
         260.0
       ],
       "size": null,
@@ -180,7 +180,7 @@
         "pivot": 0.5
       },
       "position": [
-        960.0,
+        1280.0,
         260.0
       ],
       "size": null,
@@ -204,8 +204,8 @@
         "scale": 1.0
       },
       "position": [
-        1280.0,
-        260.0
+        0.0,
+        520.0
       ],
       "size": null,
       "type_id": "synmachine.image.convolve",
@@ -232,8 +232,8 @@
         "top": 0.0
       },
       "position": [
-        1600.0,
-        260.0
+        320.0,
+        520.0
       ],
       "size": null,
       "type_id": "synmachine.image.crop",
@@ -245,6 +245,22 @@
       "id": "65000000-0000-0000-0000-000000000013",
       "implementation_version": 1,
       "parameters": {
+        "normalize": false
+      },
+      "position": [
+        640.0,
+        520.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.difference",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000014",
+      "implementation_version": 1,
+      "parameters": {
         "anchor_x": -1,
         "anchor_y": -1,
         "border_mode": "REFLECT_101",
@@ -255,7 +271,7 @@
         "process_alpha": false
       },
       "position": [
-        0.0,
+        960.0,
         520.0
       ],
       "size": null,
@@ -265,7 +281,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000014",
+      "id": "65000000-0000-0000-0000-000000000015",
       "implementation_version": 1,
       "parameters": {
         "channels": "COLOUR",
@@ -274,7 +290,7 @@
         "value": 1.0
       },
       "position": [
-        320.0,
+        1280.0,
         520.0
       ],
       "size": null,
@@ -284,7 +300,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000015",
+      "id": "65000000-0000-0000-0000-000000000016",
       "implementation_version": 1,
       "parameters": {
         "anchor_x": -1,
@@ -297,8 +313,8 @@
         "process_alpha": false
       },
       "position": [
-        640.0,
-        520.0
+        0.0,
+        780.0
       ],
       "size": null,
       "type_id": "synmachine.image.erode",
@@ -307,14 +323,14 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000016",
+      "id": "65000000-0000-0000-0000-000000000017",
       "implementation_version": 1,
       "parameters": {
         "mode": "HORIZONTAL"
       },
       "position": [
-        960.0,
-        520.0
+        320.0,
+        780.0
       ],
       "size": null,
       "type_id": "synmachine.image.flip",
@@ -323,38 +339,18 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000017",
+      "id": "65000000-0000-0000-0000-000000000018",
       "implementation_version": 1,
       "parameters": {
         "channels": "COLOUR",
         "gamma": 1.0
       },
       "position": [
-        1280.0,
-        520.0
+        640.0,
+        780.0
       ],
       "size": null,
       "type_id": "synmachine.image.gamma",
-      "ui_state": {},
-      "user_label": null
-    },
-    {
-      "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000018",
-      "implementation_version": 1,
-      "parameters": {
-        "border_mode": "REFLECT_101",
-        "kernel_height": 3,
-        "kernel_width": 3,
-        "sigma_x": 0.0,
-        "sigma_y": 0.0
-      },
-      "position": [
-        1600.0,
-        520.0
-      ],
-      "size": null,
-      "type_id": "synmachine.image.gaussian_blur",
       "ui_state": {},
       "user_label": null
     },
@@ -364,12 +360,32 @@
       "implementation_version": 1,
       "parameters": {
         "border_mode": "REFLECT_101",
+        "kernel_height": 3,
+        "kernel_width": 3,
+        "sigma_x": 0.0,
+        "sigma_y": 0.0
+      },
+      "position": [
+        960.0,
+        780.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.gaussian_blur",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000020",
+      "implementation_version": 1,
+      "parameters": {
+        "border_mode": "REFLECT_101",
         "display_offset": 0.0,
         "gain": 1.0,
         "sigma": 1.0
       },
       "position": [
-        0.0,
+        1280.0,
         780.0
       ],
       "size": null,
@@ -379,15 +395,15 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000020",
+      "id": "65000000-0000-0000-0000-000000000021",
       "implementation_version": 1,
       "parameters": {
         "delay_frames": 1,
         "memory_limit_mb": 256
       },
       "position": [
-        320.0,
-        780.0
+        0.0,
+        1040.0
       ],
       "size": null,
       "type_id": "synmachine.image.hold_image",
@@ -396,14 +412,14 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000021",
-      "implementation_version": 1,
+      "id": "65000000-0000-0000-0000-000000000022",
+      "implementation_version": 2,
       "parameters": {
         "turns": 0.0
       },
       "position": [
-        640.0,
-        780.0
+        320.0,
+        1040.0
       ],
       "size": null,
       "type_id": "synmachine.image.hue",
@@ -412,14 +428,14 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000022",
+      "id": "65000000-0000-0000-0000-000000000023",
       "implementation_version": 1,
       "parameters": {
         "invert_alpha": false
       },
       "position": [
-        960.0,
-        780.0
+        640.0,
+        1040.0
       ],
       "size": null,
       "type_id": "synmachine.image.invert_colour",
@@ -428,15 +444,15 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000023",
+      "id": "65000000-0000-0000-0000-000000000024",
       "implementation_version": 1,
       "parameters": {
         "border_mode": "REFLECT_101",
         "sigma": 1.0
       },
       "position": [
-        1280.0,
-        780.0
+        960.0,
+        1040.0
       ],
       "size": null,
       "type_id": "synmachine.image.low_pass",
@@ -445,15 +461,15 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000024",
+      "id": "65000000-0000-0000-0000-000000000025",
       "implementation_version": 1,
       "parameters": {
         "channels": "COLOUR",
         "value": 1.0
       },
       "position": [
-        1600.0,
-        780.0
+        1280.0,
+        1040.0
       ],
       "size": null,
       "type_id": "synmachine.image.multiply_scalar",
@@ -462,14 +478,14 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000025",
+      "id": "65000000-0000-0000-0000-000000000026",
       "implementation_version": 1,
       "parameters": {
         "factor": 1.0
       },
       "position": [
         0.0,
-        1040.0
+        1300.0
       ],
       "size": null,
       "type_id": "synmachine.image.opacity",
@@ -478,7 +494,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000026",
+      "id": "65000000-0000-0000-0000-000000000027",
       "implementation_version": 1,
       "parameters": {
         "channels": "COLOUR",
@@ -487,7 +503,7 @@
       },
       "position": [
         320.0,
-        1040.0
+        1300.0
       ],
       "size": null,
       "type_id": "synmachine.image.posterize",
@@ -496,7 +512,23 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000027",
+      "id": "65000000-0000-0000-0000-000000000028",
+      "implementation_version": 1,
+      "parameters": {
+        "interval_frames": 2
+      },
+      "position": [
+        640.0,
+        1300.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.posterize_time",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000029",
       "implementation_version": 1,
       "parameters": {
         "fit_mode": "CONTAIN",
@@ -506,8 +538,8 @@
         "width": 500
       },
       "position": [
-        640.0,
-        1040.0
+        960.0,
+        1300.0
       ],
       "size": null,
       "type_id": "synmachine.image.resize",
@@ -516,7 +548,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000028",
+      "id": "65000000-0000-0000-0000-000000000030",
       "implementation_version": 1,
       "parameters": {
         "angle_degrees": 0.0,
@@ -534,8 +566,8 @@
         "interpolation": "AUTO"
       },
       "position": [
-        960.0,
-        1040.0
+        1280.0,
+        1300.0
       ],
       "size": null,
       "type_id": "synmachine.image.rotate",
@@ -544,14 +576,14 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000029",
+      "id": "65000000-0000-0000-0000-000000000031",
       "implementation_version": 1,
       "parameters": {
         "factor": 1.0
       },
       "position": [
-        1280.0,
-        1040.0
+        0.0,
+        1560.0
       ],
       "size": null,
       "type_id": "synmachine.image.saturation",
@@ -560,12 +592,12 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000030",
+      "id": "65000000-0000-0000-0000-000000000032",
       "implementation_version": 1,
       "parameters": {},
       "position": [
-        1600.0,
-        1040.0
+        320.0,
+        1560.0
       ],
       "size": null,
       "type_id": "synmachine.image.separate_channels",
@@ -574,7 +606,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000031",
+      "id": "65000000-0000-0000-0000-000000000033",
       "implementation_version": 1,
       "parameters": {
         "amount": 1.0,
@@ -583,8 +615,8 @@
         "threshold": 0.0
       },
       "position": [
-        0.0,
-        1300.0
+        640.0,
+        1560.0
       ],
       "size": null,
       "type_id": "synmachine.image.sharpen",
@@ -593,7 +625,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000032",
+      "id": "65000000-0000-0000-0000-000000000034",
       "implementation_version": 1,
       "parameters": {
         "channels": "COLOUR",
@@ -604,8 +636,8 @@
         "upper_percentile": 100.0
       },
       "position": [
-        320.0,
-        1300.0
+        960.0,
+        1560.0
       ],
       "size": null,
       "type_id": "synmachine.image.stretch_contrast",
@@ -614,7 +646,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000033",
+      "id": "65000000-0000-0000-0000-000000000035",
       "implementation_version": 1,
       "parameters": {
         "maximum": 1.0,
@@ -622,8 +654,8 @@
         "threshold": 0.5
       },
       "position": [
-        640.0,
-        1300.0
+        1280.0,
+        1560.0
       ],
       "size": null,
       "type_id": "synmachine.image.threshold",
@@ -632,12 +664,12 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000034",
+      "id": "65000000-0000-0000-0000-000000000036",
       "implementation_version": 1,
       "parameters": {},
       "position": [
-        960.0,
-        1300.0
+        0.0,
+        1820.0
       ],
       "size": null,
       "type_id": "synmachine.image.to_luminance",
@@ -646,7 +678,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000035",
+      "id": "65000000-0000-0000-0000-000000000037",
       "implementation_version": 1,
       "parameters": {
         "backend_preference": "AUTO",
@@ -658,8 +690,8 @@
         "requested_width": 1280
       },
       "position": [
-        1280.0,
-        1300.0
+        320.0,
+        1820.0
       ],
       "size": null,
       "type_id": "synmachine.input.load_camera",
@@ -668,7 +700,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000036",
+      "id": "65000000-0000-0000-0000-000000000038",
       "implementation_version": 1,
       "parameters": {
         "file_path": "",
@@ -677,8 +709,8 @@
         "stream_index": 0
       },
       "position": [
-        1600.0,
-        1300.0
+        640.0,
+        1820.0
       ],
       "size": null,
       "type_id": "synmachine.input.load_video",
@@ -687,7 +719,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000037",
+      "id": "65000000-0000-0000-0000-000000000039",
       "implementation_version": 1,
       "parameters": {
         "attack_ms": 10.0,
@@ -699,8 +731,8 @@
         "waveform": "SINE"
       },
       "position": [
-        0.0,
-        1560.0
+        960.0,
+        1820.0
       ],
       "size": null,
       "type_id": "synmachine.output.generate_audio",
@@ -709,7 +741,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000038",
+      "id": "65000000-0000-0000-0000-000000000040",
       "implementation_version": 1,
       "parameters": {
         "output_port": "",
@@ -717,8 +749,8 @@
         "velocity_update_policy": "Ignore while held"
       },
       "position": [
-        320.0,
-        1560.0
+        1280.0,
+        1820.0
       ],
       "size": null,
       "type_id": "synmachine.output.send_midi",
@@ -727,7 +759,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000039",
+      "id": "65000000-0000-0000-0000-000000000041",
       "implementation_version": 1,
       "parameters": {
         "binning_mode": "LINEAR_NOMINAL_RANGE",
@@ -750,8 +782,8 @@
         "scale": "chromatic"
       },
       "position": [
-        640.0,
-        1560.0
+        0.0,
+        2080.0
       ],
       "size": null,
       "type_id": "synmachine.synesthesia.channel_to_pitch",
@@ -760,7 +792,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000040",
+      "id": "65000000-0000-0000-0000-000000000042",
       "implementation_version": 1,
       "parameters": {
         "contour_limit": 128,
@@ -784,8 +816,8 @@
         "velocity_minimum": 0.0
       },
       "position": [
-        960.0,
-        1560.0
+        320.0,
+        2080.0
       ],
       "size": null,
       "type_id": "synmachine.synesthesia.edges_to_pitch",
@@ -794,7 +826,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000041",
+      "id": "65000000-0000-0000-0000-000000000043",
       "implementation_version": 1,
       "parameters": {
         "activation_threshold": 0.0,
@@ -819,8 +851,8 @@
         "window": "HANN"
       },
       "position": [
-        1280.0,
-        1560.0
+        640.0,
+        2080.0
       ],
       "size": null,
       "type_id": "synmachine.synesthesia.fourier",
@@ -829,7 +861,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000042",
+      "id": "65000000-0000-0000-0000-000000000044",
       "implementation_version": 1,
       "parameters": {
         "aggregation": "CELL_NOTES",
@@ -852,8 +884,8 @@
         "velocity_feature": "MEAN_MAGNITUDE"
       },
       "position": [
-        1600.0,
-        1560.0
+        960.0,
+        2080.0
       ],
       "size": null,
       "type_id": "synmachine.synesthesia.optical_flow",
@@ -862,7 +894,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000043",
+      "id": "65000000-0000-0000-0000-000000000045",
       "implementation_version": 1,
       "parameters": {
         "activation_threshold": 0.5,
@@ -880,8 +912,8 @@
         "scale": "chromatic"
       },
       "position": [
-        0.0,
-        1820.0
+        1280.0,
+        2080.0
       ],
       "size": null,
       "type_id": "synmachine.synesthesia.region_grid",
@@ -890,7 +922,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000044",
+      "id": "65000000-0000-0000-0000-000000000046",
       "implementation_version": 1,
       "parameters": {
         "activation_threshold": 0.0,
@@ -910,8 +942,8 @@
         "velocity_curve_exponent": 1.0
       },
       "position": [
-        320.0,
-        1820.0
+        0.0,
+        2340.0
       ],
       "size": null,
       "type_id": "synmachine.synesthesia.scanline",
@@ -920,51 +952,17 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000045",
-      "implementation_version": 1,
-      "parameters": {
-        "ignore_non_finite": true,
-        "percentile": 50.0,
-        "statistic": "MEAN"
-      },
-      "position": [
-        640.0,
-        1820.0
-      ],
-      "size": null,
-      "type_id": "synmachine.utility.channel_statistics",
-      "ui_state": {},
-      "user_label": null
-    },
-    {
-      "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000046",
-      "implementation_version": 1,
-      "parameters": {
-        "absolute_tolerance": 1e-09,
-        "operation": "EQ",
-        "relative_tolerance": 1e-09
-      },
-      "position": [
-        960.0,
-        1820.0
-      ],
-      "size": null,
-      "type_id": "synmachine.utility.compare",
-      "ui_state": {},
-      "user_label": null
-    },
-    {
-      "collapsed": false,
       "id": "65000000-0000-0000-0000-000000000047",
       "implementation_version": 1,
-      "parameters": {},
+      "parameters": {
+        "capacity": 8
+      },
       "position": [
-        1280.0,
-        1820.0
+        320.0,
+        2340.0
       ],
       "size": null,
-      "type_id": "synmachine.utility.conditional",
+      "type_id": "synmachine.utility.buffer",
       "ui_state": {},
       "user_label": null
     },
@@ -973,14 +971,16 @@
       "id": "65000000-0000-0000-0000-000000000048",
       "implementation_version": 1,
       "parameters": {
-        "mode": "ROUND"
+        "absolute_tolerance": 1e-09,
+        "operation": "EQ",
+        "relative_tolerance": 1e-09
       },
       "position": [
-        1600.0,
-        1820.0
+        640.0,
+        2340.0
       ],
       "size": null,
-      "type_id": "synmachine.utility.float_to_integer",
+      "type_id": "synmachine.utility.compare",
       "ui_state": {},
       "user_label": null
     },
@@ -988,15 +988,13 @@
       "collapsed": false,
       "id": "65000000-0000-0000-0000-000000000049",
       "implementation_version": 1,
-      "parameters": {
-        "operation": "AND"
-      },
+      "parameters": {},
       "position": [
-        0.0,
-        2080.0
+        960.0,
+        2340.0
       ],
       "size": null,
-      "type_id": "synmachine.utility.logic",
+      "type_id": "synmachine.utility.conditional",
       "ui_state": {},
       "user_label": null
     },
@@ -1005,14 +1003,17 @@
       "id": "65000000-0000-0000-0000-000000000050",
       "implementation_version": 1,
       "parameters": {
-        "operation": "ADD"
+        "curve": "POWER",
+        "exponent": 1.0,
+        "gain": 4.0,
+        "midpoint": 0.5
       },
       "position": [
-        320.0,
-        2080.0
+        1280.0,
+        2340.0
       ],
       "size": null,
-      "type_id": "synmachine.utility.math",
+      "type_id": "synmachine.utility.curve",
       "ui_state": {},
       "user_label": null
     },
@@ -1020,13 +1021,15 @@
       "collapsed": false,
       "id": "65000000-0000-0000-0000-000000000051",
       "implementation_version": 1,
-      "parameters": {},
+      "parameters": {
+        "mode": "ROUND"
+      },
       "position": [
-        640.0,
-        2080.0
+        0.0,
+        2600.0
       ],
       "size": null,
-      "type_id": "synmachine.utility.midi_merge",
+      "type_id": "synmachine.utility.float_to_integer",
       "ui_state": {},
       "user_label": null
     },
@@ -1035,14 +1038,14 @@
       "id": "65000000-0000-0000-0000-000000000052",
       "implementation_version": 1,
       "parameters": {
-        "factor": 1.0
+        "operation": "AND"
       },
       "position": [
-        960.0,
-        2080.0
+        320.0,
+        2600.0
       ],
       "size": null,
-      "type_id": "synmachine.utility.multiply_velocity",
+      "type_id": "synmachine.utility.logic",
       "ui_state": {},
       "user_label": null
     },
@@ -1051,16 +1054,14 @@
       "id": "65000000-0000-0000-0000-000000000053",
       "implementation_version": 1,
       "parameters": {
-        "float_value": 0.0,
-        "int_value": 0,
-        "number_type": "FLOAT"
+        "operation": "ADD"
       },
       "position": [
-        1280.0,
-        2080.0
+        640.0,
+        2600.0
       ],
       "size": null,
-      "type_id": "synmachine.utility.number",
+      "type_id": "synmachine.utility.math",
       "ui_state": {},
       "user_label": null
     },
@@ -1070,8 +1071,92 @@
       "implementation_version": 1,
       "parameters": {},
       "position": [
-        1600.0,
-        2080.0
+        960.0,
+        2600.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.midi_merge",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000055",
+      "implementation_version": 1,
+      "parameters": {
+        "modulo": 1.0
+      },
+      "position": [
+        1280.0,
+        2600.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.modulo_accumulator",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000056",
+      "implementation_version": 1,
+      "parameters": {
+        "factor": 1.0
+      },
+      "position": [
+        0.0,
+        2860.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.multiply_velocity",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000057",
+      "implementation_version": 1,
+      "parameters": {
+        "input_maximum": 1.0,
+        "input_minimum": 0.0,
+        "mode": "DATA_RANGE",
+        "output_maximum": 1.0,
+        "output_minimum": 0.0
+      },
+      "position": [
+        320.0,
+        2860.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.normalize",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000058",
+      "implementation_version": 1,
+      "parameters": {
+        "float_value": 0.0,
+        "int_value": 0,
+        "number_type": "FLOAT"
+      },
+      "position": [
+        640.0,
+        2860.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.number",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000059",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        960.0,
+        2860.0
       ],
       "size": null,
       "type_id": "synmachine.utility.pass_through",
@@ -1080,7 +1165,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000055",
+      "id": "65000000-0000-0000-0000-000000000060",
       "implementation_version": 1,
       "parameters": {
         "clamp": false,
@@ -1090,8 +1175,8 @@
         "output_minimum": 0.0
       },
       "position": [
-        0.0,
-        2340.0
+        1280.0,
+        2860.0
       ],
       "size": null,
       "type_id": "synmachine.utility.remap_number",
@@ -1100,14 +1185,31 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000056",
+      "id": "65000000-0000-0000-0000-000000000061",
+      "implementation_version": 1,
+      "parameters": {
+        "percentile": 50.0,
+        "statistic": "MEAN"
+      },
+      "position": [
+        0.0,
+        3120.0
+      ],
+      "size": null,
+      "type_id": "synmachine.utility.statistics",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "65000000-0000-0000-0000-000000000062",
       "implementation_version": 1,
       "parameters": {
         "semitones": 0
       },
       "position": [
         320.0,
-        2340.0
+        3120.0
       ],
       "size": null,
       "type_id": "synmachine.utility.transpose",
@@ -1116,7 +1218,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000057",
+      "id": "65000000-0000-0000-0000-000000000063",
       "implementation_version": 1,
       "parameters": {
         "fit_mode": "CONTAIN",
@@ -1127,7 +1229,7 @@
       },
       "position": [
         640.0,
-        2340.0
+        3120.0
       ],
       "size": null,
       "type_id": "synmachine.visualization.channel_display",
@@ -1136,7 +1238,7 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000058",
+      "id": "65000000-0000-0000-0000-000000000064",
       "implementation_version": 1,
       "parameters": {
         "checkerboard_alpha": true,
@@ -1148,7 +1250,7 @@
       },
       "position": [
         960.0,
-        2340.0
+        3120.0
       ],
       "size": null,
       "type_id": "synmachine.visualization.display_image_data",
@@ -1157,12 +1259,12 @@
     },
     {
       "collapsed": false,
-      "id": "65000000-0000-0000-0000-000000000059",
+      "id": "65000000-0000-0000-0000-000000000065",
       "implementation_version": 1,
       "parameters": {},
       "position": [
         1280.0,
-        2340.0
+        3120.0
       ],
       "size": null,
       "type_id": "synmachine.visualization.note_visualizer",

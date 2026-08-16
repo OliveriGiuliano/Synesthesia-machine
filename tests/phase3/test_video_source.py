@@ -43,6 +43,18 @@ class AdvancingClock:
         return wake_event.is_set()
 
 
+class _BlockingClearEvent(threading.Event):
+    def __init__(self) -> None:
+        super().__init__()
+        self.clear_started = threading.Event()
+        self.allow_clear = threading.Event()
+
+    def clear(self) -> None:
+        self.clear_started.set()
+        assert self.allow_clear.wait(1.0)
+        super().clear()
+
+
 def test_load_video_definition_has_stable_source_contract() -> None:
     definition = create_input_definitions()[0]
     assert definition.type_id == LOAD_VIDEO_TYPE_ID
@@ -52,6 +64,37 @@ def test_load_video_definition_has_stable_source_contract() -> None:
     assert definition.parameter("file_path").update_mode is (  # type: ignore[union-attr]
         ParameterUpdateMode.RESTART_SOURCE
     )
+
+
+def test_resume_cannot_be_lost_between_pause_check_and_wake_clear(tmp_path: Path) -> None:
+    path = generate_test_video(tmp_path / "resume-race.mp4", frame_count=1)
+    source = VideoSourceService(
+        SOURCE_ID, path, on_frame=lambda _frame: None, clock=AdvancingClock()
+    )
+    wake_event = _BlockingClearEvent()
+    source._wake_event = wake_event  # pyright: ignore[reportPrivateUsage]
+    with source._lock:  # pyright: ignore[reportPrivateUsage]
+        source._state = SourceState.PAUSED  # pyright: ignore[reportPrivateUsage]
+    result: list[bool] = []
+    waiter = threading.Thread(
+        target=lambda: result.append(
+            source._wait_until_playing()  # pyright: ignore[reportPrivateUsage]
+        )
+    )
+    try:
+        waiter.start()
+        assert wake_event.clear_started.wait(1.0)
+        source.resume()
+        wake_event.allow_clear.set()
+        waiter.join(0.2)
+        assert not waiter.is_alive()
+        assert result == [True]
+    finally:
+        wake_event.allow_clear.set()
+        source._stop_event.set()  # pyright: ignore[reportPrivateUsage]
+        wake_event.set()
+        waiter.join(1.0)
+        source.close()
 
 
 def test_inspection_reads_metadata_without_starting_playback(tmp_path: Path) -> None:
@@ -76,6 +119,25 @@ def test_inspection_accepts_shell_quoted_pasted_video_path(tmp_path: Path) -> No
 
     assert metadata.path == path.resolve()
     assert metadata.width == 32 and metadata.height == 24
+
+
+def test_source_falls_back_to_first_video_stream_when_persisted_index_is_stale(
+    tmp_path: Path,
+) -> None:
+    path = generate_test_video(tmp_path / "single-stream.mp4", frame_count=2)
+    received: list[PresentedVideoFrame] = []
+
+    source = VideoSourceService(SOURCE_ID, path, stream_index=3, on_frame=received.append)
+    try:
+        assert source.metadata.stream_index == 0
+        assert source.status().state is SourceState.READY
+        assert source.status().warnings == 1
+        source.play()
+        assert source.wait_until_finished()
+        assert received
+        assert source.status().state is SourceState.ENDED
+    finally:
+        source.close()
 
 
 def test_vfr_pts_and_exact_nth_selection_drive_presentation_timeline(tmp_path: Path) -> None:

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from synesthesia_machine.contracts import NodeProfile
+from synesthesia_machine.ui.translations import tr, trf
 
 FRAME_BUDGET_MS = 1000.0 / 60.0
 WARNING_FRACTION = 0.5
@@ -65,16 +66,19 @@ class ProfilerPanel(QWidget):
         self._names: dict[UUID, str] = {}
 
         self.summary = QLabel(
-            f"60 FPS frame budget {FRAME_BUDGET_MS:.2f} ms · warning above "
-            f"{FRAME_BUDGET_MS * WARNING_FRACTION:.2f} ms p95",
+            trf(
+                "60 FPS frame budget {budget:.2f} ms · warning above {warning:.2f} ms p95",
+                budget=FRAME_BUDGET_MS,
+                warning=FRAME_BUDGET_MS * WARNING_FRACTION,
+            ),
             self,
         )
-        self.summary.setAccessibleName("Profiler frame budget summary")
-        self.freeze_button = QPushButton("Freeze", self)
+        self.summary.setAccessibleName(tr("Profiler frame budget summary"))
+        self.freeze_button = QPushButton(tr("Freeze"), self)
         self.freeze_button.setCheckable(True)
-        self.reset_button = QPushButton("Reset", self)
-        self.copy_button = QPushButton("Copy report", self)
-        self.heatmap_checkbox = QCheckBox("Canvas heatmap", self)
+        self.reset_button = QPushButton(tr("Reset"), self)
+        self.copy_button = QPushButton(tr("Copy report"), self)
+        self.heatmap_checkbox = QCheckBox(tr("Canvas heatmap"), self)
         self.heatmap_checkbox.setChecked(True)
 
         controls = QHBoxLayout()
@@ -86,8 +90,8 @@ class ProfilerPanel(QWidget):
         controls.addWidget(self.summary)
 
         self.table = QTableWidget(0, len(self.HEADERS), self)
-        self.table.setHorizontalHeaderLabels(self.HEADERS)
-        self.table.setAccessibleName("Per-node runtime profiler")
+        self.table.setHorizontalHeaderLabels(tuple(tr(header) for header in self.HEADERS))
+        self.table.setAccessibleName(tr("Per-node runtime profiler"))
         self.table.setAlternatingRowColors(True)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -147,7 +151,7 @@ class ProfilerPanel(QWidget):
                 if column == 4 and value > warning_ms:
                     item.setForeground(QColor("#f0b44c"))
                     item.setToolTip(
-                        "This node uses more than half of a 60 FPS frame budget at p95."
+                        tr("This node uses more than half of a 60 FPS frame budget at p95.")
                     )
                 self.table.setItem(row, column, item)
             self.table.setItem(
@@ -169,7 +173,7 @@ class ProfilerPanel(QWidget):
 
     @Slot()
     def copy_report(self) -> None:
-        lines = ["\t".join(self.HEADERS)]
+        lines = ["\t".join(tr(header) for header in self.HEADERS)]
         for profile in self._profiles:
             lines.append(
                 "\t".join(
@@ -191,7 +195,23 @@ class ProfilerPanel(QWidget):
 
     @Slot(bool)
     def _set_frozen_label(self, frozen: bool) -> None:
-        self.freeze_button.setText("Resume" if frozen else "Freeze")
+        self.freeze_button.setText(tr("Resume" if frozen else "Freeze"))
+
+    def retranslate(self) -> None:
+        self.summary.setText(
+            trf(
+                "60 FPS frame budget {budget:.2f} ms · warning above {warning:.2f} ms p95",
+                budget=FRAME_BUDGET_MS,
+                warning=FRAME_BUDGET_MS * WARNING_FRACTION,
+            )
+        )
+        self.summary.setAccessibleName(tr("Profiler frame budget summary"))
+        self._set_frozen_label(self.frozen)
+        self.reset_button.setText(tr("Reset"))
+        self.copy_button.setText(tr("Copy report"))
+        self.heatmap_checkbox.setText(tr("Canvas heatmap"))
+        self.table.setHorizontalHeaderLabels(tuple(tr(header) for header in self.HEADERS))
+        self.table.setAccessibleName(tr("Per-node runtime profiler"))
 
     @Slot()
     def _reset(self) -> None:

@@ -78,6 +78,12 @@ def test_bundle_is_bounded_redacted_and_contains_no_frames(tmp_path: Path) -> No
             f"opened {media_path} at tick {index}\n", encoding="utf-8"
         )
     (logs / "frame.png").write_bytes(b"not a real frame")
+    (logs / "synesthesia-machine-engine.jsonl").write_text(
+        '{"message":"engine failure"}\n', encoding="utf-8"
+    )
+    (logs / "synesthesia-machine-ui.jsonl.1").write_text(
+        '{"message":"rotated UI log"}\n', encoding="utf-8"
+    )
     output = tmp_path / "diagnostics.zip"
 
     result = create_diagnostic_bundle(

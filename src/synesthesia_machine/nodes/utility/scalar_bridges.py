@@ -10,7 +10,6 @@ from uuid import UUID
 import numpy as np
 
 from synesthesia_machine.contracts import (
-    ChannelFrame,
     FrameContext,
     ParameterValue,
     PortType,
@@ -22,19 +21,9 @@ from synesthesia_machine.nodes.base import (
     InputPortSpec,
     NodeDefinition,
     OutputPortSpec,
-    ParameterEditorHint,
     ParameterSpec,
     ResetReason,
 )
-
-
-class ChannelStatistic(StrEnum):
-    MEAN = "MEAN"
-    MEDIAN = "MEDIAN"
-    MINIMUM = "MINIMUM"
-    MAXIMUM = "MAXIMUM"
-    STANDARD_DEVIATION = "STANDARD_DEVIATION"
-    PERCENTILE = "PERCENTILE"
 
 
 class IntegerConversionMode(StrEnum):
@@ -53,26 +42,6 @@ class _ScalarBridgeRuntime:
 
     def close(self) -> None:
         return
-
-
-class ChannelStatisticsRuntime(_ScalarBridgeRuntime):
-    def process(
-        self,
-        inputs: Mapping[str, RuntimeValue],
-        parameters: Mapping[str, ParameterValue],
-        context: FrameContext,
-    ) -> Mapping[str, RuntimeValue]:
-        del context
-        try:
-            value = _channel_statistic(
-                _channel(inputs["channel"]),
-                ChannelStatistic(_text(parameters["statistic"])),
-                percentile=_number(parameters["percentile"]),
-                ignore_non_finite=_boolean(parameters["ignore_non_finite"]),
-            )
-        except (TypeError, ValueError) as error:
-            raise ExpectedNodeError("invalid_channel_statistics", str(error)) from error
-        return {"value": value}
 
 
 class RemapNumberRuntime(_ScalarBridgeRuntime):
@@ -123,35 +92,6 @@ class FloatToIntegerRuntime(_ScalarBridgeRuntime):
         return {"value": result}
 
 
-def _channel_statistic(
-    channel: ChannelFrame,
-    statistic: ChannelStatistic,
-    *,
-    percentile: float,
-    ignore_non_finite: bool,
-) -> float:
-    samples = (
-        channel.data[np.isfinite(channel.data)] if ignore_non_finite else channel.data.reshape(-1)
-    )
-    if samples.size == 0:
-        qualifier = "finite " if ignore_non_finite else ""
-        raise ValueError(f"Channel Statistics has no {qualifier}samples")
-    with np.errstate(all="ignore"):
-        if statistic is ChannelStatistic.MEAN:
-            result = np.mean(samples)
-        elif statistic is ChannelStatistic.MEDIAN:
-            result = np.median(samples)
-        elif statistic is ChannelStatistic.MINIMUM:
-            result = np.min(samples)
-        elif statistic is ChannelStatistic.MAXIMUM:
-            result = np.max(samples)
-        elif statistic is ChannelStatistic.STANDARD_DEVIATION:
-            result = np.std(samples)
-        else:
-            result = np.percentile(samples, percentile)
-    return float(result)
-
-
 def _remap_number(
     value: float,
     *,
@@ -178,13 +118,6 @@ def _remap_number(
         )
 
 
-def _validate_statistics(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
-    percentile = _number(parameters["percentile"])
-    if not math.isfinite(percentile) or not 0.0 <= percentile <= 100.0:
-        return ("percentile must be finite and between 0 and 100",)
-    return ()
-
-
 def _validate_remap(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
     if _number(parameters["input_minimum"]) == _number(parameters["input_maximum"]):
         return ("input endpoints must not be equal",)
@@ -206,43 +139,6 @@ def create_scalar_bridge_definitions() -> tuple[NodeDefinition, ...]:
     """Return Batch 6 scalar bridge definitions in persistent catalogue order."""
 
     return (
-        NodeDefinition(
-            "synmachine.utility.channel_statistics",
-            1,
-            "Channel Statistics",
-            "Utility / Channel",
-            "Reduce a channel to a scalar statistic with an explicit non-finite policy.",
-            (InputPortSpec("channel", "Channel", PortType.CHANNEL),),
-            (OutputPortSpec("value", "Value", PortType.FLOAT),),
-            (
-                ParameterSpec(
-                    "statistic",
-                    "Statistic",
-                    PortType.STRING,
-                    ChannelStatistic.MEAN.value,
-                    choices=tuple(statistic.value for statistic in ChannelStatistic),
-                ),
-                ParameterSpec(
-                    "percentile",
-                    "Percentile",
-                    PortType.FLOAT,
-                    50.0,
-                    minimum=0.0,
-                    maximum=100.0,
-                    editor_hint=ParameterEditorHint.SLIDER,
-                ),
-                ParameterSpec(
-                    "ignore_non_finite",
-                    "Ignore non-finite",
-                    PortType.BOOL,
-                    True,
-                ),
-            ),
-            ExecutionKind.STATELESS,
-            ChannelStatisticsRuntime,
-            aliases=("channel mean", "channel average", "channel percentile"),
-            parameter_validator=_validate_statistics,
-        ),
         NodeDefinition(
             "synmachine.utility.remap_number",
             1,
@@ -295,12 +191,6 @@ def _connected_number(
     return _number(inputs.get(parameter_id, parameters[parameter_id]))
 
 
-def _channel(value: object) -> ChannelFrame:
-    if isinstance(value, ChannelFrame):
-        return value
-    raise TypeError(f"Expected ChannelFrame, got {type(value).__name__}")
-
-
 def _number(value: object) -> float:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return float(value)
@@ -320,7 +210,6 @@ def _text(value: object) -> str:
 
 
 __all__ = [
-    "ChannelStatistic",
     "IntegerConversionMode",
     "create_scalar_bridge_definitions",
 ]

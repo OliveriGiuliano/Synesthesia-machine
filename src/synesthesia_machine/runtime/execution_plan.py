@@ -65,10 +65,16 @@ class CompiledNode:
             for parameter in self.definition.parameters
             if parameter.update_mode is not ParameterUpdateMode.LIVE
         )
+        input_bindings = tuple(
+            (port_id, binding.source, binding.conversion)
+            for port_id, binding in sorted(self.input_bindings.items())
+        )
         return (
             self.definition.type_id,
             self.definition.implementation_version,
             self.clock_id,
+            self.is_demanded,
+            input_bindings,
             state_parameters,
         )
 

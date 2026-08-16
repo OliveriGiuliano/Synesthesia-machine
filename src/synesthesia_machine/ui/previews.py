@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QImage, QPainter, QPaintEvent, QPen, QPixmap
 from PySide6.QtWidgets import QLabel, QTabWidget, QVBoxLayout, QWidget
 
 from synesthesia_machine.contracts import ImagePreview, NotePreview
+from synesthesia_machine.ui.translations import tr, trf
 
 
 class ImagePreviewWidget(QWidget):
@@ -17,7 +18,7 @@ class ImagePreviewWidget(QWidget):
         self.latest_preview: ImagePreview | None = None
         self._pixmap = QPixmap()
         self.setObjectName("image_preview_widget")
-        self.setAccessibleName("Image data preview")
+        self.setAccessibleName(tr("Image data preview"))
         self.setMinimumSize(260, 180)
 
     def sizeHint(self) -> QSize:
@@ -45,7 +46,7 @@ class ImagePreviewWidget(QWidget):
         painter.fillRect(self.rect(), QColor("#161a22"))
         if self._pixmap.isNull():
             painter.setPen(QColor("#8d96a8"))
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "No image preview")
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, tr("No image preview"))
             return
 
         target_size = self._pixmap.size().scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio)
@@ -75,7 +76,7 @@ class NotePreviewWidget(QWidget):
         super().__init__(parent)
         self.latest_preview: NotePreview | None = None
         self.setObjectName("note_preview_widget")
-        self.setAccessibleName("MIDI note velocity chart")
+        self.setAccessibleName(tr("MIDI note velocity chart"))
         self.setMinimumSize(180, 120)
 
     def sizeHint(self) -> QSize:
@@ -117,7 +118,7 @@ class NotePreviewWidget(QWidget):
 
         painter.setPen(QColor("#a8b3c7"))
         count = len(active)
-        label = f"{count} active note{'s' if count != 1 else ''} · velocity 0-127"
+        label = trf("{count} active note(s) · velocity 0-127", count=count)
         painter.drawText(8, 18, label)
 
     @staticmethod
@@ -230,9 +231,9 @@ class ImagePreviewPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("image_preview_panel")
-        self.setAccessibleName("Image preview")
+        self.setAccessibleName(tr("Image preview"))
         self.image_widget = ImagePreviewWidget(self)
-        self.image_caption = QLabel("Waiting for Display Image Data…", self)
+        self.image_caption = QLabel(tr("Waiting for Display Image Data…"), self)
         self.image_caption.setObjectName("image_preview_caption")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -242,9 +243,24 @@ class ImagePreviewPanel(QWidget):
     def show_preview(self, preview: ImagePreview) -> None:
         self.image_widget.set_preview(preview)
         self.image_caption.setText(
-            f"Node {str(preview.node_id)[:8]} · tick {preview.tick_index} · "
-            f"{preview.width}x{preview.height} · sequence {preview.sequence}"
+            trf(
+                "Node {node} · tick {tick} · {width}x{height} · sequence {sequence}",
+                node=str(preview.node_id)[:8],
+                tick=preview.tick_index,
+                width=preview.width,
+                height=preview.height,
+                sequence=preview.sequence,
+            )
         )
+
+    def retranslate(self) -> None:
+        self.setAccessibleName(tr("Image preview"))
+        self.image_widget.setAccessibleName(tr("Image data preview"))
+        if self.image_widget.latest_preview is None:
+            self.image_caption.setText(tr("Waiting for Display Image Data…"))
+        else:
+            self.show_preview(self.image_widget.latest_preview)
+        self.image_widget.update()
 
 
 class NotePreviewPanel(QWidget):
@@ -253,9 +269,9 @@ class NotePreviewPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("note_preview_panel")
-        self.setAccessibleName("Note visualizer")
+        self.setAccessibleName(tr("Note visualizer"))
         self.note_widget = NotePreviewWidget(self)
-        self.note_caption = QLabel("Waiting for Note Visualizer…", self)
+        self.note_caption = QLabel(tr("Waiting for Note Visualizer…"), self)
         self.note_caption.setObjectName("note_preview_caption")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -265,9 +281,23 @@ class NotePreviewPanel(QWidget):
     def show_preview(self, preview: NotePreview) -> None:
         self.note_widget.set_preview(preview)
         self.note_caption.setText(
-            f"Node {str(preview.node_id)[:8]} · tick {preview.tick_index} · "
-            f"{len(preview.notes)} active · sequence {preview.sequence}"
+            trf(
+                "Node {node} · tick {tick} · {count} active · sequence {sequence}",
+                node=str(preview.node_id)[:8],
+                tick=preview.tick_index,
+                count=len(preview.notes),
+                sequence=preview.sequence,
+            )
         )
+
+    def retranslate(self) -> None:
+        self.setAccessibleName(tr("Note visualizer"))
+        self.note_widget.setAccessibleName(tr("MIDI note velocity chart"))
+        if self.note_widget.latest_preview is None:
+            self.note_caption.setText(tr("Waiting for Note Visualizer…"))
+        else:
+            self.show_preview(self.note_widget.latest_preview)
+        self.note_widget.update()
 
 
 class RuntimePreviewPanel(QWidget):
@@ -276,7 +306,7 @@ class RuntimePreviewPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("runtime_preview_panel")
-        self.setAccessibleName("Runtime previews")
+        self.setAccessibleName(tr("Runtime previews"))
         self.image_panel = ImagePreviewPanel(self)
         self.note_panel = NotePreviewPanel(self)
         self.image_widget = self.image_panel.image_widget
@@ -285,9 +315,9 @@ class RuntimePreviewPanel(QWidget):
         self.note_caption = self.note_panel.note_caption
         self.tabs = QTabWidget(self)
         self.tabs.setObjectName("runtime_preview_tabs")
-        self.tabs.setAccessibleName("Image and note preview tabs")
-        self.tabs.addTab(self.image_panel, "Image Preview")
-        self.tabs.addTab(self.note_panel, "Note Visualizer")
+        self.tabs.setAccessibleName(tr("Image and note preview tabs"))
+        self.tabs.addTab(self.image_panel, tr("Image Preview"))
+        self.tabs.addTab(self.note_panel, tr("Note Visualizer"))
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.tabs)

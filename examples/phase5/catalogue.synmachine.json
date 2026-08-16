@@ -553,20 +553,6 @@
     },
     {
       "collapsed": false,
-      "id": "51000000-0000-0000-0000-000000000040",
-      "implementation_version": 1,
-      "parameters": {},
-      "position": [
-        900.0,
-        1560.0
-      ],
-      "size": null,
-      "type_id": "synmachine.utility.channel_statistics",
-      "ui_state": {},
-      "user_label": null
-    },
-    {
-      "collapsed": false,
       "id": "51000000-0000-0000-0000-000000000041",
       "implementation_version": 1,
       "parameters": {},

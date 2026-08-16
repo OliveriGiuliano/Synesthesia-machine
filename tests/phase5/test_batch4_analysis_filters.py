@@ -96,6 +96,35 @@ DEFAULTS = {
     "synmachine.image.high_pass": (1.0, 0.0, 1.0, "REFLECT_101"),
     "synmachine.image.low_pass": (1.0, "REFLECT_101"),
 }
+CONNECTABLE_IDS = {
+    "synmachine.image.threshold": {"threshold", "maximum"},
+    "synmachine.image.canny": {
+        "low_threshold",
+        "high_threshold",
+        "aperture_size",
+        "l2_gradient",
+        "pre_blur_sigma",
+    },
+    "synmachine.image.convolve": {"scale", "delta"},
+    "synmachine.image.dilate": {
+        "kernel_width",
+        "kernel_height",
+        "iterations",
+        "anchor_x",
+        "anchor_y",
+        "process_alpha",
+    },
+    "synmachine.image.erode": {
+        "kernel_width",
+        "kernel_height",
+        "iterations",
+        "anchor_x",
+        "anchor_y",
+        "process_alpha",
+    },
+    "synmachine.image.high_pass": {"sigma", "display_offset", "gain"},
+    "synmachine.image.low_pass": {"sigma"},
+}
 CV_THRESHOLDS = {
     "BINARY": cv2.THRESH_BINARY,
     "BINARY_INVERSE": cv2.THRESH_BINARY_INV,
@@ -231,6 +260,9 @@ def test_batch4_metadata_has_exact_order_ports_defaults_and_choices() -> None:
             tuple(parameter.default for parameter in definition.parameters)
             == DEFAULTS[definition.type_id]
         )
+        assert {
+            parameter.id for parameter in definition.parameters if parameter.connectable
+        } == CONNECTABLE_IDS[definition.type_id]
 
     threshold = _definition("synmachine.image.threshold")
     assert threshold.category == "Image / Analysis"
@@ -264,7 +296,9 @@ def test_batch4_metadata_has_exact_order_ports_defaults_and_choices() -> None:
         assert definition.category == "Image / Filter"
         assert tuple(port.id for port in definition.inputs) == ("image",)
         assert tuple(port.id for port in definition.outputs) == ("image",)
-        assert not any(parameter.connectable for parameter in definition.parameters)
+        assert {
+            parameter.id for parameter in definition.parameters if parameter.connectable
+        } == CONNECTABLE_IDS[type_id]
 
 
 def test_threshold_default_conforms_and_preserves_channel_metadata(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -38,6 +39,9 @@ class PortType(StrEnum):
     MATRIX = "MATRIX"
     MIDI_STATE = "MIDI_STATE"
     STRING = "STRING"
+    SCALAR_ARRAY = "SCALAR_ARRAY"
+    IMAGE_ARRAY = "IMAGE_ARRAY"
+    CHANNEL_ARRAY = "CHANNEL_ARRAY"
 
 
 class ColorSpace(StrEnum):
@@ -112,8 +116,8 @@ class FrameContext:
         if self.source_frame_index is not None and self.source_frame_index < 0:
             msg = "source_frame_index cannot be negative"
             raise ValueError(msg)
-        if self.source_time_s < 0.0:
-            msg = "source_time_s cannot be negative"
+        if not math.isfinite(self.source_time_s) or self.source_time_s < 0.0:
+            msg = "source_time_s must be finite and non-negative"
             raise ValueError(msg)
         if self.received_monotonic_ns < 0:
             msg = "received_monotonic_ns cannot be negative"
@@ -241,6 +245,9 @@ class ChannelFrame:
 
     def __post_init__(self) -> None:
         _validate_read_only_float32(self.data, dimensions=2)
+        if not math.isfinite(self.nominal_min) or not math.isfinite(self.nominal_max):
+            msg = "channel nominal range must be finite"
+            raise ValueError(msg)
         if self.nominal_max <= self.nominal_min:
             msg = "nominal_max must be greater than nominal_min"
             raise ValueError(msg)
@@ -261,9 +268,10 @@ class ColorValue:
 
     def __post_init__(self) -> None:
         if any(
-            component < 0.0 or component > 1.0 for component in (self.r, self.g, self.b, self.a)
+            not math.isfinite(component) or component < 0.0 or component > 1.0
+            for component in (self.r, self.g, self.b, self.a)
         ):
-            msg = "color components must be normalized to the range 0..1"
+            msg = "color components must be finite and normalized to the range 0..1"
             raise ValueError(msg)
 
 
@@ -337,6 +345,30 @@ class MidiStateFrame:
         object.__setattr__(self, "notes", MappingProxyType(copied))
 
 
+@dataclass(frozen=True, slots=True)
+class ValueArray:
+    """Immutable homogeneous FIFO/statistics payload carried by array ports."""
+
+    item_type: PortType
+    values: tuple[ImageFrame | ChannelFrame | float | int, ...]
+
+    def __post_init__(self) -> None:
+        if self.item_type is PortType.FLOAT:
+            valid = all(isinstance(value, float) for value in self.values)
+        elif self.item_type is PortType.INT:
+            valid = all(
+                isinstance(value, int) and not isinstance(value, bool) for value in self.values
+            )
+        elif self.item_type is PortType.IMAGE:
+            valid = all(isinstance(value, ImageFrame) for value in self.values)
+        elif self.item_type is PortType.CHANNEL:
+            valid = all(isinstance(value, ChannelFrame) for value in self.values)
+        else:
+            raise ValueError("ValueArray supports FLOAT, INT, IMAGE, or CHANNEL elements")
+        if not valid:
+            raise TypeError(f"ValueArray values do not match {self.item_type.value}")
+
+
 class NoDataType:
     """Type of the one explicit missing-runtime-value sentinel."""
 
@@ -359,7 +391,16 @@ NoData: Final = NoDataType()
 
 type ParameterValue = float | int | bool | str | ColorValue | NumericMatrix
 type RuntimeValue = (
-    ImageFrame | ChannelFrame | float | int | bool | ColorValue | MidiStateFrame | str | NoDataType
+    ImageFrame
+    | ChannelFrame
+    | ValueArray
+    | float
+    | int
+    | bool
+    | ColorValue
+    | MidiStateFrame
+    | str
+    | NoDataType
 )
 
 
@@ -368,6 +409,11 @@ def clock_id_of(value: RuntimeValue) -> UUID | None:
 
     if isinstance(value, (ImageFrame, ChannelFrame, MidiStateFrame)):
         return value.context.clock_id
+    if isinstance(value, ValueArray):
+        clock_ids = {
+            clock_id for item in value.values if (clock_id := clock_id_of(item)) is not None
+        }
+        return next(iter(clock_ids)) if len(clock_ids) == 1 else None
     return None
 
 

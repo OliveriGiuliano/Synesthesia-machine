@@ -86,3 +86,40 @@ def test_seek_is_explicitly_reserved(tmp_path: Path) -> None:
             client.seek(source_id, 0.5)
     finally:
         client.close()
+
+
+def test_runtime_node_errors_are_exposed_through_typed_engine_metrics(tmp_path: Path) -> None:
+    video = generate_test_video(tmp_path / "runtime-error.mp4", frame_count=2)
+    document = GraphDocument()
+    source_id = document.add_node(
+        "synmachine.input.load_video",
+        parameters={"file_path": str(video)},
+    )
+    resize_id = document.add_node(
+        "synmachine.image.resize",
+        parameters={"width": 8, "height": 8, "preserve_aspect": False},
+    )
+    difference_id = document.add_node("synmachine.image.difference")
+    preview_id = document.add_node("synmachine.visualization.display_image_data")
+    document.add_connection(source_id, "image", resize_id, "image")
+    document.add_connection(source_id, "image", difference_id, "a")
+    document.add_connection(resize_id, "image", difference_id, "b")
+    document.add_connection(difference_id, "image", preview_id, "image")
+    client = InProcessEngineClient(create_application_registry())
+    try:
+        activation = client.activate(document.snapshot())
+        assert activation.activated and activation.report.is_valid
+
+        client.play(source_id)
+        assert client.wait_until_idle(2.0)
+
+        metrics = client.metrics()
+        assert metrics.state is EngineState.ERROR
+        assert len(metrics.runtime_errors) == 1
+        error = metrics.runtime_errors[0]
+        assert error.node_id == difference_id
+        assert error.code == "difference_shape"
+        assert error.recoverable
+        assert error.tick_index == 2
+    finally:
+        client.close()

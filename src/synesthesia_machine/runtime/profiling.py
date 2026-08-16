@@ -17,6 +17,7 @@ from synesthesia_machine.contracts.runtime_values import (
     MidiStateFrame,
     NoData,
     RuntimeValue,
+    ValueArray,
 )
 
 DEFAULT_PROFILE_WINDOW = 240
@@ -146,15 +147,19 @@ def _summarize_value(value: RuntimeValue) -> tuple[str, int]:
     if isinstance(value, MidiStateFrame):
         return f"MIDI_STATE {len(value.notes)} note(s)", len(value.notes) * 3
     if isinstance(value, ColorValue):
-        return "COLOR", 32
+        return f"COLOR ({value.r:.3g}, {value.g:.3g}, {value.b:.3g}, {value.a:.3g})", 32
     if isinstance(value, bool):
-        return "BOOL", 1
+        return f"BOOL {value}", 1
     if isinstance(value, int):
-        return "INT", 8
+        return f"INT {value}", 8
     if isinstance(value, float):
-        return "FLOAT", 8
+        return f"FLOAT {value:.8g}", 8
     if isinstance(value, str):
-        return f"STRING {len(value)} char(s)", len(value.encode("utf-8"))
+        shown = value if len(value) <= 48 else value[:45] + "…"
+        return f"STRING {shown!r}", len(value.encode("utf-8"))
+    if isinstance(value, ValueArray):
+        byte_count = sum(_summarize_value(item)[1] for item in value.values)
+        return f"{value.item_type.value}_ARRAY {len(value.values)} item(s)", byte_count
     raise TypeError(f"unsupported runtime value: {type(value).__name__}")
 
 

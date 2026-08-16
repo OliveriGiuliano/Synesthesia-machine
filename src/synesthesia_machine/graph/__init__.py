@@ -23,6 +23,11 @@ from synesthesia_machine.graph.model import (
     LiteralValue,
     NodeModel,
 )
+from synesthesia_machine.graph.random_graph import (
+    generate_random_graph,
+    randomize_graph_nodes,
+    randomize_graph_parameters,
+)
 from synesthesia_machine.graph.validation import (
     ValidationIssue,
     ValidationReport,
@@ -48,6 +53,9 @@ __all__ = [
     "ValidationSeverity",
     "align_boxes",
     "distribute_boxes",
+    "generate_random_graph",
+    "randomize_graph_nodes",
+    "randomize_graph_parameters",
     "tidy_boxes",
     "types_compatible",
 ]

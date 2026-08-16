@@ -61,6 +61,27 @@ class MidiOutputConnectionState(StrEnum):
     CLOSED = "CLOSED"
 
 
+class ResetReason(StrEnum):
+    PLAN_REPLACED = "PLAN_REPLACED"
+    SOURCE_RESTARTED = "SOURCE_RESTARTED"
+    SEEK = "SEEK"
+    PARAMETER_CHANGED = "PARAMETER_CHANGED"
+    CLOCK_CHANGED = "CLOCK_CHANGED"
+    ENGINE_RESTARTED = "ENGINE_RESTARTED"
+
+
+@dataclass(frozen=True, slots=True)
+class NodeExecutionError:
+    """Structured node failure safe to carry across the engine boundary."""
+
+    node_id: UUID
+    code: str
+    message: str
+    details: str | None
+    recoverable: bool
+    tick_index: int | None
+
+
 @dataclass(frozen=True, slots=True)
 class EngineActivation:
     graph_revision: int
@@ -204,6 +225,7 @@ class EngineMetrics:
     p95_graph_execution_ms: float = 0.0
     p99_graph_execution_ms: float = 0.0
     max_graph_execution_ms: float = 0.0
+    runtime_errors: tuple[NodeExecutionError, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

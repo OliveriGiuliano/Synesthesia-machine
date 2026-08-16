@@ -29,5 +29,5 @@ loads and instantiates without unknown type IDs or unsupported versions, and to 
 node reference. It is **not** an executable graph because nodes with required inputs are unconnected.
 
 The catalogue includes source and output definitions for completeness, but loading it does not start
-sources or access hardware. Automated tests compare its exact 51-node sequence with the production
+sources or access hardware. Automated tests compare its supported 50-node sequence with the production
 registry and round-trip both files through the schema-versioned persistence boundary.

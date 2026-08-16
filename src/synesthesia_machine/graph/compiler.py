@@ -14,7 +14,13 @@ from synesthesia_machine.graph.validation import (
     ValidationReport,
     ValidationSeverity,
 )
-from synesthesia_machine.nodes.base import CachePolicy, ExecutionKind, NodeDefinition, TypeVariable
+from synesthesia_machine.nodes.base import (
+    ArrayTypeVariable,
+    CachePolicy,
+    ExecutionKind,
+    NodeDefinition,
+    TypeVariable,
+)
 from synesthesia_machine.nodes.registry import NodeRegistry
 from synesthesia_machine.runtime.execution_plan import (
     CompiledNode,
@@ -43,9 +49,14 @@ class _TypeGroups:
     def __init__(self) -> None:
         self._parent: dict[tuple[UUID, str], tuple[UUID, str]] = {}
         self._candidates: dict[tuple[UUID, str], set[PortType]] = defaultdict(set)
+        self._allowed: dict[tuple[UUID, str], set[PortType]] = {}
 
-    def add(self, key: tuple[UUID, str]) -> None:
+    def add(self, key: tuple[UUID, str], allowed_types: frozenset[PortType]) -> None:
         self._parent.setdefault(key, key)
+        if allowed_types:
+            current = self._allowed.get(key)
+            allowed = set(allowed_types)
+            self._allowed[key] = allowed if current is None else current & allowed
 
     def find(self, key: tuple[UUID, str]) -> tuple[UUID, str]:
         parent = self._parent[key]
@@ -62,12 +73,23 @@ class _TypeGroups:
         root, child = sorted((left_root, right_root), key=lambda item: (str(item[0]), item[1]))
         self._parent[child] = root
         self._candidates[root].update(self._candidates.pop(child, set()))
+        left_allowed = self._allowed.pop(root, None)
+        right_allowed = self._allowed.pop(child, None)
+        if left_allowed is None and right_allowed is not None:
+            self._allowed[root] = right_allowed
+        elif left_allowed is not None and right_allowed is None:
+            self._allowed[root] = left_allowed
+        elif left_allowed is not None and right_allowed is not None:
+            self._allowed[root] = left_allowed & right_allowed
 
     def constrain(self, key: tuple[UUID, str], value_type: PortType) -> None:
         self._candidates[self.find(key)].add(value_type)
 
     def resolve(self, key: tuple[UUID, str]) -> PortType | None:
         candidates = self._candidates.get(self.find(key), set())
+        allowed = self._allowed.get(self.find(key))
+        if allowed is not None and not candidates <= allowed:
+            return None
         if not candidates:
             return None
         if len(candidates) == 1:
@@ -78,6 +100,9 @@ class _TypeGroups:
 
     def incompatible_candidates(self, key: tuple[UUID, str]) -> frozenset[PortType]:
         candidates = self._candidates.get(self.find(key), set())
+        allowed = self._allowed.get(self.find(key))
+        if allowed is not None and not candidates <= allowed:
+            return frozenset(candidates - allowed or candidates)
         if len(candidates) <= 1 or candidates <= {PortType.INT, PortType.FLOAT}:
             return frozenset()
         return frozenset(candidates)
@@ -148,35 +173,60 @@ class GraphCompiler:
         otherwise compatible authoring connection impossible.
         """
 
-        retained = tuple(
-            connection
-            for connection in snapshot.connections
-            if not (
-                connection.destination_node_id == destination_node_id
-                and connection.destination_port_id == destination_port_id
+        endpoint = (
+            source_node_id,
+            source_port_id,
+            destination_node_id,
+            destination_port_id,
+        )
+        return self.connection_compatibilities(snapshot, (endpoint,))[endpoint]
+
+    def connection_compatibilities(
+        self,
+        snapshot: GraphSnapshot,
+        candidates: Iterable[tuple[UUID, str, UUID, str]],
+    ) -> dict[tuple[UUID, str, UUID, str], ConnectionCompatibility]:
+        """Validate several prospective edges while sharing identical baselines."""
+
+        results: dict[tuple[UUID, str, UUID, str], ConnectionCompatibility] = {}
+        baseline_cache: dict[tuple[ConnectionModel, ...], set[ValidationIssue]] = {}
+        for endpoint in candidates:
+            source_node_id, source_port_id, destination_node_id, destination_port_id = endpoint
+            retained = tuple(
+                connection
+                for connection in snapshot.connections
+                if not (
+                    connection.destination_node_id == destination_node_id
+                    and connection.destination_port_id == destination_port_id
+                )
             )
-        )
-        base = replace(snapshot, connections=retained)
-        candidate_id = uuid5(
-            snapshot.document_id,
-            f"connection-query:{source_node_id}:{source_port_id}:"
-            f"{destination_node_id}:{destination_port_id}",
-        )
-        candidate = ConnectionModel(
-            id=candidate_id,
-            source_node_id=source_node_id,
-            source_port_id=source_port_id,
-            destination_node_id=destination_node_id,
-            destination_port_id=destination_port_id,
-        )
-        baseline_issues = set(self.compile(base).report.issues)
-        prospective = replace(base, connections=(*retained, candidate))
-        new_errors = tuple(
-            issue
-            for issue in self.compile(prospective).report.errors
-            if issue not in baseline_issues
-        )
-        return ConnectionCompatibility(accepted=not new_errors, issues=new_errors)
+            baseline_issues = baseline_cache.get(retained)
+            if baseline_issues is None:
+                base = replace(snapshot, connections=retained)
+                baseline_issues = set(self.compile(base).report.issues)
+                baseline_cache[retained] = baseline_issues
+            candidate = ConnectionModel(
+                id=uuid5(
+                    snapshot.document_id,
+                    f"connection-query:{source_node_id}:{source_port_id}:"
+                    f"{destination_node_id}:{destination_port_id}",
+                ),
+                source_node_id=source_node_id,
+                source_port_id=source_port_id,
+                destination_node_id=destination_node_id,
+                destination_port_id=destination_port_id,
+            )
+            prospective = replace(snapshot, connections=(*retained, candidate))
+            new_errors = tuple(
+                issue
+                for issue in self.compile(prospective).report.errors
+                if issue not in baseline_issues
+            )
+            results[endpoint] = ConnectionCompatibility(
+                accepted=not new_errors,
+                issues=new_errors,
+            )
+        return results
 
     @staticmethod
     def _unique_nodes(
@@ -324,7 +374,7 @@ class GraphCompiler:
         issues: list[ValidationIssue],
     ) -> dict[tuple[UUID, str, bool], PortType]:
         groups = _TypeGroups()
-        expressions: dict[tuple[UUID, str, bool], PortType | TypeVariable] = {}
+        expressions: dict[tuple[UUID, str, bool], PortType | TypeVariable | ArrayTypeVariable] = {}
         connected_inputs: dict[UUID, set[str]] = defaultdict(set)
         for connection in connections:
             connected_inputs[connection.destination_node_id].add(connection.destination_port_id)
@@ -335,8 +385,8 @@ class GraphCompiler:
                     port.id, is_output=False, parameters=node_parameters
                 )
                 expressions[(node_id, port.id, False)] = expression
-                if isinstance(expression, TypeVariable):
-                    groups.add((node_id, expression.name))
+                if isinstance(expression, (TypeVariable, ArrayTypeVariable)):
+                    groups.add((node_id, expression.name), expression.allowed_types)
             for parameter in definition.parameters:
                 if not parameter.connectable or parameter.connected_port_type is None:
                     continue
@@ -346,8 +396,8 @@ class GraphCompiler:
                     port.id, is_output=True, parameters=node_parameters
                 )
                 expressions[(node_id, port.id, True)] = expression
-                if isinstance(expression, TypeVariable):
-                    groups.add((node_id, expression.name))
+                if isinstance(expression, (TypeVariable, ArrayTypeVariable)):
+                    groups.add((node_id, expression.name), expression.allowed_types)
 
         for connection in connections:
             source = expressions[(connection.source_node_id, connection.source_port_id, True)]
@@ -359,9 +409,11 @@ class GraphCompiler:
             if source_key is not None and destination_key is not None:
                 groups.union(source_key, destination_key)
             elif source_key is not None and isinstance(destination, PortType):
-                groups.constrain(source_key, destination)
+                assert isinstance(source, (TypeVariable, ArrayTypeVariable))
+                groups.constrain(source_key, _base_type(destination, source))
             elif destination_key is not None and isinstance(source, PortType):
-                groups.constrain(destination_key, source)
+                assert isinstance(destination, (TypeVariable, ArrayTypeVariable))
+                groups.constrain(destination_key, _base_type(source, destination))
 
         resolved: dict[tuple[UUID, str, bool], PortType] = {}
         for port_key, expression in expressions.items():
@@ -391,7 +443,11 @@ class GraphCompiler:
                     )
                 )
             else:
-                resolved[port_key] = value_type
+                resolved[port_key] = (
+                    _array_type(value_type)
+                    if isinstance(expression, ArrayTypeVariable)
+                    else value_type
+                )
 
         for connection in connections:
             source_type = resolved.get((connection.source_node_id, connection.source_port_id, True))
@@ -612,10 +668,34 @@ def _input_socket_ids(
     )
 
 
-def _variable_key(node_id: UUID, expression: PortType | TypeVariable) -> tuple[UUID, str] | None:
-    if isinstance(expression, TypeVariable):
+def _variable_key(
+    node_id: UUID, expression: PortType | TypeVariable | ArrayTypeVariable
+) -> tuple[UUID, str] | None:
+    if isinstance(expression, (TypeVariable, ArrayTypeVariable)):
         return node_id, expression.name
     return None
+
+
+def _array_type(value_type: PortType) -> PortType:
+    if value_type in {PortType.FLOAT, PortType.INT}:
+        return PortType.SCALAR_ARRAY
+    if value_type is PortType.IMAGE:
+        return PortType.IMAGE_ARRAY
+    if value_type is PortType.CHANNEL:
+        return PortType.CHANNEL_ARRAY
+    raise ValueError(f"No array port type for {value_type.value}")
+
+
+def _base_type(value_type: PortType, expression: TypeVariable | ArrayTypeVariable) -> PortType:
+    if not isinstance(expression, ArrayTypeVariable):
+        return value_type
+    if value_type is PortType.SCALAR_ARRAY:
+        return PortType.FLOAT
+    if value_type is PortType.IMAGE_ARRAY:
+        return PortType.IMAGE
+    if value_type is PortType.CHANNEL_ARRAY:
+        return PortType.CHANNEL
+    return value_type
 
 
 def _error(

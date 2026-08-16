@@ -205,7 +205,7 @@ def test_midi_utility_definitions_have_stable_ports_parameters_alias_and_variadi
     assert transpose.display_name == "Transpose"
     assert "Pitch Up or Down" in transpose.aliases
     assert transpose.parameter("semitones").connectable  # type: ignore[union-attr]
-    assert transpose.parameter("semitones").connected_port_type is PortType.INT  # type: ignore[union-attr]
+    assert transpose.parameter("semitones").connected_port_type is PortType.FLOAT  # type: ignore[union-attr]
     assert merge.variadic_input is not None and merge.variadic_input.minimum_count == 2
     assert tuple(port.id for port in merge.input_ports()) == ("midi_1", "midi_2")
 

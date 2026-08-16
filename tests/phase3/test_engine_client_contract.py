@@ -16,11 +16,11 @@ from synesthesia_machine.contracts import (
     PortType,
     freeze_uint8_preview,
 )
-from synesthesia_machine.contracts.engine_messages import GraphSnapshotPayload
 from synesthesia_machine.graph import GraphCompiler, GraphDocument
 from synesthesia_machine.nodes import ExecutionKind, ResetReason
 from synesthesia_machine.nodes.registry import NodeRegistry
 from synesthesia_machine.runtime import Scheduler
+from synesthesia_machine.runtime.graph_payload import payload_to_snapshot, snapshot_to_payload
 from tests.phase1.helpers import ProbeRuntime, RuntimeCounters, make_definition
 
 
@@ -52,7 +52,7 @@ def test_graph_snapshot_payload_round_trips_numeric_matrix_parameters() -> None:
         parameters={"kernel": kernel},
     )
 
-    restored = GraphSnapshotPayload.from_snapshot(document.snapshot()).to_snapshot()
+    restored = payload_to_snapshot(snapshot_to_payload(document.snapshot()))
 
     node = restored.node(node_id)
     assert node is not None

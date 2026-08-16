@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from uuid import UUID
 
-from PySide6.QtCore import QObject, QPoint, QPointF, QRect, QRectF, QSignalBlocker, Qt, Signal
+from PySide6.QtCore import QObject, QPoint, QPointF, QRect, QRectF, QSignalBlocker, Qt, Signal, Slot
 from PySide6.QtGui import (
     QBrush,
     QContextMenuEvent,
@@ -37,6 +37,7 @@ from synesthesia_machine.ui.graphics import (
 )
 from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.theme import Theme
+from synesthesia_machine.ui.translations import tr
 
 NODE_MIME_TYPE = "application/x-synesthesia-node-type"
 LARGE_GRAPH_NODE_THRESHOLD = 200
@@ -44,6 +45,7 @@ LARGE_GRAPH_NODE_THRESHOLD = 200
 
 class GraphScene(QGraphicsScene):
     connectionDroppedOnEmpty = Signal(object, object)
+    connectionInspectRequested = Signal(object)
 
     def __init__(
         self,
@@ -62,10 +64,12 @@ class GraphScene(QGraphicsScene):
         self._large_graph_mode = False
         self._detail_visible = True
         self._node_heat_levels: dict[UUID, float] = {}
+        self._selection_outline_rect = QRectF()
         self.grid_snap_enabled = False
         self.grid_spacing = theme.metrics.grid_size
         self.setSceneRect(-4000.0, -3000.0, 8000.0, 6000.0)
         session.changed.connect(self.sync_from_session)
+        self.selectionChanged.connect(self.update_selection_outline)
         self.sync_from_session()
 
     def sync_from_session(self) -> None:
@@ -177,6 +181,26 @@ class GraphScene(QGraphicsScene):
             )
             if source is not None and destination is not None:
                 item.set_endpoints(source.scenePos(), destination.scenePos())
+        self.update_selection_outline()
+
+    @property
+    def selection_outline_rect(self) -> QRectF:
+        return QRectF(self._selection_outline_rect)
+
+    @Slot()
+    def update_selection_outline(self) -> None:
+        bounds = QRectF()
+        for item in self.node_items.values():
+            if item.isSelected():
+                bounds = bounds.united(item.body_scene_rect)
+        margin = self.theme.metrics.selection_outline_margin
+        updated = (
+            bounds.adjusted(-margin, -margin, margin, margin) if not bounds.isEmpty() else bounds
+        )
+        dirty = self._selection_outline_rect.united(updated).adjusted(-3.0, -3.0, 3.0, 3.0)
+        self._selection_outline_rect = updated
+        if not dirty.isEmpty():
+            self.invalidate(dirty, QGraphicsScene.SceneLayer.ForegroundLayer)
 
     def port_item(self, node_id: UUID, port_id: str, is_output: bool) -> PortGraphicsItem | None:
         node = self.node_items.get(node_id)
@@ -207,6 +231,9 @@ class GraphScene(QGraphicsScene):
             for node_id, item in self.node_items.items()
             if item.isSelected()
         }
+
+    def inspect_connection(self, connection_id: UUID) -> None:
+        self.connectionInspectRequested.emit(connection_id)
 
     def commit_node_move(self, origins: dict[UUID, tuple[float, float]]) -> None:
         current = {
@@ -262,13 +289,15 @@ class GraphScene(QGraphicsScene):
         group = self.session.document.group(group_id)
         if group is None:
             return
-        title, accepted = QInputDialog.getText(None, "Edit canvas item", "Title", text=group.title)
+        title, accepted = QInputDialog.getText(
+            None, tr("Edit canvas item"), tr("Title"), text=group.title
+        )
         if not accepted:
             return
         text, accepted = QInputDialog.getMultiLineText(
             None,
-            "Edit canvas item",
-            "Comment text",
+            tr("Edit canvas item"),
+            tr("Comment text"),
             text=group.text,
         )
         if accepted:
@@ -324,20 +353,25 @@ class GraphScene(QGraphicsScene):
         self._temporary = TemporaryConnectionGraphicsItem(self.theme)
         self.addItem(self._temporary)
         self._temporary.set_endpoints(port.scenePos(), position)
+        candidates: list[tuple[PortGraphicsItem, tuple[UUID, str, UUID, str]]] = []
         for item in self.node_items.values():
             for target in item.ports.values():
                 if target is port or target.view_model.is_output == port.view_model.is_output:
                     target.set_compatible(False)
                     continue
                 source, destination = self._normalize_ports(port, target)
-                target.set_compatible(
-                    self.session.compatibility(
-                        source.view_model.node_id,
-                        source.view_model.port_id,
-                        destination.view_model.node_id,
-                        destination.view_model.port_id,
-                    )
+                endpoint = (
+                    source.view_model.node_id,
+                    source.view_model.port_id,
+                    destination.view_model.node_id,
+                    destination.view_model.port_id,
                 )
+                candidates.append((target, endpoint))
+        compatibility = self.session.compatibilities(
+            tuple(endpoint for _target, endpoint in candidates)
+        )
+        for target, endpoint in candidates:
+            target.set_compatible(compatibility[endpoint])
 
     def update_connection_drag(self, position: QPointF) -> None:
         if self._drag_port is not None and self._temporary is not None:
@@ -412,6 +446,20 @@ class GraphScene(QGraphicsScene):
             painter.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
             y += spacing
 
+    def drawForeground(self, painter: QPainter, rect: QRectF | QRect) -> None:
+        super().drawForeground(painter, rect)
+        if self._selection_outline_rect.isEmpty():
+            return
+        painter.save()
+        pen = QPen(self.theme.color("selection_outline"))
+        pen.setWidthF(self.theme.metrics.selection_outline_width)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        radius = self.theme.metrics.node_radius + self.theme.metrics.selection_outline_margin
+        painter.drawRoundedRect(self._selection_outline_rect, radius, radius)
+        painter.restore()
+
 
 class GraphView(QGraphicsView):
     requestSearch = Signal(object)
@@ -436,7 +484,11 @@ class GraphView(QGraphicsView):
         self.setCacheMode(QGraphicsView.CacheModeFlag.CacheBackground)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
-        factor = 1.15 if event.angleDelta().y() > 0 else 1.0 / 1.15
+        vertical_delta = event.angleDelta().y()
+        if vertical_delta == 0:
+            super().wheelEvent(event)
+            return
+        factor = 1.15 if vertical_delta > 0 else 1.0 / 1.15
         current = self.transform().m11()
         target = current * factor
         if self.theme.metrics.min_zoom <= target <= self.theme.metrics.max_zoom:

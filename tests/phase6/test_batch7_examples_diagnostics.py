@@ -116,13 +116,13 @@ SYNESTHESIA_DESCRIPTION_DETAILS = {
 }
 
 
-def test_phase6_catalogue_is_the_exact_current_59_definition_registry() -> None:
+def test_phase6_catalogue_is_the_exact_current_65_definition_registry() -> None:
     registry = create_application_registry()
     snapshot = load_graph(CATALOGUE_PATH, registry)
     expected = tuple(definition.type_id for definition in registry.definitions())
     actual = tuple(node.type_id for node in snapshot.nodes)
 
-    assert len(expected) == len(actual) == len(set(actual)) == 59
+    assert len(expected) == len(actual) == len(set(actual)) == 65
     assert actual == expected
     assert not snapshot.connections
 
@@ -146,14 +146,14 @@ def test_complex_synesthesia_nodes_have_explanatory_hover_descriptions() -> None
         assert all(detail in description for detail in expected_details)
 
 
-def test_frozen_phase5_catalogue_remains_an_exact_51_node_historical_subset() -> None:
+def test_supported_phase5_catalogue_remains_an_exact_50_node_historical_subset() -> None:
     registry = create_application_registry()
     phase5 = load_graph(PHASE5_CATALOGUE_PATH, registry)
     phase6 = load_graph(CATALOGUE_PATH, registry)
     phase5_ids = tuple(node.type_id for node in phase5.nodes)
     phase6_ids = tuple(node.type_id for node in phase6.nodes)
 
-    assert len(phase5_ids) == len(set(phase5_ids)) == 51
+    assert len(phase5_ids) == len(set(phase5_ids)) == 50
     assert set(phase5_ids) < set(phase6_ids)
 
 

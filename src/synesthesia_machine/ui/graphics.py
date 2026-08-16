@@ -37,6 +37,7 @@ from synesthesia_machine.graph import (
 from synesthesia_machine.ui.parameter_editors import create_parameter_editor, parameter_tooltip
 from synesthesia_machine.ui.theme import Theme, node_category_color, port_color_name
 from synesthesia_machine.ui.tooltips import format_tooltip
+from synesthesia_machine.ui.translations import tr
 from synesthesia_machine.ui.view_models import (
     ConnectionViewModel,
     NodeViewModel,
@@ -58,7 +59,9 @@ def _diagnostic_tooltip(description: str, issues: tuple[ValidationIssue, ...]) -
 
 
 def _issue_text(issues: tuple[ValidationIssue, ...]) -> str:
-    return "\n".join(f"{issue.severity} · {issue.message} ({issue.code})" for issue in issues)
+    return "\n".join(
+        f"{tr(str(issue.severity))} · {tr(issue.message)} ({issue.code})" for issue in issues
+    )
 
 
 class GroupGraphicsItem(QGraphicsObject):
@@ -241,7 +244,7 @@ class PortGraphicsItem(QGraphicsObject):
         self.compatible: bool | None = None
         self.setAcceptHoverEvents(True)
         self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
-        direction = "output" if view_model.is_output else "input"
+        direction = tr("output" if view_model.is_output else "input")
         self.setToolTip(f"{view_model.label} — {view_model.type_name} {direction}")
 
     def boundingRect(self) -> QRectF:
@@ -387,6 +390,12 @@ class NodeGraphicsItem(QGraphicsObject):
     def node_width(self) -> float:
         return self._width
 
+    @property
+    def body_scene_rect(self) -> QRectF:
+        """Painted node-body bounds, excluding port and interaction margins."""
+        body = QRectF(0.0, 0.0, self._width, self._height)
+        return self.mapRectToScene(body)
+
     def _editor_left(self) -> float:
         return self._width - self._EDITOR_WIDTH - self._EDITOR_RIGHT_MARGIN
 
@@ -482,9 +491,6 @@ class NodeGraphicsItem(QGraphicsObject):
                 category_color, self.theme.color("error"), self._heat_level
             )
             border_width = 1.5 + self._heat_level * 2.5
-        if self.isSelected():
-            border_color = border_color.lighter(120)
-            border_width = max(border_width, 2.2)
         pen = QPen(border_color)
         pen.setWidthF(border_width)
         painter.setPen(pen)
@@ -530,7 +536,7 @@ class NodeGraphicsItem(QGraphicsObject):
             self._draw_row(painter, y, port.label, port.type_name, False)
             y += metrics.row_height
         for parameter in self.view_model.parameters:
-            detail = "Live input" if parameter.connected else ""
+            detail = tr("Live input") if parameter.connected else ""
             self._draw_row(
                 painter,
                 y,
@@ -644,7 +650,8 @@ class ConnectionGraphicsItem(QGraphicsObject):
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         self.setToolTip(
             _diagnostic_tooltip(
-                f"{view_model.source_port_id} → {view_model.destination_port_id}",
+                f"{view_model.source_port_id} → {view_model.destination_port_id}\n"
+                + tr("Double-click to inspect this live connection."),
                 view_model.issues,
             )
         )
@@ -681,6 +688,11 @@ class ConnectionGraphicsItem(QGraphicsObject):
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawPath(self.path)
+
+    def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        scene = cast("GraphSceneProtocol", self.scene())
+        scene.inspect_connection(self.view_model.connection_id)
+        event.accept()
 
 
 class TemporaryConnectionGraphicsItem(QGraphicsObject):
@@ -738,3 +750,4 @@ class GraphSceneProtocol:
         size: tuple[float, float],
     ) -> None: ...
     def edit_group(self, group_id: UUID) -> None: ...
+    def inspect_connection(self, connection_id: UUID) -> None: ...

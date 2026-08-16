@@ -4,13 +4,22 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from uuid import UUID
+
+import numpy as np
 
 from synesthesia_machine.contracts import (
+    AlphaMode,
+    ChannelFrame,
+    ColorSpace,
     ColorValue,
     FrameContext,
+    FrameProvenance,
+    ImageFrame,
     ParameterValue,
     PortType,
     RuntimeValue,
+    read_only_float32,
 )
 from synesthesia_machine.media import (
     BorderMode,
@@ -32,16 +41,18 @@ from synesthesia_machine.nodes import (
     OutputPortSpec,
     ParameterEditorHint,
     ParameterSpec,
+    TypeVariable,
 )
 from synesthesia_machine.nodes.image.runtime_support import (
     StatelessImageRuntime,
     boolean_value,
     color_value,
-    image_value,
     integer_value,
     number_value,
     text_value,
 )
+
+IMAGE_OR_CHANNEL = TypeVariable("IMAGE_OR_CHANNEL", frozenset({PortType.IMAGE, PortType.CHANNEL}))
 
 
 class ResizeRuntime(StatelessImageRuntime):
@@ -53,8 +64,9 @@ class ResizeRuntime(StatelessImageRuntime):
     ) -> Mapping[str, RuntimeValue]:
         del context
         try:
+            source = _image_or_channel(inputs["image"])
             result = resize_image(
-                image_value(inputs["image"]),
+                _as_image(source, self.node_id),
                 integer_value(inputs.get("width", parameters["width"])),
                 integer_value(inputs.get("height", parameters["height"])),
                 preserve_aspect=boolean_value(parameters["preserve_aspect"]),
@@ -63,7 +75,7 @@ class ResizeRuntime(StatelessImageRuntime):
             )
         except ValueError as error:
             raise ExpectedNodeError("invalid_resize", str(error)) from error
-        return {"image": result}
+        return {"image": _restore_type(source, result)}
 
 
 class CropRuntime(StatelessImageRuntime):
@@ -75,16 +87,20 @@ class CropRuntime(StatelessImageRuntime):
     ) -> Mapping[str, RuntimeValue]:
         del context
         try:
-            result = crop_image(
-                image_value(inputs["image"]),
-                coordinate_mode=CoordinateMode(text_value(parameters["coordinate_mode"])),
-                left=number_value(parameters["left"]),
-                top=number_value(parameters["top"]),
-                right=number_value(parameters["right"]),
-                bottom=number_value(parameters["bottom"]),
-                out_of_bounds=CropOutOfBounds(text_value(parameters["out_of_bounds"])),
-                pad_colour=color_value(parameters["pad_colour"]),
-            )
+            source = _image_or_channel(inputs["image"])
+            if isinstance(source, ChannelFrame):
+                result: ImageFrame | ChannelFrame = _crop_channel(source, parameters)
+            else:
+                result = crop_image(
+                    source,
+                    coordinate_mode=CoordinateMode(text_value(parameters["coordinate_mode"])),
+                    left=number_value(parameters["left"]),
+                    top=number_value(parameters["top"]),
+                    right=number_value(parameters["right"]),
+                    bottom=number_value(parameters["bottom"]),
+                    out_of_bounds=CropOutOfBounds(text_value(parameters["out_of_bounds"])),
+                    pad_colour=color_value(parameters["pad_colour"]),
+                )
         except ValueError as error:
             raise ExpectedNodeError("invalid_crop", str(error)) from error
         return {"image": result}
@@ -99,12 +115,13 @@ class FlipRuntime(StatelessImageRuntime):
     ) -> Mapping[str, RuntimeValue]:
         del context
         try:
+            source = _image_or_channel(inputs["image"])
             result = flip_image(
-                image_value(inputs["image"]), FlipMode(text_value(parameters["mode"]))
+                _as_image(source, self.node_id), FlipMode(text_value(parameters["mode"]))
             )
         except ValueError as error:
             raise ExpectedNodeError("invalid_flip", str(error)) from error
-        return {"image": result}
+        return {"image": _restore_type(source, result)}
 
 
 class RotateRuntime(StatelessImageRuntime):
@@ -116,8 +133,9 @@ class RotateRuntime(StatelessImageRuntime):
     ) -> Mapping[str, RuntimeValue]:
         del context
         try:
+            source = _image_or_channel(inputs["image"])
             result = rotate_image(
-                image_value(inputs["image"]),
+                _as_image(source, self.node_id),
                 angle_degrees=number_value(
                     inputs.get("angle_degrees", parameters["angle_degrees"])
                 ),
@@ -130,7 +148,7 @@ class RotateRuntime(StatelessImageRuntime):
             )
         except ValueError as error:
             raise ExpectedNodeError("invalid_rotation", str(error)) from error
-        return {"image": result}
+        return {"image": _restore_type(source, result)}
 
 
 def _validate_crop(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
@@ -151,8 +169,8 @@ def _validate_crop(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
 
 
 def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
-    image_input = (InputPortSpec("image", "Image", PortType.IMAGE),)
-    image_output = (OutputPortSpec("image", "Image", PortType.IMAGE),)
+    image_input = (InputPortSpec("image", "Image / Channel", PortType.IMAGE),)
+    image_output = (OutputPortSpec("image", "Image / Channel", PortType.IMAGE),)
     return (
         NodeDefinition(
             "synmachine.image.resize",
@@ -201,6 +219,7 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
             ),
             ExecutionKind.STATELESS,
             ResizeRuntime,
+            port_type_resolver=_dynamic_image_channel_type,
             aliases=("scale", "image size", "resample"),
         ),
         NodeDefinition(
@@ -231,13 +250,18 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
                     choices=tuple(policy.value for policy in CropOutOfBounds),
                 ),
                 ParameterSpec(
-                    "pad_colour", "Pad colour", PortType.COLOR, ColorValue(0.0, 0.0, 0.0, 0.0)
+                    "pad_colour",
+                    "Pad colour",
+                    PortType.COLOR,
+                    ColorValue(0.0, 0.0, 0.0, 0.0),
+                    applicable_input_types=(PortType.IMAGE,),
                 ),
             ),
             ExecutionKind.STATELESS,
             CropRuntime,
             aliases=("trim", "bounds", "roi"),
             parameter_validator=_validate_crop,
+            port_type_resolver=_dynamic_image_channel_type,
         ),
         NodeDefinition(
             "synmachine.image.flip",
@@ -259,6 +283,7 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
             ExecutionKind.STATELESS,
             FlipRuntime,
             aliases=("mirror", "reverse"),
+            port_type_resolver=_dynamic_image_channel_type,
         ),
         NodeDefinition(
             "synmachine.image.rotate",
@@ -319,12 +344,99 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
                     "Border colour",
                     PortType.COLOR,
                     ColorValue(0.0, 0.0, 0.0, 0.0),
+                    applicable_input_types=(PortType.IMAGE,),
                 ),
             ),
             ExecutionKind.STATELESS,
             RotateRuntime,
             aliases=("turn", "angle", "transform"),
+            port_type_resolver=_dynamic_image_channel_type,
         ),
+    )
+
+
+def _dynamic_image_channel_type(
+    port_id: str, is_output: bool, parameters: Mapping[str, ParameterValue]
+) -> TypeVariable:
+    del port_id, is_output, parameters
+    return IMAGE_OR_CHANNEL
+
+
+def _image_or_channel(value: object) -> ImageFrame | ChannelFrame:
+    if isinstance(value, (ImageFrame, ChannelFrame)):
+        return value
+    raise TypeError(f"Expected image or channel, got {type(value).__name__}")
+
+
+def _as_image(value: ImageFrame | ChannelFrame, node_id: UUID) -> ImageFrame:
+    if isinstance(value, ImageFrame):
+        return value
+    return ImageFrame(
+        read_only_float32(value.data[..., None]),
+        ColorSpace.LINEAR_RGB,
+        ("value",),
+        AlphaMode.NONE,
+        value.context,
+        FrameProvenance(node_id, "channel_adapter"),
+    )
+
+
+def _restore_type(
+    source: ImageFrame | ChannelFrame, result: ImageFrame
+) -> ImageFrame | ChannelFrame:
+    if isinstance(source, ImageFrame):
+        return result
+    data = result.data[..., 0]
+    return ChannelFrame(
+        read_only_float32(data),
+        source.semantic,
+        source.nominal_min,
+        source.nominal_max,
+        source.cyclic,
+        source.context,
+    )
+
+
+def _crop_channel(channel: ChannelFrame, parameters: Mapping[str, ParameterValue]) -> ChannelFrame:
+    height, width = channel.data.shape
+    bounds = [number_value(parameters[key]) for key in ("left", "top", "right", "bottom")]
+    if CoordinateMode(text_value(parameters["coordinate_mode"])) is CoordinateMode.NORMALIZED:
+        left, top, right, bottom = (
+            round(bounds[0] * width),
+            round(bounds[1] * height),
+            round(bounds[2] * width),
+            round(bounds[3] * height),
+        )
+    else:
+        left, top, right, bottom = (round(value) for value in bounds)
+    target_width, target_height = right - left, bottom - top
+    if target_width <= 0 or target_height <= 0:
+        raise ValueError("crop bounds must produce a non-empty channel")
+    outside = left < 0 or top < 0 or right > width or bottom > height
+    policy = CropOutOfBounds(text_value(parameters["out_of_bounds"]))
+    if policy is CropOutOfBounds.ERROR and outside:
+        raise ValueError("crop bounds extend outside the source channel")
+    source_left, source_top = max(0, left), max(0, top)
+    source_right, source_bottom = min(width, right), min(height, bottom)
+    if policy is CropOutOfBounds.CLAMP:
+        if source_right <= source_left or source_bottom <= source_top:
+            raise ValueError("clamped crop is empty")
+        data = channel.data[source_top:source_bottom, source_left:source_right]
+    else:
+        data = np.zeros((target_height, target_width), dtype=np.float32)
+        if source_right > source_left and source_bottom > source_top:
+            destination_left, destination_top = source_left - left, source_top - top
+            data[
+                destination_top : destination_top + source_bottom - source_top,
+                destination_left : destination_left + source_right - source_left,
+            ] = channel.data[source_top:source_bottom, source_left:source_right]
+    return ChannelFrame(
+        read_only_float32(np.asarray(data, dtype=np.float32)),
+        channel.semantic,
+        channel.nominal_min,
+        channel.nominal_max,
+        channel.cyclic,
+        channel.context,
     )
 
 

@@ -14,6 +14,7 @@ from synesthesia_machine.persistence import (
     GraphPersistenceError,
     NodeMigrationRegistry,
     graph_from_json,
+    migrate_hue_v1_to_v2,
 )
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "phase7"
@@ -37,6 +38,22 @@ def test_legacy_load_video_parameter_is_migrated() -> None:
     assert snapshot.nodes[0].implementation_version == 1
     assert snapshot.nodes[0].parameters["file_path"] == "media/legacy.mp4"
     assert "path" not in snapshot.nodes[0].parameters
+
+
+def test_legacy_hue_turns_are_normalized_purely_into_one_turn() -> None:
+    source = {
+        "id": "70000000-0000-0000-0000-000000000018",
+        "type_id": "synmachine.image.hue",
+        "implementation_version": 1,
+        "parameters": {"turns": -1.25},
+    }
+    original = deepcopy(source)
+
+    migrated = migrate_hue_v1_to_v2(source)  # type: ignore[arg-type]
+
+    assert source == original
+    assert migrated["implementation_version"] == 2
+    assert migrated["parameters"] == {"turns": 0.75}
 
 
 def test_registry_applies_multiple_steps_sequentially_and_purely() -> None:

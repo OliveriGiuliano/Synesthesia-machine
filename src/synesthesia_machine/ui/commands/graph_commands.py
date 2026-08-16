@@ -18,6 +18,7 @@ from synesthesia_machine.graph import (
 )
 from synesthesia_machine.persistence.clipboard import ClipboardFragment
 from synesthesia_machine.persistence.media_relink import relinked_media_node
+from synesthesia_machine.ui.translations import tr
 
 type ChangeCallback = Callable[[], None]
 
@@ -33,7 +34,7 @@ class _DocumentCommand(QUndoCommand):
         document: GraphDocument,
         on_changed: ChangeCallback | None = None,
     ) -> None:
-        super().__init__(text)
+        super().__init__(tr(text))
         self.document = document
         self._on_changed = on_changed
 
@@ -48,16 +49,30 @@ class AddNodeCommand(_DocumentCommand):
         document: GraphDocument,
         node: NodeModel,
         on_changed: ChangeCallback | None = None,
+        *,
+        replaced_node_ids: set[UUID] | None = None,
     ) -> None:
         super().__init__("Add node", document, on_changed)
         self.node = node
+        selected = frozenset(replaced_node_ids or ())
+        self.replaced_nodes = tuple(item for item in document.nodes if item.id in selected)
+        if len(self.replaced_nodes) != len(selected):
+            raise KeyError("Visualizer replacement contains an unknown node")
+        self.replaced_connections = document.incident_connections(selected)
 
     def redo(self) -> None:
+        for replaced in self.replaced_nodes:
+            if self.document.node(replaced.id) is not None:
+                self.document.remove_node(replaced.id)
         self.document.restore_node(self.node)
         self._changed()
 
     def undo(self) -> None:
         self.document.remove_node(self.node.id)
+        for replaced in self.replaced_nodes:
+            self.document.restore_node(replaced)
+        for connection in self.replaced_connections:
+            self.document.restore_connection(connection)
         self._changed()
 
 
@@ -284,6 +299,81 @@ class SetParameterCommand(_DocumentCommand):
 
     def undo(self) -> None:
         self.document.restore_node(self.old_node, replace_existing=True)
+        self._changed()
+
+
+class RandomizeParametersCommand(_DocumentCommand):
+    """Replace parameter mappings for several nodes as one undoable document edit."""
+
+    def __init__(
+        self,
+        document: GraphDocument,
+        nodes: Mapping[UUID, NodeModel],
+        on_changed: ChangeCallback | None = None,
+    ) -> None:
+        super().__init__("Randomize parameters", document, on_changed)
+        self.new_nodes = tuple(nodes[node_id] for node_id in sorted(nodes, key=str))
+        old_nodes: list[NodeModel] = []
+        for node in self.new_nodes:
+            old = document.node(node.id)
+            if old is None:
+                raise KeyError(f"Unknown node: {node.id}")
+            old_nodes.append(old)
+        self.old_nodes = tuple(old_nodes)
+
+    def redo(self) -> None:
+        self._apply(self.new_nodes)
+
+    def undo(self) -> None:
+        self._apply(self.old_nodes)
+
+    def _apply(self, nodes: tuple[NodeModel, ...]) -> None:
+        for node in nodes:
+            self.document.restore_node(node, replace_existing=True)
+        self._changed()
+
+
+class RandomizeNodesCommand(_DocumentCommand):
+    """Swap a selected subgraph for a compiler-valid randomized replacement."""
+
+    def __init__(
+        self,
+        document: GraphDocument,
+        old_node_ids: set[UUID],
+        replacement_nodes: Mapping[UUID, NodeModel],
+        replacement_connections: tuple[ConnectionModel, ...],
+        on_changed: ChangeCallback | None = None,
+    ) -> None:
+        super().__init__("Randomize nodes", document, on_changed)
+        selected = frozenset(old_node_ids)
+        self.old_nodes = tuple(node for node in document.nodes if node.id in selected)
+        if len(self.old_nodes) != len(selected):
+            raise KeyError("Randomize Nodes selection contains an unknown node")
+        self.old_connections = document.incident_connections(selected)
+        self.new_nodes = tuple(
+            replacement_nodes[node_id] for node_id in sorted(replacement_nodes, key=str)
+        )
+        self.new_connections = replacement_connections
+
+    def redo(self) -> None:
+        self._swap(self.old_nodes, self.new_nodes, self.new_connections)
+
+    def undo(self) -> None:
+        self._swap(self.new_nodes, self.old_nodes, self.old_connections)
+
+    def _swap(
+        self,
+        removed_nodes: tuple[NodeModel, ...],
+        added_nodes: tuple[NodeModel, ...],
+        added_connections: tuple[ConnectionModel, ...],
+    ) -> None:
+        for node in removed_nodes:
+            if self.document.node(node.id) is not None:
+                self.document.remove_node(node.id)
+        for node in added_nodes:
+            self.document.restore_node(node)
+        for connection in added_connections:
+            self.document.restore_connection(connection)
         self._changed()
 
 

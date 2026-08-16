@@ -11,16 +11,25 @@ from PySide6.QtCore import QObject, Signal, Slot
 from PySide6.QtGui import QUndoCommand, QUndoStack
 
 from synesthesia_machine.graph import (
+    CompilationResult,
     ConnectionModel,
     GraphCompiler,
     GraphDocument,
+    GraphSnapshot,
     GroupKind,
     GroupModel,
     LiteralValue,
     NodeModel,
     ValidationReport,
+    randomize_graph_nodes,
+    randomize_graph_parameters,
 )
 from synesthesia_machine.nodes import NodeDefinition, NodeRegistry
+from synesthesia_machine.nodes.visualization import (
+    CHANNEL_DISPLAY_TYPE_ID,
+    DISPLAY_IMAGE_DATA_TYPE_ID,
+    NOTE_VISUALIZER_TYPE_ID,
+)
 from synesthesia_machine.persistence import (
     ClipboardFragment,
     copy_fragment,
@@ -39,12 +48,18 @@ from synesthesia_machine.ui.commands import (
     MoveGroupsCommand,
     MoveNodesCommand,
     PasteCommand,
+    RandomizeNodesCommand,
+    RandomizeParametersCommand,
     RelinkMediaCommand,
     RemoveConnectionCommand,
     ReplaceConnectionCommand,
     SetParameterCommand,
 )
+from synesthesia_machine.ui.translations import tr
 from synesthesia_machine.ui.view_models import GraphViewModel, project_graph
+
+_IMAGE_VISUALIZER_TYPE_IDS = frozenset({DISPLAY_IMAGE_DATA_TYPE_ID, CHANNEL_DISPLAY_TYPE_ID})
+_NOTE_VISUALIZER_TYPE_IDS = frozenset({NOTE_VISUALIZER_TYPE_ID})
 
 
 class DocumentSession(QObject):
@@ -70,6 +85,7 @@ class DocumentSession(QObject):
         self._command_change_callback = refresh_session
         self.current_path: Path | None = None
         self.report = ValidationReport()
+        self._compilation: CompilationResult
         self.undo_stack.cleanChanged.connect(self._on_clean_changed)
         self.undo_stack.setClean()
         self._refresh()
@@ -80,7 +96,12 @@ class DocumentSession(QObject):
 
     @property
     def view_model(self) -> GraphViewModel:
-        return project_graph(self.document.snapshot(), self.registry, self.report)
+        return project_graph(
+            self.document.snapshot(),
+            self.registry,
+            self.report,
+            compilation=self._compilation,
+        )
 
     def push(self, command: QUndoCommand) -> None:
         self.undo_stack.push(command)
@@ -117,6 +138,16 @@ class DocumentSession(QObject):
         self.pathChanged.emit(self.current_path)
         self._refresh()
 
+    def replace_with_snapshot(self, snapshot: GraphSnapshot) -> None:
+        """Install a generated graph as a new unsaved, dirty document."""
+
+        self.document = GraphDocument.from_snapshot(snapshot)
+        self.current_path = None
+        self.undo_stack.clear()
+        self.undo_stack.resetClean()
+        self.pathChanged.emit(None)
+        self._refresh()
+
     def save(self, path: str | Path | None = None) -> Path:
         destination = Path(path).resolve() if path is not None else self.current_path
         if destination is None:
@@ -130,7 +161,19 @@ class DocumentSession(QObject):
     def add_node(self, type_id: str, position: tuple[float, float]) -> UUID:
         definition = self.registry.require(type_id)
         node = NodeModel(uuid4(), type_id, definition.implementation_version, position=position)
-        self.push(AddNodeCommand(self.document, node, self._command_change_callback))
+        replaced_node_ids = {
+            existing.id
+            for existing in self.document.nodes
+            if existing.type_id in _visualizer_type_ids_for(type_id)
+        }
+        self.push(
+            AddNodeCommand(
+                self.document,
+                node,
+                self._command_change_callback,
+                replaced_node_ids=replaced_node_ids,
+            )
+        )
         return node.id
 
     def add_group(
@@ -207,7 +250,7 @@ class DocumentSession(QObject):
             connection.id for connection in self.document.incident_connections(node_ids)
         }
         independent_connections = connection_ids - incident_ids
-        self.undo_stack.beginMacro("Delete selection")
+        self.undo_stack.beginMacro(tr("Delete selection"))
         try:
             for connection_id in sorted(independent_connections, key=str):
                 self.remove_connection(connection_id)
@@ -244,6 +287,80 @@ class DocumentSession(QObject):
                 self._command_change_callback,
             )
         )
+
+    def randomize_parameters(
+        self,
+        node_ids: set[UUID],
+        *,
+        seed: int | None = None,
+    ) -> tuple[int, int]:
+        """Randomize selected node literals as one undoable, compiler-safe operation."""
+
+        original = self.document.snapshot()
+        randomized = randomize_graph_parameters(original, self.registry, node_ids, seed=seed)
+        original_nodes = {node.id: node for node in original.nodes}
+        changed_nodes = {
+            node.id: node
+            for node in randomized.nodes
+            if node.id in node_ids and node.parameters != original_nodes[node.id].parameters
+        }
+        if not changed_nodes:
+            return 0, 0
+        parameter_count = 0
+        for node_id, node in changed_nodes.items():
+            definition = self.registry.require(node.type_id)
+            original_values, _errors = definition.parameter_values(
+                original_nodes[node_id].parameters
+            )
+            parameter_count += sum(
+                value != original_values[parameter_id]
+                for parameter_id, value in node.parameters.items()
+            )
+        self.push(
+            RandomizeParametersCommand(
+                self.document,
+                changed_nodes,
+                self._command_change_callback,
+            )
+        )
+        return len(changed_nodes), parameter_count
+
+    def randomize_nodes(
+        self,
+        node_ids: set[UUID],
+        *,
+        seed: int | None = None,
+    ) -> frozenset[UUID]:
+        """Replace selected nodes and their incident edges as one undoable edit."""
+
+        original = self.document.snapshot()
+        randomized, replacement_ids = randomize_graph_nodes(
+            original,
+            self.registry,
+            node_ids,
+            seed=seed,
+        )
+        if not replacement_ids:
+            return frozenset()
+        replacement_nodes = {
+            node.id: node for node in randomized.nodes if node.id in replacement_ids
+        }
+        replacement_connections = tuple(
+            connection
+            for connection in randomized.connections
+            if connection.source_node_id in replacement_ids
+            or connection.destination_node_id in replacement_ids
+        )
+        self.push(
+            RandomizeNodesCommand(
+                self.document,
+                node_ids,
+                replacement_nodes,
+                replacement_connections,
+                self._command_change_callback,
+            )
+        )
+        return replacement_ids
 
     def relink_media(self, node_id: UUID, candidate: str | Path) -> None:
         self.push(
@@ -308,6 +425,13 @@ class DocumentSession(QObject):
             destination_port_id,
         ).accepted
 
+    def compatibilities(
+        self,
+        candidates: tuple[tuple[UUID, str, UUID, str], ...],
+    ) -> dict[tuple[UUID, str, UUID, str], bool]:
+        results = self.compiler.connection_compatibilities(self.document.snapshot(), candidates)
+        return {endpoint: result.accepted for endpoint, result in results.items()}
+
     def copy(self, node_ids: set[UUID]) -> ClipboardFragment:
         return copy_fragment(self.document.snapshot(), node_ids)
 
@@ -343,15 +467,13 @@ class DocumentSession(QObject):
                 pairs = (
                     (candidate_id, output.id, node_id, port_id) for output in definition.outputs
                 )
-            for source_node, source_port, destination_node, destination_port in pairs:
-                if self.compiler.connection_compatibility(
-                    temporary.snapshot(),
-                    source_node,
-                    source_port,
-                    destination_node,
-                    destination_port,
-                ).accepted:
-                    results.append((definition, destination_port if is_output else source_port))
+            endpoints = tuple(pairs)
+            compatibilities = self.compiler.connection_compatibilities(
+                temporary.snapshot(), endpoints
+            )
+            for endpoint in endpoints:
+                if compatibilities[endpoint].accepted:
+                    results.append((definition, endpoint[3] if is_output else endpoint[1]))
                     break
         return tuple(results)
 
@@ -364,7 +486,7 @@ class DocumentSession(QObject):
         existing_is_output: bool,
         position: tuple[float, float],
     ) -> UUID:
-        self.undo_stack.beginMacro("Insert and connect node")
+        self.undo_stack.beginMacro(tr("Insert and connect node"))
         try:
             node_id = self.add_node(definition.type_id, position)
             if existing_is_output:
@@ -376,10 +498,19 @@ class DocumentSession(QObject):
         return node_id
 
     def _refresh(self) -> None:
-        self.report = self.compiler.compile(self.document.snapshot()).report
+        self._compilation = self.compiler.compile(self.document.snapshot())
+        self.report = self._compilation.report
         self.validationChanged.emit(self.report)
         self.changed.emit()
 
     @Slot(bool)
     def _on_clean_changed(self, clean: bool) -> None:
         self.dirtyChanged.emit(not clean)
+
+
+def _visualizer_type_ids_for(type_id: str) -> frozenset[str]:
+    if type_id in _IMAGE_VISUALIZER_TYPE_IDS:
+        return _IMAGE_VISUALIZER_TYPE_IDS
+    if type_id in _NOTE_VISUALIZER_TYPE_IDS:
+        return _NOTE_VISUALIZER_TYPE_IDS
+    return frozenset()

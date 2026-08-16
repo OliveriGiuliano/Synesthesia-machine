@@ -55,6 +55,7 @@ def common_musical_parameter_specs() -> tuple[ParameterSpec, ...]:
             PortType.STRING,
             "C",
             choices=PITCH_CLASS_NAMES,
+            connectable=False,
         ),
         ParameterSpec(
             "scale",
@@ -62,6 +63,7 @@ def common_musical_parameter_specs() -> tuple[ParameterSpec, ...]:
             PortType.STRING,
             "chromatic",
             choices=BUILTIN_SCALE_REGISTRY.ids,
+            connectable=False,
         ),
         ParameterSpec(
             "custom_scale_mask",
@@ -69,26 +71,33 @@ def common_musical_parameter_specs() -> tuple[ParameterSpec, ...]:
             PortType.STRING,
             "111111111111",
             help_text="Twelve 0/1 values from the selected root pitch class.",
+            connectable=False,
         ),
-        ParameterSpec("midi_minimum", "Minimum MIDI note", PortType.INT, 0, minimum=0, maximum=127),
-        ParameterSpec(
-            "midi_maximum", "Maximum MIDI note", PortType.INT, 127, minimum=0, maximum=127
-        ),
-        ParameterSpec("midi_channel", "MIDI channel", PortType.INT, 1, minimum=1, maximum=16),
-        ParameterSpec(
-            "maximum_polyphony",
-            "Maximum polyphony",
-            PortType.INT,
-            16,
-            minimum=1,
-            maximum=128,
-        ),
-        ParameterSpec(
-            "minimum_velocity", "Minimum velocity", PortType.INT, 1, minimum=1, maximum=127
-        ),
-        ParameterSpec(
-            "maximum_velocity", "Maximum velocity", PortType.INT, 127, minimum=1, maximum=127
-        ),
+        _live_integer_parameter("midi_minimum", "Minimum MIDI note", 0, 0, 127),
+        _live_integer_parameter("midi_maximum", "Maximum MIDI note", 127, 0, 127),
+        _live_integer_parameter("midi_channel", "MIDI channel", 1, 1, 16),
+        _live_integer_parameter("maximum_polyphony", "Maximum polyphony", 16, 1, 128),
+        _live_integer_parameter("minimum_velocity", "Minimum velocity", 1, 1, 127),
+        _live_integer_parameter("maximum_velocity", "Maximum velocity", 127, 1, 127),
+    )
+
+
+def _live_integer_parameter(
+    parameter_id: str,
+    label: str,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> ParameterSpec:
+    return ParameterSpec(
+        parameter_id,
+        label,
+        PortType.INT,
+        default,
+        minimum=minimum,
+        maximum=maximum,
+        connectable=True,
+        connected_port_type=PortType.FLOAT,
     )
 
 

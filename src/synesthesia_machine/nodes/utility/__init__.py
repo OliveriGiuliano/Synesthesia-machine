@@ -1,6 +1,10 @@
 """Built-in scalar, MIDI-state, and channel bridge utility nodes."""
 
 from synesthesia_machine.nodes.utility.core import create_utility_registry
+from synesthesia_machine.nodes.utility.dynamic import (
+    create_difference_definitions,
+    create_dynamic_definitions,
+)
 from synesthesia_machine.nodes.utility.midi import (
     MIDI_MERGE_TYPE_ID,
     MULTIPLY_VELOCITY_TYPE_ID,
@@ -22,6 +26,8 @@ __all__ = [
     "MidiMergeRuntime",
     "MultiplyVelocityRuntime",
     "TransposeRuntime",
+    "create_difference_definitions",
+    "create_dynamic_definitions",
     "create_midi_utility_definitions",
     "create_scalar_bridge_definitions",
     "create_utility_registry",

@@ -6,12 +6,16 @@ import math
 from collections.abc import Callable, Mapping, Sequence
 from uuid import UUID
 
+import numpy as np
+
 from synesthesia_machine.contracts import (
+    ChannelFrame,
     FrameContext,
     ImageFrame,
     ParameterValue,
     PortType,
     RuntimeValue,
+    read_only_float32,
 )
 from synesthesia_machine.media import (
     ChannelSelection,
@@ -39,19 +43,20 @@ from synesthesia_machine.nodes import (
     NodeDefinition,
     NodeRuntime,
     OutputPortSpec,
+    ParameterEditorHint,
     ParameterSpec,
+    TypeVariable,
 )
 from synesthesia_machine.nodes.image.runtime_support import (
     StatelessImageRuntime,
     boolean_value,
-    image_value,
     number_value,
     text_value,
 )
 
-type AdjustmentProcessor = Callable[
-    [ImageFrame, Mapping[str, RuntimeValue], Mapping[str, ParameterValue]], ImageFrame
-]
+IMAGE_OR_CHANNEL = TypeVariable("IMAGE_OR_CHANNEL", frozenset({PortType.IMAGE, PortType.CHANNEL}))
+
+type AdjustmentProcessor = Callable[..., ImageFrame | ChannelFrame]
 
 
 class AdjustmentRuntime(StatelessImageRuntime):
@@ -73,7 +78,10 @@ class AdjustmentRuntime(StatelessImageRuntime):
     ) -> Mapping[str, RuntimeValue]:
         del context
         try:
-            result = self._processor(image_value(inputs["image"]), inputs, parameters)
+            source = inputs["image"]
+            if not isinstance(source, (ImageFrame, ChannelFrame)):
+                raise TypeError(f"Expected image or channel, got {type(source).__name__}")
+            result = self._processor(source, inputs, parameters)
         except ValueError as error:
             raise ExpectedNodeError(self._error_code, str(error)) from error
         return {"image": result}
@@ -120,10 +128,16 @@ def _contrast(
 
 
 def _clamp(
-    image: ImageFrame,
+    image: ImageFrame | ChannelFrame,
     inputs: Mapping[str, RuntimeValue],
     parameters: Mapping[str, ParameterValue],
-) -> ImageFrame:
+) -> ImageFrame | ChannelFrame:
+    if isinstance(image, ChannelFrame):
+        minimum = _number(inputs, parameters, "minimum")
+        maximum = _number(inputs, parameters, "maximum")
+        if maximum < minimum:
+            raise ValueError("clamp maximum must be greater than or equal to minimum")
+        return _channel_like(image, np.clip(image.data, minimum, maximum))
     return clamp_image(
         image,
         _number(inputs, parameters, "minimum"),
@@ -208,28 +222,43 @@ def _gamma(
 
 
 def _add_scalar(
-    image: ImageFrame,
+    image: ImageFrame | ChannelFrame,
     inputs: Mapping[str, RuntimeValue],
     parameters: Mapping[str, ParameterValue],
-) -> ImageFrame:
+) -> ImageFrame | ChannelFrame:
+    if isinstance(image, ChannelFrame):
+        return _channel_like(image, image.data + np.float32(_number(inputs, parameters, "value")))
     return add_scalar_image(image, _number(inputs, parameters, "value"), _selection(parameters))
 
 
 def _multiply_scalar(
-    image: ImageFrame,
+    image: ImageFrame | ChannelFrame,
     inputs: Mapping[str, RuntimeValue],
     parameters: Mapping[str, ParameterValue],
-) -> ImageFrame:
+) -> ImageFrame | ChannelFrame:
+    if isinstance(image, ChannelFrame):
+        return _channel_like(image, image.data * np.float32(_number(inputs, parameters, "value")))
     return multiply_scalar_image(
         image, _number(inputs, parameters, "value"), _selection(parameters)
     )
 
 
 def _divide_scalar(
-    image: ImageFrame,
+    image: ImageFrame | ChannelFrame,
     inputs: Mapping[str, RuntimeValue],
     parameters: Mapping[str, ParameterValue],
-) -> ImageFrame:
+) -> ImageFrame | ChannelFrame:
+    if isinstance(image, ChannelFrame):
+        denominator = _number(inputs, parameters, "value")
+        epsilon = number_value(parameters["epsilon"])
+        policy = NearZeroPolicy(text_value(parameters["near_zero_policy"]))
+        if abs(denominator) < epsilon:
+            if policy is NearZeroPolicy.ERROR:
+                raise ValueError("division scalar is near zero")
+            if policy is NearZeroPolicy.REPLACE_WITH_ZERO:
+                return _channel_like(image, np.zeros_like(image.data))
+            denominator = math.copysign(epsilon, denominator if denominator else 1.0)
+        return _channel_like(image, image.data / np.float32(denominator))
     return divide_scalar_image(
         image,
         _number(inputs, parameters, "value"),
@@ -246,6 +275,7 @@ def _channel_parameter() -> ParameterSpec:
         PortType.STRING,
         ChannelSelection.COLOUR.value,
         choices=tuple(selection.value for selection in ChannelSelection),
+        applicable_input_types=(PortType.IMAGE,),
     )
 
 
@@ -351,21 +381,31 @@ def _definition(
     *,
     aliases: tuple[str, ...] = (),
     validator: Callable[[Mapping[str, ParameterValue]], Sequence[str]] | None = None,
+    dynamic: bool = False,
+    implementation_version: int = 1,
 ) -> NodeDefinition:
     return NodeDefinition(
         type_id,
-        1,
+        implementation_version,
         display_name,
         "Image / Adjustment",
         description,
-        (InputPortSpec("image", "Image", PortType.IMAGE),),
-        (OutputPortSpec("image", "Image", PortType.IMAGE),),
+        (InputPortSpec("image", "Image / Channel" if dynamic else "Image", PortType.IMAGE),),
+        (OutputPortSpec("image", "Image / Channel" if dynamic else "Image", PortType.IMAGE),),
         parameters,
         ExecutionKind.STATELESS,
         _factory(processor, f"invalid_{type_id.rsplit('.', 1)[1]}"),
         aliases=aliases,
         parameter_validator=_combined_validator(parameters, validator),
+        port_type_resolver=_dynamic_image_channel_type if dynamic else None,
     )
+
+
+def _dynamic_image_channel_type(
+    port_id: str, is_output: bool, parameters: Mapping[str, ParameterValue]
+) -> TypeVariable:
+    del port_id, is_output, parameters
+    return IMAGE_OR_CHANNEL
 
 
 def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
@@ -397,10 +437,17 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
                 _float_parameter("minimum", "Minimum", 0.0),
                 _float_parameter("maximum", "Maximum", 1.0),
                 _channel_parameter(),
-                ParameterSpec("include_alpha", "Include alpha", PortType.BOOL, False),
+                ParameterSpec(
+                    "include_alpha",
+                    "Include alpha",
+                    PortType.BOOL,
+                    False,
+                    applicable_input_types=(PortType.IMAGE,),
+                ),
             ),
             _clamp,
             validator=_validate_clamp,
+            dynamic=True,
         ),
         _definition(
             "synmachine.image.colour_levels",
@@ -422,9 +469,22 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             "synmachine.image.hue",
             "Hue",
             "Rotate hue by normalized turns while preserving the original descriptor and alpha.",
-            (_float_parameter("turns", "Turns", 0.0),),
+            (
+                ParameterSpec(
+                    "turns",
+                    "Turns",
+                    PortType.FLOAT,
+                    0.0,
+                    minimum=0.0,
+                    maximum=1.0,
+                    connectable=True,
+                    connected_port_type=PortType.FLOAT,
+                    editor_hint=ParameterEditorHint.SLIDER,
+                ),
+            ),
             _hue,
             aliases=("hue shift", "colour rotate"),
+            implementation_version=2,
         ),
         _definition(
             "synmachine.image.saturation",
@@ -461,8 +521,8 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
                     StretchMode.PER_CHANNEL.value,
                     choices=tuple(mode.value for mode in StretchMode),
                 ),
-                _float_parameter("lower_percentile", "Lower percentile", 0.0, connectable=False),
-                _float_parameter("upper_percentile", "Upper percentile", 100.0, connectable=False),
+                _float_parameter("lower_percentile", "Lower percentile", 0.0),
+                _float_parameter("upper_percentile", "Upper percentile", 100.0),
                 ParameterSpec("ignore_non_finite", "Ignore non-finite", PortType.BOOL, True),
                 ParameterSpec(
                     "constant_policy",
@@ -492,6 +552,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             (_float_parameter("value", "Value", 0.0), _channel_parameter()),
             _add_scalar,
             aliases=("image offset",),
+            dynamic=True,
         ),
         _definition(
             "synmachine.image.multiply_scalar",
@@ -500,6 +561,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             (_float_parameter("value", "Value", 1.0), _channel_parameter()),
             _multiply_scalar,
             aliases=("image scale",),
+            dynamic=True,
         ),
         _definition(
             "synmachine.image.divide_scalar",
@@ -514,13 +576,25 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
                     NearZeroPolicy.REPLACE_WITH_ZERO.value,
                     choices=tuple(policy.value for policy in NearZeroPolicy),
                 ),
-                _float_parameter("epsilon", "Epsilon", 1e-6, connectable=False),
+                _float_parameter("epsilon", "Epsilon", 1e-6),
                 _channel_parameter(),
             ),
             _divide_scalar,
             aliases=("image ratio",),
             validator=_validate_positive("epsilon"),
+            dynamic=True,
         ),
+    )
+
+
+def _channel_like(channel: ChannelFrame, data: np.ndarray) -> ChannelFrame:
+    return ChannelFrame(
+        read_only_float32(np.asarray(data, dtype=np.float32)),
+        channel.semantic,
+        channel.nominal_min,
+        channel.nominal_max,
+        channel.cyclic,
+        channel.context,
     )
 
 

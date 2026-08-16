@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -64,11 +66,19 @@ class _RecordingEngineClient:
     memory_diagnostics: tuple[NodeMemoryDiagnostic, ...] = ()
     midi_statuses: tuple[MidiOutputStatus, ...] = ()
     closed: bool = False
+    activation_started: threading.Event | None = None
+    activation_release: threading.Event | None = None
+    metrics_started: threading.Event | None = None
+    metrics_release: threading.Event | None = None
 
     def activate(
         self, snapshot: GraphSnapshot, *, demand_roots: Iterable[UUID] | None = None
     ) -> EngineActivation:
         del demand_roots
+        if self.activation_started is not None:
+            self.activation_started.set()
+        if self.activation_release is not None:
+            assert self.activation_release.wait(2.0)
         self.activations.append(snapshot)
         return EngineActivation(snapshot.revision, ValidationReport(), True)
 
@@ -117,6 +127,10 @@ class _RecordingEngineClient:
         )
 
     def metrics(self) -> EngineMetrics:
+        if self.metrics_started is not None:
+            self.metrics_started.set()
+        if self.metrics_release is not None:
+            assert self.metrics_release.wait(2.0)
         return EngineMetrics(
             EngineState.RUNNING,
             graph_revision=4,
@@ -206,6 +220,35 @@ def test_session_changes_debounce_graph_activation_through_client(
 
     assert len(client.activations) == 1
     assert len(client.activations[0].nodes) == 1
+
+
+def test_activation_and_metrics_ipc_never_block_qt_event_thread(
+    runtime_window: tuple[MainWindow, _RecordingEngineClient],
+    qapp: QApplication,
+) -> None:
+    window, client = runtime_window
+    window.session.add_node("synmachine.utility.number", (0.0, 0.0))
+    client.activation_started = threading.Event()
+    client.activation_release = threading.Event()
+
+    started = time.perf_counter()
+    window._activate_graph()
+    assert time.perf_counter() - started < 0.1
+    assert client.activation_started.wait(1.0)
+    assert window.isVisible()
+    client.activation_release.set()
+    QTest.qWait(20)
+
+    client.metrics_started = threading.Event()
+    client.metrics_release = threading.Event()
+    started = time.perf_counter()
+    window._refresh_engine_status()
+    assert time.perf_counter() - started < 0.1
+    assert client.metrics_started.wait(1.0)
+    qapp.processEvents()
+    assert window.isVisible()
+    client.metrics_release.set()
+    QTest.qWait(20)
 
 
 def test_transport_auto_targets_sole_source_resumes_paused_and_never_fans_out(

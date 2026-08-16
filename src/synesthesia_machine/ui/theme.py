@@ -18,6 +18,7 @@ class ThemeColors:
     muted_text: str = "#9aa6b2"
     accent: str = "#61a8ff"
     selection: str = "#8cc2ff"
+    selection_outline: str = "#527a9e"
     warning: str = "#f0b44c"
     error: str = "#ef6b73"
     disabled: str = "#59616c"
@@ -41,6 +42,8 @@ class ThemeMetrics:
     port_radius: float = 6.0
     cable_width: float = 2.5
     cable_hit_width: float = 12.0
+    selection_outline_margin: float = 2.0
+    selection_outline_width: float = 1.75
     grid_size: float = 24.0
     canvas_margin: float = 80.0
     min_zoom: float = 0.2
@@ -90,6 +93,24 @@ class Theme:
             QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QListWidget, QTreeWidget,
             QPlainTextEdit {{ background: {colors.canvas}; border: 1px solid {colors.border};
                 border-radius: 3px; padding: 4px; selection-background-color: {colors.accent}; }}
+            QTableWidget, QTableView {{ background: {colors.canvas}; color: {colors.text};
+                alternate-background-color: {colors.panel}; gridline-color: {colors.border};
+                selection-background-color: {colors.accent}; selection-color: {colors.canvas};
+                border: 1px solid {colors.border}; }}
+            QTableWidget::item, QTableView::item {{ padding: 3px; }}
+            QTableWidget::item:selected, QTableView::item:selected {{ color: {colors.canvas};
+                background: {colors.accent}; }}
+            QHeaderView::section {{ background: {colors.node_header}; color: {colors.text};
+                border: 0; border-right: 1px solid {colors.border};
+                border-bottom: 1px solid {colors.border}; padding: 4px; }}
+            QFileDialog, QFileDialog QWidget {{ background: {colors.window};
+                color: {colors.text}; }}
+            QFileDialog QAbstractItemView {{ background: {colors.canvas}; color: {colors.text};
+                alternate-background-color: {colors.panel};
+                selection-background-color: {colors.accent};
+                selection-color: {colors.canvas}; border: 1px solid {colors.border}; }}
+            QFileDialog QHeaderView::section {{ background: {colors.node_header};
+                color: {colors.text}; border: 1px solid {colors.border}; padding: 4px; }}
             QSpinBox, QDoubleSpinBox {{ padding-right: 20px; }}
             QSpinBox::up-button, QDoubleSpinBox::up-button {{
                 subcontrol-origin: border; subcontrol-position: top right; width: 18px;

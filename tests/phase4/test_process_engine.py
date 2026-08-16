@@ -9,13 +9,15 @@ from pathlib import Path
 
 import psutil
 import pytest
+from tools.generate_test_video import generate_test_video
 
 from synesthesia_machine.contracts import EngineActivation, EngineConnectionState, EngineState
 from synesthesia_machine.contracts.engine_messages import (
     ENGINE_PROTOCOL_VERSION,
     ActivateGraph,
+    CommandFailed,
     GraphActivationAcknowledged,
-    GraphSnapshotPayload,
+    Panic,
 )
 from synesthesia_machine.graph import GraphDocument
 from synesthesia_machine.graph.validation import ValidationReport
@@ -24,6 +26,7 @@ from synesthesia_machine.runtime import EngineProtocolError, ProcessEngineClient
 from synesthesia_machine.runtime import engine_client as engine_client_module
 from synesthesia_machine.runtime import engine_server as engine_server_module
 from synesthesia_machine.runtime.engine_server import EngineServer
+from synesthesia_machine.runtime.graph_payload import snapshot_to_payload
 
 
 def _wait_until(predicate: Callable[[], bool], *, timeout_s: float = 3.0) -> bool:
@@ -111,6 +114,40 @@ def test_process_activation_metrics_and_concurrent_request_correlation(
     child_process_id = process_client.status().child_process_id
     assert all(item.child_process_id == child_process_id for item in metrics)
     assert process_client.source_status() == ()
+
+
+def test_process_metrics_transport_structured_runtime_errors(
+    process_client: ProcessEngineClient, tmp_path: Path
+) -> None:
+    video = generate_test_video(tmp_path / "runtime-error.mp4", frame_count=2)
+    document = GraphDocument()
+    source_id = document.add_node(
+        "synmachine.input.load_video", parameters={"file_path": str(video)}
+    )
+    resize_id = document.add_node(
+        "synmachine.image.resize",
+        parameters={"width": 8, "height": 8, "preserve_aspect": False},
+    )
+    difference_id = document.add_node("synmachine.image.difference")
+    preview_id = document.add_node("synmachine.visualization.display_image_data")
+    document.add_connection(source_id, "image", resize_id, "image")
+    document.add_connection(source_id, "image", difference_id, "a")
+    document.add_connection(resize_id, "image", difference_id, "b")
+    document.add_connection(difference_id, "image", preview_id, "image")
+    assert process_client.activate(document.snapshot()).activated
+
+    process_client.play(source_id)
+    assert process_client.wait_until_idle(3.0)
+
+    metrics = process_client.metrics()
+    assert metrics.state is EngineState.ERROR
+    assert len(metrics.runtime_errors) == 1
+    error = metrics.runtime_errors[0]
+    assert (error.node_id, error.code, error.recoverable) == (
+        difference_id,
+        "difference_shape",
+        True,
+    )
 
 
 def test_invalid_candidate_does_not_replace_active_revision(
@@ -256,7 +293,7 @@ def test_server_forwards_activate_reset_reason_to_child_engine() -> None:
     command = ActivateGraph(
         "request",
         snapshot.revision,
-        GraphSnapshotPayload.from_snapshot(snapshot),
+        snapshot_to_payload(snapshot),
         reset_reason=ResetReason.ENGINE_RESTARTED,
     )
 
@@ -265,3 +302,33 @@ def test_server_forwards_activate_reset_reason_to_child_engine() -> None:
     assert isinstance(response, GraphActivationAcknowledged)
     assert response.activation.activated
     assert reset_reasons == [ResetReason.ENGINE_RESTARTED]
+
+
+def test_server_rejects_stale_graph_command_before_runtime_mutation() -> None:
+    sent: list[object] = []
+
+    class ConnectionProbe:
+        def send(self, value: object) -> None:
+            sent.append(value)
+
+    class EngineProbe:
+        panic_count = 0
+
+        def panic(self) -> None:
+            self.panic_count += 1
+
+    engine = EngineProbe()
+    server = object.__new__(EngineServer)
+    server._connection = ConnectionProbe()  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue]
+    server._engine = engine  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue]
+    server._graph_revision = 7  # pyright: ignore[reportPrivateUsage]
+
+    should_stop = server._dispatch(Panic("stale", 6))  # pyright: ignore[reportPrivateUsage]
+
+    assert not should_stop
+    assert engine.panic_count == 0
+    assert len(sent) == 1 and isinstance(sent[0], CommandFailed)
+    failure = sent[0]
+    assert isinstance(failure, CommandFailed)
+    assert failure.error_type == "StaleGraphRevisionError"
+    assert "active revision is 7" in failure.message

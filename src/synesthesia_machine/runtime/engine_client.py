@@ -27,6 +27,7 @@ from synesthesia_machine.contracts.engine_client import (
     NodeMemoryDiagnostic,
     NodeProfile,
     NotePreview,
+    ResetReason,
     SourceStatus,
 )
 from synesthesia_machine.contracts.engine_messages import (
@@ -40,7 +41,6 @@ from synesthesia_machine.contracts.engine_messages import (
     EngineErrorPublished,
     EngineResponse,
     GraphActivationAcknowledged,
-    GraphSnapshotPayload,
     Handshake,
     HandshakeAcknowledged,
     Heartbeat,
@@ -69,8 +69,8 @@ from synesthesia_machine.contracts.engine_messages import (
     WaitUntilIdle,
 )
 from synesthesia_machine.graph.model import GraphSnapshot
-from synesthesia_machine.nodes.base import ResetReason
 from synesthesia_machine.runtime.engine_server import engine_server_main
+from synesthesia_machine.runtime.graph_payload import snapshot_to_payload
 from synesthesia_machine.runtime.shared_previews import OwnedPreviewSlot
 
 DEFAULT_REQUEST_TIMEOUT_S = 3.0
@@ -170,6 +170,9 @@ class ProcessEngineClient:
         self._crash_log_path = (
             None if crash_log_path is None else str(Path(crash_log_path).resolve())
         )
+        self._engine_log_directory = (
+            None if self._crash_log_path is None else str(Path(self._crash_log_path).parent)
+        )
         self._lifecycle_lock = threading.RLock()
         self._send_lock = threading.Lock()
         self._pending_lock = threading.Lock()
@@ -208,7 +211,12 @@ class ProcessEngineClient:
             event_queue = cast(EventQueueReader, raw_event_queue)
             process = self._context.Process(
                 target=engine_server_main,
-                args=(child_connection, raw_event_queue, self._crash_log_path),
+                args=(
+                    child_connection,
+                    raw_event_queue,
+                    self._crash_log_path,
+                    self._engine_log_directory,
+                ),
                 name="synesthesia-engine",
             )
             self._connection_state = EngineConnectionState.STARTING
@@ -454,7 +462,7 @@ class ProcessEngineClient:
             ActivateGraph(
                 uuid4().hex,
                 snapshot.revision,
-                GraphSnapshotPayload.from_snapshot(snapshot),
+                snapshot_to_payload(snapshot),
                 demand_roots,
                 reset_reason,
             ),

@@ -20,7 +20,7 @@ from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.app.settings import ApplicationPaths
 from synesthesia_machine.contracts import FrameContext, MidiNoteKey, MidiStateFrame
 from synesthesia_machine.diagnostics import create_diagnostic_bundle
-from synesthesia_machine.graph import GraphDocument
+from synesthesia_machine.graph import GraphCompiler, GraphDocument
 from synesthesia_machine.media import enumerate_cameras, open_camera
 from synesthesia_machine.midi import (
     DebugSynth,
@@ -73,15 +73,19 @@ def _graph_round_trip(root: Path) -> str:
     node_id = document.add_node(
         definition.type_id,
         implementation_version=definition.implementation_version,
-        parameters={"value": 42.0},
+        parameters={"number_type": "FLOAT", "float_value": 42.0},
     )
     graph_path = root / "release-smoke.synmachine.json"
     save_graph(graph_path, document.snapshot())
     loaded = load_graph(graph_path, registry)
     node = loaded.node(node_id)
-    if node is None or node.parameters.get("value") != 42.0:
+    if node is None or node.parameters.get("float_value") != 42.0:
         raise RuntimeError("saved graph did not round-trip")
-    return f"saved and opened {len(loaded.nodes)} node"
+    compilation = GraphCompiler(registry).compile(loaded)
+    if not compilation.report.is_valid or compilation.plan is None:
+        details = "; ".join(issue.message for issue in compilation.report.errors)
+        raise RuntimeError(f"round-tripped smoke graph did not compile: {details}")
+    return f"saved, opened, and compiled {len(loaded.nodes)} node"
 
 
 def _decode_h264(path: Path) -> str:

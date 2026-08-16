@@ -39,6 +39,7 @@ from synesthesia_machine.ui.parameter_editors import create_parameter_editor, pa
 from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.theme import node_category_color
 from synesthesia_machine.ui.tooltips import format_tooltip
+from synesthesia_machine.ui.translations import tr, trf
 from synesthesia_machine.ui.view_models import ConnectionViewModel, NodeViewModel
 
 _TYPE_ROLE = int(Qt.ItemDataRole.UserRole)
@@ -72,10 +73,12 @@ class ValidationIssuePanel(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.summary = QLabel("0 errors · 0 warnings", self)
-        self.summary.setAccessibleName("Graph validation summary")
+        self.summary = QLabel(
+            trf("{errors} errors · {warnings} warnings", errors=0, warnings=0), self
+        )
+        self.summary.setAccessibleName(tr("Graph validation summary"))
         self.issues = QListWidget(self)
-        self.issues.setAccessibleName("Graph validation issue list")
+        self.issues.setAccessibleName(tr("Graph validation issue list"))
         self.issues.itemClicked.connect(self._activate_issue)
         self.issues.itemActivated.connect(self._activate_issue)
         layout = QVBoxLayout(self)
@@ -87,14 +90,20 @@ class ValidationIssuePanel(QWidget):
     @Slot(object)
     def set_report(self, report: ValidationReport) -> None:
         self.issues.clear()
-        self.summary.setText(f"{len(report.errors)} errors · {len(report.warnings)} warnings")
+        self.summary.setText(
+            trf(
+                "{errors} errors · {warnings} warnings",
+                errors=len(report.errors),
+                warnings=len(report.warnings),
+            )
+        )
         for issue in report.issues:
-            item = QListWidgetItem(f"[{issue.severity}] {issue.message}")
+            item = QListWidgetItem(f"[{tr(str(issue.severity))}] {tr(issue.message)}")
             item.setData(_ISSUE_ROLE, issue)
             item.setToolTip(_issue_detail(issue))
             self.issues.addItem(item)
         if not report.issues:
-            item = QListWidgetItem("Graph is valid")
+            item = QListWidgetItem(tr("Graph is valid"))
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
             self.issues.addItem(item)
 
@@ -135,11 +144,11 @@ class NodeLibrary(QWidget):
         self.registry = registry
         self.search = QLineEdit(self)
         self.search.setObjectName("node_library_search")
-        self.search.setAccessibleName("Search node library")
-        self.search.setPlaceholderText("Search nodes…")
+        self.search.setAccessibleName(tr("Search node library"))
+        self.search.setPlaceholderText(tr("Search nodes…"))
         self.tree = NodeTreeWidget(self)
         self.tree.setObjectName("node_library_tree")
-        self.tree.setAccessibleName("Node library")
+        self.tree.setAccessibleName(tr("Node library"))
         self.tree.setHeaderHidden(True)
         self.tree.setDragEnabled(True)
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -183,15 +192,21 @@ class NodeLibrary(QWidget):
                     groups[path] = group
                 parent = group
             assert parent is not None
-            item = QTreeWidgetItem(parent, [definition.display_name])
+            item = QTreeWidgetItem(parent, [tr(definition.display_name)])
             item.setForeground(0, QBrush(node_category_color(definition.category)))
             item.setData(0, _TYPE_ROLE, definition.type_id)
             item.setData(0, _CATEGORY_ROLE, definition.category)
-            item.setToolTip(0, format_tooltip(definition.description))
-            item.setStatusTip(0, definition.description)
+            item.setToolTip(0, format_tooltip(tr(definition.description)))
+            item.setStatusTip(0, tr(definition.description))
             if definition.type_id == selected:
                 self.tree.setCurrentItem(item)
         self.tree.expandAll()
+
+    def retranslate(self) -> None:
+        self.search.setAccessibleName(tr("Search node library"))
+        self.search.setPlaceholderText(tr("Search nodes…"))
+        self.tree.setAccessibleName(tr("Node library"))
+        self._populate(self.search.text())
 
     @Slot(QTreeWidgetItem, int)
     def _activate_item(self, item: QTreeWidgetItem, column: int) -> None:
@@ -217,8 +232,8 @@ def _category_path(category: str) -> tuple[str, ...]:
 def _library_group_label(path: tuple[str, ...]) -> str:
     name = path[-1]
     if len(path) == 1:
-        return _LIBRARY_ROOT_LABELS.get(name, name)
-    return _LIBRARY_SUBGROUP_LABELS.get(name, name)
+        return tr(_LIBRARY_ROOT_LABELS.get(name, name))
+    return tr(_LIBRARY_SUBGROUP_LABELS.get(name, name))
 
 
 def _library_sort_key(definition: NodeDefinition) -> tuple[object, ...]:
@@ -227,6 +242,7 @@ def _library_sort_key(definition: NodeDefinition) -> tuple[object, ...]:
     return (
         _LIBRARY_ROOT_ORDER.get(root, len(_LIBRARY_ROOT_ORDER)),
         root.casefold(),
+        0 if len(path) == 1 else 1,
         *(part.casefold() for part in path[1:]),
         definition.display_name.casefold(),
     )
@@ -266,17 +282,17 @@ class NodeSearchDialog(QDialog):
         title: str = "Add Node",
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle(title)
+        self.setWindowTitle(tr(title))
         self.setModal(True)
         self.resize(480, 420)
         self._candidates = tuple(candidates)
         self.search = QLineEdit(self)
         self.search.setObjectName("graph_search_field")
-        self.search.setAccessibleName("Search graph nodes")
-        self.search.setPlaceholderText("Type a node name, category, or keyword…")
+        self.search.setAccessibleName(tr("Search graph nodes"))
+        self.search.setPlaceholderText(tr("Type a node name, category, or keyword…"))
         self.results = QListWidget(self)
         self.results.setObjectName("graph_search_results")
-        self.results.setAccessibleName("Graph search results")
+        self.results.setAccessibleName(tr("Graph search results"))
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
             parent=self,
@@ -289,6 +305,7 @@ class NodeSearchDialog(QDialog):
         self.results.itemDoubleClicked.connect(self._accept_item)
         buttons.accepted.connect(self._accept_current)
         buttons.rejected.connect(self.reject)
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(tr("Cancel"))
         self._populate("")
         self.search.setFocus()
 
@@ -302,10 +319,12 @@ class NodeSearchDialog(QDialog):
             if normalized and not all(token in haystack for token in normalized.split()):
                 continue
             suffix = f"  ·  {candidate.port_id}" if candidate.port_id is not None else ""
-            item = QListWidgetItem(f"{definition.display_name}  —  {definition.category}{suffix}")
+            item = QListWidgetItem(
+                f"{tr(definition.display_name)}  —  {tr(definition.category)}{suffix}"
+            )
             item.setForeground(QBrush(node_category_color(definition.category)))
             item.setData(_INDEX_ROLE, index)
-            item.setToolTip(format_tooltip(definition.description))
+            item.setToolTip(format_tooltip(tr(definition.description)))
             self.results.addItem(item)
         if self.results.count():
             self.results.setCurrentRow(0)
@@ -346,11 +365,11 @@ class InspectorPanel(QWidget):
         self._node_ids: set[UUID] = set()
         self._connection_ids: set[UUID] = set()
         self._memory_diagnostic: NodeMemoryDiagnostic | None = None
-        self.title = QLabel("Nothing selected", self)
+        self.title = QLabel(tr("Nothing selected"), self)
         title_font = self.title.font()
         title_font.setBold(True)
         self.title.setFont(title_font)
-        self.description = QLabel("Select a node or cable to inspect it.", self)
+        self.description = QLabel(tr("Select a node or cable to inspect it."), self)
         self.description.setWordWrap(True)
         self.scroll_area = QScrollArea(self)
         self.scroll_area.setObjectName("inspector_scroll_area")
@@ -360,9 +379,9 @@ class InspectorPanel(QWidget):
         self.form_container.setObjectName("inspector_form_container")
         self.form = QFormLayout(self.form_container)
         self.scroll_area.setWidget(self.form_container)
-        self.validation_title = QLabel("Validation", self)
+        self.validation_title = QLabel(tr("Validation"), self)
         self.validation = QListWidget(self)
-        self.validation.setAccessibleName("Validation issues")
+        self.validation.setAccessibleName(tr("Validation issues"))
         self.validation.setMinimumHeight(110)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -413,21 +432,25 @@ class InspectorPanel(QWidget):
         elif len(connections) == 1 and not nodes:
             self._show_connection(connections[0])
         elif nodes or connections:
-            self.title.setText("Multiple selection")
+            self.title.setText(tr("Multiple selection"))
             self.description.setText(
-                f"{len(nodes)} node(s) and {len(connections)} cable(s) selected."
+                trf(
+                    "{nodes} node(s) and {cables} cable(s) selected.",
+                    nodes=len(nodes),
+                    cables=len(connections),
+                )
             )
             self._show_issues(())
         else:
-            self.title.setText("Nothing selected")
-            self.description.setText("Select a node or cable to inspect it.")
+            self.title.setText(tr("Nothing selected"))
+            self.description.setText(tr("Select a node or cable to inspect it."))
             self._show_issues(self.session.report.issues)
 
     def _show_node(self, node: NodeViewModel) -> None:
-        self.title.setText(node.title)
-        self.description.setText(node.description)
-        self.form.addRow("Type", QLabel(node.type_id, self.form_container))
-        self.form.addRow("Category", QLabel(node.category, self.form_container))
+        self.title.setText(tr(node.title))
+        self.description.setText(tr(node.description))
+        self.form.addRow(tr("Type"), QLabel(node.type_id, self.form_container))
+        self.form.addRow(tr("Category"), QLabel(tr(node.category), self.form_container))
         grouped_parameter_ids = {
             parameter.spec.id for group in node.parameter_groups for parameter in group.parameters
         }
@@ -443,7 +466,7 @@ class InspectorPanel(QWidget):
                 continue
             callback = partial(self._set_parameter, node.node_id, parameter.spec.id)
             editor = create_parameter_editor(parameter, callback)
-            label = QLabel(parameter.spec.label, self.form_container)
+            label = QLabel(tr(parameter.spec.label), self.form_container)
             help_text = parameter_tooltip(parameter.spec)
             label.setToolTip(format_tooltip(help_text))
             label.setAccessibleDescription(help_text)
@@ -457,30 +480,36 @@ class InspectorPanel(QWidget):
         diagnostic = self._memory_diagnostic
         if diagnostic is not None and diagnostic.node_id == node.node_id:
             self.form.addRow(
-                "Estimated retained memory",
+                tr("Estimated retained memory"),
                 QLabel(_format_bytes(diagnostic.estimated_retained_bytes), self.form_container),
             )
             self.form.addRow(
-                "Current retained memory",
+                tr("Current retained memory"),
                 QLabel(
-                    f"{_format_bytes(diagnostic.retained_bytes)} "
-                    f"({diagnostic.retained_frame_count}/{diagnostic.capacity_frame_count} frames)",
+                    trf(
+                        "{used} ({retained}/{capacity} frames)",
+                        used=_format_bytes(diagnostic.retained_bytes),
+                        retained=diagnostic.retained_frame_count,
+                        capacity=diagnostic.capacity_frame_count,
+                    ),
                     self.form_container,
                 ),
             )
             self.form.addRow(
-                "Memory limit",
+                tr("Memory limit"),
                 QLabel(_format_bytes(diagnostic.memory_limit_bytes), self.form_container),
             )
         self._show_issues(node.issues)
 
     def _show_connection(self, connection: ConnectionViewModel) -> None:
-        self.title.setText("Connection")
+        self.title.setText(tr("Connection"))
         self.description.setText(f"{connection.source_port_id} → {connection.destination_port_id}")
-        self.form.addRow("Resolved type", QLabel(connection.type_name, self.form_container))
-        self.form.addRow("Source node", QLabel(str(connection.source_node_id), self.form_container))
+        self.form.addRow(tr("Resolved type"), QLabel(connection.type_name, self.form_container))
         self.form.addRow(
-            "Destination node", QLabel(str(connection.destination_node_id), self.form_container)
+            tr("Source node"), QLabel(str(connection.source_node_id), self.form_container)
+        )
+        self.form.addRow(
+            tr("Destination node"), QLabel(str(connection.destination_node_id), self.form_container)
         )
         self._show_issues(connection.issues)
 
@@ -491,10 +520,15 @@ class InspectorPanel(QWidget):
             severity = getattr(issue, "severity", "ISSUE")
             message = getattr(issue, "message", str(issue))
             code = getattr(issue, "code", "")
-            self.validation.addItem(f"{severity}: {message} ({code})")
+            self.validation.addItem(f"{tr(str(severity))}: {tr(str(message))} ({code})")
             count += 1
         if count == 0:
-            self.validation.addItem("No validation issues")
+            self.validation.addItem(tr("No validation issues"))
+
+    def retranslate(self) -> None:
+        self.validation_title.setText(tr("Validation"))
+        self.validation.setAccessibleName(tr("Validation issues"))
+        self.refresh()
 
     def _set_parameter(self, node_id: UUID, parameter_id: str, value: LiteralValue) -> None:
         self.session.set_parameter(node_id, parameter_id, value)
@@ -512,6 +546,9 @@ def _definition_search_text(definition: NodeDefinition) -> str:
             definition.description,
             definition.type_id,
             *definition.aliases,
+            tr(definition.display_name),
+            tr(definition.category),
+            tr(definition.description),
         )
     ).casefold()
 
@@ -521,13 +558,16 @@ def _format_bytes(value: int) -> str:
 
 
 def _issue_detail(issue: ValidationIssue) -> str:
-    details = [f"{issue.severity}: {issue.message}", f"Code: {issue.code}"]
+    details = [
+        f"{tr(str(issue.severity))}: {tr(issue.message)}",
+        trf("Code: {code}", code=issue.code),
+    ]
     if issue.node_id is not None:
-        details.append(f"Node: {issue.node_id}")
+        details.append(trf("Node: {node}", node=issue.node_id))
     if issue.connection_id is not None:
-        details.append(f"Connection: {issue.connection_id}")
+        details.append(trf("Connection: {connection}", connection=issue.connection_id))
     if issue.port_id is not None:
-        details.append(f"Port: {issue.port_id}")
+        details.append(trf("Port: {port}", port=issue.port_id))
     if issue.severity is ValidationSeverity.ERROR:
-        details.append("This issue prevents activation of the current graph revision.")
+        details.append(tr("This issue prevents activation of the current graph revision."))
     return "\n".join(details)

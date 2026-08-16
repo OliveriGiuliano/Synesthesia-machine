@@ -123,12 +123,54 @@ class _SequenceClock:
         return wake_event.is_set()
 
 
+class _BlockingClearEvent(threading.Event):
+    def __init__(self) -> None:
+        super().__init__()
+        self.clear_started = threading.Event()
+        self.allow_clear = threading.Event()
+
+    def clear(self) -> None:
+        self.clear_started.set()
+        assert self.allow_clear.wait(1.0)
+        super().clear()
+
+
 def _camera_definition():
     return next(
         definition
         for definition in create_input_definitions()
         if definition.type_id == LOAD_CAMERA_TYPE_ID
     )
+
+
+def test_camera_resume_cannot_be_lost_before_wait() -> None:
+    source = CameraSourceService(
+        SOURCE_ID, "opencv:0", on_frame=lambda _frame: None, clock=_SequenceClock()
+    )
+    wake_event = _BlockingClearEvent()
+    source._wake_event = wake_event  # pyright: ignore[reportPrivateUsage]
+    with source._lock:  # pyright: ignore[reportPrivateUsage]
+        source._state = SourceState.PAUSED  # pyright: ignore[reportPrivateUsage]
+    result: list[bool] = []
+    waiter = threading.Thread(
+        target=lambda: result.append(
+            source._wait_until_active()  # pyright: ignore[reportPrivateUsage]
+        )
+    )
+    try:
+        waiter.start()
+        assert wake_event.clear_started.wait(1.0)
+        source.resume()
+        wake_event.allow_clear.set()
+        waiter.join(0.2)
+        assert not waiter.is_alive()
+        assert result == [True]
+    finally:
+        wake_event.allow_clear.set()
+        source._stop_event.set()  # pyright: ignore[reportPrivateUsage]
+        wake_event.set()
+        waiter.join(1.0)
+        source.close()
 
 
 def _bgr(blue: int, green: int, red: int) -> np.ndarray:

@@ -24,6 +24,7 @@ from synesthesia_machine.nodes.base import (
     TypeVariable,
 )
 from synesthesia_machine.nodes.registry import NodeRegistry
+from synesthesia_machine.nodes.utility.dynamic import create_dynamic_definitions
 from synesthesia_machine.nodes.utility.midi import create_midi_utility_definitions
 from synesthesia_machine.nodes.utility.scalar_bridges import create_scalar_bridge_definitions
 
@@ -338,6 +339,7 @@ def create_utility_registry() -> NodeRegistry:
         ),
         *create_midi_utility_definitions(),
         *create_scalar_bridge_definitions(),
+        *create_dynamic_definitions(),
     )
     return NodeRegistry(definitions)
 

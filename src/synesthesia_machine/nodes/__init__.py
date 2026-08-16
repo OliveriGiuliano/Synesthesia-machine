@@ -1,6 +1,7 @@
 """Public node-definition and registry contracts."""
 
 from synesthesia_machine.nodes.base import (
+    ArrayTypeVariable,
     CachePolicy,
     ExecutionKind,
     ExpectedNodeError,
@@ -22,6 +23,7 @@ from synesthesia_machine.nodes.base import (
 from synesthesia_machine.nodes.registry import NodeRegistry
 
 __all__ = [
+    "ArrayTypeVariable",
     "CachePolicy",
     "ExecutionKind",
     "ExpectedNodeError",

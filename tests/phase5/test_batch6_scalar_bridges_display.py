@@ -33,13 +33,11 @@ NODE_ID = UUID("00000000-0000-0000-0000-000000006060")
 SOURCE_ID = UUID("00000000-0000-0000-0000-000000006061")
 DISPLAY_ID = UUID("00000000-0000-0000-0000-000000006062")
 BATCH6_IDS = (
-    "synmachine.utility.channel_statistics",
     "synmachine.utility.remap_number",
     "synmachine.utility.float_to_integer",
     "synmachine.visualization.channel_display",
 )
 PHASE5_UTILITY_IDS = {
-    "synmachine.utility.channel_statistics",
     "synmachine.utility.compare",
     "synmachine.utility.conditional",
     "synmachine.utility.float_to_integer",
@@ -49,7 +47,6 @@ PHASE5_UTILITY_IDS = {
     "synmachine.utility.pass_through",
     "synmachine.utility.remap_number",
 }
-STATISTICS = ("MEAN", "MEDIAN", "MINIMUM", "MAXIMUM", "STANDARD_DEVIATION", "PERCENTILE")
 CONVERSION_MODES = ("ROUND", "FLOOR", "CEIL", "TRUNCATE")
 
 
@@ -129,19 +126,7 @@ def test_batch6_metadata_has_exact_order_ports_defaults_and_policies() -> None:
     definitions = (*scalar_definitions, visualization)
     assert tuple(definition.type_id for definition in definitions) == BATCH6_IDS
 
-    statistics, remap, conversion, channel_display = definitions
-    assert tuple(port.id for port in statistics.inputs) == ("channel",)
-    assert tuple(port.id for port in statistics.outputs) == ("value",)
-    assert tuple(parameter.id for parameter in statistics.parameters) == (
-        "statistic",
-        "percentile",
-        "ignore_non_finite",
-    )
-    assert tuple(parameter.default for parameter in statistics.parameters) == ("MEAN", 50.0, True)
-    assert statistics.parameters[0].choices == STATISTICS
-    assert statistics.parameters[1].minimum == 0.0
-    assert statistics.parameters[1].maximum == 100.0
-
+    remap, conversion, channel_display = definitions
     assert tuple(port.id for port in remap.inputs) == ("value",)
     assert tuple(port.id for port in remap.outputs) == ("value",)
     assert tuple(parameter.id for parameter in remap.parameters) == (
@@ -192,56 +177,6 @@ def test_batch6_definitions_are_registered(type_id: str) -> None:
 @pytest.mark.parametrize("definition", create_scalar_bridge_definitions())
 def test_scheduler_propagates_no_data_for_scalar_bridges(definition: NodeDefinition) -> None:
     assert_scheduler_propagates_no_data(definition, {})
-
-
-@pytest.mark.parametrize(
-    ("statistic", "expected"),
-    (
-        ("MEAN", 2.5),
-        ("MEDIAN", 2.5),
-        ("MINIMUM", 1.0),
-        ("MAXIMUM", 4.0),
-        ("STANDARD_DEVIATION", np.std(np.array([1.0, 2.0, 3.0, 4.0]))),
-        ("PERCENTILE", 3.25),
-    ),
-)
-def test_channel_statistics_algorithms(statistic: str, expected: float) -> None:
-    channel = _channel(np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32))
-    before = channel.data.copy()
-    value = _process(
-        "synmachine.utility.channel_statistics",
-        {"channel": channel},
-        {"statistic": statistic, "percentile": 75.0},
-    )
-    assert isinstance(value, float)
-    assert value == pytest.approx(expected)
-    assert np.array_equal(channel.data, before)
-    assert not channel.data.flags.writeable
-
-
-def test_channel_statistics_finite_policy_and_empty_selection_are_explicit() -> None:
-    mixed = _channel(np.array([[1.0, np.nan], [np.inf, 3.0]], dtype=np.float32))
-    assert _process("synmachine.utility.channel_statistics", {"channel": mixed}) == pytest.approx(
-        2.0
-    )
-    propagated = _process(
-        "synmachine.utility.channel_statistics",
-        {"channel": mixed},
-        {"ignore_non_finite": False},
-    )
-    assert isinstance(propagated, float) and np.isnan(propagated)
-
-    empty = _channel(np.array([[np.nan, np.inf]], dtype=np.float32))
-    with pytest.raises(ExpectedNodeError, match="no finite samples") as captured:
-        _process("synmachine.utility.channel_statistics", {"channel": empty})
-    assert captured.value.code == "invalid_channel_statistics"
-
-
-def test_channel_statistics_percentile_validation_rejects_non_finite() -> None:
-    definition = _definition("synmachine.utility.channel_statistics")
-    for value in (float("nan"), float("inf"), float("-inf")):
-        _, errors = definition.parameter_values({"percentile": value})
-        assert errors and "percentile" in errors[0]
 
 
 def test_remap_number_supports_reversed_ranges_clamping_and_connected_parameters() -> None:
@@ -403,9 +338,9 @@ def test_channel_display_is_a_default_demand_root() -> None:
 def test_batch6_utility_entry_point_remains_phase1_compatible() -> None:
     registry = create_utility_registry()
     assert registry.require("synmachine.utility.number").type_id == "synmachine.utility.number"
-    assert registry.require("synmachine.utility.channel_statistics").type_id == BATCH6_IDS[0]
+    assert registry.get("synmachine.utility.channel_statistics") is None
     current_ids = {definition.type_id for definition in registry.definitions()}
-    assert len(PHASE5_UTILITY_IDS) == 9
+    assert len(PHASE5_UTILITY_IDS) == 8
     assert current_ids >= PHASE5_UTILITY_IDS
 
 

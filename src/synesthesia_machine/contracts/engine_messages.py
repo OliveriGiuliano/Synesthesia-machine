@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING
 from uuid import UUID
 
 from synesthesia_machine.contracts.engine_client import (
@@ -14,15 +13,12 @@ from synesthesia_machine.contracts.engine_client import (
     NodeMemoryDiagnostic,
     NodeProfile,
     NotePreview,
+    ResetReason,
     SourceStatus,
 )
 from synesthesia_machine.contracts.runtime_values import ColorValue, NumericMatrix
-from synesthesia_machine.nodes.base import ResetReason
 
-if TYPE_CHECKING:
-    from synesthesia_machine.graph.model import GraphSnapshot
-
-ENGINE_PROTOCOL_VERSION = 9
+ENGINE_PROTOCOL_VERSION = 10
 
 type SnapshotLiteral = str | int | float | bool | ColorValue | NumericMatrix | None
 
@@ -56,71 +52,6 @@ class GraphSnapshotPayload:
     nodes: tuple[WireNode, ...]
     connections: tuple[WireConnection, ...]
     document_settings: tuple[tuple[str, SnapshotLiteral], ...]
-
-    @classmethod
-    def from_snapshot(cls, snapshot: GraphSnapshot) -> GraphSnapshotPayload:
-        return cls(
-            document_id=snapshot.document_id,
-            revision=snapshot.revision,
-            nodes=tuple(
-                WireNode(
-                    node.id,
-                    node.type_id,
-                    node.implementation_version,
-                    tuple(sorted(node.parameters.items())),
-                    node.position,
-                    node.size,
-                    node.user_label,
-                    node.collapsed,
-                    tuple(sorted(node.ui_state.items())),
-                )
-                for node in snapshot.nodes
-            ),
-            connections=tuple(
-                WireConnection(
-                    connection.id,
-                    connection.source_node_id,
-                    connection.source_port_id,
-                    connection.destination_node_id,
-                    connection.destination_port_id,
-                )
-                for connection in snapshot.connections
-            ),
-            document_settings=tuple(sorted(snapshot.document_settings.items())),
-        )
-
-    def to_snapshot(self) -> GraphSnapshot:
-        from synesthesia_machine.graph.model import ConnectionModel, GraphSnapshot, NodeModel
-
-        return GraphSnapshot(
-            document_id=self.document_id,
-            revision=self.revision,
-            nodes=tuple(
-                NodeModel(
-                    id=node.node_id,
-                    type_id=node.type_id,
-                    implementation_version=node.implementation_version,
-                    parameters=dict(node.parameters),
-                    position=node.position,
-                    size=node.size,
-                    user_label=node.user_label,
-                    collapsed=node.collapsed,
-                    ui_state=dict(node.ui_state),
-                )
-                for node in self.nodes
-            ),
-            connections=tuple(
-                ConnectionModel(
-                    id=connection.connection_id,
-                    source_node_id=connection.source_node_id,
-                    source_port_id=connection.source_port_id,
-                    destination_node_id=connection.destination_node_id,
-                    destination_port_id=connection.destination_port_id,
-                )
-                for connection in self.connections
-            ),
-            document_settings=dict(self.document_settings),
-        )
 
 
 class TransportAction(StrEnum):

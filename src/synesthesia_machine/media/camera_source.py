@@ -431,6 +431,8 @@ class CameraSourceService:
                 capture.release()
         if thread is not None and thread is not threading.current_thread() and thread.is_alive():
             thread.join(timeout=5.0)
+        if thread is not None and thread is not threading.current_thread() and thread.is_alive():
+            raise TimeoutError(f"Camera worker did not stop within 5 seconds: {thread.name}")
         with self._lock:
             self._capture = None
             if self._thread is not threading.current_thread():
@@ -584,12 +586,14 @@ class CameraSourceService:
 
     def _wait_until_active(self) -> bool:
         while not self._stop_event.is_set():
+            self._wake_event.clear()
             with self._lock:
+                if self._stop_event.is_set():
+                    return False
                 if self._state in {SourceState.PLAYING, SourceState.RECONNECTING}:
                     return True
                 if self._state is not SourceState.PAUSED:
                     return False
-            self._wake_event.clear()
             self._clock.wait(self._wake_event, None)
         return False
 

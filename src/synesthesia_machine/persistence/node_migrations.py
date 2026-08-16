@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
@@ -98,6 +99,18 @@ def migrate_load_video_v0_to_v1(data: JsonObject) -> JsonObject:
     return migrated
 
 
+def migrate_hue_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Normalize legacy hue turns into the new single-turn literal range."""
+
+    migrated = deepcopy(data)
+    parameters = _parameters(migrated)
+    turns = parameters.get("turns")
+    if isinstance(turns, float) and math.isfinite(turns) and not 0.0 <= turns <= 1.0:
+        parameters["turns"] = turns % 1.0
+    migrated["implementation_version"] = 2
+    return migrated
+
+
 def _parameters(data: JsonObject) -> JsonObject:
     raw_parameters = data.get("parameters")
     if not isinstance(raw_parameters, dict):
@@ -115,6 +128,7 @@ def _implementation_version(data: JsonObject) -> int:
 BUILTIN_NODE_MIGRATIONS = NodeMigrationRegistry(
     {
         ("synmachine.input.load_video", 0): migrate_load_video_v0_to_v1,
+        ("synmachine.image.hue", 1): migrate_hue_v1_to_v2,
         ("synmachine.utility.number", 0): migrate_number_v0_to_v1,
     }
 )
@@ -126,6 +140,7 @@ __all__ = [
     "NodeMigrationRegistry",
     "NodeMigrationResult",
     "NodeMigrationStep",
+    "migrate_hue_v1_to_v2",
     "migrate_load_video_v0_to_v1",
     "migrate_number_v0_to_v1",
 ]

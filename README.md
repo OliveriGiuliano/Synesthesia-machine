@@ -3,15 +3,6 @@
 Synesthesia Machine is a Windows desktop instrument that transforms video and camera data into
 live MIDI note states through a typed visual node graph.
 
-**Phases 0–7 are complete.** Production UI composition supervises a spawned engine process for
-runtime execution, bounded shared-memory previews, camera capture, MIDI output, debug audio, and
-profiling. The editor now adds groups/comments, deterministic layout tools, preferences/recent files,
-atomic backups, forced-crash recovery, fingerprinted missing-media relinking, migrations, navigable
-validation, source-scoped transport, and large-graph detail scaling. The built-in registry now contains
-59 definitions. Live camera behavior is covered with deterministic simulation because no physical
-camera was available; an explicitly selected loopMIDI port was exercised separately from automated
-tests.
-
 ## Requirements
 
 - Windows 11 x64
@@ -116,7 +107,7 @@ Any deviation from that baseline requires an Architecture Decision Record under 
 
 Current module boundaries include:
 
-- `src/synesthesia_machine/contracts`: immutable runtime values, protocol-v6 process messages,
+- `src/synesthesia_machine/contracts`: immutable runtime values, protocol-v10 process messages,
   compact node-memory diagnostics, and the final-shaped `EngineClient` API;
 - `src/synesthesia_machine/graph`, `nodes`, and `runtime`: Qt-free graph compilation, atomic plan
   replacement, process supervision, bounded source mailboxes, and shared-preview transport;
@@ -128,4 +119,4 @@ Current module boundaries include:
 - `examples/phase3`, `examples/phase5`, and `examples/phase6`: portable executable graphs,
   deterministic media, historical/current all-definition catalogue smoke artifacts, and safe Phase 6
   algorithm examples;
-- `tests`: hardware-independent Phase 1–7 and smoke acceptance coverage.
+- `tests`: hardware-independent Phase 1–9 and smoke acceptance coverage.

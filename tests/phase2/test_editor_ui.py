@@ -6,12 +6,13 @@ from uuid import UUID
 
 import pytest
 from PySide6.QtCore import QPoint, QPointF, QSettings, Qt, QTimer
-from PySide6.QtGui import QBrush, QImage, QPainter
+from PySide6.QtGui import QBrush, QImage, QPainter, QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QDockWidget,
     QDoubleSpinBox,
     QFileDialog,
     QLineEdit,
@@ -31,7 +32,7 @@ from synesthesia_machine.contracts import (
     PortType,
     RuntimeValue,
 )
-from synesthesia_machine.graph import GraphDocument
+from synesthesia_machine.graph import GraphCompiler, GraphDocument
 from synesthesia_machine.nodes import (
     ExecutionKind,
     NodeDefinition,
@@ -109,6 +110,16 @@ def test_shell_has_fixed_structure_actions_and_accessible_controls(window: MainW
     assert window.centralWidget() is window.view
     assert window.library_dock.widget() is window.library
     assert window.inspector_dock.widget() is window.inspector
+    assert window.profiler_dock.isHidden()
+    assert window.profiler_dock.features() & QDockWidget.DockWidgetFeature.DockWidgetClosable
+    assert (
+        window.action_registry.require("randomize_parameters").text().replace("&", "")
+        == "Randomize Parameters"
+    )
+    assert (
+        window.action_registry.require("randomize_nodes").text().replace("&", "")
+        == "Randomize Nodes"
+    )
     assert window.accessibleName() == "Synesthesia Machine graph editor"
     assert window.library.search.accessibleName()
     assert window.library.tree.accessibleName()
@@ -123,6 +134,117 @@ def test_shell_has_fixed_structure_actions_and_accessible_controls(window: MainW
         assert action.statusTip()
     for key in ("new", "open", "save", "undo", "redo", "copy", "paste", "duplicate"):
         assert not window.action_registry.require(key).shortcut().isEmpty()
+
+
+def test_horizontal_wheel_input_does_not_zoom_canvas(window: MainWindow) -> None:
+    initial_scale = window.view.transform().m11()
+    event = QWheelEvent(
+        QPointF(10.0, 10.0),
+        QPointF(10.0, 10.0),
+        QPoint(),
+        QPoint(120, 0),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+
+    window.view.wheelEvent(event)
+
+    assert window.view.transform().m11() == initial_scale
+
+
+def test_selection_uses_one_scene_level_outline_and_tracks_node_bounds(
+    window: MainWindow,
+) -> None:
+    first = window.session.add_node("synmachine.utility.number", (20.0, 30.0))
+    second = window.session.add_node("synmachine.utility.number", (360.0, 140.0))
+    window.scene.select_node_ids({first, second})
+
+    first_bounds = window.scene.node_items[first].body_scene_rect
+    second_bounds = window.scene.node_items[second].body_scene_rect
+    margin = DEFAULT_THEME.metrics.selection_outline_margin
+    assert margin == 2.0
+    assert (
+        DEFAULT_THEME.color("selection_outline").lightnessF()
+        < DEFAULT_THEME.color("selection").lightnessF()
+    )
+    expected = first_bounds.united(second_bounds).adjusted(-margin, -margin, margin, margin)
+    assert window.scene.selection_outline_rect == expected
+
+    window.scene.node_items[second].setPos(520.0, 220.0)
+    assert window.scene.selection_outline_rect.contains(
+        window.scene.node_items[second].body_scene_rect
+    )
+    window.scene.clearSelection()
+    assert window.scene.selection_outline_rect.isEmpty()
+
+
+def test_randomize_parameters_action_changes_only_selected_nodes_and_is_one_undo_step(
+    window: MainWindow,
+) -> None:
+    first = window.session.add_node("synmachine.utility.number", (0.0, 0.0))
+    second = window.session.add_node("synmachine.utility.number", (300.0, 0.0))
+    before_first = window.session.document.node(first)
+    before_second = window.session.document.node(second)
+    command_count = window.session.undo_stack.count()
+    window.scene.select_node_ids({first})
+
+    window.randomize_parameters()
+
+    assert window.session.document.node(first) != before_first
+    assert window.session.document.node(second) == before_second
+    assert window.scene.selected_node_ids() == {first}
+    assert window.session.undo_stack.count() == command_count + 1
+    window.session.undo_stack.undo()
+    assert window.session.document.node(first) == before_first
+
+
+def test_randomize_nodes_action_replaces_and_selects_new_nodes(window: MainWindow) -> None:
+    source = window.session.add_node("synmachine.utility.number", (0.0, 0.0))
+    selected = window.session.add_node("synmachine.utility.pass_through", (240.0, 0.0))
+    window.session.add_connection(source, "value", selected, "value")
+    command_count = window.session.undo_stack.count()
+    window.scene.select_node_ids({selected})
+
+    window.randomize_nodes()
+
+    replacement_ids = window.scene.selected_node_ids()
+    assert len(replacement_ids) > 1
+    assert selected not in replacement_ids
+    assert window.session.document.node(selected) is None
+    assert window.session.document.node(source) is not None
+    assert window.session.undo_stack.count() == command_count + 1
+    window.session.undo_stack.undo()
+    assert window.session.document.node(selected) is not None
+
+
+def test_randomize_nodes_without_selection_generates_complete_graph(
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    registry = create_application_registry()
+    generated_window = MainWindow(
+        registry,
+        paths_for(tmp_path),
+        InProcessEngineClient(registry),
+        settings=settings_for(tmp_path),
+        offer_recovery=False,
+    )
+    try:
+        generated_window.randomize_nodes()
+        qapp.processEvents()
+        snapshot = generated_window.session.document.snapshot()
+        definitions = tuple(registry.require(node.type_id) for node in snapshot.nodes)
+
+        assert GraphCompiler(registry).compile(snapshot).report.is_valid
+        assert any(definition.execution_kind is ExecutionKind.SOURCE for definition in definitions)
+        assert any(definition.execution_kind is ExecutionKind.SINK for definition in definitions)
+        assert snapshot.connections
+        assert not generated_window.scene.selected_node_ids()
+    finally:
+        generated_window.session.new_document()
+        generated_window.close()
 
 
 def test_palette_and_graph_search_index_registry_aliases(window: MainWindow) -> None:
@@ -393,6 +515,22 @@ def test_slider_hint_is_explicit_and_sliders_display_and_drag_their_value(
     qapp.processEvents()
     assert float_editor.value() > 0.9
 
+    float_editor.setValue(0.25)
+    qapp.processEvents()
+    edit_count = len(edits)
+    value_line_editor = float_editor.value_editor.lineEdit()
+    start = QPoint(20, value_line_editor.height() // 2)
+    finish = QPoint(60, value_line_editor.height() // 2)
+    QTest.mousePress(value_line_editor, Qt.MouseButton.LeftButton, pos=start)
+    QTest.mouseMove(value_line_editor, finish)
+    qapp.processEvents()
+    assert float_editor.value() > 0.25
+    assert len(edits) == edit_count
+    QTest.mouseRelease(value_line_editor, Qt.MouseButton.LeftButton, pos=finish)
+    qapp.processEvents()
+    assert len(edits) == edit_count + 1
+    assert edits[-1] == pytest.approx(float_editor.value())
+
     int_spec = ParameterSpec(
         "voices",
         "Voices",
@@ -425,6 +563,40 @@ def test_slider_hint_is_explicit_and_sliders_display_and_drag_their_value(
     assert isinstance(technical_editor, QSpinBox)
 
 
+def test_numeric_value_fields_scrub_horizontally_and_commit_on_release(
+    qapp: QApplication,
+) -> None:
+    edits: list[object] = []
+    editor = create_parameter_editor(
+        ParameterViewModel(
+            ParameterSpec("gain", "Gain", PortType.FLOAT, 1.0),
+            1.0,
+            False,
+        ),
+        edits.append,
+    )
+    assert isinstance(editor, QDoubleSpinBox)
+    editor.resize(160, 26)
+    editor.show()
+    qapp.processEvents()
+    line_editor = editor.lineEdit()
+    start = QPoint(30, line_editor.height() // 2)
+    finish = QPoint(70, line_editor.height() // 2)
+
+    QTest.mousePress(line_editor, Qt.MouseButton.LeftButton, pos=start)
+    QTest.mouseMove(line_editor, finish)
+    qapp.processEvents()
+
+    assert editor.value() > 1.0
+    assert not edits
+
+    QTest.mouseRelease(line_editor, Qt.MouseButton.LeftButton, pos=finish)
+    qapp.processEvents()
+
+    assert edits[-1] == pytest.approx(editor.value())
+    editor.close()
+
+
 def test_builtin_slider_metadata_reserves_sliders_for_continuous_spectra() -> None:
     registry = create_application_registry()
     technical_parameters = (
@@ -447,6 +619,14 @@ def test_builtin_slider_metadata_reserves_sliders_for_continuous_spectra() -> No
         ParameterViewModel(volume, volume.default, False), lambda _value: None
     )
     assert isinstance(volume_editor, FloatRangeParameterEditor)
+
+    hue = registry.require("synmachine.image.hue").parameter("turns")
+    assert hue is not None
+    hue_editor = create_parameter_editor(
+        ParameterViewModel(hue, hue.default, False), lambda _value: None
+    )
+    assert isinstance(hue_editor, FloatRangeParameterEditor)
+    assert (hue_editor.minimum(), hue_editor.maximum()) == (0.0, 1.0)
 
 
 def test_node_category_palette_is_unique_and_applied_to_library_names(
@@ -486,6 +666,15 @@ def test_node_category_palette_is_unique_and_applied_to_library_names(
     assert adjustment.background(0).color().alpha() > 0
     adjustment_names = [adjustment.child(index).text(0) for index in range(adjustment.childCount())]
     assert "Image Add Scalar" in adjustment_names
+
+    utility = roots[-1]
+    utility_children = [utility.child(index) for index in range(utility.childCount())]
+    subgroup_start = next(
+        index for index, child in enumerate(utility_children) if child.childCount() > 0
+    )
+    assert subgroup_start > 0
+    assert all(child.childCount() == 0 for child in utility_children[:subgroup_start])
+    assert all(child.childCount() > 0 for child in utility_children[subgroup_start:])
 
     image_hues = {
         node_category_color(category).hsvHue()

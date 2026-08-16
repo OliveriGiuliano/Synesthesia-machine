@@ -87,6 +87,7 @@ def _scheduler(
     delay_frames: int = 1,
     memory_limit_mb: int = 256,
     node_ids: tuple[UUID, ...] = (HOLD_ID,),
+    node_clock_id: UUID | None = SOURCE_ID,
 ) -> Scheduler:
     definition = create_temporal_definitions()[0]
     parameters, errors = definition.parameter_values(
@@ -101,7 +102,7 @@ def _scheduler(
             input_bindings={"image": InputBinding(PortKey(SOURCE_ID, "image"))},
             input_types={"image": PortType.IMAGE},
             output_types={"image": PortType.IMAGE},
-            clock_id=SOURCE_ID,
+            clock_id=node_clock_id,
             is_static=False,
         )
         for node_id in node_ids
@@ -241,7 +242,7 @@ def test_runtime_shape_descriptor_and_clock_changes_start_new_history(change: st
     options = changes[change]
     changed = _frame(2, **options)  # type: ignore[arg-type]
     following = _frame(3, **options)  # type: ignore[arg-type]
-    scheduler = _scheduler()
+    scheduler = _scheduler(node_clock_id=None if change == "clock" else SOURCE_ID)
     try:
         assert _tick(scheduler, first)[1] is NoData
         assert _tick(scheduler, changed)[1] is NoData

@@ -34,6 +34,7 @@ from synesthesia_machine.persistence.node_migrations import (
     NodeMigrationRegistry,
     NodeMigrationResult,
     NodeMigrationStep,
+    migrate_hue_v1_to_v2,
     migrate_load_video_v0_to_v1,
     migrate_number_v0_to_v1,
 )
@@ -82,6 +83,7 @@ __all__ = [
     "load_graph",
     "media_fingerprint",
     "migrate_graph_data",
+    "migrate_hue_v1_to_v2",
     "migrate_load_video_v0_to_v1",
     "migrate_number_v0_to_v1",
     "migrate_v0_to_v1",

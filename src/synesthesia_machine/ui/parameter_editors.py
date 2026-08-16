@@ -6,7 +6,7 @@ import json
 from collections.abc import Callable
 from typing import cast
 
-from PySide6.QtCore import QPointF, Qt, QTimer, Slot
+from PySide6.QtCore import QEvent, QObject, QPointF, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QColor, QMouseEvent
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
@@ -31,6 +31,7 @@ from synesthesia_machine.contracts import ColorValue, NumericMatrix, PortType
 from synesthesia_machine.graph import LiteralValue
 from synesthesia_machine.nodes import ParameterEditorHint, ParameterSpec
 from synesthesia_machine.ui.tooltips import format_tooltip
+from synesthesia_machine.ui.translations import tr, trf
 from synesthesia_machine.ui.view_models import ParameterViewModel
 
 type ParameterChanged = Callable[[LiteralValue], None]
@@ -69,7 +70,7 @@ def create_parameter_editor(
         raise ValueError(f"No scalar editor is available for {spec.value_type.value}")
 
     editor.setObjectName(f"parameter_{spec.id}")
-    editor.setAccessibleName(spec.label)
+    editor.setAccessibleName(tr(spec.label))
     help_text = parameter_tooltip(spec)
     editor.setToolTip(format_tooltip(help_text))
     editor.setStatusTip(help_text)
@@ -83,27 +84,31 @@ def parameter_tooltip(spec: ParameterSpec) -> str:
     """Build concise inline help even when a node has no authored help text."""
 
     if spec.help_text.strip():
-        return spec.help_text.strip()
-    label = spec.label.casefold()
+        return tr(spec.help_text.strip())
+    label = tr(spec.label).casefold()
     if spec.value_type is PortType.BOOL:
-        summary = f"Turns {label} on or off."
+        summary = trf("Turns {label} on or off.", label=label)
     elif spec.id == "file_path":
-        summary = "Selects the video file this source decodes."
+        summary = tr("Selects the video file this source decodes.")
     elif spec.choices:
-        summary = f"Selects the {label} setting."
+        summary = trf("Selects the {label} setting.", label=label)
     else:
-        summary = f"Sets {label}."
+        summary = trf("Sets {label}.", label=label)
     details: list[str] = []
     if spec.minimum is not None and spec.maximum is not None:
-        details.append(f"Range: {spec.minimum} to {spec.maximum}.")
+        details.append(
+            trf("Range: {minimum} to {maximum}.", minimum=spec.minimum, maximum=spec.maximum)
+        )
     elif spec.minimum is not None:
-        details.append(f"Minimum: {spec.minimum}.")
+        details.append(trf("Minimum: {minimum}.", minimum=spec.minimum))
     elif spec.maximum is not None:
-        details.append(f"Maximum: {spec.maximum}.")
+        details.append(trf("Maximum: {maximum}.", maximum=spec.maximum))
     if spec.choices and len(spec.choices) <= 8:
-        details.append("Options: " + ", ".join(str(value) for value in spec.choices) + ".")
+        details.append(
+            trf("Options: {options}.", options=", ".join(str(value) for value in spec.choices))
+        )
     if spec.connectable:
-        details.append("A connected input overrides this value.")
+        details.append(tr("A connected input overrides this value."))
     return " ".join((summary, *details))
 
 
@@ -177,6 +182,130 @@ class DirectDragSlider(QSlider):
         self.setSliderPosition(value)
 
 
+class _NumericScrubController(QObject):
+    """Translate a horizontal drag over a numeric field into value steps."""
+
+    finished = Signal()
+    _PIXELS_PER_STEP = 2.0
+
+    def __init__(
+        self,
+        line_editor: QLineEdit,
+        read_value: Callable[[], float],
+        write_value: Callable[[float], None],
+        owner: QWidget,
+    ) -> None:
+        super().__init__(owner)
+        self._line_editor = line_editor
+        self._owner = owner
+        self._read_value = read_value
+        self._write_value = write_value
+        self._step = 1.0
+        self._origin_x: float | None = None
+        self._origin_value = 0.0
+        self._scrubbing = False
+        self._line_editor.installEventFilter(self)
+        self._owner.installEventFilter(self)
+
+    @property
+    def is_scrubbing(self) -> bool:
+        return self._scrubbing
+
+    def set_step(self, step: float) -> None:
+        if step <= 0.0:
+            raise ValueError("Numeric scrub step must be positive")
+        self._step = step
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if not isinstance(event, QMouseEvent):
+            return super().eventFilter(watched, event)
+        if watched is self._owner and event.type() == QEvent.Type.MouseButtonRelease:
+            return self._finish_scrub(event) or super().eventFilter(watched, event)
+        if watched is not self._line_editor:
+            return super().eventFilter(watched, event)
+        if event.type() == QEvent.Type.MouseButtonPress:
+            if event.button() is Qt.MouseButton.LeftButton:
+                self._origin_x = event.globalPosition().x()
+                self._origin_value = self._read_value()
+                self._scrubbing = False
+            return super().eventFilter(watched, event)
+        if event.type() == QEvent.Type.MouseMove:
+            if self._origin_x is None or not event.buttons() & Qt.MouseButton.LeftButton:
+                return super().eventFilter(watched, event)
+            delta_x = event.globalPosition().x() - self._origin_x
+            if not self._scrubbing and abs(delta_x) < QApplication.startDragDistance():
+                return super().eventFilter(watched, event)
+            self._scrubbing = True
+            self._line_editor.setCursor(Qt.CursorShape.SizeHorCursor)
+            steps = round(delta_x / self._PIXELS_PER_STEP)
+            self._write_value(self._origin_value + steps * self._step)
+            event.accept()
+            return True
+        if event.type() == QEvent.Type.MouseButtonRelease and self._finish_scrub(event):
+            return True
+        return super().eventFilter(watched, event)
+
+    def _finish_scrub(self, event: QMouseEvent) -> bool:
+        if self._origin_x is None:
+            return False
+        was_scrubbing = self._scrubbing
+        self._origin_x = None
+        self._scrubbing = False
+        if not was_scrubbing:
+            return False
+        self._line_editor.unsetCursor()
+        self.finished.emit()
+        event.accept()
+        return True
+
+
+class ScrubbableDoubleSpinBox(QDoubleSpinBox):
+    """Double spin box that also supports Premiere-style horizontal scrubbing."""
+
+    scrubFinished = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._scrub_controller = _NumericScrubController(
+            self.lineEdit(),
+            lambda: float(self.value()),
+            self.setValue,
+            self,
+        )
+        self._scrub_controller.set_step(0.01)
+        self._scrub_controller.finished.connect(lambda: self.scrubFinished.emit())
+
+    @property
+    def is_scrubbing(self) -> bool:
+        return self._scrub_controller.is_scrubbing
+
+    def set_scrub_step(self, step: float) -> None:
+        self._scrub_controller.set_step(step)
+
+
+class ScrubbableSpinBox(QSpinBox):
+    """Integer spin box that also supports horizontal scrubbing."""
+
+    scrubFinished = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._scrub_controller = _NumericScrubController(
+            self.lineEdit(),
+            lambda: float(self.value()),
+            lambda value: self.setValue(round(value)),
+            self,
+        )
+        self._scrub_controller.finished.connect(lambda: self.scrubFinished.emit())
+
+    @property
+    def is_scrubbing(self) -> bool:
+        return self._scrub_controller.is_scrubbing
+
+    def set_scrub_step(self, step: float) -> None:
+        self._scrub_controller.set_step(step)
+
+
 class _RangeParameterEditor(QWidget):
     """Shared slider and editable value surface for finite metadata bounds."""
 
@@ -184,17 +313,17 @@ class _RangeParameterEditor(QWidget):
         self,
         parameter: ParameterViewModel,
         on_changed: ParameterChanged,
-        value_editor: QSpinBox | QDoubleSpinBox,
+        value_editor: ScrubbableSpinBox | ScrubbableDoubleSpinBox,
     ) -> None:
         super().__init__()
         self._on_changed = on_changed
         self.slider = DirectDragSlider(Qt.Orientation.Horizontal, self)
         self.slider.setObjectName(f"parameter_{parameter.spec.id}_slider")
-        self.slider.setAccessibleName(f"{parameter.spec.label} slider")
+        self.slider.setAccessibleName(trf("{label} slider", label=tr(parameter.spec.label)))
         self.value_editor = value_editor
         self.value_editor.setParent(self)
         self.value_editor.setObjectName(f"parameter_{parameter.spec.id}_value")
-        self.value_editor.setAccessibleName(f"{parameter.spec.label} value")
+        self.value_editor.setAccessibleName(trf("{label} value", label=tr(parameter.spec.label)))
         self.value_editor.setProperty("parameterValue", True)
         self.value_editor.setProperty("parameterValueInput", True)
         self.value_editor.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -216,6 +345,7 @@ class _RangeParameterEditor(QWidget):
         self.slider.valueChanged.connect(self._value_changed)
         self.slider.sliderReleased.connect(self._schedule_commit)
         self.value_editor.valueChanged.connect(self._field_value_changed)
+        self.value_editor.scrubFinished.connect(self._schedule_commit)
 
     @Slot(int)
     def _value_changed(self, position: int) -> None:
@@ -227,7 +357,8 @@ class _RangeParameterEditor(QWidget):
     @Slot()
     def _field_value_changed(self) -> None:
         self._update_slider_from_editor()
-        self._schedule_commit()
+        if not self.value_editor.is_scrubbing:
+            self._schedule_commit()
 
     @Slot()
     def _schedule_commit(self) -> None:
@@ -253,9 +384,10 @@ class FloatRangeParameterEditor(_RangeParameterEditor):
         assert spec.minimum is not None and spec.maximum is not None
         self._minimum = float(spec.minimum)
         self._maximum = float(spec.maximum)
-        value_editor = QDoubleSpinBox()
+        value_editor = ScrubbableDoubleSpinBox()
         value_editor.setDecimals(6)
         value_editor.setRange(self._minimum, self._maximum)
+        value_editor.set_scrub_step(max((self._maximum - self._minimum) / 100.0, 1e-6))
         super().__init__(parameter, on_changed, value_editor)
         self.slider.blockSignals(True)
         self.slider.setRange(0, self._STEPS if self._maximum > self._minimum else 0)
@@ -316,7 +448,7 @@ class IntRangeParameterEditor(_RangeParameterEditor):
         assert spec.minimum is not None and spec.maximum is not None
         self._minimum = int(spec.minimum)
         self._maximum = int(spec.maximum)
-        value_editor = QSpinBox()
+        value_editor = ScrubbableSpinBox()
         value_editor.setRange(self._minimum, self._maximum)
         super().__init__(parameter, on_changed, value_editor)
         self.slider.blockSignals(True)
@@ -360,7 +492,7 @@ class IntRangeParameterEditor(_RangeParameterEditor):
         self._on_changed(int(self.value()))
 
 
-class FloatParameterEditor(QDoubleSpinBox):
+class FloatParameterEditor(ScrubbableDoubleSpinBox):
     def __init__(self, parameter: ParameterViewModel, on_changed: ParameterChanged) -> None:
         super().__init__()
         self._on_changed = on_changed
@@ -369,6 +501,8 @@ class FloatParameterEditor(QDoubleSpinBox):
         maximum = float(spec.maximum) if spec.maximum is not None else 1_000_000_000.0
         self.setRange(minimum, maximum)
         self.setDecimals(6)
+        if spec.minimum is not None and spec.maximum is not None:
+            self.set_scrub_step(max((maximum - minimum) / 100.0, 1e-6))
         self.setKeyboardTracking(False)
         if isinstance(parameter.value, float):
             self.setValue(parameter.value)
@@ -377,9 +511,12 @@ class FloatParameterEditor(QDoubleSpinBox):
         self._commit_timer.timeout.connect(self._flush_commit)
         self.valueChanged.connect(self._commit)
         self.editingFinished.connect(self._commit)
+        self.scrubFinished.connect(self._commit)
 
     @Slot()
     def _commit(self) -> None:
+        if self.is_scrubbing:
+            return
         if self.graphicsProxyWidget() is not None:
             self._commit_timer.start(0)
             return
@@ -390,7 +527,7 @@ class FloatParameterEditor(QDoubleSpinBox):
         self._on_changed(float(self.value()))
 
 
-class IntParameterEditor(QSpinBox):
+class IntParameterEditor(ScrubbableSpinBox):
     def __init__(self, parameter: ParameterViewModel, on_changed: ParameterChanged) -> None:
         super().__init__()
         self._on_changed = on_changed
@@ -406,9 +543,12 @@ class IntParameterEditor(QSpinBox):
         self._commit_timer.timeout.connect(self._flush_commit)
         self.valueChanged.connect(self._commit)
         self.editingFinished.connect(self._commit)
+        self.scrubFinished.connect(self._commit)
 
     @Slot()
     def _commit(self) -> None:
+        if self.is_scrubbing:
+            return
         if self.graphicsProxyWidget() is not None:
             self._commit_timer.start(0)
             return
@@ -483,13 +623,15 @@ class FilePathParameterEditor(QWidget):
         self._on_changed = on_changed
         self.path_edit = QLineEdit(self)
         self.path_edit.setObjectName(f"parameter_{parameter.spec.id}_text")
-        self.path_edit.setAccessibleName(f"{parameter.spec.label} text")
+        self.path_edit.setAccessibleName(trf("{label} text", label=tr(parameter.spec.label)))
         if isinstance(parameter.value, str):
             self.path_edit.setText(parameter.value)
-        self.browse_button = QPushButton("…" if compact else "Browse…", self)
+        self.browse_button = QPushButton("…" if compact else tr("Browse…"), self)
         self.browse_button.setObjectName(f"parameter_{parameter.spec.id}_browse")
-        self.browse_button.setAccessibleName(f"Browse for {parameter.spec.label.casefold()}")
-        self.browse_button.setToolTip("Choose a video file")
+        self.browse_button.setAccessibleName(
+            trf("Browse for {label}", label=tr(parameter.spec.label).casefold())
+        )
+        self.browse_button.setToolTip(tr("Choose a video file"))
         if compact:
             self.browse_button.setFixedWidth(28)
         layout = QHBoxLayout(self)
@@ -528,9 +670,9 @@ class FilePathParameterEditor(QWidget):
         dialog_parent = active_window if active_window is not None else None
         selected, _selected_filter = QFileDialog.getOpenFileName(
             dialog_parent,
-            "Choose video file",
+            tr("Choose video file"),
             self.path_edit.text(),
-            self.VIDEO_FILTER,
+            tr(self.VIDEO_FILTER),
             options=QFileDialog.Option.DontUseNativeDialog,
         )
         if not selected:
@@ -643,7 +785,7 @@ class ChoiceParameterEditor(QComboBox):
 
 class ColorParameterEditor(QPushButton):
     def __init__(self, parameter: ParameterViewModel, on_changed: ParameterChanged) -> None:
-        super().__init__("Choose…")
+        super().__init__(tr("Choose…"))
         self._on_changed = on_changed
         self._value = (
             parameter.value if isinstance(parameter.value, ColorValue) else ColorValue(0, 0, 0)
@@ -661,7 +803,7 @@ class ColorParameterEditor(QPushButton):
         selected = QColorDialog.getColor(
             initial,
             self,
-            "Choose colour",
+            tr("Choose colour"),
             QColorDialog.ColorDialogOption.ShowAlphaChannel,
         )
         if not selected.isValid():

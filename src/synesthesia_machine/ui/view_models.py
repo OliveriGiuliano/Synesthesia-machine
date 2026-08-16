@@ -3,17 +3,25 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from uuid import UUID
 
 from synesthesia_machine.contracts import ParameterValue, PortType
-from synesthesia_machine.graph import GraphSnapshot, LiteralValue, ValidationIssue, ValidationReport
+from synesthesia_machine.graph import (
+    CompilationResult,
+    GraphCompiler,
+    GraphSnapshot,
+    LiteralValue,
+    ValidationIssue,
+    ValidationReport,
+)
 from synesthesia_machine.nodes import (
     NodeDefinition,
     NodeRegistry,
     ParameterGroupSpec,
     ParameterSpec,
 )
+from synesthesia_machine.ui.translations import tr
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,7 +85,25 @@ def project_graph(
     snapshot: GraphSnapshot,
     registry: NodeRegistry,
     report: ValidationReport,
+    *,
+    compilation: CompilationResult | None = None,
 ) -> GraphViewModel:
+    compilation = compilation or GraphCompiler(registry).compile(snapshot)
+    resolved_types: dict[tuple[UUID, str, bool], PortType] = {}
+    if compilation.plan is not None:
+        for compiled in compilation.plan.nodes:
+            resolved_types.update(
+                {
+                    (compiled.node_id, port_id, False): value_type
+                    for port_id, value_type in compiled.input_types.items()
+                }
+            )
+            resolved_types.update(
+                {
+                    (compiled.node_id, port_id, True): value_type
+                    for port_id, value_type in compiled.output_types.items()
+                }
+            )
     incoming = {
         (connection.destination_node_id, connection.destination_port_id)
         for connection in snapshot.connections
@@ -104,8 +130,10 @@ def project_graph(
             PortViewModel(
                 node.id,
                 port.id,
-                port.label,
-                _type_name(definition, port.id, False, parameters),
+                tr(port.label),
+                resolved_types[(node.id, port.id, False)].value
+                if (node.id, port.id, False) in resolved_types
+                else _type_name(definition, port.id, False, parameters),
                 False,
                 connected=(node.id, port.id) in incoming,
             )
@@ -115,7 +143,7 @@ def project_graph(
             PortViewModel(
                 node.id,
                 parameter.id,
-                parameter.label,
+                tr(parameter.label),
                 parameter.connected_port_type.value
                 if parameter.connected_port_type is not None
                 else parameter.value_type.value,
@@ -130,37 +158,59 @@ def project_graph(
             PortViewModel(
                 node.id,
                 port.id,
-                port.label,
-                _type_name(definition, port.id, True, parameters),
+                tr(port.label),
+                resolved_types[(node.id, port.id, True)].value
+                if (node.id, port.id, True) in resolved_types
+                else _type_name(definition, port.id, True, parameters),
                 True,
             )
             for port in definition.outputs
         )
         for port in (*inputs, *connectable, *outputs):
             type_names[(node.id, port.port_id, port.is_output)] = port.type_name
+        primary_input_type = next(
+            (
+                resolved_types[(node.id, port.id, False)]
+                for port in definition.inputs
+                if (node.id, port.id, False) in resolved_types
+            ),
+            None,
+        )
         parameter_rows = tuple(
             ParameterViewModel(
-                parameter,
+                replace(
+                    parameter,
+                    label=tr(parameter.label),
+                    help_text=tr(parameter.help_text),
+                ),
                 node.parameters.get(parameter.id, parameter.default),
                 (node.id, parameter.id) in incoming,
             )
             for parameter in definition.parameters
+            if not parameter.applicable_input_types
+            or primary_input_type is None
+            or primary_input_type in parameter.applicable_input_types
         )
         parameter_by_id = {parameter.spec.id: parameter for parameter in parameter_rows}
         parameter_groups = tuple(
             ParameterGroupViewModel(
-                group,
-                tuple(parameter_by_id[parameter_id] for parameter_id in group.parameter_ids),
+                replace(group, label=tr(group.label)),
+                tuple(
+                    parameter_by_id[parameter_id]
+                    for parameter_id in group.parameter_ids
+                    if parameter_id in parameter_by_id
+                ),
             )
             for group in definition.parameter_groups
+            if any(parameter_id in parameter_by_id for parameter_id in group.parameter_ids)
         )
         nodes.append(
             NodeViewModel(
                 node.id,
                 node.type_id,
-                node.user_label or definition.display_name,
-                definition.category,
-                definition.description,
+                node.user_label or tr(definition.display_name),
+                tr(definition.category),
+                tr(definition.description),
                 node.position,
                 (*inputs, *connectable),
                 outputs,
