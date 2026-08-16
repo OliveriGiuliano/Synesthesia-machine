@@ -258,6 +258,14 @@ class CurveRuntime(_RuntimeBase):
         return {"value": round(result) if isinstance(value, int) else result}
 
 
+def _validate_normalize_parameters(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
+    output_minimum = _number(parameters["output_minimum"])
+    output_maximum = _number(parameters["output_maximum"])
+    if output_maximum < output_minimum:
+        return ("output maximum must not be below output minimum",)
+    return ()
+
+
 def _create_all_definitions() -> tuple[NodeDefinition, ...]:
     return (
         NodeDefinition(
@@ -372,6 +380,7 @@ def _create_all_definitions() -> tuple[NodeDefinition, ...]:
             ExecutionKind.STATELESS,
             NormalizeRuntime,
             aliases=("normalize range", "unit range", "scale values"),
+            parameter_validator=_validate_normalize_parameters,
         ),
         NodeDefinition(
             "synmachine.utility.curve",

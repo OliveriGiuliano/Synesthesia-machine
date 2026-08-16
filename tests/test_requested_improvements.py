@@ -247,6 +247,25 @@ def test_dynamic_normalize_curve_and_filter_preserve_channel_metadata() -> None:
     assert output.data.shape == source.data.shape
 
 
+def test_normalize_definition_and_randomization_reject_reversed_output_range() -> None:
+    registry = create_application_registry()
+    definition = registry.require("synmachine.utility.normalize")
+
+    _values, errors = definition.parameter_values({"output_minimum": 1.0, "output_maximum": 0.0})
+
+    assert errors == ["output maximum must not be below output minimum"]
+
+    document = GraphDocument()
+    normalize_id = document.add_node(definition.type_id)
+    randomized = randomize_graph_parameters(document.snapshot(), registry, {normalize_id}, seed=24)
+    normalize = randomized.node(normalize_id)
+
+    assert normalize is not None
+    assert float(normalize.parameters["output_maximum"]) >= float(
+        normalize.parameters["output_minimum"]
+    )
+
+
 def test_random_graphs_are_complete_and_valid_across_seeds() -> None:
     registry = create_application_registry()
     compiler = GraphCompiler(registry)
