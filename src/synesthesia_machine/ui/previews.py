@@ -48,6 +48,11 @@ class ImagePreviewWidget(QWidget):
         self._pixmap = QPixmap.fromImage(image_preview_to_qimage(preview))
         self.update()
 
+    def clear_preview(self) -> None:
+        self.latest_preview = None
+        self._pixmap = QPixmap()
+        self.update()
+
     def paintEvent(self, event: QPaintEvent) -> None:
         del event
         painter = QPainter(self)
@@ -92,6 +97,10 @@ class NotePreviewWidget(QWidget):
 
     def set_preview(self, preview: NotePreview) -> None:
         self.latest_preview = preview
+        self.update()
+
+    def clear_preview(self) -> None:
+        self.latest_preview = None
         self.update()
 
     def note_axis_orientation(self) -> Qt.Orientation:
@@ -261,6 +270,10 @@ class ImagePreviewPanel(QWidget):
             )
         )
 
+    def clear_preview(self) -> None:
+        self.image_widget.clear_preview()
+        self.image_caption.setText(tr("Waiting for Display Image Data…"))
+
     def retranslate(self) -> None:
         self.setAccessibleName(tr("Image preview"))
         self.image_widget.setAccessibleName(tr("Image data preview"))
@@ -297,6 +310,10 @@ class NotePreviewPanel(QWidget):
                 sequence=preview.sequence,
             )
         )
+
+    def clear_preview(self) -> None:
+        self.note_widget.clear_preview()
+        self.note_caption.setText(tr("Waiting for Note Visualizer…"))
 
     def retranslate(self) -> None:
         self.setAccessibleName(tr("Note visualizer"))

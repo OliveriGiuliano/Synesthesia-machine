@@ -174,6 +174,7 @@ class MainWindow(QMainWindow):
         self._image_sequences: dict[tuple[UUID, str], int] = {}
         self._note_sequences: dict[UUID, int] = {}
         self._canvas_value_sequences: dict[tuple[UUID, str], int] = {}
+        self._image_dock_preview_sources: frozenset[tuple[UUID, str]] = frozenset()
         self._engine_closed = False
         self._engine_failure_signature: tuple[object, ...] | None = None
         self._source_error_signature: tuple[tuple[UUID, str], ...] = ()
@@ -697,9 +698,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(trf("Engine restart failed: {error}", error=error), 8000)
             self._refresh_engine_status()
             return
-        self._image_sequences.clear()
-        self._note_sequences.clear()
-        self._canvas_value_sequences.clear()
+        self._clear_runtime_previews()
         self._engine_failure_signature = None
         if activation is None:
             snapshot = self.session.document.snapshot()
@@ -1137,6 +1136,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{name}[*] — Synesthesia Machine {__version__}")
         self.setWindowModified(self.session.is_dirty)
         snapshot = self.session.document.snapshot()
+        self._image_dock_preview_sources = self._image_visualizer_source_keys(snapshot)
         self._node_count.setText(
             trf(
                 "{nodes} node(s) · {cables} cable(s) · {groups} group/comment(s)",
@@ -1306,9 +1306,7 @@ class MainWindow(QMainWindow):
 
     def _apply_engine_activation(self, activation: EngineActivation) -> None:
         if activation.activated:
-            self._image_sequences.clear()
-            self._note_sequences.clear()
-            self._canvas_value_sequences.clear()
+            self._clear_runtime_previews()
             self.statusBar().showMessage(
                 trf(
                     "Activated graph revision {revision}",
@@ -1367,6 +1365,29 @@ class MainWindow(QMainWindow):
                 roots.add(connection.source_node_id)
         return roots
 
+    @staticmethod
+    def _image_visualizer_source_keys(
+        snapshot: GraphSnapshot,
+    ) -> frozenset[tuple[UUID, str]]:
+        visualizer_ids = {
+            node.id
+            for node in snapshot.nodes
+            if node.type_id in {DISPLAY_IMAGE_DATA_TYPE_ID, CHANNEL_DISPLAY_TYPE_ID}
+        }
+        return frozenset(
+            (connection.source_node_id, connection.source_port_id)
+            for connection in snapshot.connections
+            if connection.destination_node_id in visualizer_ids
+        )
+
+    def _clear_runtime_previews(self) -> None:
+        self._image_sequences.clear()
+        self._note_sequences.clear()
+        self._canvas_value_sequences.clear()
+        self.scene.clear_connection_previews()
+        self.image_preview_panel.clear_preview()
+        self.note_preview_panel.clear_preview()
+
     @Slot(bool)
     def _on_image_preview_visibility_changed(self, visible: bool) -> None:
         if not visible:
@@ -1396,11 +1417,12 @@ class MainWindow(QMainWindow):
         except (RuntimeError, TimeoutError):
             return
         for preview in image_previews:
-            self._image_sequences[(preview.owner_id, preview.source_port_id)] = preview.sequence
+            key = (preview.owner_id, preview.source_port_id)
+            self._image_sequences[key] = preview.sequence
             self.scene.set_connection_image_preview(
                 preview.owner_id, preview.source_port_id, image_preview_to_qimage(preview)
             )
-            if image_visible:
+            if image_visible and key in self._image_dock_preview_sources:
                 self.image_preview_panel.show_preview(preview)
         for preview in value_previews:
             self._canvas_value_sequences[(preview.owner_id, preview.source_port_id)] = (

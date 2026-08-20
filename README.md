@@ -107,7 +107,7 @@ Any deviation from that baseline requires an Architecture Decision Record under 
 
 Current module boundaries include:
 
-- `src/synesthesia_machine/contracts`: immutable runtime values, protocol-v10 process messages,
+- `src/synesthesia_machine/contracts`: immutable runtime values, protocol-v13 process messages,
   compact node-memory diagnostics, and the final-shaped `EngineClient` API;
 - `src/synesthesia_machine/graph`, `nodes`, and `runtime`: Qt-free graph compilation, atomic plan
   replacement, process supervision, bounded source mailboxes, and shared-preview transport;

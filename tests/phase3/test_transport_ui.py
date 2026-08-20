@@ -41,7 +41,6 @@ from synesthesia_machine.ui.previews import NotePreviewWidget, note_rainbow_colo
 
 SOURCE_A = UUID("00000000-0000-0000-0000-000000000701")
 SOURCE_B = UUID("00000000-0000-0000-0000-000000000702")
-IMAGE_NODE = UUID("00000000-0000-0000-0000-000000000703")
 NOTE_NODE = UUID("00000000-0000-0000-0000-000000000704")
 MIDI_OUTPUT_NODE = UUID("00000000-0000-0000-0000-000000000705")
 
@@ -328,8 +327,13 @@ def test_preview_and_metrics_polling_update_ui_with_sequence_coalescing(
     runtime_window: tuple[MainWindow, _RecordingEngineClient],
 ) -> None:
     window, client = runtime_window
+    source_id = window.session.add_node("synmachine.input.load_video", (0.0, 0.0))
+    display_id = window.session.add_node(
+        "synmachine.visualization.display_image_data", (300.0, 0.0)
+    )
+    window.session.add_connection(source_id, "image", display_id, "image")
     data = freeze_uint8_preview(np.full((2, 3, 3), 127, dtype=np.uint8))
-    image = ImagePreview(IMAGE_NODE, "image", 1, 7, 3, 2, 3, data)
+    image = ImagePreview(source_id, "image", 1, 7, 3, 2, 3, data)
     notes = NotePreview(NOTE_NODE, 1, 7, (NoteActivity(0, 60, 100),))
     client.image_previews = (image,)
     client.note_previews = (notes,)
@@ -343,11 +347,75 @@ def test_preview_and_metrics_polling_update_ui_with_sequence_coalescing(
     assert window.image_preview_panel.image_widget.isVisible()
     assert window.note_preview_panel.note_widget.isVisible()
     assert "sequence 1" in window.image_preview_panel.image_caption.text()
-    assert window._image_sequences == {(IMAGE_NODE, "image"): 1}
+    assert window._image_sequences == {(source_id, "image"): 1}
     assert window._note_sequences == {NOTE_NODE: 1}
     assert "42 ticks" in window._engine_status.text()
     assert "in/process/preview 0.0/29.5/0.0 FPS" in window._engine_status.text()
     assert "drops 3" in window._engine_status.text()
+
+
+def test_image_dock_only_uses_the_source_feeding_an_image_visualizer(
+    runtime_window: tuple[MainWindow, _RecordingEngineClient],
+    qapp: QApplication,
+) -> None:
+    window, client = runtime_window
+    source_id = window.session.add_node("synmachine.input.load_video", (0.0, 0.0))
+    resize_id = window.session.add_node("synmachine.image.resize", (300.0, 0.0))
+    display_id = window.session.add_node(
+        "synmachine.visualization.display_image_data", (600.0, 0.0)
+    )
+    source_connection = window.session.add_connection(source_id, "image", resize_id, "image")
+    display_connection = window.session.add_connection(resize_id, "image", display_id, "image")
+    qapp.processEvents()
+    data = freeze_uint8_preview(np.full((2, 3, 3), 127, dtype=np.uint8))
+    display_preview = ImagePreview(resize_id, "image", 1, 7, 3, 2, 3, data)
+    unrelated_preview = ImagePreview(source_id, "image", 1, 7, 3, 2, 3, data)
+    client.image_previews = (display_preview, unrelated_preview)
+
+    window._poll_previews()
+
+    assert window.image_preview_panel.image_widget.latest_preview is display_preview
+    assert window.scene.connection_items[source_connection]._image is not None
+    assert window.scene.connection_items[display_connection]._image is not None
+
+
+def test_successful_activation_clears_all_stale_runtime_previews(
+    runtime_window: tuple[MainWindow, _RecordingEngineClient],
+    qapp: QApplication,
+) -> None:
+    window, _client = runtime_window
+    number_id = window.session.add_node("synmachine.utility.number", (0.0, 0.0))
+    math_id = window.session.add_node("synmachine.utility.math", (300.0, 0.0))
+    value_connection = window.session.add_connection(number_id, "value", math_id, "a")
+    source_id = window.session.add_node("synmachine.input.load_video", (0.0, 200.0))
+    display_id = window.session.add_node(
+        "synmachine.visualization.display_image_data", (300.0, 200.0)
+    )
+    image_connection = window.session.add_connection(source_id, "image", display_id, "image")
+    qapp.processEvents()
+    thumbnail = QImage(8, 8, QImage.Format.Format_RGB32)
+    data = freeze_uint8_preview(np.full((2, 3, 3), 127, dtype=np.uint8))
+    image_preview = ImagePreview(source_id, "image", 1, 7, 3, 2, 3, data)
+    note_preview = NotePreview(NOTE_NODE, 1, 7, (NoteActivity(0, 60, 100),))
+    window.scene.set_connection_value_preview(number_id, "value", "42")
+    window.scene.set_connection_image_preview(source_id, "image", thumbnail)
+    window.image_preview_panel.show_preview(image_preview)
+    window.note_preview_panel.show_preview(note_preview)
+    window._image_sequences[(source_id, "image")] = 1
+    window._note_sequences[NOTE_NODE] = 1
+    window._canvas_value_sequences[(number_id, "value")] = 1
+
+    window._apply_engine_activation(
+        EngineActivation(window.session.document.revision, ValidationReport(), True)
+    )
+
+    assert window.scene.connection_items[value_connection]._value_text is None
+    assert window.scene.connection_items[image_connection]._image is None
+    assert window.image_preview_panel.image_widget.latest_preview is None
+    assert window.note_preview_panel.note_widget.latest_preview is None
+    assert window._image_sequences == {}
+    assert window._note_sequences == {}
+    assert window._canvas_value_sequences == {}
 
 
 def test_image_and_note_visualizers_have_independent_dock_tabs_and_demand_roots(

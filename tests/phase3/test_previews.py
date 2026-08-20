@@ -18,6 +18,7 @@ from synesthesia_machine.contracts import (
     ImageFrame,
     MidiNoteKey,
     MidiStateFrame,
+    PortType,
     freeze_uint8_preview,
     read_only_float32,
 )
@@ -27,7 +28,14 @@ from synesthesia_machine.nodes.visualization import (
     DISPLAY_IMAGE_DATA_TYPE_ID,
     NOTE_VISUALIZER_TYPE_ID,
 )
-from synesthesia_machine.runtime import ExecutionPlan, PortKey, PreviewBroker, TickResult
+from synesthesia_machine.runtime import (
+    CompiledNode,
+    ExecutionPlan,
+    InputBinding,
+    PortKey,
+    PreviewBroker,
+    TickResult,
+)
 
 SOURCE_ID = UUID("00000000-0000-0000-0000-000000000601")
 IMAGE_VISUALIZER_ID = UUID("00000000-0000-0000-0000-000000000602")
@@ -96,6 +104,31 @@ def _note_plan() -> ExecutionPlan:
     result = GraphCompiler(create_application_registry()).compile(document.snapshot())
     assert result.plan is not None
     return result.plan
+
+
+def _many_image_target_plan(count: int) -> ExecutionPlan:
+    registry = create_application_registry()
+    port_ids = tuple(f"image_{index}" for index in range(count))
+    producer = CompiledNode(
+        SOURCE_ID,
+        registry.require("synmachine.input.load_video"),
+        output_types={port_id: PortType.IMAGE for port_id in port_ids},
+    )
+    consumers = tuple(
+        CompiledNode(
+            UUID(int=0x700 + index),
+            registry.require(DISPLAY_IMAGE_DATA_TYPE_ID),
+            input_bindings={"image": InputBinding(PortKey(SOURCE_ID, port_id))},
+            input_types={"image": PortType.IMAGE},
+        )
+        for index, port_id in enumerate(port_ids)
+    )
+    return ExecutionPlan(
+        UUID("00000000-0000-0000-0000-000000000699"),
+        1,
+        (producer, *consumers),
+        frozenset(consumer.node_id for consumer in consumers),
+    )
 
 
 def test_visualizer_definitions_are_permanent_demand_roots_with_phase3_defaults() -> None:
@@ -167,6 +200,28 @@ def test_image_preview_throttles_to_configured_rate_and_coalesces_latest_tick() 
     assert preview.sequence == 2 and preview.tick_index == 3
     assert np.all(preview.data == 255)
     assert broker.preview_fps() == 2.0
+    clock.value = 2.0
+    assert broker.preview_fps() == 0.0
+
+
+def test_preview_fps_counts_all_publications_above_the_old_fixed_history_cap() -> None:
+    clock = _Clock()
+    broker = PreviewBroker(monotonic=clock)
+    plan = _many_image_target_plan(9)
+    broker.configure(plan)
+
+    for tick_index in range(30):
+        clock.value = tick_index / 30.0
+        frame = _image(np.zeros((1, 1, 3), dtype=np.float32), tick_index + 1)
+        broker.publish(
+            TickResult(
+                {PortKey(SOURCE_ID, f"image_{port_index}"): frame for port_index in range(9)},
+                (),
+                {},
+            )
+        )
+
+    assert broker.preview_fps() == 270.0
     clock.value = 2.0
     assert broker.preview_fps() == 0.0
 

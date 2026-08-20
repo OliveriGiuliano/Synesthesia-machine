@@ -322,7 +322,7 @@ def test_channel_display_resizes_and_throttles_without_publishing_float32() -> N
     assert broker.poll_images()[0].tick_index == 1
     now[0] = 1.0 / 30.0
     broker.publish(TickResult({source: _channel(channel.data, tick_index=3)}, (), {}))
-    assert broker.poll_images({source.node_id: 1})[0].tick_index == 3
+    assert broker.poll_images({(source.node_id, source.port_id): 1})[0].tick_index == 3
 
 
 def test_channel_display_is_a_default_demand_root() -> None:

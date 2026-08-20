@@ -100,7 +100,7 @@ class PreviewBroker:
         self._value_previews: dict[tuple[UUID, str], ValuePreview] = {}
         self._value_sequences: dict[tuple[UUID, str], int] = {}
         self._value_last_published: dict[tuple[UUID, str], float] = {}
-        self._image_publication_times: deque[float] = deque(maxlen=240)
+        self._image_publication_times: deque[float] = deque()
         self._generation = 0
 
     def configure(self, plan: ExecutionPlan) -> None:
@@ -247,6 +247,7 @@ class PreviewBroker:
                 self._image_sequences[key] = sequence
                 self._image_last_published[key] = now
                 self._image_publication_times.append(now)
+            self._trim_image_publication_times_locked(now)
             for target, value, notes in note_publications:
                 if not _is_due(
                     self._note_last_published.get(target.node_id), now, target.interval_s
@@ -340,10 +341,13 @@ class PreviewBroker:
 
         now = self._monotonic()
         with self._lock:
-            cutoff = now - 1.0
-            while self._image_publication_times and self._image_publication_times[0] < cutoff:
-                self._image_publication_times.popleft()
+            self._trim_image_publication_times_locked(now)
             return float(len(self._image_publication_times))
+
+    def _trim_image_publication_times_locked(self, now: float) -> None:
+        cutoff = now - 1.0
+        while self._image_publication_times and self._image_publication_times[0] < cutoff:
+            self._image_publication_times.popleft()
 
     def _clear_locked(self) -> None:
         self._image_previews.clear()

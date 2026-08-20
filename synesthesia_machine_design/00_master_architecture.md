@@ -676,7 +676,9 @@ Control path:
 Preview path:
 
 - shared-memory slots created and owned by the UI client;
+- image/channel slots are keyed by producing node and output port and shared by all fan-out cables;
 - engine writes a resized uint8 preview plus a monotonically increasing sequence number;
+- compact scalar value previews use bounded control messages rather than shared memory;
 - UI polls at a capped rate and copies only when the sequence changes;
 - slots are recreated when dimensions change;
 - cleanup is idempotent after either process crashes.
@@ -685,10 +687,16 @@ Do not send full-rate float32 image arrays through queues.
 
 ### 10.6 Preview policy
 
-- Display Image nodes default to 30 preview fps, independently configurable down to 5 fps.
-- Preview maximum dimension defaults to 800 pixels.
+- Every connected `IMAGE` or `CHANNEL` producer port may publish one coalesced preview for all of its
+  visible connection pills. `INT` and `FLOAT` producer ports may publish compact text previews.
+- Image/channel previews use a fixed application-wide cap of 30 publications per second per producer
+  port and a maximum dimension of 800 pixels. Scalar previews use a 60 Hz cap.
+- Display Image Data and Channel Display nodes select which producer preview feeds the image dock;
+  unrelated producer previews update their cable pills without replacing the dock contents.
 - Preview publication happens after node processing and does not block the graph if the UI has not consumed the previous preview.
 - Conversion to uint8 applies finite-value sanitization and the colour-space display transform.
+- Per-connection preview visibility is persisted and undoable. A visible pill can demand an otherwise
+  unused producer; hiding it removes that demand unless another sink or visualizer needs the chain.
 
 ### 10.7 Process supervision
 
@@ -893,7 +901,7 @@ Each node item contains:
 - ordinary parameter rows;
 - output rows;
 - compact error/warning indicator;
-- optional small live preview only for designated nodes.
+- compact live image or scalar pills on eligible connections.
 
 Node graphics and domain state are separate. The scene item observes a `NodeViewModel`; it does not mutate the graph model directly.
 
@@ -1554,7 +1562,11 @@ Input `MIDI_STATE`. No engine-side heavy rendering. Engine publishes compact not
 
 #### Display Image Data
 
-Input `IMAGE` or a separate Channel Display definition for `CHANNEL`. Parameters: preview FPS, fit mode, checkerboard alpha, value display mode, histogram toggle. The node is a demand root only while visible or pinned, unless configured to remain active.
+Input `IMAGE` or a separate Channel Display definition for `CHANNEL`. Parameters: fit mode,
+checkerboard alpha, value display mode, histogram toggle. The node selects the producer-port preview
+shown in the image dock; the same fixed-rate preview also feeds every matching connection pill. It is
+a demand root while the image dock is visible. A visible connection pill can independently demand its
+producer chain.
 
 ---
 ## 17. Repository structure and coding boundaries

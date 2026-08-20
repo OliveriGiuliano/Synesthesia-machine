@@ -12,7 +12,8 @@ from uuid import UUID, uuid4
 from synesthesia_machine.contracts import ColorValue, NumericMatrix
 from synesthesia_machine.graph import ConnectionModel, GraphSnapshot, LiteralValue, NodeModel
 
-CLIPBOARD_FRAGMENT_VERSION = 1
+CLIPBOARD_FRAGMENT_VERSION = 2
+_SUPPORTED_CLIPBOARD_FRAGMENT_VERSIONS = frozenset({1, CLIPBOARD_FRAGMENT_VERSION})
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +91,7 @@ def remap_fragment(
             source_port_id=connection.source_port_id,
             destination_node_id=node_ids[connection.destination_node_id],
             destination_port_id=connection.destination_port_id,
+            ui_state=connection.ui_state,
         )
         for connection in sorted(fragment.connections, key=lambda item: str(item.id))
     )
@@ -115,7 +117,7 @@ def fragment_to_json(fragment: ClipboardFragment) -> str:
 
 
 def fragment_from_json(text: str) -> ClipboardFragment:
-    """Parse and strictly validate the current clipboard fragment format."""
+    """Parse supported clipboard formats and normalize them to the current version."""
 
     try:
         value = cast(object, json.loads(text))
@@ -123,20 +125,24 @@ def fragment_from_json(text: str) -> ClipboardFragment:
         raise ValueError(f"Invalid clipboard JSON: {error.msg}") from error
     data = _object(value, "$")
     if set(data) != {"fragment_version", "nodes", "connections"}:
-        msg = "Clipboard fragment fields do not match version 1"
+        msg = "Clipboard fragment fields do not match the supported format"
         raise ValueError(msg)
     version = data["fragment_version"]
     if isinstance(version, bool) or not isinstance(version, int):
         msg = "Clipboard fragment version must be an integer"
+        raise ValueError(msg)
+    if version not in _SUPPORTED_CLIPBOARD_FRAGMENT_VERSIONS:
+        msg = f"Unsupported clipboard fragment version: {version}"
         raise ValueError(msg)
     raw_nodes = _list(data["nodes"], "$.nodes")
     raw_connections = _list(data["connections"], "$.connections")
     return ClipboardFragment(
         nodes=tuple(_node_from_data(item, index) for index, item in enumerate(raw_nodes)),
         connections=tuple(
-            _connection_from_data(item, index) for index, item in enumerate(raw_connections)
+            _connection_from_data(item, index, version=version)
+            for index, item in enumerate(raw_connections)
         ),
-        version=version,
+        version=CLIPBOARD_FRAGMENT_VERSION,
     )
 
 
@@ -163,6 +169,9 @@ def _connection_to_data(connection: ConnectionModel) -> dict[str, object]:
         "source_port_id": connection.source_port_id,
         "destination_node_id": str(connection.destination_node_id),
         "destination_port_id": connection.destination_port_id,
+        "ui_state": {
+            key: _literal_to_data(value) for key, value in sorted(connection.ui_state.items())
+        },
     }
 
 
@@ -205,7 +214,7 @@ def _node_from_data(value: object, index: int) -> NodeModel:
     )
 
 
-def _connection_from_data(value: object, index: int) -> ConnectionModel:
+def _connection_from_data(value: object, index: int, *, version: int) -> ConnectionModel:
     path = f"$.connections[{index}]"
     data = _object(value, path)
     expected = {
@@ -215,14 +224,17 @@ def _connection_from_data(value: object, index: int) -> ConnectionModel:
         "destination_node_id",
         "destination_port_id",
     }
+    if version >= 2:
+        expected.add("ui_state")
     if set(data) != expected:
-        raise ValueError(f"{path} fields do not match version 1")
+        raise ValueError(f"{path} fields do not match version {version}")
     return ConnectionModel(
         id=_uuid(data["id"], f"{path}.id"),
         source_node_id=_uuid(data["source_node_id"], f"{path}.source_node_id"),
         source_port_id=_string(data["source_port_id"], f"{path}.source_port_id"),
         destination_node_id=_uuid(data["destination_node_id"], f"{path}.destination_node_id"),
         destination_port_id=_string(data["destination_port_id"], f"{path}.destination_port_id"),
+        ui_state=(_literal_mapping(data["ui_state"], f"{path}.ui_state") if version >= 2 else {}),
     )
 
 

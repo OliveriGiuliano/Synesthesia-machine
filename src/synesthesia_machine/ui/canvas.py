@@ -179,6 +179,13 @@ class GraphScene(QGraphicsScene):
             ):
                 item.set_image_preview(image)
 
+    def clear_connection_previews(self) -> None:
+        """Remove runtime payloads retained by stable connection graphics items."""
+
+        for item in self.connection_items.values():
+            item.set_value_preview(None)
+            item.set_image_preview(None)
+
     def _connection_preview_visible(self, connection_id: UUID) -> bool:
         connection = self.session.document.connection(connection_id)
         if connection is None:

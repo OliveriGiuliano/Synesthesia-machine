@@ -145,6 +145,7 @@ def test_paste_and_duplicate_restore_remapped_fragment_exactly(
     first = source.add_node("synmachine.utility.number", node_id=NODE_A)
     second = source.add_node("synmachine.utility.math", node_id=NODE_B)
     source.add_connection(first, "value", second, "a", connection_id=CONNECTION_A)
+    source.set_connection_ui_state(CONNECTION_A, PREVIEW_VISIBLE_KEY, False)
     identifiers = iter((NODE_C, NODE_D, CONNECTION_B))
     fragment = remap_fragment(
         copy_fragment(source.snapshot(), {first, second}), id_factory=lambda: next(identifiers)
@@ -157,6 +158,9 @@ def test_paste_and_duplicate_restore_remapped_fragment_exactly(
     after = semantic_state(target)
     assert len(target.nodes) == 2
     assert len(target.connections) == 1
+    pasted_connection = target.connection(CONNECTION_B)
+    assert pasted_connection is not None
+    assert pasted_connection.ui_state == {PREVIEW_VISIBLE_KEY: False}
     cycle(stack, target, before, after)
 
 
