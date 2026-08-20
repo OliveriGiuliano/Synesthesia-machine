@@ -19,8 +19,9 @@ schema-versioned JSON persistence.
 1. Read the user request and define the smallest coherent scope.
 2. Run `git status --short` before editing. The worktree may already contain user changes; preserve
    them and do not reformat, revert, stage, or overwrite unrelated work.
-3. Read `README.md`, the local package `README.md` for every package you will touch, the relevant
-   tests, and the public package facade (`__init__.py`) before changing an interface.
+3. Read `README.md`, `docs/agent-playbooks/README.md`, every playbook it routes to for the planned
+   change, the local package `README.md` for every package you will touch, the relevant tests, and the
+   public package facade (`__init__.py`) before changing an interface.
 4. Consult `synesthesia_machine_design/00_master_architecture.md` for the architectural baseline and
    the accepted records under `docs/adr/` for binding decisions. A deliberate architectural
    deviation requires a new ADR before implementation.
@@ -179,201 +180,61 @@ Pyright. Prefer formatting only the files in scope instead of mechanically rewri
 
 ## Change playbooks
 
-### Adding or changing a node
+Detailed procedures live in `docs/agent-playbooks/`. Read the routing index and every applicable
+playbook before editing. A task may require several playbooks; package boundaries do not imply that
+only one applies.
 
-1. Inspect `nodes/base.py`, a neighboring implementation, its package `__init__.py`, and the relevant
-   conformance tests before coding.
-2. Put reusable image/math behavior in `media/` or another headless helper when it is not inherently
-   node-specific. Keep the node runtime as orchestration and contract enforcement.
-3. Define immutable metadata with a stable namespaced `type_id`, stable input/output/parameter IDs,
-   an `implementation_version`, explicit execution/cache behavior, validated defaults, and a runtime
-   factory. Search the complete registry before selecting an ID.
-4. Register the definition through the relevant `create_*_definitions()` or utility registry factory.
-   `nodes/composition.py` is the headless built-in composition point; `app/registry.py` is only its
-   application-facing compatibility name.
-5. Test defaults and invalid parameters, nominal behavior, `NoData`, non-finite values, metadata and
-   immutability, dynamic type/clock resolution, state reset/close, compilation, and persistence as
-   applicable. Image/channel nodes should reuse the Phase 5 conformance helpers where suitable.
-6. If persisted behavior changes, preserve IDs. Bump `implementation_version` and add a pure,
-   sequential node migration when an old payload needs transformation. Do not put compatibility
-   branches into the runtime.
-7. Update the appropriate node/reference documentation and an example or catalogue acceptance
-   artifact. The current disconnected catalogue is generated deterministically with:
+### External playbook loading
 
-   ```powershell
-   uv run python -m tools.generate_catalogue
-   ```
+OpenCode does not automatically expand referenced instruction files. When this file routes a task to
+`docs/agent-playbooks/*.md`, use the file-reading tool to load every applicable playbook before
+editing. Treat loaded playbooks as mandatory instructions. Load only task-relevant playbooks, but
+follow their references when required.
 
-   This command overwrites `examples/phase6/catalogue.synmachine.json`. Run it only when the built-in
-   registry intentionally changes. Do not rewrite a historical phase catalogue unless the task
-   explicitly calls for it.
+### Mandatory cross-cutting change audit
 
-### Changing graph models, compilation, or scheduling
+Before editing a change that spans more than one of graph models, persistence, runtime, engine IPC,
+or UI, write a short impact matrix in working notes or commentary. It must identify:
 
-- Keep authoring models Qt-free and snapshots immutable. Mutations belong on `GraphDocument` and must
-  advance its revision exactly when state changes.
-- Validation should produce stable, navigable issue codes rather than UI dialogs or generic strings.
-- Compilation must be deterministic: stable ordering, type resolution, cycle rejection, clock-domain
-  analysis, demand reachability, and execution-plan construction should not depend on dict/set order.
-- Preserve atomic live-edit behavior. Invalid graph revisions remain editable in the UI but must not
-  replace the last valid active runtime.
-- When changing state-retention keys or plan replacement, test both reusable and invalidated runtime
-  paths, including factory/reset/close failures.
-- Add focused Phase 1 tests and relevant in-process/process integration coverage. Scheduler changes
-  often also require Phase 3, Phase 4, Phase 5 conformance, and Phase 8 profiling checks.
+- the authoritative owner of each changed value and every consumer;
+- every explicit constructor, clone, `dataclasses.replace`, remap, serializer, migration, IPC payload,
+  undo command, cache, and view-model/UI projection affected by changed fields;
+- lifecycle behavior on successful activation, rejected activation, graph replacement, restart,
+  shutdown, and failure where applicable;
+- cardinality changes and their effect on bounds, caches, counters, metrics, deterministic ordering,
+  fan-out, and backpressure;
+- compatibility requirements for saved graphs, clipboard fragments, examples, and the engine protocol;
+- architecture text or accepted ADRs affected by the behavior.
 
-### Changing persisted graph data
+Search the repository for the changed type, field, stable ID, and old assumptions before coding. When
+unchanged model fields should survive reconstruction, prefer `dataclasses.replace()` or a centralized
+conversion helper over manually repeating every field.
 
-- `.synmachine.json` is strict, deterministic UTF-8 JSON with sorted content and a final newline.
-- Do not rename or repurpose persisted type, port, parameter, document-setting, or field IDs.
-- A graph container change requires incrementing `GRAPH_SCHEMA_VERSION` and adding a pure one-version
-  migration in `persistence/schemas.py`. A single node payload change normally requires a node
-  implementation-version migration instead.
-- Migrations must deep-copy input, be deterministic, move exactly one version, preserve node identity
-  and type, and reject unsupported future versions.
-- Keep parsing strict and errors structured through `GraphPersistenceError`; malformed or newer files
-  must never crash the application.
-- Preserve atomic save semantics: fsync a same-directory temporary, retain one `.bak` previous
-  generation for explicit saves, and replace atomically. Autosaves intentionally do not create backup
-  chains.
-- Persist portable media paths relative to the graph directory when possible and resolve them at load.
-  Keep size/fingerprint relink checks; never silently substitute a different media file.
-- Add round-trip, deterministic serialization, migration fixture, malformed input, backup, and example
-  validation tests. Run the read-only graph validator after changing persistence:
+Do not treat a green component test as proof of integration correctness. Add at least one adversarial
+cross-layer test for a cross-cutting change. Relevant cases include multiple simultaneous producers,
+fan-out, hidden or absent consumers, stale-state cleanup, rejected replacement, legacy serialized
+input, and behavior above previous fixed limits.
 
-  ```powershell
-  uv run python -m tools.phase7_validate_graphs examples tests/fixtures/phase7
-  ```
+After implementation and normal gates, perform a distinct review pass against the impact matrix and
+the complete diff. For substantial model + persistence + runtime/IPC + UI changes, an independent
+fresh-context review is strongly preferred before merge; if it is unavailable, state that limitation.
 
-### Changing engine IPC or lifecycle
+### Architecture delta gate
 
-- Inspect the public `EngineClient` protocol in `contracts/engine_client.py`, message dataclasses and
-  unions in `contracts/engine_messages.py`, and both client/server implementations.
-- If the wire contract changes, increment `ENGINE_PROTOCOL_VERSION` and update exports, message unions,
-  handshake behavior, protocol mismatch handling, client, server, mocks, and spawn-process tests as one
-  atomic change.
-- Commands and responses should retain request IDs and graph revisions where relevant. Async events
-  must be safe to ignore when stale.
-- Test happy path, timeout, mismatch, child crash, restart, shutdown, shared-memory cleanup, stale
-  revision, and double-close behavior as applicable.
-- Preserve best-effort MIDI note-off/panic and device cleanup on stop, reload, port change, graph
-  replacement, engine failure, and application close.
-
-### Changing the Qt editor
-
-- User-visible graph mutations go through `DocumentSession` and focused `QUndoCommand` classes. Do not
-  mutate the document directly from widgets in a way that bypasses undo/redo, dirty state, autosave,
-  validation, scene synchronization, or runtime activation.
-- Keep domain logic in graph/persistence/runtime services and projection logic in view models. Widgets
-  should not become a second source of graph truth.
-- Preserve incremental scene synchronization, lazy parameter editors, low-zoom detail suppression,
-  and stable graphics-item identity; these are measured large-graph behaviors.
-- Use the central action registry for commands and shortcuts. Give interactive controls useful object
-  names, accessible names, status tips, and tooltips where neighboring code does so.
-- All authored visible English strings must pass through `ui.translations.tr()` or `trf()`, have a
-  French entry when the feature is user-visible, and refresh through the relevant `retranslate()`
-  path after a language switch.
-- Qt tests must create one application, process deferred deletion, close test-owned top-level widgets,
-  and inject temporary `QSettings` and `ApplicationPaths`. Do not write tests against the developer's
-  real registry settings, logs, recovery directory, clipboard contents, or home directory.
-- Set `QT_QPA_PLATFORM=offscreen` before importing PySide6 in headless test modules.
-
-### Changing media, MIDI, audio, or diagnostics
-
-- File video uses PyAV timestamps; camera capture and image operations use the approved OpenCV/NumPy
-  stack. Preserve source lifecycle, bounded queues, deterministic generated fixtures, and exact
-  metadata semantics.
-- Physical device absence is a normal unavailable state. Never select a fallback camera, MIDI port,
-  or output device when the user requested an exact identity.
-- Automated tests must not open a physical camera, send MIDI, or play audio. Inject capture factories,
-  use `MockMidiBackend`, and call audio callbacks with preallocated arrays.
-- Hardware commands are opt-in. `tools.camera_probe` opens cameras, `tools.audio_probe --play` emits
-  sound, and `tools.phase4_midi_evidence` sends real MIDI only after two exact matching port arguments.
-- Diagnostic bundles are bounded, redact filesystem paths by default, exclude frame/image pixels, and
-  include paths only with explicit user consent. Never add credentials, environment secrets, or raw
-  user media to logs or evidence.
-- Performance changes need correctness tests first and measurements second. Do not make performance
-  claims from one noisy run, change a gate to bless a regression, or round a failing result into a
-  pass. ADR-0007 documents the accepted Phase 8 throughput interpretation.
-
-### Changing packaging or versions
-
-- The source version in `src/synesthesia_machine/version.py`, project version in `pyproject.toml`, and
-  product/file versions in `pysidedeploy.spec` must agree. Use
-  `uv run python -m tools.phase9_release check` to verify them.
-- Read all of `packaging/README.md`, `packaging/release-checklist.md`, and
-  `packaging/licensing-review.md` before release work.
-- `packaging/build.ps1` is not an ordinary test command. It synchronizes packaging dependencies,
-  runs gates, deletes and recreates repository-owned `packaging/out`, `packaging/work`, and
-  `deployment`, and refuses a dirty tree unless `-AllowDirty` is passed. An `-AllowDirty` or
-  `-SkipTests` artifact is never a release candidate.
-- The default release is a standalone directory, not one-file packaging or an installer. Preserve the
-  native runtime checks, ASIO exclusion, notices/licenses, deterministic archive ordering/timestamps,
-  provenance, and clean-machine smoke gate.
-- The repository does not yet declare an approved application license or distribution model. Do not
-  publish or represent an artifact as legally cleared. Dependency/codec and third-party notice review
-  remain release blockers until explicitly approved.
-- Never delete user graph documents or `%LOCALAPPDATA%\SynesthesiaMachine` during packaging, rollback,
-  uninstall, or smoke testing.
+Before implementation, compare intended behavior with the master architecture and accepted ADRs.
+Changes to ownership, routing, cadence, bounds, persistence semantics, demand roots, process
+placement, or lifecycle policy are architectural unless the documents already describe them. Add or
+supersede an ADR in the same change; do not defer it until after the implementation.
 
 ## Test selection guide
 
-Use the narrowest relevant tests during development, then widen coverage according to risk.
-
-| Area changed | Start with |
-| --- | --- |
-| Runtime values, definitions, graph, compiler, scheduler, persistence boundaries | `tests/phase1/` |
-| Editor shell, commands, clipboard, autosave, session | `tests/phase2/` |
-| Video vertical slice, previews, debug synth, in-process client | `tests/phase3/` |
-| Spawned engine, plan swap, camera, MIDI, shared memory, supervision | `tests/phase4/` |
-| Image/channel nodes, immutability, catalogue, soak behavior | `tests/phase5/` |
-| Synesthesia algorithms, MIDI utilities, examples, benchmarks | `tests/phase6/` |
-| Groups/layout, settings, recovery, relinking, migrations, large graph | `tests/phase7/` |
-| Profiling, diagnostics, benchmark/soak harnesses, native-thread behavior | `tests/phase8/` |
-| Release configuration, packaged smoke, archive reproducibility | `tests/phase9/` |
-| Dependency/environment adapters and bootstrap smoke | `tests/smoke/` |
-| Cross-phase requested behavior | Root-level `tests/test_*.py` files |
-
-Testing rules:
-
-- Use exact equality for discrete graph and MIDI results where possible. Use
-  `numpy.testing.assert_allclose` with a deliberate node-specific tolerance for numeric image work.
-- Assert semantic outcomes in addition to shapes or opaque golden data: metadata, ranges, edge
-  positions, frequency peaks, note state, lifecycle calls, and source clocks.
-- Use deterministic UUIDs, seeds, arrays, generated videos, clocks, and timestamps. Do not make tests
-  depend on ordering accidents, wall-clock sleeps, the network, or local hardware.
-- Put temporary files under pytest's `tmp_path`. Process tests must clean up clients and shared memory
-  in `finally` blocks or fixtures.
-- A behavior fix needs a regression test that fails for the original defect. Do not weaken an existing
-  assertion merely to make a new implementation pass.
-- Run `uv run check` after code changes. Before final handoff, run `uv run pytest -q` unless the task is
-  documentation-only or the suite cannot reasonably run; report any unrun gate and why.
-
-CI on `windows-latest` sets `QT_QPA_PLATFORM=offscreen`, installs the locked development group, then
-runs `uv run check` and `uv run pytest -q`. Local success on another platform is not evidence that
-Windows spawn, devices, Qt deployment, or case-insensitive filesystem behavior is correct.
+Read `docs/agent-playbooks/testing.md` for every code or test change. Use the narrowest relevant tests
+while iterating, then widen according to risk and run the final gates in the definition of done.
 
 ## Tools and generated evidence
 
-Read `tools/README.md` before executing a diagnostic. Many tools intentionally overwrite committed
-evidence when run without `--output`, including phase performance, soak, profiler, and benchmark JSON
-or screenshots under `docs/`. Use a path under the system temporary directory for exploratory runs
-when the tool supports it, and inspect `git status` immediately afterward.
-
-Important distinctions:
-
-- `tools.phase7_validate_graphs` is read-only unless `--output` is supplied.
-- `tools.generate_catalogue` intentionally overwrites the current Phase 6 catalogue.
-- `tools.generate_test_video` writes the path supplied by the caller.
-- Phase 3/4 performance tools launch Qt and write JSON plus screenshots by default.
-- Phase 5/6/8 evidence tools write tracked `docs/` outputs by default and may be long-running.
-- Hardware probes may enumerate or open real devices; only run the explicitly invasive modes with
-  user authorization and an exact target.
-- Release scripts generate or replace packaging artifacts and must be treated as release operations.
-
-Never edit measured evidence by hand to manufacture a pass. If an intentional canonical run updates
-evidence, keep the environment, dependency versions, Git state, parameters, and pass/fail result
-truthful and update the corresponding report when required.
+Read `docs/agent-playbooks/tools-evidence.md` and `tools/README.md` before executing a repository tool,
+diagnostic, benchmark, evidence generator, hardware probe, or release command.
 
 ## Style and implementation conventions
 
