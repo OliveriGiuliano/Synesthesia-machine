@@ -10,6 +10,7 @@ from uuid import UUID
 
 import numpy as np
 
+from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.contracts import (
     AlphaMode,
     ColorSpace,
@@ -34,6 +35,7 @@ from synesthesia_machine.nodes import (
 )
 from synesthesia_machine.nodes.input import create_input_definitions
 from synesthesia_machine.nodes.registry import NodeRegistry
+from synesthesia_machine.runtime import EngineFacade, LatestFrameGraphWorker, PreviewBroker
 from synesthesia_machine.runtime.in_process_engine import InProcessEngineClient
 
 DOCUMENT_ID = UUID("00000000-0000-0000-0000-000000005000")
@@ -290,3 +292,74 @@ def test_slow_graph_drops_stale_frames_with_bounded_latency_and_visible_metrics(
             for event in sink_factory.runtime.release:
                 event.set()
         client.close()
+
+
+def test_slow_preview_conversion_coalesces_without_blocking_graph_ticks() -> None:
+    conversion_started = threading.Event()
+    release_conversion = threading.Event()
+    converted_ticks: list[int] = []
+    preview_time = [0.0]
+    fail_conversion = [False]
+
+    def blocking_converter(image: ImageFrame, max_dimension: int) -> np.ndarray:
+        del max_dimension
+        converted_ticks.append(image.context.tick_index)
+        if fail_conversion[0]:
+            raise RuntimeError("synthetic preview conversion failure")
+        if len(converted_ticks) == 1:
+            conversion_started.set()
+            assert release_conversion.wait(2.0)
+        data = np.zeros(image.data.shape, dtype=np.uint8)
+        data.flags.writeable = False
+        return data
+
+    registry = create_application_registry()
+    document = GraphDocument(document_id=DOCUMENT_ID)
+    document.add_node(
+        "synmachine.input.load_video",
+        node_id=SOURCE_ID,
+        parameters={"file_path": "simulated.mp4"},
+    )
+    display_id = document.add_node(
+        "synmachine.visualization.display_image_data", implementation_version=2
+    )
+    document.add_connection(SOURCE_ID, "image", display_id, "image")
+    facade = EngineFacade(registry)
+    activation = facade.activate(document.snapshot())
+    assert activation.plan is not None
+    broker = PreviewBroker(
+        monotonic=lambda: preview_time[0],
+        image_converter=blocking_converter,
+    )
+    broker.configure(activation.plan)
+    worker = LatestFrameGraphWorker(facade, preview_broker=broker)
+    try:
+        worker.publish(SOURCE_ID, _packet(1, 0))
+        assert conversion_started.wait(1.0)
+        assert not worker.wait_until_idle(0.05)
+        assert worker.processed_ticks == 1
+
+        worker.publish(SOURCE_ID, _packet(2, 1))
+        assert not worker.wait_until_idle(0.05)
+        assert worker.processed_ticks == 2
+        worker.publish(SOURCE_ID, _packet(3, 2))
+        assert not worker.wait_until_idle(0.05)
+        assert worker.processed_ticks == 3
+
+        preview_time[0] = 1.0 / 30.0
+        release_conversion.set()
+        assert worker.wait_until_idle(2.0)
+        assert converted_ticks == [1, 3]
+        assert broker.poll_images()[0].tick_index == 3
+
+        fail_conversion[0] = True
+        preview_time[0] = 2.0 / 30.0
+        worker.publish(SOURCE_ID, _packet(4, 3))
+        assert worker.wait_until_idle(2.0)
+        assert worker.last_error == "synthetic preview conversion failure"
+        worker.reset_plan_metrics()
+        assert worker.last_error is None
+    finally:
+        release_conversion.set()
+        worker.close()
+        facade.close()

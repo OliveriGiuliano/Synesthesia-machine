@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from types import MappingProxyType
 
@@ -147,9 +148,15 @@ def image_to_luminance(image: ImageFrame) -> ChannelFrame:
         for index, channel in enumerate(descriptor.channels)
         if channel.semantic is not ChannelSemantic.ALPHA
     )
-    for index in colour_indices:
-        if not np.isfinite(image.data[..., index]).all():
+    if colour_indices == tuple(range(len(colour_indices))):
+        finite, _ = cv2.checkRange(image.data[..., : len(colour_indices)], quiet=True)
+        if not finite:
             raise ValueError("Image to Luminance requires finite colour-channel values")
+    else:
+        for index in colour_indices:
+            finite, _ = cv2.checkRange(image.data[..., index], quiet=True)
+            if not finite:
+                raise ValueError("Image to Luminance requires finite colour-channel values")
     rgb, _ = _to_srgb(image.data, image.color_space)
     linear = _srgb_to_linear(rgb)
     luminance = (
@@ -190,17 +197,36 @@ def separate_image_channels(image: ImageFrame) -> tuple[ChannelFrame | None, ...
 def image_to_display_uint8(image: ImageFrame) -> NDArray[np.uint8]:
     """Sanitize and transform an image into immutable RGB/RGBA preview bytes."""
 
-    safe = np.nan_to_num(image.data, nan=0.0, posinf=1.0, neginf=0.0).astype(np.float32, copy=False)
+    safe = image.data
+    finite, _ = cv2.checkRange(safe, quiet=True)
+    if not finite:
+        safe = np.nan_to_num(safe, nan=0.0, posinf=1.0, neginf=0.0, copy=True)
     rgb, alpha = _to_srgb(safe, image.color_space)
-    rgb_bytes = np.rint(np.clip(rgb, 0.0, 1.0) * 255.0).astype(np.uint8)
+    rgb_bytes = _display_bytes(rgb)
     if alpha is None:
         result = rgb_bytes
     else:
-        alpha_bytes = np.rint(np.clip(alpha, 0.0, 1.0) * 255.0).astype(np.uint8)
+        alpha_bytes = _display_bytes(alpha)
         result = np.concatenate((rgb_bytes, alpha_bytes[..., None]), axis=2)
     immutable = np.ascontiguousarray(result)
     immutable.flags.writeable = False
     return immutable
+
+
+def _display_bytes(data: NDArray[np.float32]) -> NDArray[np.uint8]:
+    """Convert display-normalized floats without allocating for the ordinary finite case."""
+
+    in_range, _ = cv2.checkRange(
+        data,
+        quiet=True,
+        minVal=0.0,
+        maxVal=math.nextafter(1.0, math.inf),
+    )
+    if in_range:
+        return np.asarray(cv2.convertScaleAbs(data, alpha=255.0), dtype=np.uint8)
+    safe = np.nan_to_num(data, nan=0.0, posinf=1.0, neginf=0.0, copy=True)
+    np.clip(safe, np.float32(0.0), np.float32(1.0), out=safe)
+    return np.asarray(cv2.convertScaleAbs(safe, alpha=255.0), dtype=np.uint8)
 
 
 def _to_srgb(

@@ -106,6 +106,25 @@ def _note_plan() -> ExecutionPlan:
     return result.plan
 
 
+def _pill_only_image_plan() -> ExecutionPlan:
+    document = GraphDocument()
+    document.add_node(
+        "synmachine.input.load_video",
+        node_id=SOURCE_ID,
+        parameters={"file_path": "unused.mp4"},
+    )
+    resize_id = document.add_node(
+        "synmachine.image.resize",
+        parameters={"width": 2, "height": 2},
+    )
+    document.add_connection(SOURCE_ID, "image", resize_id, "image")
+    result = GraphCompiler(create_application_registry()).compile(
+        document.snapshot(), demand_roots=(resize_id,)
+    )
+    assert result.plan is not None
+    return result.plan
+
+
 def _many_image_target_plan(count: int) -> ExecutionPlan:
     registry = create_application_registry()
     port_ids = tuple(f"image_{index}" for index in range(count))
@@ -226,6 +245,55 @@ def test_preview_fps_counts_all_publications_above_the_old_fixed_history_cap() -
     assert broker.preview_fps() == 0.0
 
 
+def test_pill_only_image_preview_uses_lower_background_cadence() -> None:
+    clock = _Clock()
+    broker = PreviewBroker(monotonic=clock)
+    broker.configure(_pill_only_image_plan())
+
+    first = _image(np.zeros((2, 2, 3), dtype=np.float32), 1)
+    broker.publish(TickResult({PortKey(SOURCE_ID, "image"): first}, (), {}))
+    assert broker.poll_images()[0].tick_index == 1
+
+    clock.value = 1.0 / 30.0
+    second = _image(np.ones((2, 2, 3), dtype=np.float32), 2)
+    broker.publish(TickResult({PortKey(SOURCE_ID, "image"): second}, (), {}))
+    assert broker.poll_images()[0].tick_index == 1
+
+    clock.value = 1.0 / 15.0
+    broker.publish(TickResult({PortKey(SOURCE_ID, "image"): second}, (), {}))
+    assert broker.poll_images()[0].tick_index == 2
+
+
+def test_aliased_immutable_frames_share_one_conversion_with_separate_routes() -> None:
+    calls = 0
+
+    def converter(image: ImageFrame, max_dimension: int) -> NDArray[np.uint8]:
+        nonlocal calls
+        del max_dimension
+        calls += 1
+        return freeze_uint8_preview(np.zeros_like(image.data, dtype=np.uint8))
+
+    broker = PreviewBroker(image_converter=converter)
+    broker.configure(_many_image_target_plan(2))
+    frame = _image(np.zeros((2, 2, 3), dtype=np.float32), 1)
+    broker.publish(
+        TickResult(
+            {
+                PortKey(SOURCE_ID, "image_0"): frame,
+                PortKey(SOURCE_ID, "image_1"): frame,
+            },
+            (),
+            {},
+        )
+    )
+
+    assert calls == 1
+    assert {(preview.owner_id, preview.source_port_id) for preview in broker.poll_images()} == {
+        (SOURCE_ID, "image_0"),
+        (SOURCE_ID, "image_1"),
+    }
+
+
 def test_note_preview_is_compact_sorted_60hz_and_replaced_on_activation() -> None:
     clock = _Clock()
     broker = PreviewBroker(monotonic=clock)
@@ -288,4 +356,32 @@ def test_reconfiguration_discards_an_in_flight_publication() -> None:
     publication.join(timeout=2.0)
 
     assert not publication.is_alive()
+    assert broker.poll_images() == ()
+
+
+def test_stamped_stale_publication_is_rejected_before_conversion() -> None:
+    calls = 0
+
+    def converter(image: ImageFrame, max_dimension: int) -> NDArray[np.uint8]:
+        nonlocal calls
+        del max_dimension
+        calls += 1
+        return freeze_uint8_preview(np.zeros_like(image.data, dtype=np.uint8))
+
+    broker = PreviewBroker(image_converter=converter)
+    plan = _image_plan()
+    broker.configure(plan)
+    stale_generation = broker.generation
+    broker.configure(plan)
+
+    broker.publish(
+        TickResult(
+            {PortKey(SOURCE_ID, "image"): _image(np.zeros((2, 2, 3), dtype=np.float32), 1)},
+            (),
+            {},
+        ),
+        expected_generation=stale_generation,
+    )
+
+    assert calls == 0
     assert broker.poll_images() == ()

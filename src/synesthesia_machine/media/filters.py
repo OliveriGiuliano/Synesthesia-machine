@@ -250,7 +250,18 @@ def canny_image(
             border_mode=BorderMode.REFLECT_101,
             wrap_padding=(0, 0),
         )[..., 0]
-    source = np.rint(np.clip(values, 0.0, 1.0) * np.float32(255.0)).astype(np.uint8)
+    in_range, _ = cv2.checkRange(
+        values,
+        quiet=True,
+        minVal=0.0,
+        maxVal=math.nextafter(1.0, math.inf),
+    )
+    if in_range:
+        source = cv2.convertScaleAbs(values, alpha=255.0)
+    else:
+        display_values = np.array(values, dtype=np.float32, order="C", copy=True)
+        np.clip(display_values, np.float32(0.0), np.float32(1.0), out=display_values)
+        source = cv2.convertScaleAbs(display_values, alpha=255.0)
     try:
         edges = cv2.Canny(
             source,

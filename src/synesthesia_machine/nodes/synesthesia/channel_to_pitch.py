@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from uuid import UUID
 
+import cv2
 import numpy as np
 
 from synesthesia_machine.contracts import (
@@ -119,33 +120,52 @@ def channel_histogram_to_midi_state(
     )
     _validate_channels(channels, context)
 
-    finite = np.ones(value.data.shape, dtype=np.bool_)
-    for channel in channels:
-        channel_finite = np.isfinite(channel.data)
-        if not ignore_non_finite and not bool(np.all(channel_finite)):
+    if parameter_a is None and parameter_b is None:
+        all_finite = not value.data.size or bool(cv2.checkRange(value.data, quiet=True)[0])
+        if not ignore_non_finite and not all_finite:
             raise ValueError("Connected channels contain non-finite values")
-        finite &= channel_finite
+        if all_finite:
+            valid_pixel_count = value.data.size
+            normalized = np.array(value.data, dtype=np.float32, order="C", copy=True)
+        else:
+            finite = np.isfinite(value.data)
+            valid_pixel_count = int(np.count_nonzero(finite))
+            normalized = np.asarray(value.data[finite], dtype=np.float32)
+    else:
+        finite = np.ones(value.data.shape, dtype=np.bool_)
+        for channel in channels:
+            channel_finite = np.isfinite(channel.data)
+            if not ignore_non_finite and not bool(np.all(channel_finite)):
+                raise ValueError("Connected channels contain non-finite values")
+            finite &= channel_finite
 
-    valid = finite
-    if parameter_a is not None:
-        valid &= parameter_a.data >= minimum_a
-        if maximum_a is not None:
-            valid &= parameter_a.data <= maximum_a
-    if parameter_b is not None:
-        valid &= parameter_b.data >= minimum_b
-        if maximum_b is not None:
-            valid &= parameter_b.data <= maximum_b
+        valid = finite
+        if parameter_a is not None:
+            valid &= parameter_a.data >= minimum_a
+            if maximum_a is not None:
+                valid &= parameter_a.data <= maximum_a
+        if parameter_b is not None:
+            valid &= parameter_b.data >= minimum_b
+            if maximum_b is not None:
+                valid &= parameter_b.data <= maximum_b
+        valid_pixel_count = int(np.count_nonzero(valid))
+        normalized = np.asarray(value.data[valid], dtype=np.float32)
 
-    valid_pixel_count = int(np.count_nonzero(valid))
     if valid_pixel_count == 0:
         return MidiStateFrame({}, context, node_id)
 
     allowed_notes = selector.allowed_notes
-    normalized = (value.data[valid] - value.nominal_min) / (value.nominal_max - value.nominal_min)
-    normalized = np.clip(normalized, 0.0, 1.0)
-    bin_indexes = np.floor(normalized * len(allowed_notes)).astype(np.intp)
+    np.subtract(normalized, np.float32(value.nominal_min), out=normalized)
+    np.divide(
+        normalized,
+        np.float32(value.nominal_max - value.nominal_min),
+        out=normalized,
+    )
+    np.clip(normalized, np.float32(0.0), np.float32(1.0), out=normalized)
+    np.multiply(normalized, np.float32(len(allowed_notes)), out=normalized)
+    bin_indexes = normalized.astype(np.intp)
     np.minimum(bin_indexes, len(allowed_notes) - 1, out=bin_indexes)
-    counts = np.bincount(bin_indexes, minlength=len(allowed_notes))
+    counts = np.bincount(bin_indexes.ravel(), minlength=len(allowed_notes))
     occupancies = counts.astype(np.float64) / valid_pixel_count
 
     threshold = occupancy_threshold_percent / 100.0

@@ -24,10 +24,13 @@ from synesthesia_machine.contracts import (
     NotePreview,
     PortType,
     ValuePreview,
-    freeze_uint8_preview,
 )
 from synesthesia_machine.media import image_to_display_uint8
-from synesthesia_machine.nodes.visualization import NOTE_VISUALIZER_TYPE_ID
+from synesthesia_machine.nodes.visualization import (
+    CHANNEL_DISPLAY_TYPE_ID,
+    DISPLAY_IMAGE_DATA_TYPE_ID,
+    NOTE_VISUALIZER_TYPE_ID,
+)
 from synesthesia_machine.runtime.execution_plan import CompiledNode, ExecutionPlan, PortKey
 from synesthesia_machine.runtime.scheduler import TickResult
 
@@ -36,10 +39,11 @@ type ImagePreviewConverter = Callable[[ImageFrame, int], NDArray[np.uint8]]
 type ChannelPreviewConverter = Callable[[ChannelFrame, int], NDArray[np.uint8]]
 
 _NOTE_PREVIEW_FPS = 60
-# Link pills are anchored on the producer, so the preview cadence and cap are
-# fixed application-wide rather than read from a downstream display node. These
-# match the display node's historical defaults.
-_IMAGE_PREVIEW_FPS = 30
+# Link pills are anchored on the producer, so preview cadence and dimensions are
+# application policies rather than parameters read from a downstream display node.
+# The larger dock stays at its historical cadence while pill-only work is cheaper.
+_IMAGE_DOCK_PREVIEW_FPS = 30
+_IMAGE_PILL_PREVIEW_FPS = 15
 _IMAGE_PREVIEW_MAX_DIMENSION = 800
 
 
@@ -121,9 +125,15 @@ class PreviewBroker:
         """
 
         connected_sources: set[PortKey] = set()
+        dock_sources: set[PortKey] = set()
         for node in plan.nodes:
             for binding in node.input_bindings.values():
                 connected_sources.add(binding.source)
+            if node.definition.type_id in {
+                DISPLAY_IMAGE_DATA_TYPE_ID,
+                CHANNEL_DISPLAY_TYPE_ID,
+            }:
+                dock_sources.update(binding.source for binding in node.input_bindings.values())
 
         image_targets: list[_ImageTarget] = []
         note_targets: list[_NoteTarget] = []
@@ -135,7 +145,7 @@ class PreviewBroker:
                 binding = node.input_bindings.get("midi")
                 if binding is not None:
                     note_targets.append(_NoteTarget(node.node_id, binding.source))
-            image_targets.extend(_connected_image_targets(node, connected_sources))
+            image_targets.extend(_connected_image_targets(node, connected_sources, dock_sources))
             value_targets.extend(_connected_scalar_targets(node, connected_sources))
 
         return _PreviewConfiguration(
@@ -169,11 +179,20 @@ class PreviewBroker:
             self._value_targets = ()
             self._clear_locked()
 
-    def publish(self, result: TickResult) -> None:
+    @property
+    def generation(self) -> int:
+        """Return the active target generation for bounded asynchronous publication."""
+
+        with self._lock:
+            return self._generation
+
+    def publish(self, result: TickResult, *, expected_generation: int | None = None) -> None:
         """Coalesce one completed tick into each due preview target."""
 
         now = self._monotonic()
         with self._lock:
+            if expected_generation is not None and expected_generation != self._generation:
+                return
             generation = self._generation
             image_targets = tuple(
                 target
@@ -202,16 +221,26 @@ class PreviewBroker:
         image_publications: list[
             tuple[_ImageTarget, ImageFrame | ChannelFrame, NDArray[np.uint8]]
         ] = []
+        converted: dict[
+            tuple[int, int, str], tuple[ImageFrame | ChannelFrame, NDArray[np.uint8]]
+        ] = {}
         for target in image_targets:
             value = result.values.get(target.source)
+            if not isinstance(value, (ImageFrame, ChannelFrame)):
+                continue
+            cache_key = (id(value), target.max_dimension, target.source_kind)
+            cached = converted.get(cache_key)
+            if cached is not None and cached[0] is value:
+                image_publications.append((target, value, cached[1]))
+                continue
             if target.source_kind == "IMAGE" and isinstance(value, ImageFrame):
-                image_publications.append(
-                    (target, value, self._image_converter(value, target.max_dimension))
-                )
+                data = self._image_converter(value, target.max_dimension)
+                converted[cache_key] = (value, data)
+                image_publications.append((target, value, data))
             elif target.source_kind == "CHANNEL" and isinstance(value, ChannelFrame):
-                image_publications.append(
-                    (target, value, self._channel_converter(value, target.max_dimension))
-                )
+                data = self._channel_converter(value, target.max_dimension)
+                converted[cache_key] = (value, data)
+                image_publications.append((target, value, data))
 
         note_publications: list[tuple[_NoteTarget, MidiStateFrame, tuple[NoteActivity, ...]]] = []
         for target in note_targets:
@@ -368,11 +397,25 @@ def _preview_image_data(image: ImageFrame, max_dimension: int) -> NDArray[np.uin
 
 
 def _preview_channel_data(channel: ChannelFrame, max_dimension: int) -> NDArray[np.uint8]:
+    minimum = np.float32(channel.nominal_min)
     denominator = np.float32(channel.nominal_max - channel.nominal_min)
-    normalized = (channel.data - np.float32(channel.nominal_min)) / denominator
-    safe = np.nan_to_num(normalized, nan=0.0, posinf=1.0, neginf=0.0)
-    gray = np.rint(np.clip(safe, 0.0, 1.0) * np.float32(255.0)).astype(np.uint8)
-    display = np.repeat(gray[..., None], 3, axis=2)
+    in_range, _ = cv2.checkRange(
+        channel.data,
+        quiet=True,
+        minVal=float(channel.nominal_min),
+        maxVal=math.nextafter(float(channel.nominal_max), math.inf),
+    )
+    if in_range:
+        scale = 255.0 / float(denominator)
+        gray = cv2.convertScaleAbs(channel.data, alpha=scale, beta=-float(minimum) * scale)
+    else:
+        normalized = np.array(channel.data, dtype=np.float32, order="C", copy=True)
+        np.subtract(normalized, minimum, out=normalized)
+        np.divide(normalized, denominator, out=normalized)
+        np.nan_to_num(normalized, nan=0.0, posinf=1.0, neginf=0.0, copy=False)
+        np.clip(normalized, np.float32(0.0), np.float32(1.0), out=normalized)
+        gray = cv2.convertScaleAbs(normalized, alpha=255.0)
+    display = np.asarray(cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB), dtype=np.uint8)
     return _bounded_preview(display, max_dimension)
 
 
@@ -380,14 +423,20 @@ def _bounded_preview(display: NDArray[np.uint8], max_dimension: int) -> NDArray[
     height, width = display.shape[:2]
     largest = max(width, height)
     if largest <= max_dimension:
-        return freeze_uint8_preview(display)
+        if display.flags.c_contiguous and not display.flags.writeable:
+            return display
+        immutable = np.ascontiguousarray(display, dtype=np.uint8)
+        immutable.flags.writeable = False
+        return immutable
     scale = max_dimension / largest
     resized_width = max(1, round(width * scale))
     resized_height = max(1, round(height * scale))
     resized = cv2.resize(display, (resized_width, resized_height), interpolation=cv2.INTER_AREA)
     if resized.ndim == 2:
         resized = resized[..., None]
-    return freeze_uint8_preview(np.asarray(resized, dtype=np.uint8))
+    immutable = np.ascontiguousarray(resized, dtype=np.uint8)
+    immutable.flags.writeable = False
+    return immutable
 
 
 def _is_due(previous: float | None, now: float, interval_s: float) -> bool:
@@ -395,7 +444,9 @@ def _is_due(previous: float | None, now: float, interval_s: float) -> bool:
 
 
 def _connected_image_targets(
-    node: CompiledNode, connected_sources: set[PortKey]
+    node: CompiledNode,
+    connected_sources: set[PortKey],
+    dock_sources: set[PortKey],
 ) -> tuple[_ImageTarget, ...]:
     """Collect every connected IMAGE/CHANNEL output, ordered by port id.
 
@@ -415,7 +466,12 @@ def _connected_image_targets(
                 _ImageTarget(
                     node.node_id,
                     source,
-                    1.0 / _IMAGE_PREVIEW_FPS,
+                    1.0
+                    / (
+                        _IMAGE_DOCK_PREVIEW_FPS
+                        if source in dock_sources
+                        else _IMAGE_PILL_PREVIEW_FPS
+                    ),
                     _IMAGE_PREVIEW_MAX_DIMENSION,
                     "CHANNEL" if port_type is PortType.CHANNEL else "IMAGE",
                 )

@@ -312,7 +312,9 @@ def run_benchmark(
             "process_every_nth_frame": 1,
             "node_count": 9,
             "connection_count": 8,
-            "preview_policy": "Note Visualizer plus 30 FPS Canny Channel Display",
+            "preview_policy": (
+                "30 FPS Canny Channel Display, 15 FPS connection pills, and Note Visualizer"
+            ),
             "canny_endpoint_note": (
                 "The implemented Canny node outputs CHANNEL, so the reference uses the typed "
                 "Channel Display equivalent of the architecture packet's Display Image endpoint."
