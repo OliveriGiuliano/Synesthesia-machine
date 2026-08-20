@@ -63,7 +63,10 @@ def create_diagnostic_bundle(
     hardware_snapshot = hardware or collect_hardware_snapshot()
     try:
         with ZipFile(temporary, "w", compression=ZIP_DEFLATED) as archive:
-            _write_json(archive, "hardware.json", asdict(hardware_snapshot), included)
+            hardware_data: object = asdict(hardware_snapshot)
+            if not include_paths:
+                hardware_data = redact_sensitive_paths(hardware_data)
+            _write_json(archive, "hardware.json", hardware_data, included)
             _write_json(archive, "dependencies.json", dependency_versions(), included)
             graph_data: object = graph_to_data(graph)
             if not include_paths:

@@ -2,6 +2,10 @@
 
 Schema-versioned graph JSON conversion, pure migrations, and atomic file I/O.
 
+Untrusted graph and clipboard text is byte-bounded before parsing. Graph collection cardinalities
+and connection endpoints are checked before domain construction so migration/deep-copy work cannot
+silently accept an unbounded or dangling payload.
+
 ## Public imports
 
 Use `synesthesia_machine.persistence` for `graph_to_data`, `graph_to_json`,

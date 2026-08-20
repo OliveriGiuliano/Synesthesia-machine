@@ -73,6 +73,7 @@ class GraphScene(QGraphicsScene):
         self.grid_spacing = theme.metrics.grid_size
         self.setSceneRect(-4000.0, -3000.0, 8000.0, 6000.0)
         session.changed.connect(self.sync_from_session)
+        session.deviceCatalogueChanged.connect(self._rebuild_device_editors)
         self.selectionChanged.connect(self.update_selection_outline)
         self.sync_from_session()
 
@@ -116,6 +117,7 @@ class GraphScene(QGraphicsScene):
                     self.theme,
                     self.session.set_parameter,
                     defer_parameter_editors=large_graph_mode,
+                    device_choice_provider=self.session.device_parameter_choices,
                 )
                 item.set_detail_visible(self._detail_visible)
                 item.set_heat_level(self._node_heat_levels.get(node.node_id))
@@ -139,6 +141,17 @@ class GraphScene(QGraphicsScene):
         del selection_blocker
         if selection_changed:
             self.selectionChanged.emit()
+
+    @Slot()
+    def _rebuild_device_editors(self) -> None:
+        selected_nodes = self.selected_node_ids()
+        for item in tuple(self.node_items.values()):
+            self.removeItem(item)
+        self.node_items.clear()
+        self.sync_from_session()
+        for node_id in selected_nodes:
+            if (item := self.node_items.get(node_id)) is not None:
+                item.setSelected(True)
 
     @property
     def large_graph_mode(self) -> bool:

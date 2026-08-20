@@ -10,6 +10,7 @@ from uuid import UUID
 
 import pytest
 
+import synesthesia_machine.persistence.graph_io as graph_io
 from synesthesia_machine.contracts import ColorValue, NumericMatrix
 from synesthesia_machine.graph import GraphCompiler, GraphDocument
 from synesthesia_machine.nodes.composition import create_builtin_registry
@@ -197,6 +198,45 @@ def test_atomic_save_load_and_backup(tmp_path: Path) -> None:
 
     assert path.with_name(f"{path.name}.bak").read_text(encoding="utf-8") == first_content
     assert load_graph(path, create_utility_registry()).nodes[0].parameters["float_value"] == 9.0
+
+
+def test_graph_json_and_file_reads_are_bounded_before_parsing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(graph_io, "MAX_GRAPH_JSON_BYTES", 32)
+    oversized = " " * 33
+
+    with pytest.raises(GraphPersistenceError) as text_error:
+        graph_from_json(oversized, create_utility_registry())
+    assert text_error.value.code == "graph_too_large"
+
+    path = tmp_path / "oversized.synmachine.json"
+    path.write_bytes(oversized.encode("utf-8"))
+    with pytest.raises(GraphPersistenceError) as file_error:
+        load_graph(path, create_utility_registry())
+    assert file_error.value.code == "graph_too_large"
+
+
+def test_graph_loader_rejects_excess_cardinality_and_dangling_connections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = create_utility_registry()
+    document = GraphDocument(document_id=DOCUMENT_ID)
+    source = document.add_node("synmachine.utility.number", node_id=NODE_A)
+    target = document.add_node("synmachine.utility.pass_through", node_id=NODE_B)
+    document.add_connection(source, "value", target, "value")
+    data = graph_to_data(document.snapshot())
+
+    monkeypatch.setattr(graph_io, "MAX_GRAPH_NODES", 1)
+    with pytest.raises(GraphPersistenceError) as too_many:
+        graph_from_data(data, registry)
+    assert too_many.value.code == "too_many_items"
+
+    monkeypatch.setattr(graph_io, "MAX_GRAPH_NODES", 10_000)
+    data["connections"][0]["destination_node_id"] = str(UUID(int=999))
+    with pytest.raises(GraphPersistenceError) as dangling:
+        graph_from_data(data, registry)
+    assert dangling.value.code == "dangling_connection"
 
 
 def test_serialized_graph_loads_compiles_and_executes() -> None:

@@ -98,12 +98,14 @@ def test_bundle_is_bounded_redacted_and_contains_no_frames(tmp_path: Path) -> No
     with ZipFile(output) as archive:
         names = set(archive.namelist())
         manifest = json.loads(archive.read("manifest.json"))
+        hardware = json.loads(archive.read("hardware.json"))
         graph = archive.read("graph.json").decode("utf-8")
         metrics = json.loads(archive.read("engine_metrics.json"))
         log_text = archive.read(
             sorted(name for name in names if name.startswith("logs/"))[0]
         ).decode()
     assert manifest["frames_included"] is False
+    assert hardware["python_executable"] == "<redacted>"
     assert not any(name.endswith((".png", ".jpg", ".mp4")) for name in names)
     assert str(media_path) not in graph
     assert "<redacted>" in graph
@@ -125,5 +127,7 @@ def test_bundle_can_include_paths_only_when_explicitly_requested(tmp_path: Path)
 
     with ZipFile(output) as archive:
         graph = archive.read("graph.json").decode("utf-8")
+        hardware = json.loads(archive.read("hardware.json"))
     assert not result.redacted
     assert str(media_path).replace("\\", "\\\\") in graph
+    assert Path(hardware["python_executable"]).is_absolute()

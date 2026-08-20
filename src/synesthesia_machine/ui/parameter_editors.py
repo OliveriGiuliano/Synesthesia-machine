@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import cast
 
 from PySide6.QtCore import QEvent, QObject, QPointF, Qt, QTimer, Signal, Slot
@@ -60,12 +60,19 @@ def create_parameter_editor(
     on_changed: ParameterChanged,
     *,
     compact: bool = False,
+    dynamic_choices: Sequence[tuple[str, LiteralValue]] = (),
 ) -> QWidget:
     """Create an editor from ParameterSpec metadata without duplicating validation rules."""
 
     spec = parameter.spec
-    if spec.choices:
-        editor: QWidget = ChoiceParameterEditor(parameter, on_changed)
+    if spec.device_kind is not None:
+        editor: QWidget = ChoiceParameterEditor(
+            parameter,
+            on_changed,
+            choices=dynamic_choices,
+        )
+    elif spec.choices:
+        editor = ChoiceParameterEditor(parameter, on_changed)
     elif spec.value_type is PortType.FLOAT and _uses_slider(parameter):
         editor = FloatRangeParameterEditor(parameter, on_changed)
     elif spec.value_type is PortType.FLOAT:
@@ -781,11 +788,21 @@ def _numeric_matrix_rows(value: object) -> tuple[tuple[float, ...], ...]:
 
 
 class ChoiceParameterEditor(QComboBox):
-    def __init__(self, parameter: ParameterViewModel, on_changed: ParameterChanged) -> None:
+    def __init__(
+        self,
+        parameter: ParameterViewModel,
+        on_changed: ParameterChanged,
+        *,
+        choices: Sequence[tuple[str, LiteralValue]] = (),
+    ) -> None:
         super().__init__()
         self._on_changed = on_changed
-        for value in parameter.spec.choices:
-            self.addItem(str(value), value)
+        if choices:
+            for label, value in choices:
+                self.addItem(label, value)
+        else:
+            for value in parameter.spec.choices:
+                self.addItem(str(value), value)
         index = self.findData(parameter.value)
         if index >= 0:
             self.setCurrentIndex(index)

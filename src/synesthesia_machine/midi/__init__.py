@@ -6,6 +6,7 @@ from synesthesia_machine.midi.debug_synth import (
     DebugSynthService,
     SynthConfiguration,
     SynthWaveform,
+    enumerate_audio_output_devices,
 )
 from synesthesia_machine.midi.output_service import (
     MidiMessage,
@@ -22,6 +23,7 @@ from synesthesia_machine.midi.output_service import (
     MockMidiOutputBackend,
     MockMidiOutputPort,
     VelocityUpdatePolicy,
+    enumerate_midi_output_devices,
 )
 from synesthesia_machine.midi.scales import (
     BUILTIN_SCALE_REGISTRY,
@@ -61,6 +63,8 @@ __all__ = [
     "SynthConfiguration",
     "SynthWaveform",
     "VelocityUpdatePolicy",
+    "enumerate_audio_output_devices",
+    "enumerate_midi_output_devices",
     "parse_custom_pitch_class_mask",
     "resolve_musical_selector",
     "select_midi_notes",

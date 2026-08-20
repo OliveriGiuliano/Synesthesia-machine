@@ -229,14 +229,7 @@ class VideoSourceService:
         self._on_reset = on_reset
         self._clock = clock or SystemPlaybackClock()
         self._max_decode_failures = max_decode_failures
-        try:
-            self._metadata = inspect_video(file_path, stream_index=stream_index)
-            stream_fallback = False
-        except ValueError as error:
-            if stream_index == 0 or "is unavailable; found" not in str(error):
-                raise
-            self._metadata = inspect_video(file_path, stream_index=0)
-            stream_fallback = True
+        self._metadata = inspect_video(file_path, stream_index=stream_index)
         self._stream_index = self._metadata.stream_index
 
         self._lock = threading.RLock()
@@ -251,7 +244,7 @@ class VideoSourceService:
         self._source_frame_index: int | None = None
         self._processed_index = 0
         self._skipped_by_selection = 0
-        self._warnings = int(stream_fallback)
+        self._warnings = 0
         self._last_error: str | None = None
 
     @property
@@ -463,6 +456,10 @@ class VideoSourceService:
                 with self._lock:
                     if self._state not in {SourceState.CLOSED, SourceState.ERROR}:
                         self._state = SourceState.ENDED
+                # Reset the complete source-clock component at natural EOF. Without this
+                # lifecycle edge, stateful nodes and MIDI/audio sinks can retain the final
+                # frame's desired note state indefinitely.
+                self._publish_reset(ResetReason.SOURCE_ENDED)
                 return
             if item is _QueueSignal.LOOP:
                 with self._lock:

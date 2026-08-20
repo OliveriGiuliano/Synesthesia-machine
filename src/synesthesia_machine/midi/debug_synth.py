@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
@@ -14,7 +14,7 @@ import numpy as np
 import sounddevice as sd
 from numpy.typing import NDArray
 
-from synesthesia_machine.contracts import MidiStateFrame
+from synesthesia_machine.contracts import DeviceDescriptor, DeviceKind, MidiStateFrame
 
 
 class SynthWaveform(StrEnum):
@@ -77,7 +77,15 @@ def open_sounddevice_stream(
 ) -> AudioOutputStream:
     """Create, but do not start, the configured PortAudio output stream."""
 
-    device = configuration.output_device or None
+    device_id = configuration.output_device
+    if device_id.startswith("sounddevice:"):
+        try:
+            device: int | str | None = int(device_id.removeprefix("sounddevice:"))
+        except ValueError as error:
+            raise ValueError(f"Invalid audio output device ID: {device_id!r}") from error
+    else:
+        # Continue to accept the device names saved by earlier versions.
+        device = device_id or None
     stream = sd.OutputStream(
         samplerate=configuration.sample_rate,
         blocksize=configuration.block_size,
@@ -88,6 +96,39 @@ def open_sounddevice_stream(
         callback=callback,
     )
     return cast(AudioOutputStream, stream)
+
+
+def enumerate_audio_output_devices() -> tuple[DeviceDescriptor, ...]:
+    """Return stable sounddevice indexes with labels, plus the system default choice."""
+
+    raw_devices = cast(
+        object,
+        sd.query_devices(),  # pyright: ignore[reportUnknownMemberType]
+    )
+    if not isinstance(raw_devices, Sequence):
+        raise RuntimeError("sounddevice returned an invalid device catalogue")
+    devices = [DeviceDescriptor(DeviceKind.AUDIO_OUTPUT, "", "System default audio output", True)]
+    for index, raw_device in enumerate(cast(Sequence[object], raw_devices)):
+        if not isinstance(raw_device, Mapping):
+            continue
+        device_data = cast(Mapping[object, object], raw_device)
+        channels = device_data.get("max_output_channels")
+        name = device_data.get("name")
+        display_name = " ".join(name.split()) if isinstance(name, str) else ""
+        if (
+            isinstance(channels, (int, float))
+            and not isinstance(channels, bool)
+            and channels > 0
+            and display_name
+        ):
+            devices.append(
+                DeviceDescriptor(
+                    DeviceKind.AUDIO_OUTPUT,
+                    f"sounddevice:{index}",
+                    display_name,
+                )
+            )
+    return tuple(sorted(devices))
 
 
 class DebugSynth:
@@ -361,5 +402,6 @@ __all__ = [
     "DebugSynthService",
     "SynthConfiguration",
     "SynthWaveform",
+    "enumerate_audio_output_devices",
     "open_sounddevice_stream",
 ]

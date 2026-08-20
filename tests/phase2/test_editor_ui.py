@@ -29,6 +29,7 @@ from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.app.settings import ApplicationPaths
 from synesthesia_machine.contracts import (
     ColorValue,
+    DeviceKind,
     FrameContext,
     NumericMatrix,
     ParameterValue,
@@ -113,7 +114,7 @@ def window(qapp: QApplication, tmp_path: Path) -> Iterator[MainWindow]:
 
 def test_shell_has_fixed_structure_actions_and_accessible_controls(window: MainWindow) -> None:
     menus = tuple(action.text().replace("&", "") for action in window.menuBar().actions())
-    assert menus == ("File", "Edit", "View", "Graph", "MIDI", "Help")
+    assert menus == ("File", "Edit", "View", "Graph", "Outputs", "Help")
     assert window.centralWidget() is window.view
     assert window.library_dock.widget() is window.library
     assert window.inspector_dock.widget() is window.inspector
@@ -149,6 +150,41 @@ def test_shell_has_fixed_structure_actions_and_accessible_controls(window: MainW
         assert action.statusTip()
     for key in ("new", "open", "save", "undo", "redo", "copy", "paste", "duplicate"):
         assert not window.action_registry.require(key).shortcut().isEmpty()
+
+
+def test_device_parameter_editor_shows_labels_but_commits_stable_id(qapp: QApplication) -> None:
+    del qapp
+    edits: list[object] = []
+    spec = ParameterSpec(
+        "output_port",
+        "MIDI output port",
+        PortType.STRING,
+        "raw-port-2",
+        device_kind=DeviceKind.MIDI_OUTPUT,
+    )
+    editor = create_parameter_editor(
+        ParameterViewModel(spec, spec.default, False),
+        edits.append,
+        dynamic_choices=(("Friendly one", "raw-port-1"), ("Friendly two", "raw-port-2")),
+    )
+
+    assert isinstance(editor, QComboBox)
+    assert editor.currentText() == "Friendly two"
+    editor.setCurrentIndex(0)
+    assert edits == ["raw-port-1"]
+
+
+def test_audio_device_parameter_has_a_clear_default_before_discovery(window: MainWindow) -> None:
+    spec = ParameterSpec(
+        "output_device",
+        "Output audio device",
+        PortType.STRING,
+        "",
+        device_kind=DeviceKind.AUDIO_OUTPUT,
+    )
+    choices = window.session.device_parameter_choices(ParameterViewModel(spec, "", False))
+
+    assert choices == (("System default audio output", ""),)
 
 
 def test_horizontal_wheel_input_does_not_zoom_canvas(window: MainWindow) -> None:

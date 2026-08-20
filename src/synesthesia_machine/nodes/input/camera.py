@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from uuid import UUID
 
 from synesthesia_machine.contracts import (
+    DeviceKind,
     FrameContext,
     NoData,
     ParameterValue,
@@ -55,7 +56,7 @@ def create_camera_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Load Camera",
             "Input",
-            "Capture a live OpenCV camera with Windows backend fallback and reconnection.",
+            "Capture live video from a connected camera and reconnect if it drops out.",
             (),
             (
                 OutputPortSpec("image", "Image", PortType.IMAGE),
@@ -67,8 +68,9 @@ def create_camera_definitions() -> tuple[NodeDefinition, ...]:
                     "Camera device",
                     PortType.STRING,
                     "opencv:0",
-                    help_text="Exact ID from cached camera enumeration, for example opencv:0.",
+                    help_text="Select a camera detected by the engine.",
                     update_mode=ParameterUpdateMode.RESTART_SOURCE,
+                    device_kind=DeviceKind.CAMERA_INPUT,
                 ),
                 ParameterSpec(
                     "requested_width",
@@ -96,7 +98,7 @@ def create_camera_definitions() -> tuple[NodeDefinition, ...]:
                 ),
                 ParameterSpec(
                     "backend_preference",
-                    "Windows backend",
+                    "Camera compatibility",
                     PortType.STRING,
                     CameraBackendPreference.AUTO.value,
                     choices=tuple(preference.value for preference in CameraBackendPreference),
@@ -104,7 +106,7 @@ def create_camera_definitions() -> tuple[NodeDefinition, ...]:
                 ),
                 ParameterSpec(
                     "process_every_nth_frame",
-                    "Process every Nth frame",
+                    "Use every Nth frame",
                     PortType.INT,
                     1,
                     minimum=1,

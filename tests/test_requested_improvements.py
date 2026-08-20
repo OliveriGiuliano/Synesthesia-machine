@@ -218,6 +218,44 @@ def test_buffer_statistics_and_modulo_accumulator_process_scalars() -> None:
     )
 
 
+def test_buffer_enforces_memory_limit_and_resets_on_descriptor_change() -> None:
+    definition = create_application_registry().require("synmachine.utility.buffer")
+    parameters, errors = definition.parameter_values({"capacity": 600})
+    assert not errors
+    runtime = definition.runtime_factory(NODE_ID)
+    context = frame_context(clock_id=NODE_ID)
+    image = ImageFrame(
+        read_only_float32(np.zeros((512, 512, 3), dtype=np.float32)),
+        ColorSpace.SRGB,
+        ("R", "G", "B"),
+        AlphaMode.NONE,
+        context,
+        FrameProvenance(NODE_ID, "buffer-limit-test"),
+    )
+
+    with pytest.raises(ExpectedNodeError, match="256 MiB safety limit"):
+        runtime.process({"value": image}, parameters, context)
+    diagnostic = runtime.node_memory_diagnostic()  # type: ignore[attr-defined]
+    assert diagnostic.retained_bytes == 0
+    assert diagnostic.estimated_retained_bytes > diagnostic.memory_limit_bytes
+
+    small_parameters, errors = definition.parameter_values({"capacity": 3})
+    assert not errors
+    generic = _channel()
+    hue = ChannelFrame(
+        generic.data,
+        ChannelSemantic.HUE,
+        0.0,
+        360.0,
+        True,
+        generic.context,
+    )
+    runtime.process({"value": generic}, small_parameters, generic.context)
+    result = runtime.process({"value": hue}, small_parameters, hue.context)["values"]
+    assert isinstance(result, ValueArray)
+    assert result.values == (hue,)
+
+
 def test_dynamic_statistics_and_accumulator_respect_channel_descriptors() -> None:
     registry = create_application_registry()
     generic = _channel()
@@ -292,9 +330,11 @@ def test_normalize_definition_and_randomization_reject_reversed_output_range() -
     normalize = randomized.node(normalize_id)
 
     assert normalize is not None
-    assert float(normalize.parameters["output_maximum"]) >= float(
-        normalize.parameters["output_minimum"]
-    )
+    output_maximum = normalize.parameters["output_maximum"]
+    output_minimum = normalize.parameters["output_minimum"]
+    assert isinstance(output_maximum, float)
+    assert isinstance(output_minimum, float)
+    assert output_maximum >= output_minimum
 
 
 def test_random_graphs_are_complete_and_valid_across_seeds() -> None:
@@ -312,7 +352,9 @@ def test_random_graphs_are_complete_and_valid_across_seeds() -> None:
         )
         context = frame_context(clock_id=source.id)
         image = ImageFrame(
-            read_only_float32(np.linspace(0.0, 1.0, 24 * 32 * 3).reshape(24, 32, 3)),
+            read_only_float32(
+                np.linspace(0.0, 1.0, 24 * 32 * 3, dtype=np.float32).reshape(24, 32, 3)
+            ),
             ColorSpace.SRGB,
             ("R", "G", "B"),
             AlphaMode.NONE,

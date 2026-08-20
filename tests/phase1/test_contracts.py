@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pickle
 from collections.abc import MutableMapping
+from dataclasses import replace
 from types import MappingProxyType
 from typing import cast
 from uuid import UUID
@@ -28,10 +29,20 @@ from synesthesia_machine.contracts import (
     read_only_float32,
 )
 from synesthesia_machine.nodes import ParameterSpec
-from tests.phase1.helpers import frame_context
+from tests.phase1.helpers import frame_context, make_definition
 
 CLOCK_ID = UUID("00000000-0000-0000-0000-000000000101")
 SOURCE_ID = UUID("00000000-0000-0000-0000-000000000102")
+
+
+def test_node_definition_rejects_input_parameter_id_collisions() -> None:
+    definition = make_definition("test.collision", input_type=PortType.FLOAT)
+
+    with pytest.raises(ValueError, match="share stable IDs: value"):
+        replace(
+            definition,
+            parameters=(ParameterSpec("value", "Value", PortType.FLOAT, 0.0),),
+        )
 
 
 def test_no_data_is_a_distinct_singleton() -> None:

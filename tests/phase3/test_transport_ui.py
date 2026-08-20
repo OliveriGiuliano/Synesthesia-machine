@@ -19,6 +19,7 @@ from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QToolButton
 from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.app.settings import ApplicationPaths
 from synesthesia_machine.contracts import (
+    DeviceCatalogue,
     EngineActivation,
     EngineConnectionState,
     EngineMetrics,
@@ -28,6 +29,7 @@ from synesthesia_machine.contracts import (
     MidiOutputConnectionState,
     MidiOutputStatus,
     NodeMemoryDiagnostic,
+    NodeProfile,
     NoteActivity,
     NotePreview,
     SourceState,
@@ -119,6 +121,10 @@ class _RecordingEngineClient:
             return self.midi_statuses
         return tuple(status for status in self.midi_statuses if status.node_id == output_node_id)
 
+    def device_catalogue(self, *, force_refresh: bool = False) -> DeviceCatalogue:
+        del force_refresh
+        return DeviceCatalogue()
+
     def node_memory_diagnostics(
         self, node_id: UUID | None = None
     ) -> tuple[NodeMemoryDiagnostic, ...]:
@@ -142,6 +148,15 @@ class _RecordingEngineClient:
             dropped_before_processing=3,
             memory_bytes=64 * 1024 * 1024,
         )
+
+    def node_profiles(self) -> tuple[NodeProfile, ...]:
+        return ()
+
+    def set_profiling_enabled(self, enabled: bool) -> None:
+        del enabled
+
+    def reset_profiling(self) -> None:
+        return
 
     def poll_image_previews(
         self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
@@ -350,8 +365,8 @@ def test_preview_and_metrics_polling_update_ui_with_sequence_coalescing(
     assert window._image_sequences == {(source_id, "image"): 1}
     assert window._note_sequences == {NOTE_NODE: 1}
     assert "42 ticks" in window._engine_status.text()
-    assert "in/process/preview 0.0/29.5/0.0 FPS" in window._engine_status.text()
-    assert "drops 3" in window._engine_status.text()
+    assert "3 dropped" in window._engine_status.text()
+    assert "Input / processed / preview: 0.0 / 29.5 / 0.0 FPS" in (window._engine_status.toolTip())
 
 
 def test_image_dock_only_uses_the_source_feeding_an_image_visualizer(

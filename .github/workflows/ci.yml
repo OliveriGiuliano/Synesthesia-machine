@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   quality:
     runs-on: windows-latest
@@ -30,5 +34,11 @@ jobs:
       - name: Run static checks
         run: uv run check
 
+      - name: Type-check test call sites
+        run: uv run pyright --project pyright-tests.json
+
       - name: Run test suite
         run: uv run pytest -q
+
+      - name: Smoke-test the real application shell
+        run: uv run synmachine --smoke-test

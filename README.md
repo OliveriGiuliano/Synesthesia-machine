@@ -74,7 +74,7 @@ tests, limitations, and measurements.
 ### Phase 6 synesthesia examples and catalogue
 
 [`examples/phase6`](examples/phase6) contains hardware-safe Motion Grid, Edge Ensemble, Scanning Score,
-and Spatial Spectrum graphs plus the current exact 59-node catalogue. The examples use the included
+and Spatial Spectrum graphs plus the current exact 65-node catalogue. The examples use the included
 deterministic video and Note Visualizer or disabled Generate Audio sinks; none opens a MIDI port.
 
 The repeatable Phase 6 diagnostic times all four synthesis algorithms on deterministic 500×500
@@ -107,7 +107,7 @@ Any deviation from that baseline requires an Architecture Decision Record under 
 
 Current module boundaries include:
 
-- `src/synesthesia_machine/contracts`: immutable runtime values, protocol-v13 process messages,
+- `src/synesthesia_machine/contracts`: immutable runtime values, protocol-v14 process messages,
   compact node-memory diagnostics, and the final-shaped `EngineClient` API;
 - `src/synesthesia_machine/graph`, `nodes`, and `runtime`: Qt-free graph compilation, atomic plan
   replacement, process supervision, bounded source mailboxes, and shared-preview transport;

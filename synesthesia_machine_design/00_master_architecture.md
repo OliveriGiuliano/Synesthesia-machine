@@ -742,6 +742,8 @@ Play, Pause, Stop, Reload. Seeking is deferred from the minimum vertical slice b
 - Decode occurs on a source-owned thread and uses a small bounded decoded-frame queue.
 - PyAV frame conversion requests RGB and immediately converts to normalized float32.
 - When looping, the tick index resets to 1 and the component receives a loop reset reason.
+- At natural non-looping end, the last presented frame is processed before a source-ended reset
+  silences that source component and clears its stateful runtimes.
 - Missing/corrupt frames produce warnings and are skipped; repeated decode failure stops the source.
 
 ### 11.2 Load Camera
@@ -760,6 +762,8 @@ Use OpenCV `VideoCapture` with an explicit Windows backend preference, initially
 #### Behaviour
 
 - Device enumeration is performed in a background probe and cached.
+- Device identities and display labels cross to the UI through the engine-owned device catalogue;
+  the editor persists the ID and shows an unavailable saved selection without replacing it.
 - Opening and capture never occur on the UI thread.
 - The source reports actual negotiated width, height, and FPS.
 - Capture buffers are kept minimal; stale frames are discarded.
@@ -826,12 +830,14 @@ On Stop, graph close, node deletion, port switch, engine shutdown, or output err
 3. clear tracked state;
 4. close the port when appropriate.
 
-A visible global **Panic** action performs the same operation for every output and debug synth.
+A visible global **Silence All Outputs** action performs the same operation for every output and
+debug synth.
 
 ### 12.4 Port handling
 
 - Enumerate outputs asynchronously.
-- Persist the selected port by stable name, but tolerate renamed/missing ports.
+- Persist the selected port by engine-owned backend ID, display its separate friendly label, and
+  continue accepting unambiguous friendly names saved by earlier versions.
 - Do not auto-connect to an arbitrary replacement.
 - When the selected port disappears, panic if possible, mark the node unavailable, and periodically refresh enumeration.
 - UI channel numbers are 1–16; runtime channel numbers are 0–15.
@@ -857,7 +863,10 @@ The synth is intentionally simple:
 - fixed maximum voices, default 32, stealing the quietest/oldest voice;
 - limiter or conservative normalization to prevent clipping.
 
-The graph thread updates a lock-free or minimally locked desired-note snapshot. The audio callback reads the latest snapshot and evolves voices. It must not consume raw graph objects.
+The graph thread publishes a coalesced desired-note snapshot to a dedicated audio-output service.
+Device opening, replacement, and closure occur on that service thread; a failed configuration is
+latched until the selection changes or the node is disabled. The audio callback reads the latest
+snapshot and evolves voices. It must not consume raw graph objects.
 
 This node is diagnostic, not a production synthesizer.
 

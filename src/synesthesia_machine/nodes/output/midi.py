@@ -7,6 +7,7 @@ from functools import partial
 from uuid import UUID
 
 from synesthesia_machine.contracts import (
+    DeviceKind,
     FrameContext,
     MidiOutputConnectionState,
     MidiOutputStatus,
@@ -113,9 +114,9 @@ def create_midi_output_definitions(
         NodeDefinition(
             SEND_MIDI_TYPE_ID,
             1,
-            "Send MIDI to MIDI Output",
+            "Send MIDI",
             "Output / MIDI",
-            "Send complete desired MIDI note state to one explicitly selected output.",
+            "Send the incoming MIDI notes to a selected MIDI output.",
             (InputPortSpec("midi", "MIDI State", PortType.MIDI_STATE),),
             (),
             (
@@ -125,11 +126,11 @@ def create_midi_output_definitions(
                     PortType.STRING,
                     "",
                     help_text=(
-                        "Enumerated MIDI output name. On Windows, the numeric WinMM device index "
-                        "is hidden, so a loopMIDI port can use its friendly name (for example, "
-                        "'loopMIDI Port'). Empty opens no port."
+                        "Select a MIDI output detected by the engine. No output keeps this node "
+                        "silent."
                     ),
                     update_mode=ParameterUpdateMode.RECOMPILE,
+                    device_kind=DeviceKind.MIDI_OUTPUT,
                 ),
                 ParameterSpec(
                     "velocity_update_policy",

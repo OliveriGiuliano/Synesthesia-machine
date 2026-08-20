@@ -6,6 +6,7 @@ from uuid import UUID
 
 import pytest
 
+import synesthesia_machine.persistence.clipboard as clipboard_io
 from synesthesia_machine.contracts import NumericMatrix
 from synesthesia_machine.graph import GraphDocument
 from synesthesia_machine.persistence import (
@@ -116,3 +117,19 @@ def test_clipboard_rejects_malformed_numeric_matrices(matrix: object, message: s
 
     with pytest.raises(ValueError, match=message):
         fragment_from_json(json.dumps(raw))
+
+
+def test_clipboard_input_has_byte_and_cardinality_limits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(clipboard_io, "MAX_CLIPBOARD_JSON_BYTES", 16)
+    with pytest.raises(ValueError, match="exceeds"):
+        fragment_from_json(" " * 17)
+
+    monkeypatch.setattr(clipboard_io, "MAX_CLIPBOARD_JSON_BYTES", 8 * 1024 * 1024)
+    monkeypatch.setattr(clipboard_io, "MAX_CLIPBOARD_NODES", 0)
+    document = GraphDocument()
+    node_id = document.add_node("synmachine.utility.number", node_id=NODE_A)
+    text = fragment_to_json(copy_fragment(document.snapshot(), {node_id}))
+    with pytest.raises(ValueError, match="more than 0 nodes"):
+        fragment_from_json(text)

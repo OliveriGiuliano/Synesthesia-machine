@@ -142,7 +142,7 @@ def test_french_preference_translates_startup_and_can_switch_live(
     )
     try:
         menus = tuple(action.text().replace("&", "") for action in window.menuBar().actions())
-        assert menus == ("Fichier", "Édition", "Affichage", "Graphe", "MIDI", "Aide")
+        assert menus == ("Fichier", "Édition", "Affichage", "Graphe", "Sorties", "Aide")
         assert window.library_dock.windowTitle() == "Bibliothèque de nœuds"
         assert window.library.search.placeholderText() == "Rechercher des nœuds…"
         assert window.inspector.title.text() == "Aucune sélection"
@@ -168,7 +168,7 @@ def test_french_preference_translates_startup_and_can_switch_live(
 
         window.apply_preferences(EditorPreferences(language=UiLanguage.ENGLISH))
         menus = tuple(action.text().replace("&", "") for action in window.menuBar().actions())
-        assert menus == ("File", "Edit", "View", "Graph", "MIDI", "Help")
+        assert menus == ("File", "Edit", "View", "Graph", "Outputs", "Help")
         assert window.library_dock.windowTitle() == "Node Library"
         assert window.inspector.title.text() == "Nothing selected"
         assert window.scene.node_items[number_id].view_model.title == "Number"

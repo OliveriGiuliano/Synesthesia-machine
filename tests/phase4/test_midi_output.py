@@ -675,10 +675,12 @@ class _FakeMidoPort:
 class _FakeMidoBackend:
     def __init__(self) -> None:
         self.names = (TARGET,)
+        self.enumeration_count = 0
         self.opened: list[str] = []
         self.port = _FakeMidoPort()
 
     def get_output_names(self) -> Sequence[str]:
+        self.enumeration_count += 1
         return self.names
 
     def open_output(self, name: str) -> _FakeMidoPort:
@@ -711,6 +713,12 @@ def test_windows_rtmidi_indices_are_hidden_and_friendly_loopmidi_name_opens_raw_
     backend = MidoRtMidiBackend(fake, normalize_windows_names=True)
 
     assert backend.output_names() == ("loopMIDI Port 1", "loopMIDI Port")
+    assert tuple(
+        (device.device_id, device.display_name) for device in backend.output_devices()
+    ) == (
+        ("loopMIDI Port 1 2", "loopMIDI Port 1"),
+        ("loopMIDI Port 3", "loopMIDI Port"),
+    )
     assert fake.opened == []
 
     service = MidiOutputService(backend, refresh_interval_s=3600.0)
@@ -725,6 +733,30 @@ def test_windows_rtmidi_indices_are_hidden_and_friendly_loopmidi_name_opens_raw_
         assert status.available_ports == ("loopMIDI Port 1", "loopMIDI Port")
         assert fake.opened == ["loopMIDI Port 3"]
         assert fake.port.messages[-1] == mido.Message("note_on", channel=0, note=60, velocity=100)
+
+        enumeration_count = fake.enumeration_count
+        service.publish(_frame({(0, 61): 90}), _configuration("loopMIDI Port"))
+        _wait(service)
+        assert fake.enumeration_count == enumeration_count
+    finally:
+        service.close()
+
+
+def test_midi_service_opens_the_stable_raw_id_committed_by_device_picker() -> None:
+    fake = _FakeMidoBackend()
+    fake.names = ("loopMIDI Port 3",)
+    service = MidiOutputService(
+        MidoRtMidiBackend(fake, normalize_windows_names=True),
+        refresh_interval_s=3600.0,
+    )
+    try:
+        _wait(service)
+        service.publish(_frame({(0, 60): 100}), _configuration("loopMIDI Port 3"))
+        _wait(service)
+
+        assert service.status().connection_state is MidiOutputConnectionState.CONNECTED
+        assert service.status().selected_port == "loopMIDI Port 3"
+        assert fake.opened == ["loopMIDI Port 3"]
     finally:
         service.close()
 

@@ -10,6 +10,7 @@ from weakref import ref
 from PySide6.QtCore import QObject, Signal, Slot
 from PySide6.QtGui import QUndoCommand, QUndoStack
 
+from synesthesia_machine.contracts import DeviceCatalogue, DeviceKind
 from synesthesia_machine.graph import (
     CompilationResult,
     ConnectionModel,
@@ -57,8 +58,8 @@ from synesthesia_machine.ui.commands import (
     SetConnectionPreviewCommand,
     SetParameterCommand,
 )
-from synesthesia_machine.ui.translations import tr
-from synesthesia_machine.ui.view_models import GraphViewModel, project_graph
+from synesthesia_machine.ui.translations import tr, trf
+from synesthesia_machine.ui.view_models import GraphViewModel, ParameterViewModel, project_graph
 
 _IMAGE_VISUALIZER_TYPE_IDS = frozenset({DISPLAY_IMAGE_DATA_TYPE_ID, CHANNEL_DISPLAY_TYPE_ID})
 _NOTE_VISUALIZER_TYPE_IDS = frozenset({NOTE_VISUALIZER_TYPE_ID})
@@ -71,6 +72,7 @@ class DocumentSession(QObject):
     pathChanged = Signal(object)
     dirtyChanged = Signal(bool)
     validationChanged = Signal(object)
+    deviceCatalogueChanged = Signal()
 
     def __init__(self, registry: NodeRegistry, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -87,6 +89,7 @@ class DocumentSession(QObject):
         self._command_change_callback = refresh_session
         self.current_path: Path | None = None
         self.report = ValidationReport()
+        self._device_catalogue = DeviceCatalogue()
         self._compilation: CompilationResult
         self.undo_stack.cleanChanged.connect(self._on_clean_changed)
         self.undo_stack.setClean()
@@ -107,6 +110,43 @@ class DocumentSession(QObject):
 
     def push(self, command: QUndoCommand) -> None:
         self.undo_stack.push(command)
+
+    def set_device_catalogue(self, catalogue: DeviceCatalogue) -> None:
+        if catalogue == self._device_catalogue:
+            return
+        devices_changed = catalogue.devices != self._device_catalogue.devices
+        self._device_catalogue = catalogue
+        if devices_changed:
+            self.deviceCatalogueChanged.emit()
+
+    def device_parameter_choices(
+        self, parameter: ParameterViewModel
+    ) -> tuple[tuple[str, LiteralValue], ...]:
+        kind = parameter.spec.device_kind
+        if kind is None:
+            return ()
+        choices = [
+            (
+                tr(device.display_name) if device.is_default else device.display_name,
+                device.device_id,
+            )
+            for device in sorted(
+                self._device_catalogue.for_kind(kind),
+                key=lambda item: (
+                    not item.is_default,
+                    item.display_name.casefold(),
+                    item.device_id,
+                ),
+            )
+        ]
+        if kind is DeviceKind.MIDI_OUTPUT and not any(value == "" for _label, value in choices):
+            choices.insert(0, (tr("No MIDI output"), ""))
+        if kind is DeviceKind.AUDIO_OUTPUT and not any(value == "" for _label, value in choices):
+            choices.insert(0, (tr("System default audio output"), ""))
+        current = parameter.value
+        if isinstance(current, str) and all(value != current for _label, value in choices):
+            choices.append((trf("{device} (unavailable)", device=current), current))
+        return tuple(choices)
 
     def new_document(self) -> None:
         self.document = GraphDocument()

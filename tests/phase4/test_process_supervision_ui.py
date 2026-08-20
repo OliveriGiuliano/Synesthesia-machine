@@ -21,6 +21,7 @@ from synesthesia_machine.app import bootstrap
 from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.app.settings import ApplicationPaths
 from synesthesia_machine.contracts import (
+    DeviceCatalogue,
     EngineActivation,
     EngineConnectionState,
     EngineMetrics,
@@ -29,6 +30,7 @@ from synesthesia_machine.contracts import (
     ImagePreview,
     MidiOutputStatus,
     NodeMemoryDiagnostic,
+    NodeProfile,
     NotePreview,
     SourceStatus,
     ValuePreview,
@@ -107,6 +109,10 @@ class _SupervisionClient:
         del output_node_id
         return ()
 
+    def device_catalogue(self, *, force_refresh: bool = False) -> DeviceCatalogue:
+        del force_refresh
+        return DeviceCatalogue()
+
     def node_memory_diagnostics(
         self, node_id: UUID | None = None
     ) -> tuple[NodeMemoryDiagnostic, ...]:
@@ -121,8 +127,17 @@ class _SupervisionClient:
             child_process_id=self.engine_status.child_process_id,
         )
 
+    def node_profiles(self) -> tuple[NodeProfile, ...]:
+        return ()
+
+    def set_profiling_enabled(self, enabled: bool) -> None:
+        del enabled
+
+    def reset_profiling(self) -> None:
+        return
+
     def poll_image_previews(
-        self, after_sequences: Mapping[UUID, int] | None = None
+        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
     ) -> tuple[ImagePreview, ...]:
         del after_sequences
         return ()

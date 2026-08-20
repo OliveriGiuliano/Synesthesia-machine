@@ -27,6 +27,7 @@ from synesthesia_machine.contracts.engine_messages import (
     CommandAcknowledged,
     CommandFailed,
     ConfigurePreviewSlot,
+    DeviceCatalogueResponse,
     EngineAsyncEvent,
     EngineCommand,
     EngineErrorPublished,
@@ -48,6 +49,7 @@ from synesthesia_machine.contracts.engine_messages import (
     PreviewSlotConfigured,
     PreviewSlotDescriptor,
     ProtocolMismatch,
+    QueryDeviceCatalogue,
     QueryMetrics,
     QueryMidiOutputStatus,
     QueryNodeMemoryDiagnostics,
@@ -113,6 +115,7 @@ _COMMAND_TYPES = (
     Panic,
     QuerySourceStatus,
     QueryMidiOutputStatus,
+    QueryDeviceCatalogue,
     QueryNodeMemoryDiagnostics,
     QueryNodeProfiles,
     ResetProfiling,
@@ -123,7 +126,14 @@ _COMMAND_TYPES = (
     Shutdown,
 )
 
-_REVISION_EXEMPT_COMMANDS = (Ping, WriteSharedFrame, Handshake, ActivateGraph, Shutdown)
+_REVISION_EXEMPT_COMMANDS = (
+    Ping,
+    WriteSharedFrame,
+    Handshake,
+    ActivateGraph,
+    QueryDeviceCatalogue,
+    Shutdown,
+)
 
 
 class StaleGraphRevisionError(RuntimeError):
@@ -445,6 +455,11 @@ class EngineServer:
                 command.request_id,
                 self._graph_revision,
                 self._engine.midi_output_status(command.output_node_id),
+            )
+        if isinstance(command, QueryDeviceCatalogue):
+            return DeviceCatalogueResponse(
+                command.request_id,
+                self._engine.device_catalogue(force_refresh=command.force_refresh),
             )
         if isinstance(command, QueryNodeMemoryDiagnostics):
             return NodeMemoryDiagnosticsResponse(

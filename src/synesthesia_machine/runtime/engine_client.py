@@ -17,6 +17,7 @@ from typing import Protocol, cast
 from uuid import UUID, uuid4
 
 from synesthesia_machine.contracts.engine_client import (
+    DeviceCatalogue,
     EngineActivation,
     EngineConnectionState,
     EngineMetrics,
@@ -37,6 +38,7 @@ from synesthesia_machine.contracts.engine_messages import (
     CommandAcknowledged,
     CommandFailed,
     ConfigurePreviewSlot,
+    DeviceCatalogueResponse,
     EngineAsyncEvent,
     EngineCommand,
     EngineErrorPublished,
@@ -55,6 +57,7 @@ from synesthesia_machine.contracts.engine_messages import (
     PreviewFormatChanged,
     PreviewSlotConfigured,
     ProtocolMismatch,
+    QueryDeviceCatalogue,
     QueryMetrics,
     QueryMidiOutputStatus,
     QueryNodeMemoryDiagnostics,
@@ -319,6 +322,13 @@ class ProcessEngineClient:
         )
         self._accept_revision(response.graph_revision)
         return response.statuses
+
+    def device_catalogue(self, *, force_refresh: bool = False) -> DeviceCatalogue:
+        response = self._request(
+            QueryDeviceCatalogue(uuid4().hex, force_refresh),
+            DeviceCatalogueResponse,
+        )
+        return response.catalogue
 
     def node_memory_diagnostics(
         self, node_id: UUID | None = None

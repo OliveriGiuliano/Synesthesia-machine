@@ -395,6 +395,7 @@ class InspectorPanel(QWidget):
         self._refresh_timer.setInterval(0)
         self._refresh_timer.timeout.connect(self.refresh)
         session.changed.connect(self._schedule_refresh)
+        session.deviceCatalogueChanged.connect(self._schedule_refresh)
         self.refresh()
 
     @Slot()
@@ -465,7 +466,11 @@ class InspectorPanel(QWidget):
             if parameter.spec.id in grouped_parameter_ids:
                 continue
             callback = partial(self._set_parameter, node.node_id, parameter.spec.id)
-            editor = create_parameter_editor(parameter, callback)
+            editor = create_parameter_editor(
+                parameter,
+                callback,
+                dynamic_choices=self.session.device_parameter_choices(parameter),
+            )
             label = QLabel(tr(parameter.spec.label), self.form_container)
             help_text = parameter_tooltip(parameter.spec)
             label.setToolTip(format_tooltip(help_text))

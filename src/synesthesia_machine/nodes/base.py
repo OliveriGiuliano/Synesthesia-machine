@@ -11,6 +11,7 @@ from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 from synesthesia_machine.contracts.engine_client import (
+    DeviceKind,
     MidiOutputStatus,
     NodeMemoryDiagnostic,
     ResetReason,
@@ -135,9 +136,12 @@ class ParameterSpec:
     editor_hint: ParameterEditorHint = ParameterEditorHint.DEFAULT
     applicable_input_types: tuple[PortType, ...] = ()
     step: int | None = None
+    device_kind: DeviceKind | None = None
 
     def __post_init__(self) -> None:
         _validate_stable_id(self.id, "parameter")
+        if self.device_kind is not None and self.value_type is not PortType.STRING:
+            raise ValueError("Device parameters must use the STRING value type")
         if self.minimum is not None or self.maximum is not None:
             if self.value_type not in {PortType.FLOAT, PortType.INT}:
                 raise ValueError("Parameter bounds require a numeric value type")
@@ -400,7 +404,12 @@ class NodeDefinition:
         _ensure_unique((port.id for port in self.outputs), "output port")
         _ensure_unique((parameter.id for parameter in self.parameters), "parameter")
         _ensure_unique((group.id for group in self.parameter_groups), "parameter group")
+        fixed_input_ids = {port.id for port in self.inputs}
         parameter_ids = {parameter.id for parameter in self.parameters}
+        overlapping_inputs = fixed_input_ids & parameter_ids
+        if overlapping_inputs:
+            names = ", ".join(sorted(overlapping_inputs))
+            raise ValueError(f"Input ports and parameters share stable IDs: {names}")
         grouped_parameter_ids = tuple(
             parameter_id for group in self.parameter_groups for parameter_id in group.parameter_ids
         )

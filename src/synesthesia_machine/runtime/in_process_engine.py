@@ -17,6 +17,7 @@ from uuid import UUID
 import psutil
 
 from synesthesia_machine.contracts import (
+    DeviceCatalogue,
     EngineActivation,
     EngineConnectionState,
     EngineMetrics,
@@ -37,6 +38,10 @@ from synesthesia_machine.media.video_source import PresentedSourceFrame, VideoSo
 from synesthesia_machine.nodes.base import ResetReason
 from synesthesia_machine.nodes.input import LOAD_CAMERA_TYPE_ID, LOAD_VIDEO_TYPE_ID
 from synesthesia_machine.nodes.registry import NodeRegistry
+from synesthesia_machine.runtime.device_catalogue import (
+    DeviceCatalogueService,
+    SystemDeviceCatalogueService,
+)
 from synesthesia_machine.runtime.engine_facade import EngineFacade
 from synesthesia_machine.runtime.execution_plan import CompiledNode, ExecutionPlan, PortKey
 from synesthesia_machine.runtime.previews import PreviewBroker
@@ -313,13 +318,15 @@ class LatestFrameGraphWorker:
     def reset_source(self, source_node_id: UUID, reason: ResetReason) -> None:
         with self._condition:
             self._ensure_open()
-            self._commands = deque(
-                command
-                for command in self._commands
-                if not (
-                    isinstance(command, _TickCommand) and command.source_node_id == source_node_id
+            if reason is not ResetReason.SOURCE_ENDED:
+                self._commands = deque(
+                    command
+                    for command in self._commands
+                    if not (
+                        isinstance(command, _TickCommand)
+                        and command.source_node_id == source_node_id
+                    )
                 )
-            )
             self._commands.append(_ResetCommand(source_node_id, reason))
             self._condition.notify()
 
@@ -393,6 +400,8 @@ class LatestFrameGraphWorker:
             self._last_completed_received_ns.clear()
             self._last_processing_latency_ms.clear()
             self._graph_durations_ns.clear()
+            self._input_times_ns.clear()
+            self._processed_times_ns.clear()
             self._last_result = None
             self._last_error = None
             self._started_ns = None
@@ -563,6 +572,7 @@ class InProcessEngineClient:
         *,
         video_source_factory: VideoSourceFactory | None = None,
         camera_source_factory: CameraSourceFactory | None = None,
+        device_catalogue_service: DeviceCatalogueService | None = None,
         worker_clock: Callable[[], int] = time.perf_counter_ns,
     ) -> None:
         self._lock = threading.RLock()
@@ -571,6 +581,7 @@ class InProcessEngineClient:
         self._profiling_enabled = False
         self._video_source_factory = video_source_factory or VideoSourceService
         self._camera_source_factory = camera_source_factory or CameraSourceService
+        self._device_catalogue_service = device_catalogue_service or SystemDeviceCatalogueService()
         self._worker_clock = worker_clock
         self._preview_broker = PreviewBroker()
         self._worker: LatestFrameGraphWorker | None = None
@@ -748,7 +759,12 @@ class InProcessEngineClient:
     ) -> tuple[MidiOutputStatus, ...]:
         with self._lock:
             self._ensure_open()
-            return self._facade.midi_output_status(output_node_id)
+        return self._facade.midi_output_status(output_node_id)
+
+    def device_catalogue(self, *, force_refresh: bool = False) -> DeviceCatalogue:
+        with self._lock:
+            self._ensure_open()
+        return self._device_catalogue_service.catalogue(force_refresh=force_refresh)
 
     def node_memory_diagnostics(
         self, node_id: UUID | None = None
@@ -868,9 +884,22 @@ class InProcessEngineClient:
         with self._lock:
             if self._state is EngineState.CLOSED:
                 return
-            self._close_runtime()
-            self._facade.close()
-            self._state = EngineState.CLOSED
+            errors: list[Exception] = []
+            try:
+                self._close_runtime()
+            except Exception as error:
+                errors.append(error)
+            try:
+                self._facade.close()
+            except Exception as error:
+                errors.append(error)
+            try:
+                self._device_catalogue_service.close()
+            except Exception as error:
+                errors.append(error)
+            finally:
+                self._state = EngineState.CLOSED
+            _raise_cleanup_errors(errors, "Engine cleanup failed")
 
     def _create_source(
         self, node: CompiledNode, worker: LatestFrameGraphWorker
@@ -976,12 +1005,24 @@ class InProcessEngineClient:
     def _close_runtime(self) -> None:
         sources = tuple(self._sources.values())
         self._sources = {}
+        worker = self._worker
+        self._worker = None
+        errors: list[Exception] = []
         for source in sources:
-            source.close()
-        if self._worker is not None:
-            self._worker.close()
-            self._worker = None
-        self._preview_broker.clear()
+            try:
+                source.close()
+            except Exception as error:
+                errors.append(error)
+        if worker is not None:
+            try:
+                worker.close()
+            except Exception as error:
+                errors.append(error)
+        try:
+            self._preview_broker.clear()
+        except Exception as error:
+            errors.append(error)
+        _raise_cleanup_errors(errors, "Runtime cleanup failed")
 
     def _effective_state(
         self,
@@ -996,7 +1037,13 @@ class InProcessEngineClient:
                 return EngineState.ERROR
         if any(status.state is SourceState.ERROR for status in statuses):
             return EngineState.ERROR
-        if statuses and all(status.state is SourceState.ENDED for status in statuses):
+        if any(
+            status.state in {SourceState.PLAYING, SourceState.RECONNECTING} for status in statuses
+        ):
+            return EngineState.RUNNING
+        if any(status.state is SourceState.PAUSED for status in statuses):
+            return EngineState.PAUSED
+        if statuses:
             return EngineState.STOPPED
         return self._state
 
@@ -1010,6 +1057,16 @@ def _text_parameter(node: CompiledNode, parameter_id: str) -> str:
     if not isinstance(value, str):
         raise TypeError(f"Expected string parameter {parameter_id!r}")
     return value
+
+
+def _raise_cleanup_errors(errors: list[Exception], summary: str) -> None:
+    if not errors:
+        return
+    first, *additional = errors
+    for error in additional:
+        first.add_note(f"Additional cleanup failure: {type(error).__name__}: {error}")
+    first.add_note(summary)
+    raise first
 
 
 def _int_parameter(node: CompiledNode, parameter_id: str) -> int:

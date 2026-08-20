@@ -47,6 +47,7 @@ from synesthesia_machine.ui.view_models import (
 )
 
 type ParameterChangeHandler = Callable[[UUID, str, LiteralValue], None]
+type DeviceChoiceProvider = Callable[[ParameterViewModel], tuple[tuple[str, LiteralValue], ...]]
 
 
 def _issue_tooltip(issues: tuple[ValidationIssue, ...]) -> str:
@@ -322,11 +323,13 @@ class NodeGraphicsItem(QGraphicsObject):
         on_parameter_changed: ParameterChangeHandler,
         *,
         defer_parameter_editors: bool = False,
+        device_choice_provider: DeviceChoiceProvider | None = None,
     ) -> None:
         super().__init__()
         self.view_model = view_model
         self.theme = theme
         self._on_parameter_changed = on_parameter_changed
+        self._device_choice_provider = device_choice_provider
         self.ports: dict[tuple[str, bool], PortGraphicsItem] = {}
         self.parameter_editors: dict[str, QGraphicsProxyWidget] = {}
         self._parameter_rows: dict[str, float] = {}
@@ -440,7 +443,15 @@ class NodeGraphicsItem(QGraphicsObject):
             self.view_model.node_id,
             parameter.spec.id,
         )
-        editor = create_parameter_editor(parameter, callback, compact=True)
+        dynamic_choices = (
+            () if self._device_choice_provider is None else self._device_choice_provider(parameter)
+        )
+        editor = create_parameter_editor(
+            parameter,
+            callback,
+            compact=True,
+            dynamic_choices=dynamic_choices,
+        )
         editor.setFixedWidth(round(self._EDITOR_WIDTH))
         proxy = QGraphicsProxyWidget(self)
         proxy.setWidget(editor)

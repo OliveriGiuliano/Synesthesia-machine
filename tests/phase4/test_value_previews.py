@@ -18,6 +18,7 @@ of the compiler.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import cast
 from uuid import UUID
 
 import numpy as np
@@ -88,6 +89,7 @@ def _value_preview_plan(
 
     producer_definition = _definition(producer_type_id)
     producer_output_type = producer_definition.outputs[0].value_type
+    assert isinstance(producer_output_type, PortType)
     producer = CompiledNode(
         node_id=SCALAR_PRODUCER_ID,
         definition=producer_definition,
@@ -116,11 +118,11 @@ def _value_preview_plan(
 def _value_tick_result(
     scalar_source: PortKey,
     *,
-    scalar: object,
+    scalar: RuntimeValue,
     tick_index: int,
     include_frame: bool = True,
 ) -> TickResult:
-    values: dict[PortKey, object] = {}
+    values: dict[PortKey, RuntimeValue] = {}
     if include_frame:
         values[PortKey(SOURCE_ID, "frame")] = _channel(tick_index)
     values[scalar_source] = scalar
@@ -237,7 +239,9 @@ def test_value_preview_formats_numpy_scalars() -> None:
     )
     int_broker = PreviewBroker()
     int_broker.configure(int_plan)
-    int_broker.publish(_value_tick_result(int_source, scalar=np.int64(42), tick_index=3))
+    int_broker.publish(
+        _value_tick_result(int_source, scalar=cast(RuntimeValue, np.int64(42)), tick_index=3)
+    )
     (int_preview,) = int_broker.poll_values()
     assert int_preview.port_type == "INT"
     assert int_preview.text == "42"
@@ -245,7 +249,13 @@ def test_value_preview_formats_numpy_scalars() -> None:
     float_plan, float_source = _value_preview_plan()
     float_broker = PreviewBroker()
     float_broker.configure(float_plan)
-    float_broker.publish(_value_tick_result(float_source, scalar=np.float32(2.5), tick_index=4))
+    float_broker.publish(
+        _value_tick_result(
+            float_source,
+            scalar=cast(RuntimeValue, np.float32(2.5)),
+            tick_index=4,
+        )
+    )
     (float_preview,) = float_broker.poll_values()
     assert float_preview.port_type == "FLOAT"
     assert float_preview.text == "2.5"

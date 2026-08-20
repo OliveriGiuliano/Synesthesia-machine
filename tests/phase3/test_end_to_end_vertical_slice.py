@@ -134,6 +134,7 @@ def test_generated_video_drives_expected_midi_previews_and_mock_audio_via_client
             for state in synth.updates
         )
         assert rendered_states == tuple(((0, note, 100),) for note in EXPECTED_NOTES)
+        assert synth.panic_count == 1
 
         image_previews = client.poll_image_previews()
         note_previews = client.poll_note_previews()
@@ -149,7 +150,7 @@ def test_generated_video_drives_expected_midi_previews_and_mock_audio_via_client
         assert note_previews[0].notes == (NoteActivity(0, EXPECTED_NOTES[-1], 100),)
 
         client.panic()
-        assert synth.panic_count == 1
+        assert synth.panic_count == 2
     finally:
         client.close()
 

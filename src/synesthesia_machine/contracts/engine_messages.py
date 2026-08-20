@@ -7,6 +7,7 @@ from enum import StrEnum
 from uuid import UUID
 
 from synesthesia_machine.contracts.engine_client import (
+    DeviceCatalogue,
     EngineActivation,
     EngineMetrics,
     MidiOutputStatus,
@@ -19,7 +20,7 @@ from synesthesia_machine.contracts.engine_client import (
 )
 from synesthesia_machine.contracts.runtime_values import ColorValue, NumericMatrix
 
-ENGINE_PROTOCOL_VERSION = 13
+ENGINE_PROTOCOL_VERSION = 14
 
 type SnapshotLiteral = str | int | float | bool | ColorValue | NumericMatrix | None
 
@@ -155,6 +156,20 @@ class MidiOutputStatusResponse:
     request_id: str
     graph_revision: int | None
     statuses: tuple[MidiOutputStatus, ...]
+    protocol_version: int = ENGINE_PROTOCOL_VERSION
+
+
+@dataclass(frozen=True, slots=True)
+class QueryDeviceCatalogue:
+    request_id: str
+    force_refresh: bool = False
+    protocol_version: int = ENGINE_PROTOCOL_VERSION
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceCatalogueResponse:
+    request_id: str
+    catalogue: DeviceCatalogue
     protocol_version: int = ENGINE_PROTOCOL_VERSION
 
 
@@ -376,6 +391,7 @@ EngineCommand = (
     | Panic
     | QuerySourceStatus
     | QueryMidiOutputStatus
+    | QueryDeviceCatalogue
     | QueryNodeMemoryDiagnostics
     | QueryNodeProfiles
     | SetProfilingEnabled
@@ -392,6 +408,7 @@ EngineResponse = (
     | GraphActivationAcknowledged
     | SourceStatusResponse
     | MidiOutputStatusResponse
+    | DeviceCatalogueResponse
     | NodeMemoryDiagnosticsResponse
     | NodeProfilesResponse
     | MetricsResponse

@@ -61,9 +61,55 @@ class MidiOutputConnectionState(StrEnum):
     CLOSED = "CLOSED"
 
 
+class DeviceKind(StrEnum):
+    CAMERA_INPUT = "CAMERA_INPUT"
+    MIDI_OUTPUT = "MIDI_OUTPUT"
+    AUDIO_OUTPUT = "AUDIO_OUTPUT"
+
+
+@dataclass(frozen=True, slots=True, order=True)
+class DeviceDescriptor:
+    """Stable engine-owned device identity paired with a user-facing label."""
+
+    kind: DeviceKind
+    device_id: str
+    display_name: str
+    is_default: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.display_name.strip():
+            raise ValueError("device display name must not be empty")
+        if not self.device_id and not self.is_default:
+            raise ValueError("only a default device may use an empty device ID")
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceCatalogue:
+    """Deterministic partial hardware catalogue safe to carry across engine IPC."""
+
+    devices: tuple[DeviceDescriptor, ...] = ()
+    errors: tuple[tuple[DeviceKind, str], ...] = ()
+    pending_kinds: tuple[DeviceKind, ...] = ()
+
+    def __post_init__(self) -> None:
+        if tuple(sorted(self.devices)) != self.devices:
+            raise ValueError("devices must use deterministic kind, ID, and label order")
+        identities = tuple((device.kind, device.device_id) for device in self.devices)
+        if len(set(identities)) != len(identities):
+            raise ValueError("device IDs must be unique within each device kind")
+        if tuple(sorted(self.errors)) != self.errors:
+            raise ValueError("device catalogue errors must use deterministic kind order")
+        if tuple(sorted(set(self.pending_kinds))) != self.pending_kinds:
+            raise ValueError("pending device kinds must be unique and deterministic")
+
+    def for_kind(self, kind: DeviceKind) -> tuple[DeviceDescriptor, ...]:
+        return tuple(device for device in self.devices if device.kind is kind)
+
+
 class ResetReason(StrEnum):
     PLAN_REPLACED = "PLAN_REPLACED"
     SOURCE_RESTARTED = "SOURCE_RESTARTED"
+    SOURCE_ENDED = "SOURCE_ENDED"
     SEEK = "SEEK"
     PARAMETER_CHANGED = "PARAMETER_CHANGED"
     CLOCK_CHANGED = "CLOCK_CHANGED"
@@ -343,6 +389,8 @@ class EngineClient(Protocol):
     def midi_output_status(
         self, output_node_id: UUID | None = None
     ) -> tuple[MidiOutputStatus, ...]: ...
+
+    def device_catalogue(self, *, force_refresh: bool = False) -> DeviceCatalogue: ...
 
     def node_memory_diagnostics(
         self, node_id: UUID | None = None

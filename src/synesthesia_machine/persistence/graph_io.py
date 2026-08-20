@@ -44,6 +44,11 @@ from synesthesia_machine.persistence.schemas import (
 )
 from synesthesia_machine.version import __version__
 
+MAX_GRAPH_JSON_BYTES = 16 * 1024 * 1024
+MAX_GRAPH_NODES = 10_000
+MAX_GRAPH_CONNECTIONS = 50_000
+MAX_GRAPH_GROUPS = 5_000
+
 
 @dataclass(frozen=True, slots=True)
 class GraphPersistenceError(ValueError):
@@ -97,10 +102,12 @@ def graph_to_json(snapshot: GraphSnapshot, *, indent: int = 2) -> str:
 def graph_from_data(data: Mapping[str, object], registry: NodeRegistry) -> GraphSnapshot:
     """Migrate and validate graph data before constructing domain models."""
 
+    _validate_collection_limits(data)
     try:
         migrated = migrate_graph_data(data)
     except ValueError as error:
         raise GraphPersistenceError("migration_failed", str(error)) from error
+    _validate_collection_limits(migrated)
     _require_exact_keys(
         migrated,
         {
@@ -133,6 +140,7 @@ def graph_from_data(data: Mapping[str, object], registry: NodeRegistry) -> Graph
         _connection_from_data(value, index) for index, value in enumerate(raw_connections)
     )
     _ensure_unique_ids((connection.id for connection in connections), "connection", "$.connections")
+    _ensure_connection_endpoints(connections, nodes)
     return GraphSnapshot(
         document_id=document_id,
         revision=0,
@@ -147,11 +155,28 @@ def graph_from_json(text: str, registry: NodeRegistry) -> GraphSnapshot:
     """Parse, migrate, and validate a graph JSON string."""
 
     try:
-        value = cast(object, json.loads(text))
-    except json.JSONDecodeError as error:
+        size = len(text.encode("utf-8"))
+    except UnicodeEncodeError as error:
+        raise GraphPersistenceError("invalid_encoding", "Graph text is not valid UTF-8") from error
+    if size > MAX_GRAPH_JSON_BYTES:
         raise GraphPersistenceError(
-            "invalid_json", error.msg, f"line {error.lineno}, column {error.colno}"
-        ) from error
+            "graph_too_large",
+            f"Graph JSON exceeds the {MAX_GRAPH_JSON_BYTES // (1024 * 1024)} MiB limit",
+        )
+    return _graph_from_json_unchecked(text, registry)
+
+
+def _graph_from_json_unchecked(text: str, registry: NodeRegistry) -> GraphSnapshot:
+    try:
+        value = cast(object, json.loads(text))
+    except (json.JSONDecodeError, RecursionError) as error:
+        if isinstance(error, json.JSONDecodeError):
+            path = f"line {error.lineno}, column {error.colno}"
+            message = error.msg
+        else:
+            path = None
+            message = "Graph JSON is nested too deeply"
+        raise GraphPersistenceError("invalid_json", message, path) from error
     data = _expect_object(value, "$")
     return graph_from_data(data, registry)
 
@@ -219,7 +244,21 @@ def load_graph(path: str | Path, registry: NodeRegistry) -> GraphSnapshot:
     """Load a UTF-8 graph file through the validated schema boundary."""
 
     source = Path(path).expanduser().resolve()
-    snapshot = graph_from_json(source.read_text(encoding="utf-8"), registry)
+    with source.open("rb") as graph_file:
+        content = graph_file.read(MAX_GRAPH_JSON_BYTES + 1)
+    if len(content) > MAX_GRAPH_JSON_BYTES:
+        raise GraphPersistenceError(
+            "graph_too_large",
+            f"Graph file exceeds the {MAX_GRAPH_JSON_BYTES // (1024 * 1024)} MiB limit",
+            str(source),
+        )
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise GraphPersistenceError(
+            "invalid_encoding", "Graph file is not valid UTF-8", str(source)
+        ) from error
+    snapshot = _graph_from_json_unchecked(text, registry)
     return _with_resolved_media_paths(snapshot, source.parent)
 
 
@@ -604,6 +643,40 @@ def _validate_empty_object(value: object, path: str) -> None:
         raise GraphPersistenceError(
             "unsupported_content", "This reserved field must remain empty", path
         )
+
+
+def _validate_collection_limits(data: Mapping[str, object]) -> None:
+    limits = (
+        ("nodes", MAX_GRAPH_NODES),
+        ("connections", MAX_GRAPH_CONNECTIONS),
+        ("groups", MAX_GRAPH_GROUPS),
+    )
+    for field, limit in limits:
+        value = data.get(field)
+        if isinstance(value, list) and len(cast(list[object], value)) > limit:
+            raise GraphPersistenceError(
+                "too_many_items",
+                f"Graph contains more than {limit:,} {field}",
+                f"$.{field}",
+            )
+
+
+def _ensure_connection_endpoints(
+    connections: Iterable[ConnectionModel], nodes: Iterable[NodeModel]
+) -> None:
+    node_ids = {node.id for node in nodes}
+    for index, connection in enumerate(connections):
+        missing = tuple(
+            str(node_id)
+            for node_id in (connection.source_node_id, connection.destination_node_id)
+            if node_id not in node_ids
+        )
+        if missing:
+            raise GraphPersistenceError(
+                "dangling_connection",
+                f"Connection references missing node ID(s): {', '.join(missing)}",
+                f"$.connections[{index}]",
+            )
 
 
 def _ensure_unique_ids(values: Iterable[UUID], kind: str, path: str) -> None:

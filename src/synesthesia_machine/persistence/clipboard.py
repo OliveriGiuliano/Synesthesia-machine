@@ -14,6 +14,9 @@ from synesthesia_machine.graph import ConnectionModel, GraphSnapshot, LiteralVal
 
 CLIPBOARD_FRAGMENT_VERSION = 2
 _SUPPORTED_CLIPBOARD_FRAGMENT_VERSIONS = frozenset({1, CLIPBOARD_FRAGMENT_VERSION})
+MAX_CLIPBOARD_JSON_BYTES = 8 * 1024 * 1024
+MAX_CLIPBOARD_NODES = 5_000
+MAX_CLIPBOARD_CONNECTIONS = 25_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,9 +123,18 @@ def fragment_from_json(text: str) -> ClipboardFragment:
     """Parse supported clipboard formats and normalize them to the current version."""
 
     try:
+        size = len(text.encode("utf-8"))
+    except UnicodeEncodeError as error:
+        raise ValueError("Clipboard text is not valid UTF-8") from error
+    if size > MAX_CLIPBOARD_JSON_BYTES:
+        raise ValueError(
+            f"Clipboard JSON exceeds the {MAX_CLIPBOARD_JSON_BYTES // (1024 * 1024)} MiB limit"
+        )
+    try:
         value = cast(object, json.loads(text))
-    except json.JSONDecodeError as error:
-        raise ValueError(f"Invalid clipboard JSON: {error.msg}") from error
+    except (json.JSONDecodeError, RecursionError) as error:
+        message = error.msg if isinstance(error, json.JSONDecodeError) else "nested too deeply"
+        raise ValueError(f"Invalid clipboard JSON: {message}") from error
     data = _object(value, "$")
     if set(data) != {"fragment_version", "nodes", "connections"}:
         msg = "Clipboard fragment fields do not match the supported format"
@@ -136,6 +148,12 @@ def fragment_from_json(text: str) -> ClipboardFragment:
         raise ValueError(msg)
     raw_nodes = _list(data["nodes"], "$.nodes")
     raw_connections = _list(data["connections"], "$.connections")
+    if len(raw_nodes) > MAX_CLIPBOARD_NODES:
+        raise ValueError(f"Clipboard fragment contains more than {MAX_CLIPBOARD_NODES:,} nodes")
+    if len(raw_connections) > MAX_CLIPBOARD_CONNECTIONS:
+        raise ValueError(
+            f"Clipboard fragment contains more than {MAX_CLIPBOARD_CONNECTIONS:,} connections"
+        )
     return ClipboardFragment(
         nodes=tuple(_node_from_data(item, index) for index, item in enumerate(raw_nodes)),
         connections=tuple(

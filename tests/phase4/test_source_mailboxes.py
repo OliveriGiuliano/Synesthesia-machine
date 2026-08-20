@@ -294,6 +294,42 @@ def test_slow_graph_drops_stale_frames_with_bounded_latency_and_visible_metrics(
         client.close()
 
 
+def test_plan_metric_reset_clears_stale_input_and_processed_fps_windows() -> None:
+    clock = _LogicalClock()
+    registry = create_application_registry()
+    document = GraphDocument(document_id=DOCUMENT_ID)
+    document.add_node(
+        "synmachine.input.load_video",
+        node_id=SOURCE_ID,
+        parameters={"file_path": "simulated.mp4"},
+    )
+    display_id = document.add_node(
+        "synmachine.visualization.display_image_data",
+        implementation_version=2,
+    )
+    document.add_connection(SOURCE_ID, "image", display_id, "image")
+    facade = EngineFacade(registry)
+    assert facade.activate(document.snapshot()).plan is not None
+    worker = LatestFrameGraphWorker(facade, monotonic_ns=clock)
+    try:
+        clock.set_ms(10)
+        worker.publish(SOURCE_ID, _packet(1, 0))
+        assert worker.wait_until_idle(1.0)
+        clock.set_ms(20)
+        worker.publish(SOURCE_ID, _packet(2, 10))
+        assert worker.wait_until_idle(1.0)
+        assert worker.input_fps == 2.0
+        assert worker.processed_fps == 2.0
+
+        worker.reset_plan_metrics()
+
+        assert worker.input_fps == 0.0
+        assert worker.processed_fps == 0.0
+    finally:
+        worker.close()
+        facade.close()
+
+
 def test_slow_preview_conversion_coalesces_without_blocking_graph_ticks() -> None:
     conversion_started = threading.Event()
     release_conversion = threading.Event()

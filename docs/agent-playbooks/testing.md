@@ -31,12 +31,14 @@ Use the narrowest relevant tests during development, then widen coverage accordi
   in `finally` blocks or fixtures.
 - A behavior fix needs a regression test that fails for the original defect. Do not weaken an existing
   assertion merely to make a new implementation pass.
-- `pyproject.toml` currently includes `src` and `tools`, but not `tests`, in strict Pyright. Treat test
-  call-site types as manually unverified: audit changed keys, mappings, IDs, and protocol signatures,
-  and do not assume `uv run check` would catch an incompatible test argument.
+- `uv run check` applies strict Pyright to `src` and `tools`. CI additionally runs
+  `uv run pyright --project pyright-tests.json` in basic mode over `tests`; this catches stale public
+  call signatures and protocol fakes while allowing deliberate white-box assertions against private
+  Qt/runtime state. Run that test-call-site gate after changing a public protocol.
 - Run `uv run check` after code changes. Before final handoff, run `uv run pytest -q` unless the task is
   documentation-only or the suite cannot reasonably run; report any unrun gate and why.
 
 CI on `windows-latest` sets `QT_QPA_PLATFORM=offscreen`, installs the locked development group, then
-runs `uv run check` and `uv run pytest -q`. Local success on another platform is not evidence that
+runs both type gates, `uv run pytest -q`, and the real application-shell smoke test. Local success on
+another platform is not evidence that
 Windows spawn, devices, Qt deployment, or case-insensitive filesystem behavior is correct.

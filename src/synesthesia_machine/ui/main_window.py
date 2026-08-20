@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 from synesthesia_machine import __version__
 from synesthesia_machine.app.settings import ApplicationPaths
 from synesthesia_machine.contracts import (
+    DeviceCatalogue,
     EngineActivation,
     EngineClient,
     EngineConnectionState,
@@ -82,6 +83,7 @@ from synesthesia_machine.ui.application_settings import (
     EditorPreferences,
     PreferencesDialog,
 )
+from synesthesia_machine.ui.autosave_controller import AutosaveController
 from synesthesia_machine.ui.canvas import GraphScene, GraphView
 from synesthesia_machine.ui.commands import PREVIEW_VISIBLE_KEY
 from synesthesia_machine.ui.previews import (
@@ -156,6 +158,7 @@ class MainWindow(QMainWindow):
         set_language(self.preferences.language)
         self.session = DocumentSession(registry, self)
         self.autosave_store = AutosaveStore(paths.recovery)
+        self.autosave_controller = AutosaveController(self.autosave_store, self)
         self.action_registry = ActionRegistry(self)
         self.scene = GraphScene(self.session, theme, self)
         self.scene.configure_grid_snap(
@@ -199,6 +202,10 @@ class MainWindow(QMainWindow):
         self._metrics_timer.setInterval(100)
         self._profiler_timer = QTimer(self)
         self._profiler_timer.setInterval(250)
+        self._device_refresh_timer = QTimer(self)
+        self._device_refresh_timer.setSingleShot(True)
+        self._device_refresh_timer.setInterval(1500)
+        self._device_refresh_timer.timeout.connect(self._load_device_catalogue)
         self._node_count = QLabel(self)
         self._validation_status = QLabel(self)
         self._engine_status = QLabel(self)
@@ -228,6 +235,9 @@ class MainWindow(QMainWindow):
         self._refresh_selection_ui()
         self._preview_timer.start()
         self._metrics_timer.start()
+        # Let initial engine status/activation settle before the first hardware catalogue request.
+        # The owned timer is cancelled with the window; users can refresh immediately from the menu.
+        self._device_refresh_timer.start()
         if offer_recovery:
             QTimer.singleShot(0, self._offer_recovery)
 
@@ -450,7 +460,12 @@ class MainWindow(QMainWindow):
         create(ActionSpec("stop", "&Stop", "Stop the targeted source", "F7"), self.stop)
         create(ActionSpec("reload", "&Reload", "Reload the targeted source", "F8"), self.reload)
         create(
-            ActionSpec("panic", "&Panic", "Immediately silence debug audio", "Ctrl+Shift+Escape"),
+            ActionSpec(
+                "panic",
+                "&Silence All Outputs",
+                "Immediately stop all MIDI notes and generated audio",
+                "Ctrl+Shift+Escape",
+            ),
             self.panic,
         )
         restart_engine = create(
@@ -463,6 +478,14 @@ class MainWindow(QMainWindow):
             self.restart_engine,
         )
         restart_engine.setEnabled(False)
+        create(
+            ActionSpec(
+                "refresh_devices",
+                "Refresh &Devices",
+                "Refresh camera, MIDI, and audio output choices in the engine",
+            ),
+            self.refresh_devices,
+        )
         create(
             ActionSpec(
                 "export_diagnostics",
@@ -512,7 +535,7 @@ class MainWindow(QMainWindow):
     def _create_toolbar(self) -> None:
         toolbar = QToolBar(tr("Transport"), self)
         toolbar.setObjectName("transport_toolbar")
-        toolbar.setAccessibleName(tr("Source transport and panic"))
+        toolbar.setAccessibleName(tr("Source transport and output silence"))
         toolbar.setMovable(False)
         toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         for key in ("play", "pause", "stop", "reload"):
@@ -600,9 +623,10 @@ class MainWindow(QMainWindow):
             graph_menu.addAction(self.action_registry.require(key))
         graph_menu.addSeparator()
         graph_menu.addAction(self.action_registry.require("restart_engine"))
+        graph_menu.addAction(self.action_registry.require("refresh_devices"))
 
-        midi_menu = self.menuBar().addMenu(tr("&MIDI"))
-        midi_menu.addAction(self.action_registry.require("panic"))
+        output_menu = self.menuBar().addMenu(tr("&Outputs"))
+        output_menu.addAction(self.action_registry.require("panic"))
 
         help_menu = self.menuBar().addMenu(tr("&Help"))
         help_menu.addAction(self.action_registry.require("export_diagnostics"))
@@ -614,7 +638,7 @@ class MainWindow(QMainWindow):
             "view": view_menu,
             "graph": graph_menu,
             "arrange": arrange_menu,
-            "midi": midi_menu,
+            "outputs": output_menu,
             "help": help_menu,
         }
 
@@ -652,6 +676,8 @@ class MainWindow(QMainWindow):
         QApplication.clipboard().dataChanged.connect(self._refresh_action_states)
         self._engine_task_signals.completed.connect(self._on_engine_task_completed)
         self._engine_task_signals.failed.connect(self._on_engine_task_failed)
+        self.autosave_controller.saved.connect(self._on_autosave_saved)
+        self.autosave_controller.failed.connect(self._on_autosave_failed)
 
     @Slot()
     def play(self) -> None:
@@ -692,7 +718,7 @@ class MainWindow(QMainWindow):
         except (RuntimeError, TimeoutError) as error:
             self.statusBar().showMessage(trf("Could not send panic: {error}", error=error), 5000)
             return
-        self.statusBar().showMessage(tr("Panic sent"), 3000)
+        self.statusBar().showMessage(tr("All outputs silenced"), 3000)
 
     @Slot()
     def restart_engine(self) -> None:
@@ -770,7 +796,7 @@ class MainWindow(QMainWindow):
             return
         self.session.new_document()
         if decision is _ReplacementDecision.DISCARD:
-            self.autosave_store.discard(previous_id)
+            self._discard_recovery(previous_id)
         self.statusBar().showMessage(tr("Created new graph"), 3000)
 
     @Slot()
@@ -818,7 +844,7 @@ class MainWindow(QMainWindow):
                 return
             self.session.replace_with_snapshot(snapshot)
             if decision is _ReplacementDecision.DISCARD:
-                self.autosave_store.discard(previous_id)
+                self._discard_recovery(previous_id)
             self.scene.select_node_ids(set())
             QTimer.singleShot(0, self.view.frame_all)
             self.statusBar().showMessage(
@@ -869,7 +895,7 @@ class MainWindow(QMainWindow):
             self._show_error("Could not open graph", str(error))
             return False
         if decision is _ReplacementDecision.DISCARD:
-            self.autosave_store.discard(previous_id)
+            self._discard_recovery(previous_id)
         self._remember_recent(path)
         missing_count = len(find_missing_media(self.session.document.snapshot()))
         if missing_count:
@@ -964,7 +990,7 @@ class MainWindow(QMainWindow):
         except (OSError, ValueError) as error:
             self._show_error("Could not save graph", str(error))
             return False
-        self.autosave_store.discard(document_id)
+        self._discard_recovery(document_id)
         self._remember_recent(saved)
         self.statusBar().showMessage(trf("Saved {name}", name=saved.name), 4000)
         return True
@@ -1293,6 +1319,20 @@ class MainWindow(QMainWindow):
             if not isinstance(result, _EngineRefreshSnapshot):
                 raise TypeError("Engine refresh task returned an invalid result")
             self._apply_engine_refresh(result)
+        elif kind == "devices":
+            if not isinstance(result, DeviceCatalogue):
+                raise TypeError("Device catalogue task returned an invalid result")
+            self.session.set_device_catalogue(result)
+            if result.pending_kinds:
+                self._device_refresh_timer.start(250)
+            if result.errors:
+                detail = "; ".join(f"{kind.value}: {message}" for kind, message in result.errors)
+                self.statusBar().showMessage(
+                    trf("Some devices could not be enumerated: {error}", error=detail),
+                    8000,
+                )
+            elif result.pending_kinds:
+                self.statusBar().showMessage(tr("Detecting devices…"), 3000)
 
     @Slot(str, object)
     def _on_engine_task_failed(self, kind: str, error: object) -> None:
@@ -1305,6 +1345,22 @@ class MainWindow(QMainWindow):
                 trf("Engine activation failed: {error}", error=detail), 5000
             )
             self._start_pending_activation()
+        elif kind == "devices":
+            self.statusBar().showMessage(
+                trf("Could not refresh devices: {error}", error=detail),
+                8000,
+            )
+
+    @Slot()
+    def refresh_devices(self) -> None:
+        self._load_device_catalogue(force_refresh=True)
+
+    def _load_device_catalogue(self, *, force_refresh: bool = False) -> None:
+        if self._submit_engine_task(
+            "devices",
+            partial(self.engine_client.device_catalogue, force_refresh=force_refresh),
+        ):
+            self.statusBar().showMessage(tr("Refreshing devices…"), 3000)
 
     def _start_pending_activation(self) -> None:
         if self._pending_activation is None or "activation" in self._engine_tasks_inflight:
@@ -1548,28 +1604,35 @@ class MainWindow(QMainWindow):
                 or runtime_errors != self._runtime_error_signature
             ):
                 self.statusBar().showMessage(diagnostic_detail, 10000)
-        elif midi_outputs:
-            self._engine_status.setToolTip(
-                "\n".join(
-                    trf(
-                        "MIDI {port}: {state}, {count} active note(s)",
-                        port=status.selected_port or tr("unselected"),
-                        state=tr(status.connection_state.value),
-                        count=status.active_note_count,
-                    )
-                    for status in midi_outputs
-                )
-            )
         else:
-            self._engine_status.setToolTip(tr("Live engine and source performance"))
+            midi_detail = "\n".join(
+                trf(
+                    "MIDI {port}: {state}, {count} active note(s)",
+                    port=status.selected_port or tr("unselected"),
+                    state=tr(status.connection_state.value),
+                    count=status.active_note_count,
+                )
+                for status in midi_outputs
+            )
+            telemetry = (
+                f"Input / processed / preview: {metrics.input_fps:.1f} / "
+                f"{metrics.processed_fps:.1f} / {metrics.preview_fps:.1f} FPS\n"
+                f"Graph p95: {metrics.p95_graph_execution_ms:.2f} ms · "
+                f"queue {metrics.mailbox_occupancy}/{metrics.mailbox_capacity} · "
+                f"frame age {metrics.frame_age_ms:.1f} ms\n"
+                f"CPU {metrics.cpu_percent:.1f}% · "
+                f"RAM {metrics.memory_bytes / (1024 * 1024):.1f} MiB"
+            )
+            self._engine_status.setToolTip(
+                f"{midi_detail}\n{telemetry}" if midi_detail else telemetry
+            )
         self._source_error_signature = source_errors
         self._midi_error_signature = midi_errors
         self._runtime_error_signature = runtime_errors
-        memory_mib = metrics.memory_bytes / (1024 * 1024)
         midi_text = ", ".join(tr(status.connection_state.value) for status in midi_outputs) or tr(
             "no output"
         )
-        self._engine_status.setText(
+        summary = (
             trf(
                 "Engine {state} · source {source}",
                 state=tr(metrics.state.value),
@@ -1577,14 +1640,14 @@ class MainWindow(QMainWindow):
             )
             + " · "
             f"MIDI {midi_text} · "
-            f"{metrics.processed_ticks} ticks · "
-            f"in/process/preview {metrics.input_fps:.1f}/{metrics.processed_fps:.1f}/"
-            f"{metrics.preview_fps:.1f} FPS · "
-            f"graph p95 {metrics.p95_graph_execution_ms:.2f} ms · "
-            f"queue {metrics.mailbox_occupancy}/{metrics.mailbox_capacity} · "
-            f"age {metrics.frame_age_ms:.1f} ms · drops {metrics.dropped_before_processing} · "
-            f"CPU {metrics.cpu_percent:.1f}% · RAM {memory_mib:.1f} MiB"
+            f"{metrics.processed_ticks} ticks"
         )
+        if metrics.dropped_before_processing:
+            summary += trf(
+                " · {count} dropped",
+                count=metrics.dropped_before_processing,
+            )
+        self._engine_status.setText(summary)
 
     @Slot(bool)
     def _on_profiler_visibility_changed(self, visible: bool) -> None:
@@ -1757,15 +1820,25 @@ class MainWindow(QMainWindow):
     def _autosave(self) -> None:
         if not self.session.is_dirty:
             return
-        try:
-            path = self.autosave_store.save(
-                self.session.document.snapshot(),
-                explicit_path=self.session.current_path,
+        self.autosave_controller.request(
+            self.session.document.snapshot(),
+            explicit_path=self.session.current_path,
+        )
+
+    @Slot(object)
+    def _on_autosave_saved(self, path: object) -> None:
+        if isinstance(path, Path):
+            self.statusBar().showMessage(
+                trf("Recovery saved to {name}", name=path.name),
+                3500,
             )
-        except OSError as error:
-            self.statusBar().showMessage(trf("Autosave failed: {error}", error=error), 5000)
-            return
-        self.statusBar().showMessage(trf("Recovery saved to {name}", name=path.name), 3500)
+
+    @Slot(object)
+    def _on_autosave_failed(self, error: object) -> None:
+        self.statusBar().showMessage(trf("Autosave failed: {error}", error=error), 5000)
+
+    def _discard_recovery(self, document_id: UUID) -> None:
+        self.autosave_controller.discard(document_id)
 
     def _confirm_document_replacement(self) -> _ReplacementDecision:
         if not self.session.is_dirty:
@@ -1814,7 +1887,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.StandardButton.Open,
             )
             if choice == QMessageBox.StandardButton.Discard:
-                self.autosave_store.discard(record.document_id)
+                self._discard_recovery(record.document_id)
                 continue
             if choice != QMessageBox.StandardButton.Open:
                 return
@@ -1911,14 +1984,14 @@ class MainWindow(QMainWindow):
             dock.setWindowTitle(tr(source))
         self.recent_menu.setTitle(tr("Open &Recent"))
         self.transport_toolbar.setWindowTitle(tr("Transport"))
-        self.transport_toolbar.setAccessibleName(tr("Source transport and panic"))
+        self.transport_toolbar.setAccessibleName(tr("Source transport and output silence"))
         for key, source in (
             ("file", "&File"),
             ("edit", "&Edit"),
             ("view", "&View"),
             ("graph", "&Graph"),
             ("arrange", "&Arrange Selection"),
-            ("midi", "&MIDI"),
+            ("outputs", "&Outputs"),
             ("help", "&Help"),
         ):
             self._menus[key].setTitle(tr(source))
@@ -1961,17 +2034,20 @@ class MainWindow(QMainWindow):
         decision = self._confirm_document_replacement()
         if decision is not _ReplacementDecision.CANCEL:
             if decision is _ReplacementDecision.DISCARD:
-                self.autosave_store.discard(self.session.document.document_id)
+                self._discard_recovery(self.session.document.document_id)
             self._activation_timer.stop()
+            self._autosave_timer.stop()
             self._preview_timer.stop()
             self._metrics_timer.stop()
             self._profiler_timer.stop()
+            self._device_refresh_timer.stop()
             if not self._engine_closed:
                 self._engine_closed = True
                 self._pending_activation = None
                 self._engine_executor.shutdown(wait=True, cancel_futures=True)
                 with suppress(RuntimeError, TimeoutError):
                     self.engine_client.close()
+            self.autosave_controller.close()
             self._save_window_state()
             event.accept()
             return

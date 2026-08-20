@@ -15,6 +15,7 @@ from synesthesia_machine.contracts import (
     ChannelFrame,
     FrameContext,
     ImageFrame,
+    NodeMemoryDiagnostic,
     ParameterValue,
     PortType,
     RuntimeValue,
@@ -36,6 +37,7 @@ from synesthesia_machine.nodes import (
 )
 
 _DYNAMIC_TYPES = frozenset({PortType.FLOAT, PortType.INT, PortType.IMAGE, PortType.CHANNEL})
+_BUFFER_MEMORY_LIMIT_BYTES = 256 * 1024 * 1024
 T = TypeVariable("T", _DYNAMIC_TYPES)
 T_ARRAY = ArrayTypeVariable("T", _DYNAMIC_TYPES)
 
@@ -114,7 +116,8 @@ class BufferRuntime(_RuntimeBase):
         self._lock = Lock()
         self._values: deque[ImageFrame | ChannelFrame | float | int] = deque()
         self._capacity = 0
-        self._item_type: PortType | None = None
+        self._signature: tuple[object, ...] | None = None
+        self._estimated_retained_bytes = 0
 
     def process(
         self,
@@ -126,21 +129,49 @@ class BufferRuntime(_RuntimeBase):
         value = _array_item(inputs["value"])
         capacity = _integer(parameters["capacity"], "capacity")
         item_type = _runtime_port_type(value)
+        signature = _buffer_signature(value)
+        estimated_retained_bytes = _buffer_item_bytes(value) * capacity
         with self._lock:
-            if capacity != self._capacity or item_type is not self._item_type:
+            self._capacity = capacity
+            self._estimated_retained_bytes = estimated_retained_bytes
+            if estimated_retained_bytes > _BUFFER_MEMORY_LIMIT_BYTES:
+                self._clear_locked()
+                raise ExpectedNodeError(
+                    "buffer_memory_limit",
+                    "Buffer estimated retained memory exceeds its 256 MiB safety limit",
+                    details=(
+                        f"estimated_retained_bytes={estimated_retained_bytes}; "
+                        f"memory_limit_bytes={_BUFFER_MEMORY_LIMIT_BYTES}"
+                    ),
+                )
+            if capacity != self._values.maxlen or signature != self._signature:
                 self._values = deque(maxlen=capacity)
-                self._capacity = capacity
-                self._item_type = item_type
+                self._signature = signature
             self._values.append(value)
             return {"values": ValueArray(item_type, tuple(self._values))}
 
     def reset(self, reason: ResetReason) -> None:
         del reason
         with self._lock:
-            self._values.clear()
+            self._clear_locked()
 
     def close(self) -> None:
         self.reset(ResetReason.ENGINE_RESTARTED)
+
+    def node_memory_diagnostic(self) -> NodeMemoryDiagnostic:
+        with self._lock:
+            return NodeMemoryDiagnostic(
+                node_id=self.node_id,
+                estimated_retained_bytes=self._estimated_retained_bytes,
+                retained_bytes=sum(_buffer_item_bytes(value) for value in self._values),
+                retained_frame_count=len(self._values),
+                capacity_frame_count=self._capacity,
+                memory_limit_bytes=_BUFFER_MEMORY_LIMIT_BYTES,
+            )
+
+    def _clear_locked(self) -> None:
+        self._values.clear()
+        self._signature = None
 
 
 class StatisticsRuntime(_RuntimeBase):
@@ -311,6 +342,7 @@ def _create_all_definitions() -> tuple[NodeDefinition, ...]:
                     "Capacity",
                     PortType.INT,
                     8,
+                    help_text="Image and channel history is limited to 256 MiB.",
                     minimum=1,
                     maximum=600,
                     update_mode=ParameterUpdateMode.RECOMPILE,
@@ -545,6 +577,33 @@ def _runtime_port_type(value: object) -> PortType:
     if isinstance(value, float):
         return PortType.FLOAT
     raise TypeError(f"Unsupported dynamic value {type(value).__name__}")
+
+
+def _buffer_item_bytes(value: ImageFrame | ChannelFrame | float | int) -> int:
+    return value.data.nbytes if isinstance(value, (ImageFrame, ChannelFrame)) else 8
+
+
+def _buffer_signature(value: ImageFrame | ChannelFrame | float | int) -> tuple[object, ...]:
+    if isinstance(value, ImageFrame):
+        return (
+            PortType.IMAGE,
+            value.data.shape,
+            value.color_space,
+            value.channel_names,
+            value.alpha_mode,
+            value.context.clock_id,
+        )
+    if isinstance(value, ChannelFrame):
+        return (
+            PortType.CHANNEL,
+            value.data.shape,
+            value.semantic,
+            value.nominal_min,
+            value.nominal_max,
+            value.cyclic,
+            value.context.clock_id,
+        )
+    return (_runtime_port_type(value),)
 
 
 def _array_item(value: RuntimeValue) -> ImageFrame | ChannelFrame | float | int:

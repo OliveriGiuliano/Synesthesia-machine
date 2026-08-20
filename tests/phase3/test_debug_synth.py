@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -11,7 +12,10 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
+import synesthesia_machine.midi.debug_synth as debug_synth_module
 from synesthesia_machine.contracts import (
+    DeviceDescriptor,
+    DeviceKind,
     FrameContext,
     MidiNoteKey,
     MidiStateFrame,
@@ -22,7 +26,11 @@ from synesthesia_machine.contracts import (
 )
 from synesthesia_machine.graph import GraphCompiler, GraphDocument
 from synesthesia_machine.midi import DebugSynth, SynthConfiguration, SynthWaveform
-from synesthesia_machine.midi.debug_synth import AudioCallback
+from synesthesia_machine.midi.debug_synth import (
+    AudioCallback,
+    enumerate_audio_output_devices,
+    open_sounddevice_stream,
+)
 from synesthesia_machine.nodes import (
     CachePolicy,
     ExecutionKind,
@@ -42,6 +50,45 @@ CLOCK_ID = UUID("00000000-0000-0000-0000-000000000401")
 MIDI_SOURCE_ID = UUID("00000000-0000-0000-0000-000000000402")
 AUDIO_NODE_ID = UUID("00000000-0000-0000-0000-000000000403")
 PANIC_NODE_ID = UUID("00000000-0000-0000-0000-000000000404")
+
+
+def test_audio_catalogue_uses_stable_indexes_and_open_resolves_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        debug_synth_module.sd,
+        "query_devices",
+        lambda: (
+            {"name": "  Studio\nSpeakers  ", "max_output_channels": 2},
+            {"name": "Input only", "max_output_channels": 0},
+        ),
+    )
+    assert enumerate_audio_output_devices() == (
+        DeviceDescriptor(DeviceKind.AUDIO_OUTPUT, "", "System default audio output", True),
+        DeviceDescriptor(DeviceKind.AUDIO_OUTPUT, "sounddevice:0", "Studio Speakers"),
+    )
+
+    arguments: dict[str, object] = {}
+
+    def output_stream(**kwargs: object) -> MockAudioStream:
+        arguments.update(kwargs)
+        return MockAudioStream(lambda _out, _frames, _time_info, _status: None)
+
+    monkeypatch.setattr(debug_synth_module.sd, "OutputStream", output_stream)
+
+    def callback(
+        _out: NDArray[np.float32],
+        _frames: int,
+        _time_info: object,
+        _status: object,
+    ) -> None:
+        return
+
+    open_sounddevice_stream(SynthConfiguration(output_device="sounddevice:0"), callback)
+    assert arguments["device"] == 0
+
+    open_sounddevice_stream(SynthConfiguration(output_device="Legacy device name"), callback)
+    assert arguments["device"] == "Legacy device name"
 
 
 class MockAudioStream:
@@ -142,6 +189,14 @@ def _parameters(
     return parameters
 
 
+def _wait_for(predicate: Callable[[], bool], *, timeout: float = 2.0) -> None:
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        if time.monotonic() >= deadline:
+            pytest.fail("timed out waiting for background audio work")
+        time.sleep(0.005)
+
+
 def _source_audio_scheduler(
     synth_factory: RecordingSynthFactory,
 ) -> tuple[Scheduler, UUID, UUID]:
@@ -231,7 +286,10 @@ def test_runtime_opens_lazily_updates_state_and_replaces_changed_configuration()
         },
     )
     runtime.process({"midi": midi}, enabled, midi.context)
+    assert isinstance(runtime, GenerateAudioRuntime)
+    assert runtime.wait_until_idle()
     runtime.process({"midi": midi}, enabled, midi.context)
+    assert runtime.wait_until_idle()
     assert len(synth_factory.synths) == 1
     first = synth_factory.synths[0]
     assert first.updates == [midi, midi]
@@ -247,11 +305,13 @@ def test_runtime_opens_lazily_updates_state_and_replaces_changed_configuration()
     changed = dict(enabled)
     changed["volume"] = 0.4
     runtime.process({"midi": midi}, changed, midi.context)
+    assert runtime.wait_until_idle()
     assert first.close_count == 1
     assert len(synth_factory.synths) == 2
     assert synth_factory.synths[1].configuration.volume == 0.4
 
     runtime.process({"midi": midi}, disabled, midi.context)
+    assert runtime.wait_until_idle()
     assert synth_factory.synths[1].close_count == 1
     runtime.close()
 
@@ -265,6 +325,7 @@ def test_scheduler_no_data_reset_panic_and_close_cannot_leave_stale_state() -> N
         source_values={PortKey(source_id, "value"): midi},
     )
     assert first.invocation_counts == {audio_id: 1}
+    _wait_for(lambda: bool(synth_factory.synths))
     synth = synth_factory.synths[0]
     assert synth.updates == [midi]
 
@@ -284,8 +345,14 @@ def test_scheduler_no_data_reset_panic_and_close_cannot_leave_stale_state() -> N
 
 
 def test_audio_open_failure_becomes_recoverable_scheduler_error() -> None:
+    attempted = threading.Event()
+    attempt_count = 0
+
     def fail_factory(configuration: SynthConfiguration) -> RecordingSynth:
+        nonlocal attempt_count
         del configuration
+        attempt_count += 1
+        attempted.set()
         raise OSError("no test output device")
 
     source_definition = make_definition(
@@ -303,8 +370,15 @@ def test_audio_open_failure_becomes_recoverable_scheduler_error() -> None:
     assert plan is not None
     midi = _midi_state({(0, 60): 100})
 
-    result = Scheduler(plan).execute_tick(
+    scheduler = Scheduler(plan)
+    first = scheduler.execute_tick(
         midi.context,
+        source_values={PortKey(source_id, "value"): midi},
+    )
+    assert first.errors == ()
+    assert attempted.wait(2.0)
+    result = scheduler.execute_tick(
+        frame_context(clock_id=source_id, tick_index=2),
         source_values={PortKey(source_id, "value"): midi},
     )
 
@@ -312,58 +386,37 @@ def test_audio_open_failure_becomes_recoverable_scheduler_error() -> None:
     assert result.errors[0].node_id == audio_id
     assert result.errors[0].code == "audio_output_unavailable"
     assert result.errors[0].recoverable
+    assert attempt_count == 1
+    scheduler.close()
 
 
-def test_runtime_serializes_process_and_panic_snapshot_writers() -> None:
-    entered_update = threading.Event()
-    release_update = threading.Event()
-    panic_started = threading.Event()
-    order: list[str] = []
-    errors: list[BaseException] = []
+def test_runtime_never_opens_audio_device_on_graph_worker_and_discards_stale_state() -> None:
+    entered_factory = threading.Event()
+    release_factory = threading.Event()
+    synth = RecordingSynth(SynthConfiguration())
 
-    class BlockingSynth(RecordingSynth):
-        def update(self, state: MidiStateFrame) -> None:
-            entered_update.set()
-            if not release_update.wait(2.0):
-                raise TimeoutError("test did not release blocked synth update")
-            super().update(state)
-            order.append("update")
+    def blocking_factory(configuration: SynthConfiguration) -> RecordingSynth:
+        del configuration
+        entered_factory.set()
+        if not release_factory.wait(2.0):
+            raise TimeoutError("test did not release blocked synth factory")
+        return synth
 
-        def panic(self) -> None:
-            super().panic()
-            order.append("panic")
-
-    synth = BlockingSynth(SynthConfiguration())
-    runtime = GenerateAudioRuntime(AUDIO_NODE_ID, synth_factory=lambda configuration: synth)
+    runtime = GenerateAudioRuntime(AUDIO_NODE_ID, synth_factory=blocking_factory)
     definition = create_output_definitions()[0]
     parameters = _parameters(definition, {"enabled": True})
     midi = _midi_state({(0, 60): 100})
 
-    def process() -> None:
-        try:
-            runtime.process({"midi": midi}, parameters, midi.context)
-        except BaseException as error:
-            errors.append(error)
+    started = time.monotonic()
+    runtime.process({"midi": midi}, parameters, midi.context)
+    assert time.monotonic() - started < 0.25
+    assert entered_factory.wait(1.0)
 
-    def panic() -> None:
-        panic_started.set()
-        runtime.panic()
-
-    process_thread = threading.Thread(target=process)
-    panic_thread = threading.Thread(target=panic)
-    process_thread.start()
-    assert entered_update.wait(1.0)
-    panic_thread.start()
-    assert panic_started.wait(1.0)
-    assert synth.panic_count == 0
-    release_update.set()
-    process_thread.join(2.0)
-    panic_thread.join(2.0)
-
-    assert not process_thread.is_alive()
-    assert not panic_thread.is_alive()
-    assert errors == []
-    assert order == ["update", "panic"]
+    runtime.panic()
+    release_factory.set()
+    assert runtime.wait_until_idle()
+    assert synth.updates == []
+    assert synth.panic_count >= 1
     runtime.close()
 
 

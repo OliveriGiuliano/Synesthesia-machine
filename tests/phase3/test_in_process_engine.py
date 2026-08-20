@@ -3,14 +3,46 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from tools.generate_test_video import DEFAULT_FRAME_COUNT, generate_test_video
 
 from synesthesia_machine.app.registry import create_application_registry
-from synesthesia_machine.contracts import EngineState, SourceState
+from synesthesia_machine.contracts import EngineState, SourceState, SourceStatus
 from synesthesia_machine.graph import GraphDocument
 from synesthesia_machine.runtime import InProcessEngineClient
+
+SOURCE_A = UUID("00000000-0000-0000-0000-0000000000a1")
+SOURCE_B = UUID("00000000-0000-0000-0000-0000000000b2")
+
+
+def test_effective_engine_state_tracks_mixed_asynchronous_source_transitions() -> None:
+    client = InProcessEngineClient(create_application_registry())
+    try:
+        client._state = EngineState.RUNNING
+        assert (
+            client._effective_state(
+                (
+                    SourceStatus(SOURCE_A, SourceState.ENDED),
+                    SourceStatus(SOURCE_B, SourceState.PAUSED),
+                ),
+                None,
+            )
+            is EngineState.PAUSED
+        )
+        assert (
+            client._effective_state(
+                (
+                    SourceStatus(SOURCE_A, SourceState.ENDED),
+                    SourceStatus(SOURCE_B, SourceState.STOPPED),
+                ),
+                None,
+            )
+            is EngineState.STOPPED
+        )
+    finally:
+        client.close()
 
 
 def test_client_activates_real_video_and_drives_graph_through_final_api(tmp_path: Path) -> None:

@@ -10,11 +10,17 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Protocol, cast
+from typing import Protocol, cast, runtime_checkable
 
 import mido
 
-from synesthesia_machine.contracts import MidiNoteKey, MidiOutputConnectionState, MidiStateFrame
+from synesthesia_machine.contracts import (
+    DeviceDescriptor,
+    DeviceKind,
+    MidiNoteKey,
+    MidiOutputConnectionState,
+    MidiStateFrame,
+)
 
 
 class VelocityUpdatePolicy(StrEnum):
@@ -81,6 +87,11 @@ class MidiOutputBackend(Protocol):
     def open_output(self, name: str) -> MidiOutputPort: ...
 
 
+@runtime_checkable
+class MidiDeviceBackend(Protocol):
+    def output_devices(self) -> Sequence[DeviceDescriptor]: ...
+
+
 class _MidoOutputPort(Protocol):
     def send(self, message: mido.Message) -> None: ...
 
@@ -142,6 +153,12 @@ class MidoRtMidiBackend:
     def output_names(self) -> Sequence[str]:
         return tuple(display_name for display_name, _raw_name in self._output_entries())
 
+    def output_devices(self) -> Sequence[DeviceDescriptor]:
+        return tuple(
+            DeviceDescriptor(DeviceKind.MIDI_OUTPUT, raw_name, display_name)
+            for display_name, raw_name in self._output_entries()
+        )
+
     def open_output(self, name: str) -> MidiOutputPort:
         entries = self._output_entries()
         raw_name = next((raw for display, raw in entries if display == name), None)
@@ -155,7 +172,7 @@ class MidoRtMidiBackend:
     def _output_entries(self) -> tuple[tuple[str, str], ...]:
         raw_names = tuple(dict.fromkeys(self._backend.get_output_names()))
         if not self._normalize_windows_names:
-            return tuple((name, name) for name in raw_names)
+            return tuple((_midi_display_name(name), name) for name in raw_names)
         aliases = tuple(_windows_midi_display_name(name) for name in raw_names)
         alias_counts: dict[str, int] = {}
         for alias in aliases:
@@ -171,7 +188,25 @@ def _windows_midi_display_name(raw_name: str) -> str:
     """Hide the WinMM device index RtMidi appends to otherwise friendly names."""
 
     friendly = re.sub(r"\s+\d+$", "", raw_name).strip()
-    return friendly or raw_name
+    return _midi_display_name(friendly or raw_name)
+
+
+def _midi_display_name(raw_name: str) -> str:
+    return " ".join(raw_name.split()) or "Unnamed MIDI output"
+
+
+def enumerate_midi_output_devices(
+    backend: MidiOutputBackend | None = None,
+) -> tuple[DeviceDescriptor, ...]:
+    selected_backend = backend or MidoRtMidiBackend()
+    if isinstance(selected_backend, MidiDeviceBackend):
+        devices = tuple(selected_backend.output_devices())
+    else:
+        devices = tuple(
+            DeviceDescriptor(DeviceKind.MIDI_OUTPUT, name, name)
+            for name in dict.fromkeys(selected_backend.output_names())
+        )
+    return tuple(sorted(devices))
 
 
 def _message_list() -> list[MidiMessage]:
@@ -329,6 +364,8 @@ class MidiOutputService:
         self._port_name: str | None = None
         self._selected_port = ""
         self._available_ports: tuple[str, ...] = ()
+        self._available_port_ids: tuple[str, ...] = ()
+        self._available_port_entries: tuple[tuple[str, str], ...] = ()
         self._sent: dict[MidiNoteKey, int] = {}
         self._used_channels: set[int] = set()
         self._connection_state = MidiOutputConnectionState.UNSELECTED
@@ -501,14 +538,15 @@ class MidiOutputService:
 
     def _apply_desired(self, desired: _DesiredState) -> None:
         configuration = desired.configuration
-        selected_port = configuration.output_port
+        selected_value = configuration.output_port
+        selected_port = self._resolve_port_id(selected_value)
         with self._status_lock:
-            self._selected_port = selected_port
-            available_ports = self._available_ports
+            self._selected_port = selected_value
+            available_port_ids = self._available_port_ids
 
         if self._port_name is not None and self._port_name != selected_port:
             self._panic_current(close_port=True)
-        if not selected_port:
+        if not selected_value:
             if self._port is not None:
                 self._panic_current(close_port=True)
             with self._status_lock:
@@ -516,10 +554,10 @@ class MidiOutputService:
                 self._last_error = None
             return
         if self._port is None:
-            if selected_port not in available_ports:
+            if selected_port not in available_port_ids:
                 with self._status_lock:
                     self._connection_state = MidiOutputConnectionState.UNAVAILABLE
-                    self._last_error = f"MIDI output {selected_port!r} is not currently available"
+                    self._last_error = f"MIDI output {selected_value!r} is not currently available"
                 return
             if not self._open_exact_port(selected_port, desired):
                 return
@@ -611,7 +649,7 @@ class MidiOutputService:
     def _mark_output_error(self, summary: str, error: BaseException) -> None:
         with self._status_lock:
             selected_port = self._selected_port
-            available = selected_port in self._available_ports
+            available = self._resolve_port_id(selected_port) in self._available_port_ids
             self._connection_state = (
                 MidiOutputConnectionState.ERROR
                 if available
@@ -663,13 +701,21 @@ class MidiOutputService:
 
     def _refresh_port_names(self) -> None:
         try:
-            names = tuple(dict.fromkeys(self._backend.output_names()))
+            if isinstance(self._backend, MidiDeviceBackend):
+                devices = tuple(self._backend.output_devices())
+                port_ids = tuple(device.device_id for device in devices)
+                names = tuple(device.display_name for device in devices)
+            else:
+                names = tuple(dict.fromkeys(self._backend.output_names()))
+                port_ids = names
         except Exception as error:
             self._discard_desired_state()
             had_open_port = self._port is not None
             self._panic_current(close_port=True, initial_error=error)
             with self._status_lock:
                 self._available_ports = ()
+                self._available_port_ids = ()
+                self._available_port_entries = ()
                 if self._selected_port or had_open_port:
                     self._connection_state = MidiOutputConnectionState.ERROR
                 self._last_error = (
@@ -678,21 +724,35 @@ class MidiOutputService:
             return
         with self._status_lock:
             self._available_ports = names
-            selected_port = self._selected_port
-        if self._port_name is not None and self._port_name not in names:
+            self._available_port_ids = port_ids
+            self._available_port_entries = tuple(zip(names, port_ids, strict=True))
+            selected_value = self._selected_port
+        selected_port = self._resolve_port_id(selected_value)
+        if self._port_name is not None and self._port_name not in port_ids:
             disappeared_port = self._port_name
             self._panic_current(close_port=True)
             with self._status_lock:
                 self._connection_state = MidiOutputConnectionState.UNAVAILABLE
                 self._last_error = f"MIDI output {disappeared_port!r} disappeared"
-        elif selected_port and selected_port not in names:
+        elif selected_value and selected_port not in port_ids:
             with self._status_lock:
                 self._connection_state = MidiOutputConnectionState.UNAVAILABLE
-                self._last_error = f"MIDI output {selected_port!r} is not currently available"
-        elif not selected_port:
+                self._last_error = f"MIDI output {selected_value!r} is not currently available"
+        elif not selected_value:
             with self._status_lock:
                 self._connection_state = MidiOutputConnectionState.UNSELECTED
                 self._last_error = None
+
+    def _resolve_port_id(self, selected: str) -> str:
+        if not selected:
+            return selected
+        entries = self._available_port_entries
+        if any(device_id == selected for _display_name, device_id in entries):
+            return selected
+        matches = tuple(
+            device_id for display_name, device_id in entries if display_name == selected
+        )
+        return matches[0] if len(matches) == 1 else selected
 
     def _close_port(self) -> None:
         port = self._port

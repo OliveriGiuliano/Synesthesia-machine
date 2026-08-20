@@ -9,6 +9,7 @@ from uuid import UUID
 
 import av
 import numpy as np
+import pytest
 from tools.generate_test_video import generate_test_video, generate_vfr_test_video
 
 from synesthesia_machine.contracts import SourceState
@@ -121,23 +122,13 @@ def test_inspection_accepts_shell_quoted_pasted_video_path(tmp_path: Path) -> No
     assert metadata.width == 32 and metadata.height == 24
 
 
-def test_source_falls_back_to_first_video_stream_when_persisted_index_is_stale(
+def test_source_rejects_unavailable_persisted_video_stream(
     tmp_path: Path,
 ) -> None:
     path = generate_test_video(tmp_path / "single-stream.mp4", frame_count=2)
-    received: list[PresentedVideoFrame] = []
 
-    source = VideoSourceService(SOURCE_ID, path, stream_index=3, on_frame=received.append)
-    try:
-        assert source.metadata.stream_index == 0
-        assert source.status().state is SourceState.READY
-        assert source.status().warnings == 1
-        source.play()
-        assert source.wait_until_finished()
-        assert received
-        assert source.status().state is SourceState.ENDED
-    finally:
-        source.close()
+    with pytest.raises(ValueError, match="stream index 3 is unavailable"):
+        VideoSourceService(SOURCE_ID, path, stream_index=3, on_frame=lambda _frame: None)
 
 
 def test_vfr_pts_and_exact_nth_selection_drive_presentation_timeline(tmp_path: Path) -> None:
@@ -175,6 +166,25 @@ def test_vfr_pts_and_exact_nth_selection_drive_presentation_timeline(tmp_path: P
         assert all(not packet.image.data.flags.writeable for packet in received)
         assert source.status().skipped_by_selection == 2
         assert source.status().state is SourceState.ENDED
+    finally:
+        source.close()
+
+
+def test_natural_end_resets_the_source_component(tmp_path: Path) -> None:
+    path = generate_test_video(tmp_path / "end-reset.mp4", frame_count=2)
+    resets: list[ResetReason] = []
+    source = VideoSourceService(
+        SOURCE_ID,
+        path,
+        on_frame=lambda _frame: None,
+        on_reset=resets.append,
+        clock=AdvancingClock(),
+    )
+    try:
+        source.play()
+        assert source.wait_until_finished()
+        assert source.status().state is SourceState.ENDED
+        assert resets == [ResetReason.SOURCE_ENDED]
     finally:
         source.close()
 
