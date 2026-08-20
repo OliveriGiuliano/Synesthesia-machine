@@ -456,7 +456,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             (
                 _float_parameter("input_black", "Input black", 0.0),
                 _float_parameter("input_white", "Input white", 1.0),
-                _float_parameter("gamma", "Gamma", 1.0),
+                _float_parameter("gamma", "Gamma", 1.0, minimum=1e-6),
                 _float_parameter("output_black", "Output black", 0.0),
                 _float_parameter("output_white", "Output white", 1.0),
                 _channel_parameter(),
@@ -521,8 +521,12 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
                     StretchMode.PER_CHANNEL.value,
                     choices=tuple(mode.value for mode in StretchMode),
                 ),
-                _float_parameter("lower_percentile", "Lower percentile", 0.0),
-                _float_parameter("upper_percentile", "Upper percentile", 100.0),
+                _float_parameter(
+                    "lower_percentile", "Lower percentile", 0.0, minimum=0.0, maximum=100.0
+                ),
+                _float_parameter(
+                    "upper_percentile", "Upper percentile", 100.0, minimum=0.0, maximum=100.0
+                ),
                 ParameterSpec("ignore_non_finite", "Ignore non-finite", PortType.BOOL, True),
                 ParameterSpec(
                     "constant_policy",
@@ -541,7 +545,10 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             "synmachine.image.gamma",
             "Gamma",
             "Apply max(x, 0) raised to a positive gamma on selected channels.",
-            (_float_parameter("gamma", "Gamma", 1.0), _channel_parameter()),
+            (
+                _float_parameter("gamma", "Gamma", 1.0, minimum=1e-6),
+                _channel_parameter(),
+            ),
             _gamma,
             validator=_validate_positive("gamma"),
         ),
@@ -576,7 +583,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
                     NearZeroPolicy.REPLACE_WITH_ZERO.value,
                     choices=tuple(policy.value for policy in NearZeroPolicy),
                 ),
-                _float_parameter("epsilon", "Epsilon", 1e-6),
+                _float_parameter("epsilon", "Epsilon", 1e-6, minimum=1e-12),
                 _channel_parameter(),
             ),
             _divide_scalar,

@@ -378,6 +378,7 @@ def test_parameter_randomization_preserves_context_dependent_video_identity() ->
 
 def test_randomize_nodes_replaces_selection_with_random_sized_valid_subgraph() -> None:
     registry = create_application_registry()
+    size_deltas: list[int] = []
     for seed in range(5):
         original = generate_random_graph(registry, seed=seed)
         selected = {node.id for node in original.nodes}
@@ -393,7 +394,13 @@ def test_randomize_nodes_replaces_selection_with_random_sized_valid_subgraph() -
         assert not selected & replacement_ids
         assert selected.isdisjoint(node.id for node in randomized.nodes)
         assert replacement_ids == frozenset(node.id for node in randomized.nodes)
-        assert len(replacement_ids) > len(selected)
+        definitions = tuple(registry.require(node.type_id) for node in randomized.nodes)
+        assert any(item.execution_kind is ExecutionKind.SOURCE for item in definitions)
+        assert any(item.execution_kind is ExecutionKind.SINK for item in definitions)
+        size_deltas.append(len(replacement_ids) - len(selected))
+
+    assert any(delta > 0 for delta in size_deltas)
+    assert any(delta < 0 for delta in size_deltas)
 
 
 def test_non_native_video_dialog_has_explicit_dark_palette_rules() -> None:

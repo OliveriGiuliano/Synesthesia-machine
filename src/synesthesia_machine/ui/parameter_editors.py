@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Callable
 from typing import cast
 
@@ -35,6 +36,23 @@ from synesthesia_machine.ui.translations import tr, trf
 from synesthesia_machine.ui.view_models import ParameterViewModel
 
 type ParameterChanged = Callable[[LiteralValue], None]
+
+
+def _color_dialog_parent(editor: QWidget) -> QWidget | None:
+    active_window = QApplication.activeWindow()
+    return None if active_window is editor else active_window
+
+
+def _float_editor_decimals(spec: ParameterSpec) -> int:
+    magnitudes = tuple(
+        abs(value)
+        for value in (spec.default, spec.minimum, spec.maximum)
+        if isinstance(value, float) and math.isfinite(value) and value != 0.0
+    )
+    if not magnitudes:
+        return 6
+    required = math.ceil(-math.log10(min(magnitudes)))
+    return min(12, max(6, required))
 
 
 def create_parameter_editor(
@@ -107,6 +125,8 @@ def parameter_tooltip(spec: ParameterSpec) -> str:
         details.append(
             trf("Options: {options}.", options=", ".join(str(value) for value in spec.choices))
         )
+    if spec.step is not None:
+        details.append(trf("Step: {step}.", step=spec.step))
     if spec.connectable:
         details.append(tr("A connected input overrides this value."))
     return " ".join((summary, *details))
@@ -317,6 +337,7 @@ class _RangeParameterEditor(QWidget):
     ) -> None:
         super().__init__()
         self._on_changed = on_changed
+        self._spec = parameter.spec
         self.slider = DirectDragSlider(Qt.Orientation.Horizontal, self)
         self.slider.setObjectName(f"parameter_{parameter.spec.id}_slider")
         self.slider.setAccessibleName(trf("{label} slider", label=tr(parameter.spec.label)))
@@ -385,7 +406,7 @@ class FloatRangeParameterEditor(_RangeParameterEditor):
         self._minimum = float(spec.minimum)
         self._maximum = float(spec.maximum)
         value_editor = ScrubbableDoubleSpinBox()
-        value_editor.setDecimals(6)
+        value_editor.setDecimals(_float_editor_decimals(spec))
         value_editor.setRange(self._minimum, self._maximum)
         value_editor.set_scrub_step(max((self._maximum - self._minimum) / 100.0, 1e-6))
         super().__init__(parameter, on_changed, value_editor)
@@ -437,7 +458,12 @@ class FloatRangeParameterEditor(_RangeParameterEditor):
 
     @Slot()
     def _commit(self) -> None:
-        self._on_changed(float(self.value()))
+        sanitized = self._spec.sanitize_value(float(self.value()))
+        if not isinstance(sanitized, float):
+            raise TypeError("Float parameter sanitization produced a non-float value")
+        self._set_editor_value(sanitized)
+        self._update_slider_from_editor()
+        self._on_changed(sanitized)
 
 
 class IntRangeParameterEditor(_RangeParameterEditor):
@@ -450,9 +476,11 @@ class IntRangeParameterEditor(_RangeParameterEditor):
         self._maximum = int(spec.maximum)
         value_editor = ScrubbableSpinBox()
         value_editor.setRange(self._minimum, self._maximum)
+        value_editor.setSingleStep(spec.step or 1)
         super().__init__(parameter, on_changed, value_editor)
         self.slider.blockSignals(True)
         self.slider.setRange(self._minimum, self._maximum)
+        self.slider.setSingleStep(spec.step or 1)
         value = (
             int(parameter.value)
             if isinstance(parameter.value, int) and not isinstance(parameter.value, bool)
@@ -489,7 +517,12 @@ class IntRangeParameterEditor(_RangeParameterEditor):
 
     @Slot()
     def _commit(self) -> None:
-        self._on_changed(int(self.value()))
+        sanitized = self._spec.sanitize_value(int(self.value()))
+        if not isinstance(sanitized, int) or isinstance(sanitized, bool):
+            raise TypeError("Integer parameter sanitization produced a non-integer value")
+        self._set_editor_value(sanitized)
+        self._update_slider_from_editor()
+        self._on_changed(sanitized)
 
 
 class FloatParameterEditor(ScrubbableDoubleSpinBox):
@@ -497,10 +530,11 @@ class FloatParameterEditor(ScrubbableDoubleSpinBox):
         super().__init__()
         self._on_changed = on_changed
         spec = parameter.spec
+        self._spec = spec
         minimum = float(spec.minimum) if spec.minimum is not None else -1_000_000_000.0
         maximum = float(spec.maximum) if spec.maximum is not None else 1_000_000_000.0
+        self.setDecimals(_float_editor_decimals(spec))
         self.setRange(minimum, maximum)
-        self.setDecimals(6)
         if spec.minimum is not None and spec.maximum is not None:
             self.set_scrub_step(max((maximum - minimum) / 100.0, 1e-6))
         self.setKeyboardTracking(False)
@@ -524,7 +558,13 @@ class FloatParameterEditor(ScrubbableDoubleSpinBox):
 
     @Slot()
     def _flush_commit(self) -> None:
-        self._on_changed(float(self.value()))
+        sanitized = self._spec.sanitize_value(float(self.value()))
+        if not isinstance(sanitized, float):
+            raise TypeError("Float parameter sanitization produced a non-float value")
+        blocked = self.blockSignals(True)
+        self.setValue(sanitized)
+        self.blockSignals(blocked)
+        self._on_changed(sanitized)
 
 
 class IntParameterEditor(ScrubbableSpinBox):
@@ -532,9 +572,11 @@ class IntParameterEditor(ScrubbableSpinBox):
         super().__init__()
         self._on_changed = on_changed
         spec = parameter.spec
+        self._spec = spec
         minimum = int(spec.minimum) if spec.minimum is not None else -2_147_483_648
         maximum = int(spec.maximum) if spec.maximum is not None else 2_147_483_647
         self.setRange(minimum, maximum)
+        self.setSingleStep(spec.step or 1)
         self.setKeyboardTracking(False)
         if isinstance(parameter.value, int) and not isinstance(parameter.value, bool):
             self.setValue(parameter.value)
@@ -556,7 +598,13 @@ class IntParameterEditor(ScrubbableSpinBox):
 
     @Slot()
     def _flush_commit(self) -> None:
-        self._on_changed(int(self.value()))
+        sanitized = self._spec.sanitize_value(int(self.value()))
+        if not isinstance(sanitized, int) or isinstance(sanitized, bool):
+            raise TypeError("Integer parameter sanitization produced a non-integer value")
+        blocked = self.blockSignals(True)
+        self.setValue(sanitized)
+        self.blockSignals(blocked)
+        self._on_changed(sanitized)
 
 
 class BoolParameterEditor(QCheckBox):
@@ -800,9 +848,13 @@ class ColorParameterEditor(QPushButton):
     def _choose(self, checked: bool = False) -> None:
         del checked
         initial = QColor.fromRgbF(self._value.r, self._value.g, self._value.b, self._value.a)
+        # Parenting a modal dialog to a widget embedded by QGraphicsProxyWidget makes Qt embed the
+        # dialog itself in the graph scene. On Windows that proxy can expand across the canvas and
+        # paint it white. The real application window keeps the colour dialog top-level instead.
+        dialog_parent = _color_dialog_parent(self)
         selected = QColorDialog.getColor(
             initial,
-            self,
+            dialog_parent,
             tr("Choose colour"),
             QColorDialog.ColorDialogOption.ShowAlphaChannel,
         )

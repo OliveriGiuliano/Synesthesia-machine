@@ -692,9 +692,9 @@ def test_pass_filters_wrap_and_non_finite_values_match_wrapped_gaussian(
             },
             "denominator",
         ),
-        ("synmachine.image.dilate", {"kernel_width": 2}, "positive odd"),
+        ("synmachine.image.dilate", {"kernel_width": 2}, "increments of 2"),
         ("synmachine.image.erode", {"anchor_x": 3, "anchor_y": 0}, "anchor"),
-        ("synmachine.image.high_pass", {"sigma": 0.0}, "positive"),
+        ("synmachine.image.high_pass", {"sigma": 0.0}, "at least"),
         ("synmachine.image.low_pass", {"sigma": float("inf")}, "finite"),
     ],
 )

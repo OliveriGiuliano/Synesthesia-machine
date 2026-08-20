@@ -401,17 +401,31 @@ class RandomizeNodesCommand(_DocumentCommand):
         self.new_connections = replacement_connections
 
     def redo(self) -> None:
-        self._swap(self.old_nodes, self.new_nodes, self.new_connections)
+        self._swap(
+            self.old_nodes,
+            self.old_connections,
+            self.new_nodes,
+            self.new_connections,
+        )
 
     def undo(self) -> None:
-        self._swap(self.new_nodes, self.old_nodes, self.old_connections)
+        self._swap(
+            self.new_nodes,
+            self.new_connections,
+            self.old_nodes,
+            self.old_connections,
+        )
 
     def _swap(
         self,
         removed_nodes: tuple[NodeModel, ...],
+        removed_connections: tuple[ConnectionModel, ...],
         added_nodes: tuple[NodeModel, ...],
         added_connections: tuple[ConnectionModel, ...],
     ) -> None:
+        for connection in removed_connections:
+            if self.document.connection(connection.id) is not None:
+                self.document.remove_connection(connection.id)
         for node in removed_nodes:
             if self.document.node(node.id) is not None:
                 self.document.remove_node(node.id)

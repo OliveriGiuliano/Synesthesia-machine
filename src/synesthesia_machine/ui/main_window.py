@@ -393,6 +393,14 @@ class MainWindow(QMainWindow):
             self.randomize_nodes,
         )
         create(
+            ActionSpec(
+                "organize_graph",
+                "&Organize Graph",
+                "Arrange every node and visualizer into non-overlapping graph layers",
+            ),
+            self.organize_graph,
+        )
+        create(
             ActionSpec("add_group", "Add &Group", "Add an organizational group to the canvas"),
             self.add_group_at_center,
         )
@@ -518,7 +526,7 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         toolbar.addAction(self.action_registry.require("panic"))
         toolbar.addSeparator()
-        for key in ("randomize_parameters", "randomize_nodes"):
+        for key in ("randomize_parameters", "randomize_nodes", "organize_graph"):
             random_action = self.action_registry.require(key)
             toolbar.addAction(random_action)
             random_button = toolbar.widgetForAction(random_action)
@@ -571,6 +579,7 @@ class MainWindow(QMainWindow):
         graph_menu.addAction(self.action_registry.require("add_comment"))
         graph_menu.addAction(self.action_registry.require("randomize_parameters"))
         graph_menu.addAction(self.action_registry.require("randomize_nodes"))
+        graph_menu.addAction(self.action_registry.require("organize_graph"))
         arrange_menu = graph_menu.addMenu(tr("&Arrange Selection"))
         for key in (
             "align_left",
@@ -834,6 +843,14 @@ class MainWindow(QMainWindow):
             ),
             4000,
         )
+
+    @Slot()
+    def organize_graph(self) -> None:
+        if len(self.session.document.nodes) < 2:
+            return
+        self.scene.organize_graph()
+        QTimer.singleShot(0, self.view.frame_all)
+        self.statusBar().showMessage(tr("Organized the complete graph"), 4000)
 
     @Slot()
     def open_document(self) -> None:
@@ -1196,6 +1213,9 @@ class MainWindow(QMainWindow):
             self.action_registry.require(key).setEnabled(selected_node_count >= 2)
         self.action_registry.require("distribute_horizontal").setEnabled(selected_node_count >= 3)
         self.action_registry.require("distribute_vertical").setEnabled(selected_node_count >= 3)
+        self.action_registry.require("organize_graph").setEnabled(
+            len(self.session.document.nodes) >= 2
+        )
         sources = tuple(
             node.id
             for node in self.session.document.nodes

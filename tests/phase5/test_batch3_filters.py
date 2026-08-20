@@ -523,10 +523,10 @@ def test_filter_channel_selection_errors_are_recoverable(rgb_image: ImageFrame) 
 @pytest.mark.parametrize(
     ("type_id", "overrides", "message"),
     [
-        ("synmachine.image.gaussian_blur", {"kernel_width": 2}, "positive odd"),
+        ("synmachine.image.gaussian_blur", {"kernel_width": 2}, "increments of 2"),
         ("synmachine.image.gaussian_blur", {"sigma_x": float("nan")}, "sigma_x must be finite"),
         ("synmachine.image.sharpen", {"amount": float("inf")}, "amount must be finite"),
-        ("synmachine.image.sharpen", {"sigma": 0.0}, "sigma must be positive"),
+        ("synmachine.image.sharpen", {"sigma": 0.0}, "at least"),
         ("synmachine.image.sharpen", {"threshold": -0.1}, "threshold"),
         ("synmachine.image.add_noise", {"amount": float("nan")}, "amount must be finite"),
         (

@@ -113,3 +113,23 @@ def test_scalar_descriptors_and_parameters_reject_non_finite_values() -> None:
         assert spec.validate(invalid) == "must be finite"
         with pytest.raises(ValueError, match="finite"):
             spec.connected_value(invalid)
+
+
+def test_parameter_constraints_clamp_and_snap_authored_and_connected_values() -> None:
+    odd = ParameterSpec(
+        "kernel_width",
+        "Kernel width",
+        PortType.INT,
+        3,
+        minimum=1,
+        maximum=9,
+        step=2,
+    )
+
+    assert odd.validate(4) == "must use increments of 2 from 1"
+    assert odd.sanitize_value(-20) == 1
+    assert odd.sanitize_value(4) == 5
+    assert odd.sanitize_value(100) == 9
+    assert odd.connected_value(4.0) == 5
+    with pytest.raises(ValueError, match="positive integer"):
+        ParameterSpec("bad", "Bad", PortType.INT, 1, step=0)

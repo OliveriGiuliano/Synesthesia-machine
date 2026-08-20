@@ -6,11 +6,12 @@ from uuid import UUID
 
 import pytest
 from PySide6.QtCore import QPoint, QPointF, QSettings, Qt, QTimer
-from PySide6.QtGui import QBrush, QImage, QPainter, QWheelEvent
+from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QColorDialog,
     QComboBox,
     QDockWidget,
     QDoubleSpinBox,
@@ -20,8 +21,10 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSpinBox,
     QStyleOptionGraphicsItem,
+    QWidget,
 )
 
+import synesthesia_machine.ui.parameter_editors as parameter_editors_module
 from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.app.settings import ApplicationPaths
 from synesthesia_machine.contracts import (
@@ -124,6 +127,14 @@ def test_shell_has_fixed_structure_actions_and_accessible_controls(window: MainW
         window.action_registry.require("randomize_nodes").text().replace("&", "")
         == "Randomize Nodes"
     )
+    assert (
+        window.action_registry.require("organize_graph").text().replace("&", "") == "Organize Graph"
+    )
+    organize_button = window.transport_toolbar.widgetForAction(
+        window.action_registry.require("organize_graph")
+    )
+    assert organize_button is not None
+    assert organize_button.objectName() == "organize_graph_button"
     assert window.accessibleName() == "Synesthesia Machine graph editor"
     assert window.library.search.accessibleName()
     assert window.library.tree.accessibleName()
@@ -214,7 +225,7 @@ def test_randomize_nodes_action_replaces_and_selects_new_nodes(window: MainWindo
     window.randomize_nodes()
 
     replacement_ids = window.scene.selected_node_ids()
-    assert len(replacement_ids) > 1
+    assert replacement_ids
     assert selected not in replacement_ids
     assert window.session.document.node(selected) is None
     assert window.session.document.node(source) is not None
@@ -516,6 +527,72 @@ def test_scalar_editor_factory_supports_all_phase_2_literal_types() -> None:
         )
         assert isinstance(editor, expected_type)
         assert editor.accessibleName() == spec.label
+
+
+def test_odd_integer_editor_snaps_even_gaussian_kernel_values(qapp: QApplication) -> None:
+    spec = (
+        create_application_registry()
+        .require("synmachine.image.gaussian_blur")
+        .parameter("kernel_width")
+    )
+    assert spec is not None
+    assert spec.step == 2
+    edits: list[object] = []
+    editor = create_parameter_editor(ParameterViewModel(spec, spec.default, False), edits.append)
+    assert isinstance(editor, QSpinBox)
+
+    editor.setValue(4)
+    qapp.processEvents()
+
+    assert editor.value() == 5
+    assert edits[-1] == 5
+
+
+def test_float_editor_preserves_and_clamps_tiny_positive_bounds(qapp: QApplication) -> None:
+    spec = ParameterSpec("epsilon", "Epsilon", PortType.FLOAT, 1e-6, minimum=1e-12)
+    edits: list[object] = []
+    editor = create_parameter_editor(ParameterViewModel(spec, spec.default, False), edits.append)
+    assert isinstance(editor, QDoubleSpinBox)
+
+    editor.setValue(0.0)
+    qapp.processEvents()
+
+    assert editor.decimals() == 12
+    assert editor.value() == pytest.approx(1e-12)
+    assert edits[-1] == pytest.approx(1e-12)
+
+
+def test_color_dialog_uses_real_window_parent_instead_of_graph_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = QWidget()
+    captured: dict[str, object] = {}
+
+    def fake_get_color(
+        initial: QColor,
+        parent: QWidget | None,
+        title: str,
+        options: QColorDialog.ColorDialogOption,
+    ) -> QColor:
+        captured.update(initial=initial, parent=parent, title=title, options=options)
+        return QColor()
+
+    monkeypatch.setattr(parameter_editors_module, "_color_dialog_parent", lambda _editor: owner)
+    monkeypatch.setattr(QColorDialog, "getColor", staticmethod(fake_get_color))
+    spec = ParameterSpec(
+        "border_colour",
+        "Border colour",
+        PortType.COLOR,
+        ColorValue(0.0, 0.0, 0.0, 0.0),
+    )
+    editor = create_parameter_editor(
+        ParameterViewModel(spec, spec.default, False), lambda _value: None
+    )
+
+    editor.click()
+
+    assert captured["parent"] is owner
+    assert captured["options"] == QColorDialog.ColorDialogOption.ShowAlphaChannel
 
 
 def test_slider_hint_is_explicit_and_sliders_display_and_drag_their_value(

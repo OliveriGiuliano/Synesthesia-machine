@@ -1,6 +1,7 @@
 """DocumentSession command grouping, persistence, and recovery semantics."""
 
 from pathlib import Path
+from uuid import UUID
 
 from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.graph import GraphCompiler
@@ -139,6 +140,47 @@ def test_randomize_nodes_is_valid_scoped_and_one_undoable_command() -> None:
     assert semantic_state(session) == before
     session.undo_stack.redo()
     assert semantic_state(session) == after
+
+
+def test_randomize_nodes_can_add_or_remove_with_exact_undo() -> None:
+    def make_session() -> tuple[DocumentSession, set[UUID]]:
+        session = DocumentSession(create_utility_registry())
+        source = session.add_node("synmachine.utility.number", (0.0, 0.0))
+        first = session.add_node("synmachine.utility.pass_through", (240.0, 0.0))
+        second = session.add_node("synmachine.utility.pass_through", (480.0, 0.0))
+        third = session.add_node("synmachine.utility.pass_through", (720.0, 0.0))
+        session.add_connection(source, "value", first, "value")
+        session.add_connection(first, "value", second, "value")
+        session.add_connection(second, "value", third, "value")
+        return session, {first, second, third}
+
+    added, add_selection = make_session()
+    baseline_count = len(added.document.nodes)
+    added.randomize_nodes(add_selection, seed=0)
+    assert len(added.document.nodes) > baseline_count
+
+    removed, remove_selection = make_session()
+    before = semantic_state(removed)
+    removed.randomize_nodes(remove_selection, seed=9)
+    after = semantic_state(removed)
+    assert len(removed.document.nodes) < baseline_count
+    assert GraphCompiler(removed.registry).compile(removed.document.snapshot()).report.is_valid
+    removed.undo_stack.undo()
+    assert semantic_state(removed) == before
+    removed.undo_stack.redo()
+    assert semantic_state(removed) == after
+
+
+def test_session_sanitizes_odd_kernel_literals_before_creating_undo_command() -> None:
+    registry = create_application_registry()
+    session = DocumentSession(registry)
+    gaussian = session.add_node("synmachine.image.gaussian_blur", (0.0, 0.0))
+
+    session.set_parameter(gaussian, "kernel_width", 4)
+
+    node = session.document.node(gaussian)
+    assert node is not None
+    assert node.parameters["kernel_width"] == 5
 
 
 def test_save_open_and_recovery_preserve_values_and_clean_state(tmp_path: Path) -> None:

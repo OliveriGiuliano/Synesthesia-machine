@@ -512,15 +512,15 @@ def _dynamic_image_channel_type(
 
 def create_filter_definitions() -> tuple[NodeDefinition, ...]:
     gaussian_parameters = (
-        ParameterSpec("kernel_width", "Kernel width", PortType.INT, 3, minimum=1),
-        ParameterSpec("kernel_height", "Kernel height", PortType.INT, 3, minimum=1),
+        ParameterSpec("kernel_width", "Kernel width", PortType.INT, 3, minimum=1, step=2),
+        ParameterSpec("kernel_height", "Kernel height", PortType.INT, 3, minimum=1, step=2),
         ParameterSpec("sigma_x", "Sigma X", PortType.FLOAT, 0.0, minimum=0.0),
         ParameterSpec("sigma_y", "Sigma Y", PortType.FLOAT, 0.0, minimum=0.0),
         _border_parameter(),
     )
     sharpen_parameters = (
         ParameterSpec("amount", "Amount", PortType.FLOAT, 1.0),
-        ParameterSpec("sigma", "Sigma", PortType.FLOAT, 1.0, minimum=0.0),
+        ParameterSpec("sigma", "Sigma", PortType.FLOAT, 1.0, minimum=1e-6),
         ParameterSpec("threshold", "Threshold", PortType.FLOAT, 0.0, minimum=0.0),
         _border_parameter(),
     )
@@ -596,8 +596,8 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
             MorphKernelShape.RECTANGLE.value,
             choices=tuple(shape.value for shape in MorphKernelShape),
         ),
-        ParameterSpec("kernel_width", "Kernel width", PortType.INT, 3, minimum=1),
-        ParameterSpec("kernel_height", "Kernel height", PortType.INT, 3, minimum=1),
+        ParameterSpec("kernel_width", "Kernel width", PortType.INT, 3, minimum=1, step=2),
+        ParameterSpec("kernel_height", "Kernel height", PortType.INT, 3, minimum=1, step=2),
         ParameterSpec("iterations", "Iterations", PortType.INT, 1, minimum=1),
         ParameterSpec("anchor_x", "Anchor X", PortType.INT, -1, minimum=-1),
         ParameterSpec("anchor_y", "Anchor Y", PortType.INT, -1, minimum=-1),
@@ -611,13 +611,13 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
         ),
     )
     high_pass_parameters = (
-        _float_parameter("sigma", "Sigma", 1.0, minimum=0.0),
+        _float_parameter("sigma", "Sigma", 1.0, minimum=1e-6),
         _float_parameter("display_offset", "Display offset", 0.0),
         _float_parameter("gain", "Gain", 1.0),
         _border_parameter(),
     )
     low_pass_parameters = (
-        _float_parameter("sigma", "Sigma", 1.0, minimum=0.0),
+        _float_parameter("sigma", "Sigma", 1.0, minimum=1e-6),
         _border_parameter(),
     )
     return (

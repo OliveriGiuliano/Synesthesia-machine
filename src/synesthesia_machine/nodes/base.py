@@ -134,9 +134,37 @@ class ParameterSpec:
     update_mode: ParameterUpdateMode = ParameterUpdateMode.LIVE
     editor_hint: ParameterEditorHint = ParameterEditorHint.DEFAULT
     applicable_input_types: tuple[PortType, ...] = ()
+    step: int | None = None
 
     def __post_init__(self) -> None:
         _validate_stable_id(self.id, "parameter")
+        if self.minimum is not None or self.maximum is not None:
+            if self.value_type not in {PortType.FLOAT, PortType.INT}:
+                raise ValueError("Parameter bounds require a numeric value type")
+            for bound in (self.minimum, self.maximum):
+                if bound is not None and (
+                    isinstance(bound, bool) or not math.isfinite(float(bound))
+                ):
+                    raise ValueError("Parameter bounds must be finite numbers")
+                if (
+                    bound is not None
+                    and self.value_type is PortType.INT
+                    and not isinstance(bound, int)
+                ):
+                    raise ValueError("INT parameter bounds must be integers")
+            if (
+                self.minimum is not None
+                and self.maximum is not None
+                and self.minimum > self.maximum
+            ):
+                raise ValueError("Parameter minimum cannot exceed maximum")
+        if self.step is not None:
+            if self.value_type is not PortType.INT:
+                raise ValueError("Parameter steps currently require an INT value type")
+            if self.step < 1:
+                raise ValueError("Parameter step must be a positive integer")
+            if self.choices:
+                raise ValueError("Parameter step and explicit choices cannot be combined")
         error = self.validate(self.default)
         if error is not None:
             msg = f"Invalid default for parameter {self.id!r}: {error}"
@@ -162,7 +190,79 @@ class ParameterSpec:
                 return f"must be at least {self.minimum}"
             if self.maximum is not None and value > self.maximum:
                 return f"must be at most {self.maximum}"
+            if self.step is not None and (value - self._step_origin()) % self.step != 0:
+                return f"must use increments of {self.step} from {self._step_origin()}"
         return None
+
+    def sanitize_value(self, value: object) -> ParameterValue:
+        """Clamp and snap an authored value to this parameter's declared constraints."""
+
+        if not _matches_port_type(value, self.value_type):
+            raise ValueError(f"expected {self.value_type.value}, got {type(value).__name__}")
+        converted: ParameterValue
+        if self.value_type is PortType.FLOAT:
+            if not isinstance(value, float):
+                raise ValueError(f"expected FLOAT, got {type(value).__name__}")
+            numeric = value
+            if not math.isfinite(numeric):
+                raise ValueError("must be finite")
+            if self.minimum is not None:
+                numeric = max(numeric, float(self.minimum))
+            if self.maximum is not None:
+                numeric = min(numeric, float(self.maximum))
+            if self.choices:
+                numeric_choices = tuple(
+                    choice for choice in self.choices if isinstance(choice, float)
+                )
+                if numeric_choices:
+                    numeric = min(
+                        numeric_choices,
+                        key=lambda choice: abs(choice - numeric),
+                    )
+            converted = numeric
+        elif self.value_type is PortType.INT:
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ValueError(f"expected INT, got {type(value).__name__}")
+            numeric_int = value
+            if self.minimum is not None:
+                numeric_int = max(numeric_int, int(self.minimum))
+            if self.maximum is not None:
+                numeric_int = min(numeric_int, int(self.maximum))
+            if self.step is not None:
+                origin = self._step_origin()
+                step_index = math.floor((numeric_int - origin) / self.step + 0.5)
+                if self.minimum is not None:
+                    step_index = max(
+                        step_index,
+                        math.ceil((int(self.minimum) - origin) / self.step),
+                    )
+                if self.maximum is not None:
+                    step_index = min(
+                        step_index,
+                        math.floor((int(self.maximum) - origin) / self.step),
+                    )
+                numeric_int = origin + step_index * self.step
+            if self.choices:
+                integer_choices = tuple(
+                    choice
+                    for choice in self.choices
+                    if isinstance(choice, int) and not isinstance(choice, bool)
+                )
+                if integer_choices:
+                    numeric_int = min(
+                        integer_choices,
+                        key=lambda choice: abs(choice - numeric_int),
+                    )
+            converted = numeric_int
+        else:
+            converted = _as_parameter_value(value)
+        error = self.validate(converted)
+        if error is not None:
+            raise ValueError(error)
+        return _as_parameter_value(converted)
+
+    def _step_origin(self) -> int:
+        return int(self.minimum) if self.minimum is not None else 0
 
     def connected_value(self, value: object) -> float | int | bool:
         """Coerce and bound a live socket value to this parameter's literal contract."""
@@ -188,23 +288,10 @@ class ParameterSpec:
         else:
             raise ValueError(f"{self.value_type.value} parameters do not accept live scalar input")
 
-        if not isinstance(converted, bool):
-            if self.minimum is not None and converted < self.minimum:
-                converted = self.minimum
-            if self.maximum is not None and converted > self.maximum:
-                converted = self.maximum
-            converted = int(converted) if self.value_type is PortType.INT else float(converted)
-            numeric_choices = tuple(
-                choice
-                for choice in self.choices
-                if isinstance(choice, (int, float)) and not isinstance(choice, bool)
-            )
-            if numeric_choices:
-                converted = min(numeric_choices, key=lambda choice: abs(float(choice) - converted))
-        error = self.validate(converted)
-        if error is not None:
-            raise ValueError(error)
-        return converted
+        sanitized = self.sanitize_value(converted)
+        if isinstance(sanitized, (float, int, bool)):
+            return sanitized
+        raise TypeError("Connected scalar sanitization produced a non-scalar value")
 
 
 @dataclass(frozen=True, slots=True)

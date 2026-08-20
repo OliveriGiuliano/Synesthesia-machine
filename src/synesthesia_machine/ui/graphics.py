@@ -715,6 +715,20 @@ class ConnectionGraphicsItem(QGraphicsObject):
     def takes_image_pill(self) -> bool:
         return self._pill_family() in ("image", "channel")
 
+    @property
+    def preview_scene_rect(self) -> QRectF:
+        """Visible pill bounds used to keep organized nodes clear of previews."""
+
+        if not self._preview_visible:
+            return QRectF()
+        body = self._pill_body_rect()
+        if body is None:
+            return QRectF()
+        chevron = self._chevron_rect()
+        if chevron is not None:
+            body = body.united(chevron)
+        return self.mapRectToScene(body)
+
     def _pill_family(self) -> str:
         type_name = self.view_model.type_name
         if type_name in ("INT", "FLOAT"):

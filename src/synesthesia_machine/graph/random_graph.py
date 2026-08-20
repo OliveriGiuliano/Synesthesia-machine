@@ -206,21 +206,31 @@ def randomize_graph_nodes(
         raise RuntimeError("Could not produce a valid randomized node replacement")
     candidate, replacement_ids = replacement
 
-    desired_extra_nodes = generator.randint(1, 3)
-    for _index in range(desired_extra_nodes):
-        inserted = _insert_random_node(candidate, registry, replacement_ids, generator, compiler)
-        if inserted is None:
-            inserted = _add_random_standalone_node(
-                candidate,
-                registry,
-                replacement_ids,
-                generator,
-                compiler,
+    mutation_count = generator.randint(1, 3)
+    if generator.choice(("add", "remove")) == "add":
+        for _index in range(mutation_count):
+            inserted = _insert_random_node(
+                candidate, registry, replacement_ids, generator, compiler
             )
-        if inserted is None:
-            break
-        candidate, inserted_id = inserted
-        replacement_ids = frozenset((*replacement_ids, inserted_id))
+            if inserted is None:
+                inserted = _add_random_standalone_node(
+                    candidate,
+                    registry,
+                    replacement_ids,
+                    generator,
+                    compiler,
+                )
+            if inserted is None:
+                break
+            candidate, inserted_id = inserted
+            replacement_ids = frozenset((*replacement_ids, inserted_id))
+    else:
+        for _index in range(mutation_count):
+            removed = _remove_random_node(candidate, replacement_ids, generator, compiler)
+            if removed is None:
+                break
+            candidate, removed_id = removed
+            replacement_ids -= {removed_id}
     return candidate, replacement_ids
 
 
@@ -324,7 +334,10 @@ def _random_integer(
         upper = min(upper, floor(parameter.maximum))
     if lower > upper:
         return current
-    return generator.randint(lower, upper)
+    randomized = parameter.sanitize_value(generator.randint(lower, upper))
+    return (
+        randomized if isinstance(randomized, int) and not isinstance(randomized, bool) else current
+    )
 
 
 def _random_float(
@@ -566,6 +579,69 @@ def _add_random_standalone_node(
         candidate = replace(snapshot, nodes=(*snapshot.nodes, node))
         if compiler.compile(candidate).report.is_valid:
             return candidate, node_id
+    return None
+
+
+def _remove_random_node(
+    snapshot: GraphSnapshot,
+    replacement_ids: frozenset[UUID],
+    generator: random.Random,
+    compiler: GraphCompiler,
+) -> tuple[GraphSnapshot, UUID] | None:
+    """Remove a randomized node, bypassing a unary transform when necessary."""
+
+    if len(replacement_ids) <= 1:
+        return None
+    candidates = [node_id for node_id in replacement_ids if snapshot.node(node_id) is not None]
+    generator.shuffle(candidates)
+    for node_id in candidates:
+        incoming = tuple(
+            connection
+            for connection in snapshot.connections
+            if connection.destination_node_id == node_id
+        )
+        outgoing = tuple(
+            connection
+            for connection in snapshot.connections
+            if connection.source_node_id == node_id
+        )
+        # Preserve connected graph boundaries: sources have no incoming edge and demand roots have
+        # no outgoing edge. Internal transforms can be bypassed, while disconnected experimental
+        # nodes can be removed directly.
+        if not ((incoming and outgoing) or (not incoming and not outgoing)):
+            continue
+        retained_connections = tuple(
+            connection
+            for connection in snapshot.connections
+            if connection.source_node_id != node_id and connection.destination_node_id != node_id
+        )
+        without_node = replace(
+            snapshot,
+            nodes=tuple(node for node in snapshot.nodes if node.id != node_id),
+            connections=retained_connections,
+        )
+        if compiler.compile(without_node).report.is_valid:
+            return without_node, node_id
+
+        if len(incoming) != 1 or not outgoing:
+            continue
+        source = incoming[0]
+        bypass_connections = tuple(
+            ConnectionModel(
+                _random_uuid(generator),
+                source.source_node_id,
+                source.source_port_id,
+                connection.destination_node_id,
+                connection.destination_port_id,
+            )
+            for connection in outgoing
+        )
+        bypassed = replace(
+            without_node,
+            connections=(*retained_connections, *bypass_connections),
+        )
+        if compiler.compile(bypassed).report.is_valid:
+            return bypassed, node_id
     return None
 
 

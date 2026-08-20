@@ -43,6 +43,8 @@ from synesthesia_machine.ui.translations import tr
 
 NODE_MIME_TYPE = "application/x-synesthesia-node-type"
 LARGE_GRAPH_NODE_THRESHOLD = 200
+ORGANIZE_NODE_PREVIEW_CLEARANCE = 24.0
+ORGANIZE_MINIMUM_HORIZONTAL_GAP = 96.0
 
 
 class GraphScene(QGraphicsScene):
@@ -379,7 +381,33 @@ class GraphScene(QGraphicsScene):
             return
         self._apply_layout(tidy_boxes(boxes, self.session.document.connections))
 
+    def organize_graph(self) -> None:
+        """Arrange all nodes into layers with room for visible connection previews."""
+
+        boxes = self._layout_boxes()
+        if len(boxes) < 2:
+            return
+        preview_width = max(
+            (item.preview_scene_rect.width() for item in self.connection_items.values()),
+            default=0.0,
+        )
+        horizontal_gap = max(
+            ORGANIZE_MINIMUM_HORIZONTAL_GAP,
+            preview_width + ORGANIZE_NODE_PREVIEW_CLEARANCE,
+        )
+        self._apply_layout(
+            tidy_boxes(
+                boxes,
+                self.session.document.connections,
+                horizontal_gap=horizontal_gap,
+            )
+        )
+
     def _selected_layout_boxes(self) -> tuple[LayoutBox, ...]:
+        selected = self.selected_node_ids()
+        return tuple(box for box in self._layout_boxes() if box.node_id in selected)
+
+    def _layout_boxes(self) -> tuple[LayoutBox, ...]:
         return tuple(
             LayoutBox(
                 node_id,
@@ -389,7 +417,6 @@ class GraphScene(QGraphicsScene):
                 item.boundingRect().height(),
             )
             for node_id, item in sorted(self.node_items.items(), key=lambda pair: str(pair[0]))
-            if item.isSelected()
         )
 
     def _apply_layout(self, positions: dict[UUID, tuple[float, float]]) -> None:

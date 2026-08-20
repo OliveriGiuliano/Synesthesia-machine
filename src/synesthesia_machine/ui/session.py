@@ -278,14 +278,20 @@ class DocumentSession(QObject):
 
     def set_parameter(self, node_id: UUID, parameter_id: str, value: LiteralValue) -> None:
         node = self.document.node(node_id)
-        if node is not None and node.parameters.get(parameter_id) == value:
+        if node is None:
+            raise KeyError(f"Unknown node: {node_id}")
+        parameter = self.registry.require(node.type_id).parameter(parameter_id)
+        if parameter is None:
+            raise KeyError(f"Unknown parameter {parameter_id!r} on {node.type_id}")
+        sanitized = parameter.sanitize_value(value)
+        if node.parameters.get(parameter_id) == sanitized:
             return
         self.push(
             SetParameterCommand(
                 self.document,
                 node_id,
                 parameter_id,
-                value,
+                sanitized,
                 self._command_change_callback,
             )
         )
@@ -357,16 +363,16 @@ class DocumentSession(QObject):
             node_ids,
             seed=seed,
         )
-        if not replacement_ids:
+        if randomized == original:
             return frozenset()
         replacement_nodes = {
             node.id: node for node in randomized.nodes if node.id in replacement_ids
         }
+        original_connections = {connection.id: connection for connection in original.connections}
         replacement_connections = tuple(
             connection
             for connection in randomized.connections
-            if connection.source_node_id in replacement_ids
-            or connection.destination_node_id in replacement_ids
+            if original_connections.get(connection.id) != connection
         )
         self.push(
             RandomizeNodesCommand(
