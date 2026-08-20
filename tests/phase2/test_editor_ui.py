@@ -44,7 +44,11 @@ from synesthesia_machine.nodes import (
 from synesthesia_machine.nodes.utility import create_utility_registry
 from synesthesia_machine.persistence import save_graph
 from synesthesia_machine.runtime import InProcessEngineClient
-from synesthesia_machine.ui.graphics import NodeGraphicsItem, TemporaryConnectionGraphicsItem
+from synesthesia_machine.ui.graphics import (
+    ConnectionGraphicsItem,
+    NodeGraphicsItem,
+    TemporaryConnectionGraphicsItem,
+)
 from synesthesia_machine.ui.main_window import MainWindow
 from synesthesia_machine.ui.parameter_editors import (
     DirectDragSlider,
@@ -55,7 +59,7 @@ from synesthesia_machine.ui.parameter_editors import (
 )
 from synesthesia_machine.ui.theme import DEFAULT_THEME, node_category_color
 from synesthesia_machine.ui.tooltips import TOOLTIP_LINE_WIDTH, format_tooltip
-from synesthesia_machine.ui.view_models import ParameterViewModel
+from synesthesia_machine.ui.view_models import ConnectionViewModel, ParameterViewModel
 from synesthesia_machine.ui.widgets import NodeLibrary, NodeSearchDialog, SearchCandidate
 
 
@@ -434,6 +438,61 @@ def test_temporary_connection_explicitly_disables_path_fill() -> None:
     painter.end()
 
 
+def _connection_view_model(type_name: str) -> ConnectionViewModel:
+    return ConnectionViewModel(
+        connection_id=UUID("00000000-0000-0000-0000-0000000000e1"),
+        source_node_id=UUID("00000000-0000-0000-0000-0000000000e2"),
+        source_port_id="out",
+        destination_node_id=UUID("00000000-0000-0000-0000-0000000000e3"),
+        destination_port_id="in",
+        type_name=type_name,
+        issues=(),
+    )
+
+
+@pytest.mark.parametrize(
+    ("type_name", "value_pill", "image_pill"),
+    [
+        ("INT", True, False),
+        ("FLOAT", True, False),
+        ("IMAGE", False, True),
+        ("CHANNEL", False, True),
+        ("BOOLEAN", False, False),
+        ("", False, False),
+    ],
+)
+def test_connection_pill_predicates_follow_link_type_family(
+    type_name: str, value_pill: bool, image_pill: bool
+) -> None:
+    item = ConnectionGraphicsItem(_connection_view_model(type_name), DEFAULT_THEME)
+    assert item.takes_value_pill() is value_pill
+    assert item.takes_image_pill() is image_pill
+
+
+def test_connection_pill_state_toggles_and_stores_previews() -> None:
+    item = ConnectionGraphicsItem(_connection_view_model("FLOAT"), DEFAULT_THEME)
+    assert item._preview_visible is True
+    assert item._value_text is None
+    assert item._image is None
+
+    item.set_value_preview("42")
+    assert item._value_text == "42"
+    item.set_value_preview("42")  # no-op when unchanged
+    assert item._value_text == "42"
+
+    item.set_preview_visible(False)
+    assert item._preview_visible is False
+    item.set_preview_visible(True)
+    assert item._preview_visible is True
+
+    image = QImage(4, 4, QImage.Format.Format_ARGB32)
+    image.fill(Qt.GlobalColor.red)
+    item.set_image_preview(image)
+    assert item._image is image
+    item.set_image_preview(None)
+    assert item._image is None
+
+
 def test_scalar_editor_factory_supports_all_phase_2_literal_types() -> None:
     cases = (
         (ParameterSpec("float_value", "Float", PortType.FLOAT, 1.0), 1.0, QDoubleSpinBox),
@@ -554,9 +613,7 @@ def test_slider_hint_is_explicit_and_sliders_display_and_drag_their_value(
     assert edits[-1] == 7
     assert int_editor.slider.value() == 7
 
-    technical_spec = ParameterSpec(
-        "preview_fps", "Preview FPS", PortType.INT, 30, minimum=5, maximum=30
-    )
+    technical_spec = ParameterSpec("int_steps", "Steps", PortType.INT, 30, minimum=5, maximum=30)
     technical_editor = create_parameter_editor(
         ParameterViewModel(technical_spec, 30, False), edits.append
     )
@@ -600,8 +657,6 @@ def test_numeric_value_fields_scrub_horizontally_and_commit_on_release(
 def test_builtin_slider_metadata_reserves_sliders_for_continuous_spectra() -> None:
     registry = create_application_registry()
     technical_parameters = (
-        ("synmachine.visualization.channel_display", "preview_fps"),
-        ("synmachine.visualization.channel_display", "max_dimension"),
         ("synmachine.synesthesia.channel_to_pitch", "midi_channel"),
         ("synmachine.synesthesia.channel_to_pitch", "maximum_polyphony"),
     )

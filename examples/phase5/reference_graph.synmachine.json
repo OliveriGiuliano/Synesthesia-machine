@@ -6,56 +6,64 @@
       "destination_port_id": "image",
       "id": "52000000-0000-0000-0001-000000000001",
       "source_node_id": "52000000-0000-0000-0000-000000000001",
-      "source_port_id": "image"
+      "source_port_id": "image",
+      "ui_state": {}
     },
     {
       "destination_node_id": "52000000-0000-0000-0000-000000000003",
       "destination_port_id": "image",
       "id": "52000000-0000-0000-0001-000000000002",
       "source_node_id": "52000000-0000-0000-0000-000000000002",
-      "source_port_id": "image"
+      "source_port_id": "image",
+      "ui_state": {}
     },
     {
       "destination_node_id": "52000000-0000-0000-0000-000000000004",
       "destination_port_id": "image",
       "id": "52000000-0000-0000-0001-000000000003",
       "source_node_id": "52000000-0000-0000-0000-000000000003",
-      "source_port_id": "image"
+      "source_port_id": "image",
+      "ui_state": {}
     },
     {
       "destination_node_id": "52000000-0000-0000-0000-000000000005",
       "destination_port_id": "image",
       "id": "52000000-0000-0000-0001-000000000004",
       "source_node_id": "52000000-0000-0000-0000-000000000004",
-      "source_port_id": "image"
+      "source_port_id": "image",
+      "ui_state": {}
     },
     {
       "destination_node_id": "52000000-0000-0000-0000-000000000006",
       "destination_port_id": "value",
       "id": "52000000-0000-0000-0001-000000000005",
       "source_node_id": "52000000-0000-0000-0000-000000000005",
-      "source_port_id": "channel_1"
+      "source_port_id": "channel_1",
+      "ui_state": {}
     },
     {
       "destination_node_id": "52000000-0000-0000-0000-000000000007",
       "destination_port_id": "midi",
       "id": "52000000-0000-0000-0001-000000000006",
       "source_node_id": "52000000-0000-0000-0000-000000000006",
-      "source_port_id": "midi"
+      "source_port_id": "midi",
+      "ui_state": {}
     },
     {
       "destination_node_id": "52000000-0000-0000-0000-000000000008",
       "destination_port_id": "image",
       "id": "52000000-0000-0000-0001-000000000007",
       "source_node_id": "52000000-0000-0000-0000-000000000004",
-      "source_port_id": "image"
+      "source_port_id": "image",
+      "ui_state": {}
     },
     {
       "destination_node_id": "52000000-0000-0000-0000-000000000009",
       "destination_port_id": "channel",
       "id": "52000000-0000-0000-0001-000000000008",
       "source_node_id": "52000000-0000-0000-0000-000000000008",
-      "source_port_id": "channel"
+      "source_port_id": "channel",
+      "ui_state": {}
     }
   ],
   "document_id": "52000000-0000-0000-0000-000000000000",
@@ -221,11 +229,9 @@
     {
       "collapsed": false,
       "id": "52000000-0000-0000-0000-000000000009",
-      "implementation_version": 1,
+      "implementation_version": 2,
       "parameters": {
         "fit_mode": "CONTAIN",
-        "max_dimension": 500,
-        "preview_fps": 30,
         "show_histogram": false,
         "value_display_mode": "NOMINAL_RANGE"
       },
@@ -239,6 +245,6 @@
       "user_label": null
     }
   ],
-  "schema_version": 1,
+  "schema_version": 2,
   "ui_state": {}
 }

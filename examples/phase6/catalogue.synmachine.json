@@ -1219,11 +1219,9 @@
     {
       "collapsed": false,
       "id": "65000000-0000-0000-0000-000000000063",
-      "implementation_version": 1,
+      "implementation_version": 2,
       "parameters": {
         "fit_mode": "CONTAIN",
-        "max_dimension": 800,
-        "preview_fps": 30,
         "show_histogram": false,
         "value_display_mode": "NOMINAL_RANGE"
       },
@@ -1239,12 +1237,10 @@
     {
       "collapsed": false,
       "id": "65000000-0000-0000-0000-000000000064",
-      "implementation_version": 1,
+      "implementation_version": 2,
       "parameters": {
         "checkerboard_alpha": true,
         "fit_mode": "CONTAIN",
-        "max_dimension": 800,
-        "preview_fps": 30,
         "show_histogram": false,
         "value_display_mode": "DISPLAY_TRANSFORM"
       },
@@ -1272,6 +1268,6 @@
       "user_label": null
     }
   ],
-  "schema_version": 1,
+  "schema_version": 2,
   "ui_state": {}
 }

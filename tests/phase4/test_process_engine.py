@@ -129,7 +129,10 @@ def test_process_metrics_transport_structured_runtime_errors(
         parameters={"width": 8, "height": 8, "preserve_aspect": False},
     )
     difference_id = document.add_node("synmachine.image.difference")
-    preview_id = document.add_node("synmachine.visualization.display_image_data")
+    # Fresh nodes are stamped at the definition's current implementation version.
+    preview_id = document.add_node(
+        "synmachine.visualization.display_image_data", implementation_version=2
+    )
     document.add_connection(source_id, "image", resize_id, "image")
     document.add_connection(source_id, "image", difference_id, "a")
     document.add_connection(resize_id, "image", difference_id, "b")

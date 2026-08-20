@@ -19,7 +19,9 @@ from synesthesia_machine.runtime import InProcessEngineClient
 
 EXAMPLE_PATH = Path("examples/phase3/hue_chord.synmachine.json")
 SOURCE_ID = UUID("30000000-0000-0000-0000-000000000001")
-IMAGE_VISUALIZER_ID = UUID("30000000-0000-0000-0000-000000000006")
+RESIZE_ID = UUID("30000000-0000-0000-0000-000000000002")
+COLOUR_ID = UUID("30000000-0000-0000-0000-000000000003")
+CHANNELS_ID = UUID("30000000-0000-0000-0000-000000000004")
 NOTE_VISUALIZER_ID = UUID("30000000-0000-0000-0000-000000000007")
 AUDIO_ID = UUID("30000000-0000-0000-0000-000000000008")
 EXPECTED_NOTES = (60, 62, 64, 65, 67, 69, 71)
@@ -135,11 +137,14 @@ def test_generated_video_drives_expected_midi_previews_and_mock_audio_via_client
 
         image_previews = client.poll_image_previews()
         note_previews = client.poll_note_previews()
-        assert len(image_previews) == 1
-        assert image_previews[0].node_id == IMAGE_VISUALIZER_ID
-        assert (image_previews[0].width, image_previews[0].height) == (500, 500)
+        # Image previews are anchored on each demanded producer, not on the
+        # display node, so every producer with a connected image/channel output
+        # (source, resize, colour, separate_channels) owns a link-pill preview.
+        by_owner = {preview.owner_id: preview for preview in image_previews}
+        assert set(by_owner) == {SOURCE_ID, RESIZE_ID, COLOUR_ID, CHANNELS_ID}
+        assert (by_owner[RESIZE_ID].width, by_owner[RESIZE_ID].height) == (500, 500)
         assert len(note_previews) == 1
-        assert note_previews[0].node_id == NOTE_VISUALIZER_ID
+        assert note_previews[0].owner_id == NOTE_VISUALIZER_ID
         assert note_previews[0].tick_index == HUE_FRAME_COUNT
         assert note_previews[0].notes == (NoteActivity(0, EXPECTED_NOTES[-1], 100),)
 

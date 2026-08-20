@@ -194,9 +194,8 @@ def create_reference_document(media_path: str) -> GraphDocument:
     document.add_node(
         "synmachine.visualization.channel_display",
         node_id=CHANNEL_DISPLAY_ID,
+        implementation_version=2,
         parameters={
-            "preview_fps": 30,
-            "max_dimension": 800,
             "fit_mode": "CONTAIN",
             "value_display_mode": "NOMINAL_RANGE",
             "show_histogram": False,

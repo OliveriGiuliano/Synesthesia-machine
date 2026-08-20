@@ -1,6 +1,7 @@
 """Undoable graph-document command adapters."""
 
 from synesthesia_machine.ui.commands.graph_commands import (
+    PREVIEW_VISIBLE_KEY,
     AddConnectionCommand,
     AddGroupCommand,
     AddNodeCommand,
@@ -17,10 +18,12 @@ from synesthesia_machine.ui.commands.graph_commands import (
     RelinkMediaCommand,
     RemoveConnectionCommand,
     ReplaceConnectionCommand,
+    SetConnectionPreviewCommand,
     SetParameterCommand,
 )
 
 __all__ = [
+    "PREVIEW_VISIBLE_KEY",
     "AddConnectionCommand",
     "AddGroupCommand",
     "AddNodeCommand",
@@ -37,5 +40,6 @@ __all__ = [
     "RelinkMediaCommand",
     "RemoveConnectionCommand",
     "ReplaceConnectionCommand",
+    "SetConnectionPreviewCommand",
     "SetParameterCommand",
 ]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
 
@@ -14,8 +15,11 @@ from synesthesia_machine.persistence import (
     GraphPersistenceError,
     NodeMigrationRegistry,
     graph_from_json,
+    migrate_channel_display_v1_to_v2,
+    migrate_display_image_data_v1_to_v2,
     migrate_hue_v1_to_v2,
 )
+from synesthesia_machine.persistence.schemas import JsonObject
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "phase7"
 
@@ -54,6 +58,32 @@ def test_legacy_hue_turns_are_normalized_purely_into_one_turn() -> None:
     assert source == original
     assert migrated["implementation_version"] == 2
     assert migrated["parameters"] == {"turns": 0.75}
+
+
+@pytest.mark.parametrize(
+    ("type_id", "migrate"),
+    [
+        ("synmachine.visualization.display_image_data", migrate_display_image_data_v1_to_v2),
+        ("synmachine.visualization.channel_display", migrate_channel_display_v1_to_v2),
+    ],
+)
+def test_legacy_display_preview_params_are_dropped_purely(
+    type_id: str,
+    migrate: Callable[[JsonObject], JsonObject],
+) -> None:
+    source = {
+        "id": "70000000-0000-0000-0000-000000000040",
+        "type_id": type_id,
+        "implementation_version": 1,
+        "parameters": {"preview_fps": 15, "max_dimension": 512, "fit_mode": "FILL"},
+    }
+    original = deepcopy(source)
+
+    migrated = migrate(source)
+
+    assert source == original
+    assert migrated["implementation_version"] == 2
+    assert migrated["parameters"] == {"fit_mode": "FILL"}
 
 
 def test_registry_applies_multiple_steps_sequentially_and_purely() -> None:
@@ -128,5 +158,5 @@ def test_validator_reports_fixture_migrations_and_invalid_file(tmp_path: Path) -
     assert report.invalid_files == 1
     assert report.migrated_files == 2
     legacy = next(result for result in report.results if "legacy_number" in result.path)
-    assert legacy.graph_migration_steps == 1
+    assert legacy.graph_migration_steps == 2
     assert legacy.node_migration_steps == 1

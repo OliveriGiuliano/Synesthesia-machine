@@ -83,7 +83,12 @@ from synesthesia_machine.ui.application_settings import (
     PreferencesDialog,
 )
 from synesthesia_machine.ui.canvas import GraphScene, GraphView
-from synesthesia_machine.ui.previews import ImagePreviewPanel, NotePreviewPanel
+from synesthesia_machine.ui.commands import PREVIEW_VISIBLE_KEY
+from synesthesia_machine.ui.previews import (
+    ImagePreviewPanel,
+    NotePreviewPanel,
+    image_preview_to_qimage,
+)
 from synesthesia_machine.ui.profiler import ProfilerPanel, profile_heat_levels
 from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.theme import DEFAULT_THEME, Theme
@@ -166,8 +171,9 @@ class MainWindow(QMainWindow):
         self.profiler_panel = ProfilerPanel(self)
         self.recent_menu = QMenu(tr("Open &Recent"), self)
         self._recent_paths = self._load_recent_paths()
-        self._image_sequences: dict[UUID, int] = {}
+        self._image_sequences: dict[tuple[UUID, str], int] = {}
         self._note_sequences: dict[UUID, int] = {}
+        self._canvas_value_sequences: dict[tuple[UUID, str], int] = {}
         self._engine_closed = False
         self._engine_failure_signature: tuple[object, ...] | None = None
         self._source_error_signature: tuple[tuple[UUID, str], ...] = ()
@@ -693,6 +699,7 @@ class MainWindow(QMainWindow):
             return
         self._image_sequences.clear()
         self._note_sequences.clear()
+        self._canvas_value_sequences.clear()
         self._engine_failure_signature = None
         if activation is None:
             snapshot = self.session.document.snapshot()
@@ -1301,6 +1308,7 @@ class MainWindow(QMainWindow):
         if activation.activated:
             self._image_sequences.clear()
             self._note_sequences.clear()
+            self._canvas_value_sequences.clear()
             self.statusBar().showMessage(
                 trf(
                     "Activated graph revision {revision}",
@@ -1321,21 +1329,43 @@ class MainWindow(QMainWindow):
     def _runtime_demand_roots(self, snapshot: GraphSnapshot) -> tuple[UUID, ...]:
         include_images = self.image_preview_dock.isVisible()
         include_notes = self.note_preview_dock.isVisible()
-        roots = (
-            node.id
-            for node in snapshot.nodes
-            if (
-                (kind := self.registry.require(node.type_id).execution_kind) is ExecutionKind.SINK
-                or (
-                    kind is ExecutionKind.VISUALIZER
-                    and (
-                        (node.type_id == NOTE_VISUALIZER_TYPE_ID and include_notes)
-                        or (node.type_id != NOTE_VISUALIZER_TYPE_ID and include_images)
-                    )
-                )
-            )
-        )
+        roots: set[UUID] = set()
+        for node in snapshot.nodes:
+            kind = self.registry.require(node.type_id).execution_kind
+            if kind is ExecutionKind.SINK:
+                roots.add(node.id)
+            elif kind is ExecutionKind.VISUALIZER:
+                # Note visualizers feed their own dock. Image/channel display
+                # nodes remain demand anchors for the preview dock; the link
+                # pills are anchored on producers instead (see below).
+                if node.type_id == NOTE_VISUALIZER_TYPE_ID:
+                    if include_notes:
+                        roots.add(node.id)
+                elif include_images:
+                    roots.add(node.id)
+        roots.update(self._pill_producer_roots(snapshot))
         return tuple(sorted(roots, key=str))
+
+    def _pill_producer_roots(self, snapshot: GraphSnapshot) -> set[UUID]:
+        """Return source nodes of visible image/channel/scalar link pills.
+
+        A visible image, channel, or scalar value pill needs its producer to
+        compute so the link can show live data, independent of whether the
+        destination is a display node. A hidden pill must not force the engine
+        to compute an unused producer chain.
+        """
+        pill_types = ("IMAGE", "CHANNEL", "INT", "FLOAT")
+        type_by_connection = {
+            view_model.connection_id: view_model.type_name
+            for view_model in self.session.view_model.connections
+        }
+        roots: set[UUID] = set()
+        for connection in snapshot.connections:
+            if not bool(connection.ui_state.get(PREVIEW_VISIBLE_KEY, True)):
+                continue
+            if type_by_connection.get(connection.id) in pill_types:
+                roots.add(connection.source_node_id)
+        return roots
 
     @Slot(bool)
     def _on_image_preview_visibility_changed(self, visible: bool) -> None:
@@ -1355,24 +1385,32 @@ class MainWindow(QMainWindow):
             return
         image_visible = self.image_preview_dock.isVisible()
         note_visible = self.note_preview_dock.isVisible()
-        if not image_visible and not note_visible:
-            return
         try:
-            image_previews = (
-                self.engine_client.poll_image_previews(self._image_sequences)
-                if image_visible
-                else ()
-            )
+            # Canvas link pills are always visible, so value and image previews are
+            # polled unconditionally; only the note dock is gated on its own visibility.
+            image_previews = self.engine_client.poll_image_previews(self._image_sequences)
+            value_previews = self.engine_client.poll_value_previews(self._canvas_value_sequences)
             note_previews = (
                 self.engine_client.poll_note_previews(self._note_sequences) if note_visible else ()
             )
         except (RuntimeError, TimeoutError):
             return
         for preview in image_previews:
-            self._image_sequences[preview.node_id] = preview.sequence
-            self.image_preview_panel.show_preview(preview)
+            self._image_sequences[(preview.owner_id, preview.source_port_id)] = preview.sequence
+            self.scene.set_connection_image_preview(
+                preview.owner_id, preview.source_port_id, image_preview_to_qimage(preview)
+            )
+            if image_visible:
+                self.image_preview_panel.show_preview(preview)
+        for preview in value_previews:
+            self._canvas_value_sequences[(preview.owner_id, preview.source_port_id)] = (
+                preview.sequence
+            )
+            self.scene.set_connection_value_preview(
+                preview.owner_id, preview.source_port_id, preview.text
+            )
         for preview in note_previews:
-            self._note_sequences[preview.node_id] = preview.sequence
+            self._note_sequences[preview.owner_id] = preview.sequence
             self.note_preview_panel.show_preview(preview)
 
     @Slot()

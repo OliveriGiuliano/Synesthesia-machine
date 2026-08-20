@@ -8,7 +8,7 @@ from typing import TypedDict, cast
 
 from synesthesia_machine.version import __version__
 
-GRAPH_SCHEMA_VERSION = 1
+GRAPH_SCHEMA_VERSION = 2
 
 type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
 type JsonObject = dict[str, JsonValue]
@@ -33,6 +33,9 @@ class ConnectionSchemaV1(TypedDict):
     source_port_id: str
     destination_node_id: str
     destination_port_id: str
+    # Per-connection UI state (the live-preview visibility flag). Absent in v1
+    # payloads; the v1 -> v2 migration backfills it as the empty object.
+    ui_state: dict[str, JsonValue]
 
 
 class GroupSchemaV1(TypedDict):
@@ -107,6 +110,21 @@ def migrate_v0_to_v1(data: JsonObject) -> JsonObject:
     return migrated
 
 
+def migrate_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Migrate v1 connections so each carries per-connection UI state."""
+
+    migrated = deepcopy(data)
+    migrated["schema_version"] = 2
+    connections = migrated.get("connections")
+    if isinstance(connections, list):
+        for raw_connection in connections:
+            if not isinstance(raw_connection, dict):
+                continue
+            connection = cast(dict[str, JsonValue], raw_connection)
+            connection.setdefault("ui_state", {})
+    return migrated
+
+
 def _schema_version(data: JsonObject) -> int:
     value = data.get("schema_version", 0)
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -141,4 +159,4 @@ def _copy_json_value(value: object, path: str) -> JsonValue:
     raise ValueError(msg)
 
 
-_MIGRATIONS: dict[int, GraphMigration] = {0: migrate_v0_to_v1}
+_MIGRATIONS: dict[int, GraphMigration] = {0: migrate_v0_to_v1, 1: migrate_v1_to_v2}

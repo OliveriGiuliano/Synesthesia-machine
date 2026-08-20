@@ -61,6 +61,7 @@ from synesthesia_machine.contracts.engine_messages import (
     SourceStatusResponse,
     TransportAction,
     TransportCommand,
+    ValuePreviewsPublished,
     WaitUntilIdle,
     WriteSharedFrame,
 )
@@ -148,11 +149,12 @@ class _EventPublisher:
         self._stop = threading.Event()
         self._graph_revision: int | None = None
         self._heartbeat_sequence = 0
-        self._image_sequences: dict[UUID, int] = {}
+        self._image_sequences: dict[tuple[UUID, str], int] = {}
         self._note_sequences: dict[UUID, int] = {}
-        self._format_generations: dict[UUID, int] = {}
-        self._announced_formats: dict[UUID, tuple[int, int, int, int]] = {}
-        self._slots: dict[UUID, AttachedPreviewSlot] = {}
+        self._value_sequences: dict[tuple[UUID, str], int] = {}
+        self._format_generations: dict[tuple[UUID, str], int] = {}
+        self._announced_formats: dict[tuple[UUID, str], tuple[int, int, int, int]] = {}
+        self._slots: dict[tuple[UUID, str], AttachedPreviewSlot] = {}
         self._thread = threading.Thread(
             target=self._run,
             name="engine-event-publisher",
@@ -167,6 +169,7 @@ class _EventPublisher:
             self._graph_revision = graph_revision
             self._image_sequences.clear()
             self._note_sequences.clear()
+            self._value_sequences.clear()
             self._announced_formats.clear()
             self._close_slots_locked()
 
@@ -179,7 +182,8 @@ class _EventPublisher:
                     f"Preview slot revision {graph_revision} is stale; "
                     f"active revision is {self._graph_revision}"
                 )
-            expected = self._announced_formats.get(descriptor.node_id)
+            slot_key = (descriptor.owner_id, descriptor.source_port_id)
+            expected = self._announced_formats.get(slot_key)
             configured = (
                 descriptor.generation,
                 descriptor.width,
@@ -189,8 +193,8 @@ class _EventPublisher:
             if expected != configured:
                 replacement.close()
                 raise ValueError("Preview slot does not match the announced format")
-            previous = self._slots.get(descriptor.node_id)
-            self._slots[descriptor.node_id] = replacement
+            previous = self._slots.get(slot_key)
+            self._slots[slot_key] = replacement
         if previous is not None:
             previous.close()
 
@@ -238,13 +242,15 @@ class _EventPublisher:
             graph_revision = self._graph_revision
             image_sequences = dict(self._image_sequences)
             note_sequences = dict(self._note_sequences)
+            value_sequences = dict(self._value_sequences)
         if graph_revision is None:
             return
         for preview in self._engine.poll_image_previews(image_sequences):
+            slot_key = (preview.owner_id, preview.source_port_id)
             with self._lock:
                 if graph_revision != self._graph_revision:
                     return
-                slot = self._slots.get(preview.node_id)
+                slot = self._slots.get(slot_key)
                 if slot is None or (
                     slot.descriptor.width != preview.width
                     or slot.descriptor.height != preview.height
@@ -256,26 +262,37 @@ class _EventPublisher:
                     slot.write(preview)
                 except (BufferError, OSError, RuntimeError, ValueError):
                     slot.close()
-                    self._slots.pop(preview.node_id, None)
+                    self._slots.pop(slot_key, None)
                     self._announce_format_locked(graph_revision, preview)
                     continue
-                self._image_sequences[preview.node_id] = preview.sequence
+                self._image_sequences[slot_key] = preview.sequence
         note_previews = self._engine.poll_note_previews(note_sequences)
         if note_previews and self._put_event(NotePreviewsPublished(graph_revision, note_previews)):
             with self._lock:
                 if graph_revision == self._graph_revision:
                     for preview in note_previews:
-                        self._note_sequences[preview.node_id] = preview.sequence
+                        self._note_sequences[preview.owner_id] = preview.sequence
+        value_previews = self._engine.poll_value_previews(value_sequences)
+        if value_previews and self._put_event(
+            ValuePreviewsPublished(graph_revision, value_previews)
+        ):
+            with self._lock:
+                if graph_revision == self._graph_revision:
+                    for preview in value_previews:
+                        self._value_sequences[(preview.owner_id, preview.source_port_id)] = (
+                            preview.sequence
+                        )
 
     def _announce_format_locked(self, graph_revision: int, preview: ImagePreview) -> None:
-        current = self._announced_formats.get(preview.node_id)
+        slot_key = (preview.owner_id, preview.source_port_id)
+        current = self._announced_formats.get(slot_key)
         dimensions = (preview.width, preview.height, preview.channels)
         if current is None or current[1:] != dimensions:
-            generation = self._format_generations.get(preview.node_id, 0) + 1
-            self._format_generations[preview.node_id] = generation
+            generation = self._format_generations.get(slot_key, 0) + 1
+            self._format_generations[slot_key] = generation
             announced = (generation, *dimensions)
-            self._announced_formats[preview.node_id] = announced
-            previous = self._slots.pop(preview.node_id, None)
+            self._announced_formats[slot_key] = announced
+            previous = self._slots.pop(slot_key, None)
             if previous is not None:
                 previous.close()
         else:
@@ -283,7 +300,8 @@ class _EventPublisher:
         self._put_event(
             PreviewFormatChanged(
                 graph_revision,
-                preview.node_id,
+                preview.owner_id,
+                preview.source_port_id,
                 generation,
                 preview.width,
                 preview.height,
@@ -467,7 +485,8 @@ class EngineServer:
             return PreviewSlotConfigured(
                 command.request_id,
                 command.graph_revision,
-                command.descriptor.node_id,
+                command.descriptor.owner_id,
+                command.descriptor.source_port_id,
                 command.descriptor.generation,
             )
         self._engine.panic()

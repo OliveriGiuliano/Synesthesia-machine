@@ -12,6 +12,7 @@ from PySide6.QtGui import (
     QDragEnterEvent,
     QDragMoveEvent,
     QDropEvent,
+    QImage,
     QKeyEvent,
     QMouseEvent,
     QPainter,
@@ -28,6 +29,7 @@ from synesthesia_machine.graph import (
     distribute_boxes,
     tidy_boxes,
 )
+from synesthesia_machine.ui.commands import PREVIEW_VISIBLE_KEY
 from synesthesia_machine.ui.graphics import (
     ConnectionGraphicsItem,
     GroupGraphicsItem,
@@ -121,10 +123,12 @@ class GraphScene(QGraphicsScene):
         for connection in view_model.connections:
             if connection.connection_id not in self.connection_items:
                 item = ConnectionGraphicsItem(connection, self.theme)
+                item.togglePreviewRequested.connect(self._on_toggle_preview)
                 self.addItem(item)
                 item.setSelected(connection.connection_id in selected_connections)
                 self.connection_items[connection.connection_id] = item
         self.update_connections()
+        self._sync_connection_preview_visibility()
         selection_changed = (
             selected_nodes != self.selected_node_ids()
             or selected_connections != self.selected_connection_ids()
@@ -150,6 +154,48 @@ class GraphScene(QGraphicsScene):
         self._node_heat_levels = dict(levels or {})
         for node_id, item in self.node_items.items():
             item.set_heat_level(self._node_heat_levels.get(node_id))
+
+    def set_connection_value_preview(
+        self, owner_node_id: UUID, source_port_id: str, text: str | None
+    ) -> None:
+        for item in self.connection_items.values():
+            view_model = item.view_model
+            if (
+                view_model.source_node_id == owner_node_id
+                and view_model.source_port_id == source_port_id
+                and item.takes_value_pill()
+            ):
+                item.set_value_preview(text)
+
+    def set_connection_image_preview(
+        self, owner_node_id: UUID, source_port_id: str, image: QImage
+    ) -> None:
+        for item in self.connection_items.values():
+            view_model = item.view_model
+            if (
+                view_model.source_node_id == owner_node_id
+                and view_model.source_port_id == source_port_id
+                and item.takes_image_pill()
+            ):
+                item.set_image_preview(image)
+
+    def _connection_preview_visible(self, connection_id: UUID) -> bool:
+        connection = self.session.document.connection(connection_id)
+        if connection is None:
+            return True
+        return bool(connection.ui_state.get(PREVIEW_VISIBLE_KEY, True))
+
+    def _sync_connection_preview_visibility(self) -> None:
+        for item in self.connection_items.values():
+            item.set_preview_visible(
+                self._connection_preview_visible(item.view_model.connection_id)
+            )
+
+    @Slot(object)
+    def _on_toggle_preview(self, connection_id: UUID) -> None:
+        self.session.set_connection_preview_visible(
+            connection_id, not self._connection_preview_visible(connection_id)
+        )
 
     def select_node_ids(self, node_ids: set[UUID]) -> None:
         self.clearSelection()

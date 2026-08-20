@@ -325,6 +325,7 @@ def _connection_to_data(connection: ConnectionModel) -> ConnectionSchemaV1:
         source_port_id=connection.source_port_id,
         destination_node_id=str(connection.destination_node_id),
         destination_port_id=connection.destination_port_id,
+        ui_state=_literal_mapping_to_data(connection.ui_state),
     )
 
 
@@ -419,6 +420,7 @@ def _connection_from_data(value: object, index: int) -> ConnectionModel:
             "source_port_id",
             "destination_node_id",
             "destination_port_id",
+            "ui_state",
         },
         path,
     )
@@ -430,6 +432,7 @@ def _connection_from_data(value: object, index: int) -> ConnectionModel:
             data["destination_node_id"], f"{path}.destination_node_id"
         ),
         destination_port_id=_expect_str(data["destination_port_id"], f"{path}.destination_port_id"),
+        ui_state=_expect_literal_mapping(data["ui_state"], f"{path}.ui_state"),
     )
 
 
@@ -599,7 +602,7 @@ def _validate_empty_object(value: object, path: str) -> None:
         raise GraphPersistenceError("invalid_type", "Expected JSON object", path)
     if value:
         raise GraphPersistenceError(
-            "unsupported_content", "This reserved field must be empty in schema version 1", path
+            "unsupported_content", "This reserved field must remain empty", path
         )
 
 

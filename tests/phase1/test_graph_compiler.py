@@ -19,7 +19,7 @@ from synesthesia_machine.graph import (
 )
 from synesthesia_machine.nodes import ExecutionKind, InputPortSpec, NodeRegistry
 from synesthesia_machine.nodes.utility import create_utility_registry
-from tests.phase1.helpers import make_definition
+from tests.phase1.helpers import make_definition, make_tv_image_producer
 
 NODE_A = UUID("00000000-0000-0000-0000-00000000000a")
 NODE_B = UUID("00000000-0000-0000-0000-00000000000b")
@@ -213,6 +213,42 @@ def test_compiler_rejects_clock_mismatch_and_orders_deterministically() -> None:
     ordered = GraphCompiler(registry).compile(independent.snapshot())
     assert ordered.plan is not None
     assert ordered.plan.topological_node_ids == (NODE_A, NODE_B)
+
+
+def test_compiler_exposes_resolved_types_for_invalid_graphs() -> None:
+    """A type-variable port keeps its resolved type in the result even when an unrelated
+    floating node makes the graph invalid (plan is None), so dependents (e.g. the view-model
+    projection and its link pills) do not lose the port's resolved identity."""
+    registry = NodeRegistry(
+        (
+            make_tv_image_producer(),
+            make_definition(
+                "test.image_sink", input_type=PortType.IMAGE, output_type=PortType.IMAGE
+            ),
+            make_definition("test.floaty", input_type=PortType.IMAGE, output_type=PortType.IMAGE),
+        )
+    )
+
+    valid = GraphDocument(document_id=DOCUMENT_ID)
+    source = valid.add_node("test.tv_image_producer", node_id=NODE_A)
+    sink = valid.add_node("test.image_sink", node_id=NODE_B)
+    valid.add_connection(source, "value", sink, "value")
+    valid_result = GraphCompiler(registry).compile(valid.snapshot())
+    assert valid_result.report.is_valid
+    assert valid_result.plan is not None
+    assert valid_result.resolved_types[(NODE_A, "value", True)] is PortType.IMAGE
+
+    invalid = GraphDocument(document_id=DOCUMENT_ID)
+    source = invalid.add_node("test.tv_image_producer", node_id=NODE_A)
+    sink = invalid.add_node("test.image_sink", node_id=NODE_B)
+    invalid.add_connection(source, "value", sink, "value")
+    invalid.add_node("test.floaty", node_id=NODE_C)
+    invalid_result = GraphCompiler(registry).compile(invalid.snapshot())
+    assert invalid_result.report.is_valid is False
+    assert invalid_result.plan is None
+    assert "required_input_missing" in _codes(invalid_result)
+    # The producer's type-variable output stays resolved to IMAGE despite the invalid graph.
+    assert invalid_result.resolved_types[(NODE_A, "value", True)] is PortType.IMAGE
 
 
 def _codes(result: CompilationResult) -> set[str]:

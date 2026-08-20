@@ -98,9 +98,7 @@ def _channel(
     )
 
 
-def _channel_display_plan(
-    *, preview_fps: int = 30, max_dimension: int = 800
-) -> tuple[ExecutionPlan, PortKey]:
+def _channel_display_plan() -> tuple[ExecutionPlan, PortKey]:
     document = GraphDocument()
     document.add_node(
         "synmachine.input.load_video",
@@ -108,10 +106,11 @@ def _channel_display_plan(
         parameters={"file_path": "unused.mp4"},
     )
     luminance_id = document.add_node("synmachine.image.to_luminance")
+    # Fresh nodes are stamped at the definition's current implementation version.
     document.add_node(
         CHANNEL_DISPLAY_TYPE_ID,
         node_id=DISPLAY_ID,
-        parameters={"preview_fps": preview_fps, "max_dimension": max_dimension},
+        implementation_version=2,
     )
     document.add_connection(SOURCE_ID, "image", luminance_id, "image")
     document.add_connection(luminance_id, "channel", DISPLAY_ID, "channel")
@@ -154,15 +153,11 @@ def test_batch6_metadata_has_exact_order_ports_defaults_and_policies() -> None:
     assert tuple(port.id for port in channel_display.inputs) == ("channel",)
     assert not channel_display.outputs
     assert tuple(parameter.id for parameter in channel_display.parameters) == (
-        "preview_fps",
-        "max_dimension",
         "fit_mode",
         "value_display_mode",
         "show_histogram",
     )
     assert tuple(parameter.default for parameter in channel_display.parameters) == (
-        30,
-        800,
         "CONTAIN",
         "NOMINAL_RANGE",
         False,
@@ -281,7 +276,7 @@ def test_float_to_integer_rejects_non_finite_values(value: float) -> None:
 
 
 def test_channel_display_sanitizes_nominal_range_and_publishes_bounded_uint8() -> None:
-    plan, source = _channel_display_plan(max_dimension=64)
+    plan, source = _channel_display_plan()
     channel = _channel(
         np.array(
             [
@@ -299,7 +294,7 @@ def test_channel_display_sanitizes_nominal_range_and_publishes_bounded_uint8() -
     broker.publish(TickResult({source: channel}, (), {}))
 
     preview = broker.poll_images()[0]
-    assert preview.node_id == DISPLAY_ID
+    assert preview.owner_id == source.node_id
     assert preview.tick_index == 7
     assert (preview.width, preview.height, preview.channels) == (8, 2, 3)
     assert preview.data.dtype == np.uint8
@@ -311,22 +306,23 @@ def test_channel_display_sanitizes_nominal_range_and_publishes_bounded_uint8() -
 
 
 def test_channel_display_resizes_and_throttles_without_publishing_float32() -> None:
-    plan, source = _channel_display_plan(preview_fps=30, max_dimension=64)
+    plan, source = _channel_display_plan()
     now = [0.0]
     broker = PreviewBroker(monotonic=lambda: now[0])
     broker.configure(plan)
-    channel = _channel(np.ones((50, 100), dtype=np.float32), tick_index=1)
+    channel = _channel(np.ones((100, 2000), dtype=np.float32), tick_index=1)
     broker.publish(TickResult({source: channel}, (), {}))
     first = broker.poll_images()[0]
-    assert (first.width, first.height, first.channels) == (64, 32, 3)
-    assert first.data.dtype == np.uint8 and first.data.nbytes == 64 * 32 * 3
+    assert first.owner_id == source.node_id
+    assert (first.width, first.height, first.channels) == (800, 40, 3)
+    assert first.data.dtype == np.uint8 and first.data.nbytes == 800 * 40 * 3
 
     now[0] = 1.0 / 60.0
     broker.publish(TickResult({source: _channel(channel.data, tick_index=2)}, (), {}))
     assert broker.poll_images()[0].tick_index == 1
     now[0] = 1.0 / 30.0
     broker.publish(TickResult({source: _channel(channel.data, tick_index=3)}, (), {}))
-    assert broker.poll_images({DISPLAY_ID: 1})[0].tick_index == 3
+    assert broker.poll_images({source.node_id: 1})[0].tick_index == 3
 
 
 def test_channel_display_is_a_default_demand_root() -> None:

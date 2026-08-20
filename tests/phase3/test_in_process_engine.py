@@ -25,7 +25,10 @@ def test_client_activates_real_video_and_drives_graph_through_final_api(tmp_path
         "synmachine.image.resize",
         parameters={"width": 32, "height": 24},
     )
-    preview_id = document.add_node("synmachine.visualization.display_image_data")
+    # Fresh nodes are stamped at the definition's current implementation version.
+    preview_id = document.add_node(
+        "synmachine.visualization.display_image_data", implementation_version=2
+    )
     document.add_connection(source_id, "image", resize_id, "image")
     document.add_connection(resize_id, "image", preview_id, "image")
     client = InProcessEngineClient(registry)
@@ -45,10 +48,16 @@ def test_client_activates_real_video_and_drives_graph_through_final_api(tmp_path
         assert metrics.processed_ticks == DEFAULT_FRAME_COUNT
         assert metrics.memory_bytes > 0
         previews = client.poll_image_previews()
-        assert len(previews) == 1
-        assert previews[0].node_id == preview_id
-        assert (previews[0].width, previews[0].height) == (32, 24)
-        assert client.poll_image_previews({preview_id: previews[0].sequence}) == ()
+        # Image previews are anchored on each producing port (source.image,
+        # resize.image), not on the display node, so both producer ports own one.
+        by_source = {(preview.owner_id, preview.source_port_id): preview for preview in previews}
+        assert set(by_source) == {(source_id, "image"), (resize_id, "image")}
+        assert (
+            by_source[(resize_id, "image")].width,
+            by_source[(resize_id, "image")].height,
+        ) == (32, 24)
+        acknowledged = {key: item.sequence for key, item in by_source.items()}
+        assert client.poll_image_previews(acknowledged) == ()
     finally:
         client.close()
 
@@ -100,7 +109,10 @@ def test_runtime_node_errors_are_exposed_through_typed_engine_metrics(tmp_path: 
         parameters={"width": 8, "height": 8, "preserve_aspect": False},
     )
     difference_id = document.add_node("synmachine.image.difference")
-    preview_id = document.add_node("synmachine.visualization.display_image_data")
+    # Fresh nodes are stamped at the definition's current implementation version.
+    preview_id = document.add_node(
+        "synmachine.visualization.display_image_data", implementation_version=2
+    )
     document.add_connection(source_id, "image", resize_id, "image")
     document.add_connection(source_id, "image", difference_id, "a")
     document.add_connection(resize_id, "image", difference_id, "b")

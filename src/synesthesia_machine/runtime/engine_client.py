@@ -29,6 +29,7 @@ from synesthesia_machine.contracts.engine_client import (
     NotePreview,
     ResetReason,
     SourceStatus,
+    ValuePreview,
 )
 from synesthesia_machine.contracts.engine_messages import (
     ENGINE_PROTOCOL_VERSION,
@@ -66,6 +67,7 @@ from synesthesia_machine.contracts.engine_messages import (
     SourceStatusResponse,
     TransportAction,
     TransportCommand,
+    ValuePreviewsPublished,
     WaitUntilIdle,
 )
 from synesthesia_machine.graph.model import GraphSnapshot
@@ -143,6 +145,7 @@ _ASYNC_EVENT_TYPES = (
     Heartbeat,
     PreviewFormatChanged,
     NotePreviewsPublished,
+    ValuePreviewsPublished,
     EngineErrorPublished,
 )
 
@@ -194,7 +197,8 @@ class ProcessEngineClient:
         self._latest_valid_snapshot: GraphSnapshot | None = None
         self._latest_demand_roots: tuple[UUID, ...] | None = None
         self._note_previews: dict[UUID, NotePreview] = {}
-        self._image_slots: dict[UUID, OwnedPreviewSlot] = {}
+        self._value_previews: dict[tuple[UUID, str], ValuePreview] = {}
+        self._image_slots: dict[tuple[UUID, str], OwnedPreviewSlot] = {}
         self._closed = False
         if auto_start:
             self.start()
@@ -371,14 +375,16 @@ class ProcessEngineClient:
         )
 
     def poll_image_previews(
-        self, after_sequences: Mapping[UUID, int] | None = None
+        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
     ) -> tuple[ImagePreview, ...]:
         thresholds = after_sequences or {}
         previews: list[ImagePreview] = []
         with self._preview_lock:
-            for node_id, slot in sorted(self._image_slots.items(), key=lambda item: str(item[0])):
+            for key, slot in sorted(
+                self._image_slots.items(), key=lambda item: (str(item[0][0]), item[0][1])
+            ):
                 preview = slot.read()
-                if preview is not None and preview.sequence > thresholds.get(node_id, 0):
+                if preview is not None and preview.sequence > thresholds.get(key, 0):
                     previews.append(preview)
         return tuple(previews)
 
@@ -386,7 +392,9 @@ class ProcessEngineClient:
         """Expose owned slot names for lifecycle diagnostics and cleanup tests."""
 
         with self._preview_lock:
-            ordered_slots = sorted(self._image_slots.items(), key=lambda item: str(item[0]))
+            ordered_slots = sorted(
+                self._image_slots.items(), key=lambda item: (str(item[0][0]), item[0][1])
+            )
             return tuple(slot.name for _, slot in ordered_slots)
 
     def poll_note_previews(
@@ -400,6 +408,20 @@ class ProcessEngineClient:
                     self._note_previews.items(), key=lambda item: str(item[0])
                 )
                 if preview.sequence > thresholds.get(node_id, 0)
+            )
+
+    def poll_value_previews(
+        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
+    ) -> tuple[ValuePreview, ...]:
+        thresholds = after_sequences or {}
+        with self._preview_lock:
+            return tuple(
+                preview
+                for key, preview in sorted(
+                    self._value_previews.items(),
+                    key=lambda item: (str(item[0][0]), item[0][1]),
+                )
+                if preview.sequence > thresholds.get(key, 0)
             )
 
     def wait_until_idle(self, timeout_s: float = 5.0) -> bool:
@@ -473,6 +495,7 @@ class ProcessEngineClient:
         if activation.activated:
             with self._preview_lock:
                 self._note_previews.clear()
+                self._value_previews.clear()
                 self._close_image_slots_locked()
             with self._lifecycle_lock:
                 self._graph_revision = activation.graph_revision
@@ -623,9 +646,17 @@ class ProcessEngineClient:
         if isinstance(event, NotePreviewsPublished):
             with self._preview_lock:
                 for preview in event.previews:
-                    previous = self._note_previews.get(preview.node_id)
+                    previous = self._note_previews.get(preview.owner_id)
                     if previous is None or preview.sequence > previous.sequence:
-                        self._note_previews[preview.node_id] = preview
+                        self._note_previews[preview.owner_id] = preview
+            return
+        if isinstance(event, ValuePreviewsPublished):
+            with self._preview_lock:
+                for preview in event.previews:
+                    key = (preview.owner_id, preview.source_port_id)
+                    previous = self._value_previews.get(key)
+                    if previous is None or preview.sequence > previous.sequence:
+                        self._value_previews[key] = preview
             return
         with self._lifecycle_lock:
             self._last_error = event.message
@@ -633,8 +664,9 @@ class ProcessEngineClient:
                 self._connection_state = EngineConnectionState.CRASHED
 
     def _configure_preview_slot(self, event: PreviewFormatChanged) -> None:
+        slot_key = (event.owner_id, event.source_port_id)
         with self._preview_lock:
-            current = self._image_slots.get(event.node_id)
+            current = self._image_slots.get(slot_key)
             if current is not None and (
                 current.descriptor.generation == event.generation
                 and current.descriptor.width == event.width
@@ -643,7 +675,8 @@ class ProcessEngineClient:
             ):
                 return
         replacement = OwnedPreviewSlot.create(
-            node_id=event.node_id,
+            owner_id=event.owner_id,
+            source_port_id=event.source_port_id,
             generation=event.generation,
             width=event.width,
             height=event.height,
@@ -662,7 +695,7 @@ class ProcessEngineClient:
             replacement.close()
             with self._lifecycle_lock:
                 self._last_error = (
-                    f"Could not configure preview slot for {event.node_id}: "
+                    f"Could not configure preview slot for {event.owner_id}: "
                     f"{type(error).__name__}: {error}"
                 )
             return
@@ -672,8 +705,8 @@ class ProcessEngineClient:
             replacement.close()
             return
         with self._preview_lock:
-            previous = self._image_slots.get(event.node_id)
-            self._image_slots[event.node_id] = replacement
+            previous = self._image_slots.get(slot_key)
+            self._image_slots[slot_key] = replacement
         if previous is not None:
             previous.close()
 

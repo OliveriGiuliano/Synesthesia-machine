@@ -28,7 +28,7 @@ def test_preview_contracts_are_compact_immutable_and_deterministic() -> None:
     node_id = UUID("00000000-0000-0000-0000-000000000301")
     mutable = np.zeros((2, 3, 3), dtype=np.uint8)
     data = freeze_uint8_preview(mutable)
-    preview = ImagePreview(node_id, 1, 2, 3, 2, 3, data)
+    preview = ImagePreview(node_id, "image", 1, 2, 3, 2, 3, data)
     notes = NotePreview(
         node_id,
         1,

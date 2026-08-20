@@ -89,21 +89,11 @@ def project_graph(
     compilation: CompilationResult | None = None,
 ) -> GraphViewModel:
     compilation = compilation or GraphCompiler(registry).compile(snapshot)
-    resolved_types: dict[tuple[UUID, str, bool], PortType] = {}
-    if compilation.plan is not None:
-        for compiled in compilation.plan.nodes:
-            resolved_types.update(
-                {
-                    (compiled.node_id, port_id, False): value_type
-                    for port_id, value_type in compiled.input_types.items()
-                }
-            )
-            resolved_types.update(
-                {
-                    (compiled.node_id, port_id, True): value_type
-                    for port_id, value_type in compiled.output_types.items()
-                }
-            )
+    # The compiler settles a concrete type for every resolvable port even when the
+    # graph is otherwise invalid (plan is None). Projecting those keeps type-variable
+    # ports' resolved identity (e.g. an IMAGE link) stable while an unrelated
+    # authoring error blocks the plan, so link pills are not dropped or re-typed.
+    resolved_types: Mapping[tuple[UUID, str, bool], PortType] = compilation.resolved_types
     incoming = {
         (connection.destination_node_id, connection.destination_port_id)
         for connection in snapshot.connections

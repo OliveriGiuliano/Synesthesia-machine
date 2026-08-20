@@ -143,7 +143,11 @@ def _compiled_scheduler(*, delay_frames: int, memory_limit_mb: int) -> Scheduler
         },
         node_id=HOLD_ID,
     )
-    document.add_node("synmachine.visualization.display_image_data", node_id=DISPLAY_ID)
+    document.add_node(
+        "synmachine.visualization.display_image_data",
+        node_id=DISPLAY_ID,
+        implementation_version=2,
+    )
     document.add_connection(SOURCE_ID, "image", HOLD_ID, "image")
     document.add_connection(HOLD_ID, "image", DISPLAY_ID, "image")
     compilation = GraphCompiler(registry).compile(document.snapshot())

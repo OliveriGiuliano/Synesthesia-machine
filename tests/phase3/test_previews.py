@@ -58,17 +58,18 @@ def _image(data: np.ndarray[tuple[int, ...], np.dtype[np.float32]], tick_index: 
     )
 
 
-def _image_plan(*, preview_fps: int = 30, max_dimension: int = 800) -> ExecutionPlan:
+def _image_plan() -> ExecutionPlan:
     document = GraphDocument()
     document.add_node(
         "synmachine.input.load_video",
         node_id=SOURCE_ID,
         parameters={"file_path": "unused.mp4"},
     )
+    # Fresh nodes are stamped at the definition's current implementation version.
     document.add_node(
         DISPLAY_IMAGE_DATA_TYPE_ID,
         node_id=IMAGE_VISUALIZER_ID,
-        parameters={"preview_fps": preview_fps, "max_dimension": max_dimension},
+        implementation_version=2,
     )
     document.add_connection(SOURCE_ID, "image", IMAGE_VISUALIZER_ID, "image")
     result = GraphCompiler(create_application_registry()).compile(document.snapshot())
@@ -106,8 +107,6 @@ def test_visualizer_definitions_are_permanent_demand_roots_with_phase3_defaults(
     assert image.cache_policy is notes.cache_policy is CachePolicy.NEVER
     values, errors = image.parameter_values({})
     assert not errors
-    assert values["preview_fps"] == 30
-    assert values["max_dimension"] == 800
     assert values["fit_mode"] == "CONTAIN"
     assert values["checkerboard_alpha"] is True
 
@@ -115,7 +114,7 @@ def test_visualizer_definitions_are_permanent_demand_roots_with_phase3_defaults(
 def test_image_preview_is_sanitized_immutable_resized_and_sequence_polled() -> None:
     clock = _Clock()
     broker = PreviewBroker(monotonic=clock)
-    broker.configure(_image_plan(max_dimension=800))
+    broker.configure(_image_plan())
     data = np.zeros((500, 1000, 3), dtype=np.float32)
     data[0, 0] = (np.nan, np.inf, -np.inf)
 
@@ -129,13 +128,14 @@ def test_image_preview_is_sanitized_immutable_resized_and_sequence_polled() -> N
     assert preview.data.dtype == np.uint8
     assert preview.data.flags.c_contiguous and not preview.data.flags.writeable
     assert np.isfinite(preview.data).all()
-    assert broker.poll_images({IMAGE_VISUALIZER_ID: 1}) == ()
+    assert preview.owner_id == SOURCE_ID
+    assert broker.poll_images({(SOURCE_ID, "image"): 1}) == ()
 
 
 def test_image_preview_throttles_to_configured_rate_and_coalesces_latest_tick() -> None:
     clock = _Clock()
     broker = PreviewBroker(monotonic=clock)
-    broker.configure(_image_plan(preview_fps=30))
+    broker.configure(_image_plan())
 
     broker.publish(
         TickResult(
@@ -163,7 +163,7 @@ def test_image_preview_throttles_to_configured_rate_and_coalesces_latest_tick() 
             {},
         )
     )
-    preview = broker.poll_images({IMAGE_VISUALIZER_ID: 1})[0]
+    preview = broker.poll_images({(SOURCE_ID, "image"): 1})[0]
     assert preview.sequence == 2 and preview.tick_index == 3
     assert np.all(preview.data == 255)
     assert broker.preview_fps() == 2.0

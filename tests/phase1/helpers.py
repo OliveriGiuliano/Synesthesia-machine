@@ -15,6 +15,7 @@ from synesthesia_machine.nodes import (
     NodeDefinition,
     OutputPortSpec,
     ResetReason,
+    TypeVariable,
 )
 
 
@@ -106,4 +107,29 @@ def frame_context(*, clock_id: UUID, tick_index: int = 1) -> FrameContext:
         received_monotonic_ns=tick_index,
         deadline_monotonic_ns=None,
         is_realtime=False,
+    )
+
+
+def make_tv_image_producer(type_id: str = "test.tv_image_producer") -> NodeDefinition:
+    """A source whose single output is a type variable constrained to IMAGE by consumers.
+
+    Models type-variable image producers (e.g. statistics): the output resolves to a
+    concrete image type only through the connections leaving it.
+    """
+
+    def factory(node_id: UUID) -> ProbeRuntime:
+        return ProbeRuntime(node_id, {})
+
+    return NodeDefinition(
+        type_id=type_id,
+        implementation_version=1,
+        display_name=type_id,
+        category="Test",
+        description="Type-variable image producer.",
+        inputs=(),
+        outputs=(OutputPortSpec("value", "Value", TypeVariable("T", frozenset({PortType.IMAGE}))),),
+        parameters=(),
+        execution_kind=ExecutionKind.SOURCE,
+        runtime_factory=factory,
+        cache_policy=CachePolicy.AUTO,
     )

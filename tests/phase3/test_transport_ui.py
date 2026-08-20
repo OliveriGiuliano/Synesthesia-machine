@@ -12,6 +12,7 @@ from uuid import UUID
 import numpy as np
 import pytest
 from PySide6.QtCore import QSettings, Qt
+from PySide6.QtGui import QFontMetricsF, QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QToolButton
 
@@ -31,6 +32,7 @@ from synesthesia_machine.contracts import (
     NotePreview,
     SourceState,
     SourceStatus,
+    ValuePreview,
     freeze_uint8_preview,
 )
 from synesthesia_machine.graph import GraphSnapshot, ValidationReport
@@ -63,6 +65,7 @@ class _RecordingEngineClient:
     statuses: dict[UUID, SourceStatus] = field(default_factory=_status_map)
     image_previews: tuple[ImagePreview, ...] = ()
     note_previews: tuple[NotePreview, ...] = ()
+    value_previews: tuple[ValuePreview, ...] = ()
     memory_diagnostics: tuple[NodeMemoryDiagnostic, ...] = ()
     midi_statuses: tuple[MidiOutputStatus, ...] = ()
     closed: bool = False
@@ -142,13 +145,13 @@ class _RecordingEngineClient:
         )
 
     def poll_image_previews(
-        self, after_sequences: Mapping[UUID, int] | None = None
+        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
     ) -> tuple[ImagePreview, ...]:
         thresholds = after_sequences or {}
         return tuple(
             preview
             for preview in self.image_previews
-            if preview.sequence > thresholds.get(preview.node_id, 0)
+            if preview.sequence > thresholds.get((preview.owner_id, preview.source_port_id), 0)
         )
 
     def poll_note_previews(
@@ -158,7 +161,17 @@ class _RecordingEngineClient:
         return tuple(
             preview
             for preview in self.note_previews
-            if preview.sequence > thresholds.get(preview.node_id, 0)
+            if preview.sequence > thresholds.get(preview.owner_id, 0)
+        )
+
+    def poll_value_previews(
+        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
+    ) -> tuple[ValuePreview, ...]:
+        thresholds = after_sequences or {}
+        return tuple(
+            preview
+            for preview in self.value_previews
+            if preview.sequence > thresholds.get((preview.owner_id, preview.source_port_id), 0)
         )
 
     def wait_until_idle(self, timeout_s: float = 5.0) -> bool:
@@ -316,7 +329,7 @@ def test_preview_and_metrics_polling_update_ui_with_sequence_coalescing(
 ) -> None:
     window, client = runtime_window
     data = freeze_uint8_preview(np.full((2, 3, 3), 127, dtype=np.uint8))
-    image = ImagePreview(IMAGE_NODE, 1, 7, 3, 2, 3, data)
+    image = ImagePreview(IMAGE_NODE, "image", 1, 7, 3, 2, 3, data)
     notes = NotePreview(NOTE_NODE, 1, 7, (NoteActivity(0, 60, 100),))
     client.image_previews = (image,)
     client.note_previews = (notes,)
@@ -330,7 +343,7 @@ def test_preview_and_metrics_polling_update_ui_with_sequence_coalescing(
     assert window.image_preview_panel.image_widget.isVisible()
     assert window.note_preview_panel.note_widget.isVisible()
     assert "sequence 1" in window.image_preview_panel.image_caption.text()
-    assert window._image_sequences == {IMAGE_NODE: 1}
+    assert window._image_sequences == {(IMAGE_NODE, "image"): 1}
     assert window._note_sequences == {NOTE_NODE: 1}
     assert "42 ticks" in window._engine_status.text()
     assert "in/process/preview 0.0/29.5/0.0 FPS" in window._engine_status.text()
@@ -360,6 +373,173 @@ def test_image_and_note_visualizers_have_independent_dock_tabs_and_demand_roots(
     qapp.processEvents()
     assert set(window._runtime_demand_roots(snapshot)) == {note_id}
     assert window.note_preview_dock.isVisible()
+
+
+def test_image_link_pill_keeps_producer_demanded_when_display_dock_hidden(
+    runtime_window: tuple[MainWindow, _RecordingEngineClient],
+    qapp: QApplication,
+) -> None:
+    window, _client = runtime_window
+    source_id = window.session.add_node("synmachine.input.load_video", (0.0, 0.0))
+    display_id = window.session.add_node(
+        "synmachine.visualization.display_image_data", (300.0, 0.0)
+    )
+    connection_id = window.session.add_connection(source_id, "image", display_id, "image")
+    snapshot = window.session.document.snapshot()
+    assert any(connection.destination_node_id == display_id for connection in snapshot.connections)
+
+    # Dock visible: the display node is a demand root regardless of the pill.
+    window.image_preview_dock.show()
+    qapp.processEvents()
+    assert display_id in window._runtime_demand_roots(snapshot)
+
+    # Dock hidden but the pill is visible (the default): the display node is no
+    # longer a root, but the pill keeps its producer (the source) demanded.
+    window.image_preview_dock.hide()
+    qapp.processEvents()
+    roots = window._runtime_demand_roots(snapshot)
+    assert display_id not in roots
+    assert source_id in roots
+
+    # Hiding the link pill drops the producer root, so nothing in the chain is demanded.
+    window.session.set_connection_preview_visible(connection_id, False)
+    snapshot = window.session.document.snapshot()
+    roots = window._runtime_demand_roots(snapshot)
+    assert display_id not in roots
+    assert source_id not in roots
+
+    # Showing the dock demands the display node again even with the pill hidden.
+    window.image_preview_dock.show()
+    qapp.processEvents()
+    assert display_id in window._runtime_demand_roots(snapshot)
+
+
+def test_scalar_link_pill_keeps_producer_demanded_without_a_display_root(
+    runtime_window: tuple[MainWindow, _RecordingEngineClient],
+    qapp: QApplication,
+) -> None:
+    window, _client = runtime_window
+    number_id = window.session.add_node("synmachine.utility.number", (0.0, 0.0))
+    math_id = window.session.add_node("synmachine.utility.math", (300.0, 0.0))
+    connection_id = window.session.add_connection(number_id, "value", math_id, "a")
+    qapp.processEvents()
+    snapshot = window.session.document.snapshot()
+
+    # Both nodes are stateless (no display/sink root), so the scalar producer is
+    # demanded only because its link pill is visible (the default).
+    roots = window._runtime_demand_roots(snapshot)
+    assert number_id in roots
+    assert math_id not in roots
+
+    # Hiding the link pill drops the scalar producer root; nothing in the chain is demanded.
+    window.session.set_connection_preview_visible(connection_id, False)
+    snapshot = window.session.document.snapshot()
+    roots = window._runtime_demand_roots(snapshot)
+    assert number_id not in roots
+    assert math_id not in roots
+
+
+def test_live_previews_route_to_the_correct_link_pills(
+    runtime_window: tuple[MainWindow, _RecordingEngineClient],
+    qapp: QApplication,
+) -> None:
+    window, _client = runtime_window
+    number_id = window.session.add_node("synmachine.utility.number", (0.0, 0.0))
+    math_id = window.session.add_node("synmachine.utility.math", (300.0, 0.0))
+    value_conn = window.session.add_connection(number_id, "value", math_id, "a")
+    video_id = window.session.add_node("synmachine.input.load_video", (0.0, 200.0))
+    display_id = window.session.add_node(
+        "synmachine.visualization.display_image_data", (300.0, 200.0)
+    )
+    image_conn = window.session.add_connection(video_id, "image", display_id, "image")
+    qapp.processEvents()
+
+    value_item = window.scene.connection_items[value_conn]
+    image_item = window.scene.connection_items[image_conn]
+    assert value_item.takes_value_pill()
+    assert image_item.takes_image_pill()
+
+    # The scalar value is owned by its producer port and only touches that pill.
+    window.scene.set_connection_value_preview(number_id, "value", "42")
+    assert value_item._value_text == "42"
+    assert image_item._value_text is None
+
+    # A preview aimed at a different port on the same producer must not bleed over.
+    window.scene.set_connection_value_preview(number_id, "unconnected_port", "99")
+    assert value_item._value_text == "42"
+
+    # The image is owned by its producer port and only touches the matching pill.
+    thumbnail = QImage(8, 8, QImage.Format.Format_RGB32)
+    window.scene.set_connection_image_preview(video_id, "image", thumbnail)
+    assert image_item._image is thumbnail
+    assert value_item._image is None
+
+
+def test_image_link_pill_routed_per_port_for_multi_output_producer(
+    runtime_window: tuple[MainWindow, _RecordingEngineClient],
+    qapp: QApplication,
+) -> None:
+    """A producer with several connected image/channel outputs (e.g. a channel
+    separator) shows each output's own frame on its own pill. A preview aimed at
+    one port must not bleed onto a sibling port's pill.
+    """
+
+    window, _client = runtime_window
+    video_id = window.session.add_node("synmachine.input.load_video", (0.0, 0.0))
+    separate_id = window.session.add_node("synmachine.image.separate_channels", (300.0, 0.0))
+    display_a = window.session.add_node("synmachine.visualization.channel_display", (0.0, 200.0))
+    # A non-visualizer channel consumer so the two outputs reach distinct destinations
+    # (image visualizers are singletons and would replace one another).
+    pitch_id = window.session.add_node("synmachine.synesthesia.channel_to_pitch", (300.0, 200.0))
+    window.session.add_connection(video_id, "image", separate_id, "image")
+    conn_a = window.session.add_connection(separate_id, "channel_1", display_a, "channel")
+    conn_b = window.session.add_connection(separate_id, "channel_2", pitch_id, "value")
+    qapp.processEvents()
+
+    item_a = window.scene.connection_items[conn_a]
+    item_b = window.scene.connection_items[conn_b]
+    assert item_a.takes_image_pill() and item_b.takes_image_pill()
+
+    thumb_a = QImage(8, 8, QImage.Format.Format_RGB32)
+    thumb_b = QImage(8, 8, QImage.Format.Format_RGB32)
+    # channel_1's frame lands only on channel_1's pill, leaving channel_2 neutral.
+    window.scene.set_connection_image_preview(separate_id, "channel_1", thumb_a)
+    assert item_a._image is thumb_a
+    assert item_b._image is None
+    # channel_2's frame lands only on channel_2's pill, keeping channel_1 intact.
+    window.scene.set_connection_image_preview(separate_id, "channel_2", thumb_b)
+    assert item_b._image is thumb_b
+    assert item_a._image is thumb_a
+    # A preview for a port with no pill (e.g. channel_3) touches neither.
+    window.scene.set_connection_image_preview(separate_id, "channel_3", thumb_b)
+    assert item_a._image is thumb_a
+    assert item_b._image is thumb_b
+
+
+def test_scalar_link_pill_content_rect_fits_the_font(
+    runtime_window: tuple[MainWindow, _RecordingEngineClient],
+    qapp: QApplication,
+) -> None:
+    """The scalar pill's text rect must be a full font line tall.
+
+    Regression: a fixed 22px body with 8px vertical padding left only a 6px
+    window for the number, slicing the top and bottom of the digits.
+    """
+    window, _client = runtime_window
+    number_id = window.session.add_node("synmachine.utility.number", (0.0, 0.0))
+    math_id = window.session.add_node("synmachine.utility.math", (300.0, 0.0))
+    connection_id = window.session.add_connection(number_id, "value", math_id, "a")
+    qapp.processEvents()
+
+    item = window.scene.connection_items[connection_id]
+    assert item.takes_value_pill()
+    item.set_value_preview("0.5")
+
+    body = item._pill_body_rect()
+    assert body is not None
+    content = item._pill_content_rect(body)
+    font_height = QFontMetricsF(item.theme.body_font()).height()
+    assert content.height() >= font_height
 
 
 def test_note_velocity_chart_uses_rainbow_bars_and_adapts_to_aspect_ratio(

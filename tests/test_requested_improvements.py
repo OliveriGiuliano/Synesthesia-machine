@@ -26,7 +26,7 @@ from synesthesia_machine.graph import (
     randomize_graph_nodes,
     randomize_graph_parameters,
 )
-from synesthesia_machine.nodes import ExecutionKind, ExpectedNodeError
+from synesthesia_machine.nodes import ExecutionKind, ExpectedNodeError, NodeRegistry
 from synesthesia_machine.runtime import (
     CompiledNode,
     ExecutionPlan,
@@ -36,7 +36,7 @@ from synesthesia_machine.runtime import (
 )
 from synesthesia_machine.ui.theme import DEFAULT_THEME
 from synesthesia_machine.ui.view_models import project_graph
-from tests.phase1.helpers import frame_context
+from tests.phase1.helpers import frame_context, make_definition, make_tv_image_producer
 
 NODE_ID = UUID("00000000-0000-0000-0000-00000000a001")
 
@@ -135,7 +135,10 @@ def test_dynamic_image_node_resolves_to_channel_and_hides_image_only_parameters(
     source = document.add_node("synmachine.input.load_video")
     luminance = document.add_node("synmachine.image.to_luminance")
     add = document.add_node("synmachine.image.add_scalar")
-    display = document.add_node("synmachine.visualization.channel_display")
+    # Fresh nodes are stamped at the definition's current implementation version.
+    display = document.add_node(
+        "synmachine.visualization.channel_display", implementation_version=2
+    )
     document.add_connection(source, "image", luminance, "image")
     document.add_connection(luminance, "channel", add, "image")
     document.add_connection(add, "image", display, "channel")
@@ -152,6 +155,34 @@ def test_dynamic_image_node_resolves_to_channel_and_hides_image_only_parameters(
     assert node.inputs[0].type_name == "CHANNEL"
     assert node.outputs[0].type_name == "CHANNEL"
     assert "channels" not in {parameter.spec.id for parameter in node.parameters}
+
+
+def test_view_model_keeps_resolved_link_type_when_graph_is_invalid() -> None:
+    """A type-variable image link keeps its resolved IMAGE type in the projection even when an
+    unrelated floating node makes the graph invalid, so the connection pill is neither re-typed
+    to the raw variable name nor dropped (the still-running plan keeps feeding the pill)."""
+    registry = NodeRegistry(
+        (
+            make_tv_image_producer(),
+            make_definition(
+                "test.image_sink", input_type=PortType.IMAGE, output_type=PortType.IMAGE
+            ),
+            make_definition("test.floaty", input_type=PortType.IMAGE, output_type=PortType.IMAGE),
+        )
+    )
+    document = GraphDocument()
+    source = document.add_node("test.tv_image_producer")
+    sink = document.add_node("test.image_sink")
+    document.add_connection(source, "value", sink, "value")
+    document.add_node("test.floaty")  # floating: required input missing -> invalid graph
+
+    result = GraphCompiler(registry).compile(document.snapshot())
+    assert result.report.is_valid is False
+    assert result.plan is None
+
+    view = project_graph(document.snapshot(), registry, result.report)
+    (connection,) = view.connections
+    assert connection.type_name == "IMAGE"
 
 
 def test_buffer_statistics_and_modulo_accumulator_process_scalars() -> None:

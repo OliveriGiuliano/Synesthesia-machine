@@ -29,6 +29,7 @@ from synesthesia_machine.contracts import (
     NotePreview,
     SourceState,
     SourceStatus,
+    ValuePreview,
 )
 from synesthesia_machine.graph.model import GraphSnapshot
 from synesthesia_machine.media.camera_source import CameraBackendPreference, CameraSourceService
@@ -714,7 +715,7 @@ class InProcessEngineClient:
             )
 
     def poll_image_previews(
-        self, after_sequences: Mapping[UUID, int] | None = None
+        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
     ) -> tuple[ImagePreview, ...]:
         return self._preview_broker.poll_images(after_sequences)
 
@@ -722,6 +723,11 @@ class InProcessEngineClient:
         self, after_sequences: Mapping[UUID, int] | None = None
     ) -> tuple[NotePreview, ...]:
         return self._preview_broker.poll_notes(after_sequences)
+
+    def poll_value_previews(
+        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
+    ) -> tuple[ValuePreview, ...]:
+        return self._preview_broker.poll_values(after_sequences)
 
     def wait_until_idle(self, timeout_s: float = 5.0) -> bool:
         deadline = time.monotonic() + max(0.0, timeout_s)

@@ -9,6 +9,7 @@ from synesthesia_machine.graph import ConnectionModel, GraphCompiler, GraphDocum
 from synesthesia_machine.nodes.utility import create_utility_registry
 from synesthesia_machine.persistence import copy_fragment, remap_fragment
 from synesthesia_machine.ui.commands import (
+    PREVIEW_VISIBLE_KEY,
     AddConnectionCommand,
     AddNodeCommand,
     DeleteNodesCommand,
@@ -18,6 +19,7 @@ from synesthesia_machine.ui.commands import (
     PasteCommand,
     RemoveConnectionCommand,
     ReplaceConnectionCommand,
+    SetConnectionPreviewCommand,
     SetParameterCommand,
 )
 
@@ -156,3 +158,41 @@ def test_paste_and_duplicate_restore_remapped_fragment_exactly(
     assert len(target.nodes) == 2
     assert len(target.connections) == 1
     cycle(stack, target, before, after)
+
+
+def test_set_connection_preview_visible_is_one_exact_undoable_command() -> None:
+    document = GraphDocument()
+    first = document.add_node("synmachine.utility.number", node_id=NODE_A)
+    second = document.add_node("synmachine.utility.math", node_id=NODE_B)
+    document.add_connection(first, "value", second, "a", connection_id=CONNECTION_A)
+    stack = QUndoStack()
+    before = semantic_state(document)
+    assert document.connection(CONNECTION_A).ui_state == {}
+
+    stack.push(SetConnectionPreviewCommand(document, CONNECTION_A, False))
+    after = semantic_state(document)
+    assert document.connection(CONNECTION_A).ui_state == {PREVIEW_VISIBLE_KEY: False}
+    cycle(stack, document, before, after)
+    assert document.connection(CONNECTION_A).ui_state == {PREVIEW_VISIBLE_KEY: False}
+
+
+def test_set_connection_preview_visible_toggles_between_states() -> None:
+    document = GraphDocument()
+    first = document.add_node("synmachine.utility.number", node_id=NODE_A)
+    second = document.add_node("synmachine.utility.math", node_id=NODE_B)
+    document.add_connection(first, "value", second, "a", connection_id=CONNECTION_A)
+    stack = QUndoStack()
+
+    def visible() -> bool:
+        return bool(document.connection(CONNECTION_A).ui_state.get(PREVIEW_VISIBLE_KEY, True))
+
+    assert visible() is True  # absent key is the "visible" default
+    stack.push(SetConnectionPreviewCommand(document, CONNECTION_A, False))
+    assert visible() is False
+    stack.push(SetConnectionPreviewCommand(document, CONNECTION_A, True))
+    assert visible() is True
+    assert stack.count() == 2
+    stack.undo()
+    assert visible() is False
+    stack.undo()
+    assert visible() is True  # undoing back to the original absent state

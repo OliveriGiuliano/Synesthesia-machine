@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from pathlib import Path
+from typing import cast
 from uuid import UUID
 
 import pytest
@@ -143,7 +145,7 @@ def test_v0_migration_is_pure_and_sequential() -> None:
     migrated = migrate_graph_data(prototype)
 
     assert prototype == original
-    assert migrated["schema_version"] == 1
+    assert migrated["schema_version"] == 2
     migrated_nodes = migrated["nodes"]
     assert isinstance(migrated_nodes, list)
     migrated_node = migrated_nodes[0]
@@ -151,6 +153,36 @@ def test_v0_migration_is_pure_and_sequential() -> None:
     assert migrated_node["implementation_version"] == 1
     loaded = graph_from_data(prototype, create_utility_registry())
     assert loaded.nodes[0].parameters["float_value"] == 7.0
+
+
+def test_v1_connection_payload_migrates_to_v2_and_round_trips() -> None:
+    registry = create_utility_registry()
+    document = GraphDocument(document_id=DOCUMENT_ID)
+    source = document.add_node("synmachine.utility.number", node_id=NODE_B)
+    target = document.add_node("synmachine.utility.pass_through", node_id=NODE_A)
+    document.add_connection(source, "value", target, "value")
+
+    # Reconstruct a schema v1 payload: the canonical v2 JSON with the version
+    # marker lowered and each per-connection ui_state field removed.
+    payload = cast("dict[str, object]", json.loads(graph_to_json(document.snapshot())))
+    v1_payload = cast("dict[str, object]", deepcopy(payload))
+    v1_payload["schema_version"] = 1
+    for raw_connection in cast("list[object]", v1_payload["connections"]):
+        cast("dict[str, object]", raw_connection).pop("ui_state")
+    original = deepcopy(v1_payload)
+
+    migrated = migrate_graph_data(v1_payload)
+
+    assert v1_payload == original
+    assert migrated["schema_version"] == 2
+    for raw_connection in cast("list[object]", migrated["connections"]):
+        assert cast("dict[str, object]", raw_connection)["ui_state"] == {}
+
+    # The backfilled ui_state must survive a full serialize/parse round-trip.
+    loaded = graph_from_data(migrated, registry)
+    assert loaded.connections[0].ui_state == {}
+    reparsed = graph_from_json(graph_to_json(loaded), registry)
+    assert reparsed.connections[0].ui_state == {}
 
 
 def test_atomic_save_load_and_backup(tmp_path: Path) -> None:

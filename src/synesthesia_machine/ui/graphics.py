@@ -7,11 +7,12 @@ from functools import partial
 from typing import cast
 from uuid import UUID
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
     QFontMetricsF,
+    QImage,
     QPainter,
     QPainterPath,
     QPainterPathStroker,
@@ -641,11 +642,36 @@ def _interpolate_color(start: QColor, end: QColor, amount: float) -> QColor:
 
 
 class ConnectionGraphicsItem(QGraphicsObject):
+    """Bézier cable with a type-aware live value pill at its midpoint.
+
+    The pill shows the producer's latest number for INT/FLOAT links or a
+    scaled thumbnail for IMAGE/CHANNEL links. A small chevron on the right
+    hides or shows the pill for this connection only; the hidden state persists
+    through the document and remains undoable.
+    """
+
+    togglePreviewRequested = Signal(UUID)
+
+    _PILL_TEXT_V_PADDING = 4.0
+    _PILL_PADDING = 8.0
+    _PILL_THUMB_PADDING = 5.0
+    _PILL_CHEVRON = 16.0
+    _PILL_THUMB = 204.0
+    _PILL_THUMB_HEIGHT = 120.0
+    _PILL_CORNER_RADIUS = 8.0
+    _PILL_TEXT_LIMIT = 12
+    _PILL_COLLAPSED_RADIUS = 3.5
+    _PILL_COLLAPSED_HIT = 8.0
+
     def __init__(self, view_model: ConnectionViewModel, theme: Theme) -> None:
         super().__init__()
         self.view_model = view_model
         self.theme = theme
         self.path = QPainterPath()
+        self._midpoint: QPointF | None = None
+        self._preview_visible = True
+        self._value_text: str | None = None
+        self._image: QImage | None = None
         self.setZValue(-1.0)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         self.setToolTip(
@@ -659,16 +685,135 @@ class ConnectionGraphicsItem(QGraphicsObject):
     def set_endpoints(self, start: QPointF, end: QPointF) -> None:
         self.prepareGeometryChange()
         self.path = bezier_path(start, end)
+        self._midpoint = self.path.pointAtPercent(0.5) if not self.path.isEmpty() else None
         self.update()
 
+    def set_preview_visible(self, visible: bool) -> None:
+        if visible == self._preview_visible:
+            return
+        self.prepareGeometryChange()
+        self._preview_visible = visible
+        self.update()
+
+    def set_value_preview(self, text: str | None) -> None:
+        if text == self._value_text:
+            return
+        self.prepareGeometryChange()
+        self._value_text = text
+        self.update()
+
+    def set_image_preview(self, image: QImage | None) -> None:
+        if image is self._image:
+            return
+        self.prepareGeometryChange()
+        self._image = image
+        self.update()
+
+    def takes_value_pill(self) -> bool:
+        return self._pill_family() == "scalar"
+
+    def takes_image_pill(self) -> bool:
+        return self._pill_family() in ("image", "channel")
+
+    def _pill_family(self) -> str:
+        type_name = self.view_model.type_name
+        if type_name in ("INT", "FLOAT"):
+            return "scalar"
+        if type_name in ("IMAGE", "CHANNEL"):
+            return type_name.lower()
+        return ""
+
+    def _pill_padding(self) -> float:
+        return self._PILL_PADDING if self._pill_family() == "scalar" else self._PILL_THUMB_PADDING
+
+    def _pill_text(self) -> str:
+        text = self._value_text
+        if text is None:
+            return ""
+        if len(text) > self._PILL_TEXT_LIMIT:
+            text = text[: self._PILL_TEXT_LIMIT - 1] + "…"
+        return text
+
+    def _thumbnail_size(self) -> tuple[float, float]:
+        """Fit the live frame into the pill target box, preserving its aspect ratio.
+
+        The outline is then sized to hug this fitted frame (plus padding) so the
+        pill follows the video's shape instead of a fixed rectangle.
+        """
+        image = self._image
+        if image is None or image.isNull() or image.width() <= 0 or image.height() <= 0:
+            return self._PILL_THUMB, self._PILL_THUMB_HEIGHT
+        scale = min(
+            self._PILL_THUMB / image.width(),
+            self._PILL_THUMB_HEIGHT / image.height(),
+        )
+        return image.width() * scale, image.height() * scale
+
+    def _pill_body_rect(self) -> QRectF | None:
+        if self._pill_family() == "" or self._midpoint is None:
+            return None
+        if self._pill_family() == "scalar":
+            metrics = QFontMetricsF(self.theme.body_font())
+            content = metrics.horizontalAdvance(self._pill_text())
+            # Size the badge from the font line height so the number is never
+            # clipped, regardless of DPI or font substitution.
+            height = metrics.height() + self._PILL_TEXT_V_PADDING * 2.0
+        else:
+            thumb_width, thumb_height = self._thumbnail_size()
+            content = thumb_width
+            height = thumb_height + self._PILL_THUMB_PADDING * 2.0
+        padding = self._pill_padding()
+        width = content + padding * 2.0 + self._PILL_CHEVRON
+        return QRectF(
+            self._midpoint.x() - width / 2.0,
+            self._midpoint.y() - height / 2.0,
+            width,
+            height,
+        )
+
+    def _pill_content_rect(self, body: QRectF) -> QRectF:
+        padding = self._pill_padding()
+        # The scalar body height already reserves _PILL_TEXT_V_PADDING around the
+        # font, so centre the text across the full body height (no vertical clip);
+        # image pills inset their thumbnail by the thumb padding instead.
+        v_pad = 0.0 if self._pill_family() == "scalar" else padding
+        return body.adjusted(padding, v_pad, -(self._PILL_CHEVRON + padding), -v_pad)
+
+    def _chevron_rect(self) -> QRectF | None:
+        if self._pill_family() == "" or self._midpoint is None:
+            return None
+        if not self._preview_visible:
+            mid = self._midpoint
+            return QRectF(
+                mid.x() - self._PILL_COLLAPSED_HIT,
+                mid.y() - self._PILL_COLLAPSED_HIT,
+                self._PILL_COLLAPSED_HIT * 2.0,
+                self._PILL_COLLAPSED_HIT * 2.0,
+            )
+        body = self._pill_body_rect()
+        if body is None:
+            return None
+        width = self._PILL_CHEVRON + 6.0
+        return QRectF(body.right() - width, body.top() - 3.0, width, body.height() + 6.0)
+
     def boundingRect(self) -> QRectF:
-        return self.path.boundingRect().adjusted(-6.0, -6.0, 6.0, 6.0)
+        rect = self.path.boundingRect().adjusted(-6.0, -6.0, 6.0, 6.0)
+        for extra in (self._chevron_rect(), self._pill_body_rect()):
+            if extra is not None:
+                rect = rect.united(extra)
+        return rect
 
     def shape(self) -> QPainterPath:
         stroker = QPainterPathStroker()
         stroker.setWidth(self.theme.metrics.cable_hit_width)
         stroker.setCapStyle(Qt.PenCapStyle.RoundCap)
-        return stroker.createStroke(self.path)
+        shape = stroker.createStroke(self.path)
+        chevron = self._chevron_rect()
+        if chevron is not None:
+            chevron_path = QPainterPath()
+            chevron_path.addRect(chevron)
+            shape = shape.united(chevron_path)
+        return shape
 
     def paint(
         self,
@@ -688,6 +833,96 @@ class ConnectionGraphicsItem(QGraphicsObject):
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawPath(self.path)
+        self._paint_pill(painter)
+
+    def _paint_pill(self, painter: QPainter) -> None:
+        if self._pill_family() == "" or self._midpoint is None:
+            return
+        if not self._preview_visible:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(self.theme.color("muted_text"))
+            radius = self._PILL_COLLAPSED_RADIUS
+            painter.drawEllipse(self._midpoint, radius, radius)
+            return
+        body = self._pill_body_rect()
+        if body is None:
+            return
+        # Video pills use a small radius so the outline hugs the frame; scalar
+        # value pills keep the fully-rounded (stadium) badge look, so the radius
+        # follows the font-sized body height.
+        radius = (
+            body.height() / 2.0 if self._pill_family() == "scalar" else self._PILL_CORNER_RADIUS
+        )
+        painter.setPen(QPen(self.theme.color("border"), 1.0))
+        painter.setBrush(self.theme.color("panel"))
+        painter.drawRoundedRect(body, radius, radius)
+        content = self._pill_content_rect(body)
+        if self._pill_family() == "scalar":
+            text = self._pill_text()
+            if text:
+                painter.setPen(self.theme.color("text"))
+                painter.setFont(self.theme.body_font())
+                painter.drawText(content, Qt.AlignmentFlag.AlignCenter, text)
+        else:
+            image = self._image
+            if image is not None and not image.isNull():
+                padding = self._pill_padding()
+                # Clip the frame to the body inset by the padding, with a radius
+                # concentric to the outline (radius - padding). This keeps a uniform
+                # gap between the frame and the border at the corners, so the sharp
+                # frame corners never graze the rounded outline.
+                inner_radius = max(0.0, radius - padding)
+                clip = QPainterPath()
+                clip.addRoundedRect(
+                    body.adjusted(padding, padding, -padding, -padding),
+                    inner_radius,
+                    inner_radius,
+                )
+                painter.save()
+                painter.setClipPath(clip)
+                self._draw_thumbnail(painter, content, image, self._pill_family() == "channel")
+                painter.restore()
+        self._draw_chevron(painter, body)
+
+    def _draw_thumbnail(
+        self, painter: QPainter, rect: QRectF, image: QImage, grayscale: bool
+    ) -> None:
+        if grayscale:
+            image = image.convertToFormat(QImage.Format.Format_Grayscale8)
+        scaled = image.size().scaled(rect.size().toSize(), Qt.AspectRatioMode.KeepAspectRatio)
+        if scaled.isEmpty():
+            return
+        target = QRectF(
+            rect.center().x() - scaled.width() / 2.0,
+            rect.center().y() - scaled.height() / 2.0,
+            scaled.width(),
+            scaled.height(),
+        )
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.drawImage(target, image)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
+
+    def _draw_chevron(self, painter: QPainter, body: QRectF) -> None:
+        cx = body.right() - self._PILL_CHEVRON / 2.0
+        cy = body.center().y()
+        path = QPainterPath()
+        path.moveTo(cx - 3.0, cy - 1.5)
+        path.lineTo(cx, cy + 1.5)
+        path.lineTo(cx + 3.0, cy - 1.5)
+        pen = QPen(self.theme.color("muted_text"), 1.5)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(path)
+
+    def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        chevron = self._chevron_rect()
+        if chevron is not None and chevron.contains(event.pos()):
+            self.togglePreviewRequested.emit(self.view_model.connection_id)
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         scene = cast("GraphSceneProtocol", self.scene())

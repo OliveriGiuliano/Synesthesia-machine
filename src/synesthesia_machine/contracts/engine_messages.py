@@ -15,10 +15,11 @@ from synesthesia_machine.contracts.engine_client import (
     NotePreview,
     ResetReason,
     SourceStatus,
+    ValuePreview,
 )
 from synesthesia_machine.contracts.runtime_values import ColorValue, NumericMatrix
 
-ENGINE_PROTOCOL_VERSION = 10
+ENGINE_PROTOCOL_VERSION = 13
 
 type SnapshotLiteral = str | int | float | bool | ColorValue | NumericMatrix | None
 
@@ -43,6 +44,7 @@ class WireConnection:
     source_port_id: str
     destination_node_id: UUID
     destination_port_id: str
+    ui_state: tuple[tuple[str, SnapshotLiteral], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +67,8 @@ class TransportAction(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class PreviewSlotDescriptor:
-    node_id: UUID
+    owner_id: UUID
+    source_port_id: str
     shared_memory_name: str
     generation: int
     width: int
@@ -244,7 +247,8 @@ class ConfigurePreviewSlot:
 class PreviewSlotConfigured:
     request_id: str
     graph_revision: int
-    node_id: UUID
+    owner_id: UUID
+    source_port_id: str
     generation: int
     protocol_version: int = ENGINE_PROTOCOL_VERSION
 
@@ -287,7 +291,8 @@ class Heartbeat:
 @dataclass(frozen=True, slots=True)
 class PreviewFormatChanged:
     graph_revision: int
-    node_id: UUID
+    owner_id: UUID
+    source_port_id: str
     generation: int
     width: int
     height: int
@@ -299,6 +304,13 @@ class PreviewFormatChanged:
 class NotePreviewsPublished:
     graph_revision: int
     previews: tuple[NotePreview, ...]
+    protocol_version: int = ENGINE_PROTOCOL_VERSION
+
+
+@dataclass(frozen=True, slots=True)
+class ValuePreviewsPublished:
+    graph_revision: int
+    previews: tuple[ValuePreview, ...]
     protocol_version: int = ENGINE_PROTOCOL_VERSION
 
 
@@ -390,5 +402,11 @@ EngineResponse = (
     | ProtocolMismatch
     | ShutdownAcknowledged
 )
-EngineAsyncEvent = Heartbeat | PreviewFormatChanged | NotePreviewsPublished | EngineErrorPublished
+EngineAsyncEvent = (
+    Heartbeat
+    | PreviewFormatChanged
+    | NotePreviewsPublished
+    | ValuePreviewsPublished
+    | EngineErrorPublished
+)
 EngineEvent = EngineResponse | EngineAsyncEvent

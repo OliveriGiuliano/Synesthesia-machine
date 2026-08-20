@@ -31,6 +31,7 @@ from synesthesia_machine.contracts import (
     NodeMemoryDiagnostic,
     NotePreview,
     SourceStatus,
+    ValuePreview,
 )
 from synesthesia_machine.graph import GraphSnapshot, ValidationReport
 from synesthesia_machine.ui.main_window import MainWindow
@@ -129,6 +130,12 @@ class _SupervisionClient:
     def poll_note_previews(
         self, after_sequences: Mapping[UUID, int] | None = None
     ) -> tuple[NotePreview, ...]:
+        del after_sequences
+        return ()
+
+    def poll_value_previews(
+        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
+    ) -> tuple[ValuePreview, ...]:
         del after_sequences
         return ()
 

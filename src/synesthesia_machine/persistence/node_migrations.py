@@ -111,6 +111,28 @@ def migrate_hue_v1_to_v2(data: JsonObject) -> JsonObject:
     return migrated
 
 
+def migrate_display_image_data_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Drop the preview cadence/cap params now fixed in the preview broker."""
+
+    migrated = deepcopy(data)
+    parameters = _parameters(migrated)
+    parameters.pop("preview_fps", None)
+    parameters.pop("max_dimension", None)
+    migrated["implementation_version"] = 2
+    return migrated
+
+
+def migrate_channel_display_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Drop the preview cadence/cap params now fixed in the preview broker."""
+
+    migrated = deepcopy(data)
+    parameters = _parameters(migrated)
+    parameters.pop("preview_fps", None)
+    parameters.pop("max_dimension", None)
+    migrated["implementation_version"] = 2
+    return migrated
+
+
 def _parameters(data: JsonObject) -> JsonObject:
     raw_parameters = data.get("parameters")
     if not isinstance(raw_parameters, dict):
@@ -127,9 +149,11 @@ def _implementation_version(data: JsonObject) -> int:
 
 BUILTIN_NODE_MIGRATIONS = NodeMigrationRegistry(
     {
-        ("synmachine.input.load_video", 0): migrate_load_video_v0_to_v1,
         ("synmachine.image.hue", 1): migrate_hue_v1_to_v2,
+        ("synmachine.input.load_video", 0): migrate_load_video_v0_to_v1,
         ("synmachine.utility.number", 0): migrate_number_v0_to_v1,
+        ("synmachine.visualization.channel_display", 1): migrate_channel_display_v1_to_v2,
+        ("synmachine.visualization.display_image_data", 1): migrate_display_image_data_v1_to_v2,
     }
 )
 
@@ -140,6 +164,8 @@ __all__ = [
     "NodeMigrationRegistry",
     "NodeMigrationResult",
     "NodeMigrationStep",
+    "migrate_channel_display_v1_to_v2",
+    "migrate_display_image_data_v1_to_v2",
     "migrate_hue_v1_to_v2",
     "migrate_load_video_v0_to_v1",
     "migrate_number_v0_to_v1",

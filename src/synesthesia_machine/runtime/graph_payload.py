@@ -34,6 +34,7 @@ def snapshot_to_payload(snapshot: GraphSnapshot) -> GraphSnapshotPayload:
                 connection.source_port_id,
                 connection.destination_node_id,
                 connection.destination_port_id,
+                tuple(sorted(connection.ui_state.items())),
             )
             for connection in snapshot.connections
         ),
@@ -67,6 +68,7 @@ def payload_to_snapshot(payload: GraphSnapshotPayload) -> GraphSnapshot:
                 source_port_id=connection.source_port_id,
                 destination_node_id=connection.destination_node_id,
                 destination_port_id=connection.destination_port_id,
+                ui_state=dict(connection.ui_state),
             )
             for connection in payload.connections
         ),

@@ -10,6 +10,25 @@ from synesthesia_machine.contracts import ImagePreview, NotePreview
 from synesthesia_machine.ui.translations import tr, trf
 
 
+def image_preview_to_qimage(preview: ImagePreview) -> QImage:
+    """Build an owned QImage copy from immutable preview bytes.
+
+    The returned image copies the buffer so callers may draw it asynchronously
+    without retaining the underlying preview memory.
+    """
+    image_format = (
+        QImage.Format.Format_RGB888 if preview.channels == 3 else QImage.Format.Format_RGBA8888
+    )
+    bytes_per_line = preview.width * preview.channels
+    return QImage(
+        preview.data.data,
+        preview.width,
+        preview.height,
+        bytes_per_line,
+        image_format,
+    ).copy()
+
+
 class ImagePreviewWidget(QWidget):
     """Render copied EngineClient preview bytes over an alpha checkerboard."""
 
@@ -25,19 +44,8 @@ class ImagePreviewWidget(QWidget):
         return QSize(560, 300)
 
     def set_preview(self, preview: ImagePreview) -> None:
-        image_format = (
-            QImage.Format.Format_RGB888 if preview.channels == 3 else QImage.Format.Format_RGBA8888
-        )
-        bytes_per_line = preview.width * preview.channels
-        image = QImage(
-            preview.data.data,
-            preview.width,
-            preview.height,
-            bytes_per_line,
-            image_format,
-        ).copy()
         self.latest_preview = preview
-        self._pixmap = QPixmap.fromImage(image)
+        self._pixmap = QPixmap.fromImage(image_preview_to_qimage(preview))
         self.update()
 
     def paintEvent(self, event: QPaintEvent) -> None:
@@ -245,7 +253,7 @@ class ImagePreviewPanel(QWidget):
         self.image_caption.setText(
             trf(
                 "Node {node} · tick {tick} · {width}x{height} · sequence {sequence}",
-                node=str(preview.node_id)[:8],
+                node=str(preview.owner_id)[:8],
                 tick=preview.tick_index,
                 width=preview.width,
                 height=preview.height,
@@ -283,7 +291,7 @@ class NotePreviewPanel(QWidget):
         self.note_caption.setText(
             trf(
                 "Node {node} · tick {tick} · {count} active · sequence {sequence}",
-                node=str(preview.node_id)[:8],
+                node=str(preview.owner_id)[:8],
                 tick=preview.tick_index,
                 count=len(preview.notes),
                 sequence=preview.sequence,
@@ -335,5 +343,6 @@ __all__ = [
     "NotePreviewPanel",
     "NotePreviewWidget",
     "RuntimePreviewPanel",
+    "image_preview_to_qimage",
     "note_rainbow_color",
 ]

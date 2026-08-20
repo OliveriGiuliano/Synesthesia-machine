@@ -49,6 +49,28 @@ class ConnectionModel:
     source_port_id: str
     destination_node_id: UUID
     destination_port_id: str
+    # Presentation-only editor state (e.g. link-pill visibility). Deliberately kept
+    # out of structural identity: __hash__ excludes it (see below), so two
+    # connections that differ only in ui_state hash-equal but compare unequal.
+    ui_state: Mapping[str, LiteralValue] = field(default_factory=_empty_literals)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "ui_state", _freeze_literals(self.ui_state))
+
+    def __hash__(self) -> int:
+        # ConnectionModel is used as a dict key in the compiler's baseline
+        # cache, so it must be hashable. ui_state is presentation-only editor
+        # state (not part of the connection's structural identity) and is a
+        # frozen Mapping, which is itself unhashable, so exclude it.
+        return hash(
+            (
+                self.id,
+                self.source_node_id,
+                self.source_port_id,
+                self.destination_node_id,
+                self.destination_port_id,
+            )
+        )
 
 
 class GroupKind(StrEnum):
@@ -344,6 +366,28 @@ class GraphDocument:
         del self._connections[connection_id]
         self._touch()
 
+    def set_connection_ui_state(self, connection_id: UUID, key: str, value: LiteralValue) -> None:
+        """Change one presentation-only key without touching structural identity."""
+
+        connection = self._require_connection(connection_id)
+        ui_state = dict(connection.ui_state)
+        if ui_state.get(key) == value and key in ui_state:
+            return
+        ui_state[key] = value
+        self._connections[connection_id] = replace(connection, ui_state=ui_state)
+        self._touch()
+
+    def remove_connection_ui_state_key(self, connection_id: UUID, key: str) -> None:
+        """Remove one presentation-only key, restoring the presentation default."""
+
+        connection = self._require_connection(connection_id)
+        if key not in connection.ui_state:
+            return
+        ui_state = dict(connection.ui_state)
+        del ui_state[key]
+        self._connections[connection_id] = replace(connection, ui_state=ui_state)
+        self._touch()
+
     def set_document_setting(self, key: str, value: LiteralValue) -> None:
         if self._document_settings.get(key) == value and key in self._document_settings:
             return
@@ -366,6 +410,13 @@ class GraphDocument:
             msg = f"Unknown node: {node_id}"
             raise KeyError(msg)
         return node
+
+    def _require_connection(self, connection_id: UUID) -> ConnectionModel:
+        connection = self._connections.get(connection_id)
+        if connection is None:
+            msg = f"Unknown connection: {connection_id}"
+            raise KeyError(msg)
+        return connection
 
     def _touch(self) -> None:
         self.revision += 1

@@ -54,29 +54,13 @@ def create_visualization_definitions() -> tuple[NodeDefinition, ...]:
     return (
         NodeDefinition(
             DISPLAY_IMAGE_DATA_TYPE_ID,
-            1,
+            2,
             "Display Image Data",
             "Visualization",
             "Publish a capped, display-transformed image preview for the UI.",
             (InputPortSpec("image", "Image", PortType.IMAGE),),
             (),
             (
-                ParameterSpec(
-                    "preview_fps",
-                    "Preview FPS",
-                    PortType.INT,
-                    30,
-                    minimum=5,
-                    maximum=30,
-                ),
-                ParameterSpec(
-                    "max_dimension",
-                    "Maximum dimension",
-                    PortType.INT,
-                    800,
-                    minimum=64,
-                    maximum=2048,
-                ),
                 ParameterSpec(
                     "fit_mode",
                     "Fit mode",
@@ -106,29 +90,13 @@ def create_visualization_definitions() -> tuple[NodeDefinition, ...]:
         ),
         NodeDefinition(
             CHANNEL_DISPLAY_TYPE_ID,
-            1,
+            2,
             "Channel Display",
             "Visualization",
             "Publish a bounded nominal-range channel preview for the UI.",
             (InputPortSpec("channel", "Channel", PortType.CHANNEL),),
             (),
             (
-                ParameterSpec(
-                    "preview_fps",
-                    "Preview FPS",
-                    PortType.INT,
-                    30,
-                    minimum=5,
-                    maximum=30,
-                ),
-                ParameterSpec(
-                    "max_dimension",
-                    "Maximum dimension",
-                    PortType.INT,
-                    800,
-                    minimum=64,
-                    maximum=2048,
-                ),
                 ParameterSpec(
                     "fit_mode",
                     "Fit mode",

@@ -22,7 +22,7 @@ from synesthesia_machine.runtime import ProcessEngineClient
 
 EXAMPLE_PATH = Path("examples/phase3/hue_chord.synmachine.json")
 SOURCE_ID = UUID("30000000-0000-0000-0000-000000000001")
-IMAGE_VISUALIZER_ID = UUID("30000000-0000-0000-0000-000000000006")
+RESIZE_ID = UUID("30000000-0000-0000-0000-000000000002")
 NOTE_VISUALIZER_ID = UUID("30000000-0000-0000-0000-000000000007")
 AUDIO_ID = UUID("30000000-0000-0000-0000-000000000008")
 EXPECTED_FINAL_NOTE = NoteActivity(0, 71, 100)
@@ -97,18 +97,21 @@ def test_canonical_hue_chord_runs_in_child_with_audio_opt_in_and_bounded_preview
 
         image = _wait_for(
             client.poll_image_previews,
-            lambda preview: preview.node_id == IMAGE_VISUALIZER_ID,
+            lambda preview: preview.owner_id == RESIZE_ID,
         )
         note = _wait_for(
             client.poll_note_previews,
-            lambda preview: preview.node_id == NOTE_VISUALIZER_ID,
+            lambda preview: preview.owner_id == NOTE_VISUALIZER_ID,
         )
 
         assert (image.width, image.height, image.channels) == (500, 500, 3)
         assert image.data.dtype == np.uint8
         assert not image.data.flags.writeable
         assert image.tick_index == HUE_FRAME_COUNT
-        assert len(client.preview_shared_memory_names()) == 1
+        # One shared-memory slot per connected image/channel output port. The four
+        # demanded producers (source, resize, colour, separate_channels) each expose
+        # exactly one connected such port; display nodes own none.
+        assert len(client.preview_shared_memory_names()) == 4
         assert note.tick_index == HUE_FRAME_COUNT
         assert note.notes == (EXPECTED_FINAL_NOTE,)
     finally:

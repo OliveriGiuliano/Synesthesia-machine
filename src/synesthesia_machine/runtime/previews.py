@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import TypeGuard
 from uuid import UUID
 
 import cv2
@@ -20,15 +22,13 @@ from synesthesia_machine.contracts import (
     MidiStateFrame,
     NoteActivity,
     NotePreview,
+    PortType,
+    ValuePreview,
     freeze_uint8_preview,
 )
 from synesthesia_machine.media import image_to_display_uint8
-from synesthesia_machine.nodes.visualization import (
-    CHANNEL_DISPLAY_TYPE_ID,
-    DISPLAY_IMAGE_DATA_TYPE_ID,
-    NOTE_VISUALIZER_TYPE_ID,
-)
-from synesthesia_machine.runtime.execution_plan import ExecutionPlan, PortKey
+from synesthesia_machine.nodes.visualization import NOTE_VISUALIZER_TYPE_ID
+from synesthesia_machine.runtime.execution_plan import CompiledNode, ExecutionPlan, PortKey
 from synesthesia_machine.runtime.scheduler import TickResult
 
 type MonotonicClock = Callable[[], float]
@@ -36,6 +36,11 @@ type ImagePreviewConverter = Callable[[ImageFrame, int], NDArray[np.uint8]]
 type ChannelPreviewConverter = Callable[[ChannelFrame, int], NDArray[np.uint8]]
 
 _NOTE_PREVIEW_FPS = 60
+# Link pills are anchored on the producer, so the preview cadence and cap are
+# fixed application-wide rather than read from a downstream display node. These
+# match the display node's historical defaults.
+_IMAGE_PREVIEW_FPS = 30
+_IMAGE_PREVIEW_MAX_DIMENSION = 800
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,9 +60,18 @@ class _NoteTarget:
 
 
 @dataclass(frozen=True, slots=True)
+class _ValueTarget:
+    owner_id: UUID
+    source: PortKey
+    port_type: str
+    interval_s: float = 1.0 / _NOTE_PREVIEW_FPS
+
+
+@dataclass(frozen=True, slots=True)
 class _PreviewConfiguration:
     image_targets: tuple[_ImageTarget, ...]
     note_targets: tuple[_NoteTarget, ...]
+    value_targets: tuple[_ValueTarget, ...]
 
 
 class PreviewBroker:
@@ -76,12 +90,16 @@ class PreviewBroker:
         self._lock = threading.Lock()
         self._image_targets: tuple[_ImageTarget, ...] = ()
         self._note_targets: tuple[_NoteTarget, ...] = ()
-        self._image_previews: dict[UUID, ImagePreview] = {}
+        self._image_previews: dict[tuple[UUID, str], ImagePreview] = {}
         self._note_previews: dict[UUID, NotePreview] = {}
-        self._image_sequences: dict[UUID, int] = {}
+        self._image_sequences: dict[tuple[UUID, str], int] = {}
         self._note_sequences: dict[UUID, int] = {}
-        self._image_last_published: dict[UUID, float] = {}
+        self._image_last_published: dict[tuple[UUID, str], float] = {}
         self._note_last_published: dict[UUID, float] = {}
+        self._value_targets: tuple[_ValueTarget, ...] = ()
+        self._value_previews: dict[tuple[UUID, str], ValuePreview] = {}
+        self._value_sequences: dict[tuple[UUID, str], int] = {}
+        self._value_last_published: dict[tuple[UUID, str], float] = {}
         self._image_publication_times: deque[float] = deque(maxlen=240)
         self._generation = 0
 
@@ -92,45 +110,43 @@ class PreviewBroker:
 
     @staticmethod
     def prepare(plan: ExecutionPlan) -> _PreviewConfiguration:
-        """Validate and materialize preview targets before a plan is committed."""
+        """Validate and materialize preview targets before a plan is committed.
+
+        Image, channel, and scalar value previews are anchored on the producing
+        node rather than a downstream display node, so a link pill can show live
+        data on every connection regardless of its destination. Every connected
+        image or channel output, and every connected INT/FLOAT scalar output,
+        gets its own target so each pill is routed to the exact producing port.
+        Note previews remain anchored on the note visualizer.
+        """
+
+        connected_sources: set[PortKey] = set()
+        for node in plan.nodes:
+            for binding in node.input_bindings.values():
+                connected_sources.add(binding.source)
 
         image_targets: list[_ImageTarget] = []
         note_targets: list[_NoteTarget] = []
+        value_targets: list[_ValueTarget] = []
         for node in plan.nodes:
             if not node.is_demanded:
                 continue
-            if node.definition.type_id == DISPLAY_IMAGE_DATA_TYPE_ID:
-                binding = node.input_bindings.get("image")
-                if binding is None:
-                    continue
-                image_targets.append(
-                    _ImageTarget(
-                        node.node_id,
-                        binding.source,
-                        1.0 / _integer_parameter(node.parameters, "preview_fps"),
-                        _integer_parameter(node.parameters, "max_dimension"),
-                    )
-                )
-            elif node.definition.type_id == CHANNEL_DISPLAY_TYPE_ID:
-                binding = node.input_bindings.get("channel")
-                if binding is None:
-                    continue
-                image_targets.append(
-                    _ImageTarget(
-                        node.node_id,
-                        binding.source,
-                        1.0 / _integer_parameter(node.parameters, "preview_fps"),
-                        _integer_parameter(node.parameters, "max_dimension"),
-                        "CHANNEL",
-                    )
-                )
-            elif node.definition.type_id == NOTE_VISUALIZER_TYPE_ID:
+            if node.definition.type_id == NOTE_VISUALIZER_TYPE_ID:
                 binding = node.input_bindings.get("midi")
                 if binding is not None:
                     note_targets.append(_NoteTarget(node.node_id, binding.source))
+            image_targets.extend(_connected_image_targets(node, connected_sources))
+            value_targets.extend(_connected_scalar_targets(node, connected_sources))
+
         return _PreviewConfiguration(
-            tuple(sorted(image_targets, key=lambda item: str(item.node_id))),
+            tuple(sorted(image_targets, key=lambda item: (str(item.node_id), item.source.port_id))),
             tuple(sorted(note_targets, key=lambda item: str(item.node_id))),
+            tuple(
+                sorted(
+                    value_targets,
+                    key=lambda item: (str(item.owner_id), item.source.port_id),
+                )
+            ),
         )
 
     def apply(self, configuration: _PreviewConfiguration) -> None:
@@ -140,6 +156,7 @@ class PreviewBroker:
             self._generation += 1
             self._image_targets = configuration.image_targets
             self._note_targets = configuration.note_targets
+            self._value_targets = configuration.value_targets
             self._clear_locked()
 
     def clear(self) -> None:
@@ -149,6 +166,7 @@ class PreviewBroker:
             self._generation += 1
             self._image_targets = ()
             self._note_targets = ()
+            self._value_targets = ()
             self._clear_locked()
 
     def publish(self, result: TickResult) -> None:
@@ -160,12 +178,25 @@ class PreviewBroker:
             image_targets = tuple(
                 target
                 for target in self._image_targets
-                if _is_due(self._image_last_published.get(target.node_id), now, target.interval_s)
+                if _is_due(
+                    self._image_last_published.get((target.node_id, target.source.port_id)),
+                    now,
+                    target.interval_s,
+                )
             )
             note_targets = tuple(
                 target
                 for target in self._note_targets
                 if _is_due(self._note_last_published.get(target.node_id), now, target.interval_s)
+            )
+            value_targets = tuple(
+                target
+                for target in self._value_targets
+                if _is_due(
+                    self._value_last_published.get((target.owner_id, target.source.port_id)),
+                    now,
+                    target.interval_s,
+                )
             )
 
         image_publications: list[
@@ -192,18 +223,20 @@ class PreviewBroker:
                 )
                 note_publications.append((target, value, notes))
 
+        value_tick_index = _result_tick_index(result) if value_targets else None
+
         with self._lock:
             if generation != self._generation:
                 return
             for target, value, data in image_publications:
-                if not _is_due(
-                    self._image_last_published.get(target.node_id), now, target.interval_s
-                ):
+                key = (target.node_id, target.source.port_id)
+                if not _is_due(self._image_last_published.get(key), now, target.interval_s):
                     continue
-                sequence = self._image_sequences.get(target.node_id, 0) + 1
+                sequence = self._image_sequences.get(key, 0) + 1
                 height, width, channels = data.shape
-                self._image_previews[target.node_id] = ImagePreview(
+                self._image_previews[key] = ImagePreview(
                     target.node_id,
+                    target.source.port_id,
                     sequence,
                     value.context.tick_index,
                     width,
@@ -211,8 +244,8 @@ class PreviewBroker:
                     channels,
                     data,
                 )
-                self._image_sequences[target.node_id] = sequence
-                self._image_last_published[target.node_id] = now
+                self._image_sequences[key] = sequence
+                self._image_last_published[key] = now
                 self._image_publication_times.append(now)
             for target, value, notes in note_publications:
                 if not _is_due(
@@ -228,18 +261,46 @@ class PreviewBroker:
                 )
                 self._note_sequences[target.node_id] = sequence
                 self._note_last_published[target.node_id] = now
+            # Value capture keys off the source tick index: a scalar pill only
+            # refreshes when a source (frame) tick supplies a tick index. This is
+            # an intentional, tested invariant, not an accident of the current
+            # media sources (which all emit frames).
+            if value_tick_index is not None:
+                for target in value_targets:
+                    key = (target.owner_id, target.source.port_id)
+                    if not _is_due(
+                        self._value_last_published.get(key),
+                        now,
+                        target.interval_s,
+                    ):
+                        continue
+                    value = result.values.get(target.source)
+                    if not _is_scalar(value):
+                        continue
+                    sequence = self._value_sequences.get(key, 0) + 1
+                    self._value_previews[key] = ValuePreview(
+                        owner_id=target.owner_id,
+                        source_port_id=target.source.port_id,
+                        sequence=sequence,
+                        tick_index=value_tick_index,
+                        port_type=target.port_type,
+                        text=_format_scalar(value),
+                    )
+                    self._value_sequences[key] = sequence
+                    self._value_last_published[key] = now
 
     def poll_images(
-        self, after_sequences: Mapping[UUID, int] | None = None
+        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
     ) -> tuple[ImagePreview, ...]:
         thresholds = after_sequences or {}
         with self._lock:
             return tuple(
                 preview
-                for node_id, preview in sorted(
-                    self._image_previews.items(), key=lambda item: str(item[0])
+                for key, preview in sorted(
+                    self._image_previews.items(),
+                    key=lambda item: (str(item[0][0]), item[0][1]),
                 )
-                if preview.sequence > thresholds.get(node_id, 0)
+                if preview.sequence > thresholds.get(key, 0)
             )
 
     def poll_notes(
@@ -255,8 +316,27 @@ class PreviewBroker:
                 if preview.sequence > thresholds.get(node_id, 0)
             )
 
+    def poll_values(
+        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
+    ) -> tuple[ValuePreview, ...]:
+        thresholds = after_sequences or {}
+        with self._lock:
+            return tuple(
+                preview
+                for key, preview in sorted(
+                    self._value_previews.items(),
+                    key=lambda item: (str(item[0][0]), item[0][1]),
+                )
+                if preview.sequence > thresholds.get(key, 0)
+            )
+
     def preview_fps(self) -> float:
-        """Return image-preview publications during the latest one-second window."""
+        """Return image/channel preview publications in the latest one-second window.
+
+        Each connected image or channel output publishes on its own schedule, so the
+        value scales with the number of connected image/channel outputs rather than
+        with the number of display nodes.
+        """
 
         now = self._monotonic()
         with self._lock:
@@ -268,10 +348,13 @@ class PreviewBroker:
     def _clear_locked(self) -> None:
         self._image_previews.clear()
         self._note_previews.clear()
+        self._value_previews.clear()
         self._image_sequences.clear()
         self._note_sequences.clear()
+        self._value_sequences.clear()
         self._image_last_published.clear()
         self._note_last_published.clear()
+        self._value_last_published.clear()
         self._image_publication_times.clear()
 
 
@@ -303,15 +386,80 @@ def _bounded_preview(display: NDArray[np.uint8], max_dimension: int) -> NDArray[
     return freeze_uint8_preview(np.asarray(resized, dtype=np.uint8))
 
 
-def _integer_parameter(parameters: Mapping[str, object], parameter_id: str) -> int:
-    value = parameters[parameter_id]
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise TypeError(f"Expected integer parameter {parameter_id!r}")
-    return value
-
-
 def _is_due(previous: float | None, now: float, interval_s: float) -> bool:
     return previous is None or now - previous + 1e-12 >= interval_s
+
+
+def _connected_image_targets(
+    node: CompiledNode, connected_sources: set[PortKey]
+) -> tuple[_ImageTarget, ...]:
+    """Collect every connected IMAGE/CHANNEL output, ordered by port id.
+
+    A producer may expose several connected image or channel outputs (for
+    example the four channel outputs of a channel separator); each needs its
+    own target so a pill is never stamped with another port's frame.
+    """
+
+    targets: list[_ImageTarget] = []
+    for port_id in sorted(node.output_types):
+        port_type = node.output_types[port_id]
+        if port_type not in (PortType.IMAGE, PortType.CHANNEL):
+            continue
+        source = PortKey(node.node_id, port_id)
+        if source in connected_sources:
+            targets.append(
+                _ImageTarget(
+                    node.node_id,
+                    source,
+                    1.0 / _IMAGE_PREVIEW_FPS,
+                    _IMAGE_PREVIEW_MAX_DIMENSION,
+                    "CHANNEL" if port_type is PortType.CHANNEL else "IMAGE",
+                )
+            )
+    return tuple(targets)
+
+
+def _connected_scalar_targets(
+    node: CompiledNode, connected_sources: set[PortKey]
+) -> tuple[_ValueTarget, ...]:
+    """Collect every connected INT/FLOAT output, ordered by port id.
+
+    A producer may expose several connected scalar outputs; each needs its own
+    target so a pill is never stamped with another port's value.
+    """
+
+    targets: list[_ValueTarget] = []
+    for port_id in sorted(node.output_types):
+        port_type = node.output_types[port_id]
+        if port_type not in (PortType.INT, PortType.FLOAT):
+            continue
+        source = PortKey(node.node_id, port_id)
+        if source in connected_sources:
+            targets.append(_ValueTarget(node.node_id, source, port_type.value))
+    return tuple(targets)
+
+
+def _is_scalar(value: object) -> TypeGuard[int | float | np.integer | np.floating]:
+    if isinstance(value, bool):
+        return False
+    return isinstance(value, (int, float, np.integer, np.floating))
+
+
+def _format_scalar(value: int | float | np.integer | np.floating) -> str:
+    if isinstance(value, (int, np.integer)):
+        return str(int(value))
+    number = float(value)
+    if not math.isfinite(number):
+        # Display and conversion paths must not render raw "nan"/"inf" text.
+        return "\u2014"
+    return format(number, ".6g")
+
+
+def _result_tick_index(result: TickResult) -> int | None:
+    for value in result.values.values():
+        if isinstance(value, (ImageFrame, ChannelFrame, MidiStateFrame)):
+            return value.context.tick_index
+    return None
 
 
 __all__ = [

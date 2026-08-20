@@ -302,6 +302,51 @@ class SetParameterCommand(_DocumentCommand):
         self._changed()
 
 
+PREVIEW_VISIBLE_KEY = "preview_visible"
+
+
+class SetConnectionPreviewCommand(_DocumentCommand):
+    """Show or hide the live preview pill on a single connection."""
+
+    _COMMAND_ID = 0x534D04
+
+    def __init__(
+        self,
+        document: GraphDocument,
+        connection_id: UUID,
+        visible: bool,
+        on_changed: ChangeCallback | None = None,
+    ) -> None:
+        super().__init__("Set connection preview visibility", document, on_changed)
+        connection = document.connection(connection_id)
+        if connection is None:
+            raise KeyError(f"Unknown connection: {connection_id}")
+        self.connection_id = connection_id
+        # Capture the exact prior representation (``None`` when the key is absent,
+        # which is the "visible" default) so undo restores the state precisely.
+        self._old_raw = connection.ui_state.get(PREVIEW_VISIBLE_KEY)
+        self._new_raw = visible
+
+    def id(self) -> int:
+        return self._COMMAND_ID
+
+    def mergeWith(self, other: QUndoCommand) -> bool:
+        return False
+
+    def redo(self) -> None:
+        self._apply(self._new_raw)
+
+    def undo(self) -> None:
+        self._apply(self._old_raw)
+
+    def _apply(self, raw: LiteralValue | None) -> None:
+        if raw is None:
+            self.document.remove_connection_ui_state_key(self.connection_id, PREVIEW_VISIBLE_KEY)
+        else:
+            self.document.set_connection_ui_state(self.connection_id, PREVIEW_VISIBLE_KEY, raw)
+        self._changed()
+
+
 class RandomizeParametersCommand(_DocumentCommand):
     """Replace parameter mappings for several nodes as one undoable document edit."""
 

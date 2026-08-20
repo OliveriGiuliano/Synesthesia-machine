@@ -242,7 +242,8 @@ class EngineStatus:
 
 @dataclass(frozen=True, slots=True)
 class ImagePreview:
-    node_id: UUID
+    owner_id: UUID
+    source_port_id: str
     sequence: int
     tick_index: int
     width: int
@@ -253,6 +254,8 @@ class ImagePreview:
     def __post_init__(self) -> None:
         if self.sequence < 1 or self.tick_index < 1:
             raise ValueError("preview sequence and tick index must be positive")
+        if not self.source_port_id:
+            raise ValueError("image preview source port must be non-empty")
         if self.width < 1 or self.height < 1 or self.channels not in (3, 4):
             raise ValueError("invalid image preview dimensions")
         if self.data.dtype != np.uint8:
@@ -280,7 +283,7 @@ class NoteActivity:
 
 @dataclass(frozen=True, slots=True)
 class NotePreview:
-    node_id: UUID
+    owner_id: UUID
     sequence: int
     tick_index: int
     notes: tuple[NoteActivity, ...]
@@ -290,6 +293,28 @@ class NotePreview:
             raise ValueError("preview sequence and tick index must be positive")
         if tuple(sorted(self.notes)) != self.notes:
             raise ValueError("note summaries must use deterministic key order")
+
+
+@dataclass(frozen=True, slots=True)
+class ValuePreview:
+    """Compact scalar (INT/FLOAT) preview carried in-band for connection previews."""
+
+    owner_id: UUID
+    source_port_id: str
+    sequence: int
+    tick_index: int
+    port_type: str
+    text: str
+
+    def __post_init__(self) -> None:
+        if self.sequence < 1 or self.tick_index < 1:
+            raise ValueError("preview sequence and tick index must be positive")
+        if not self.source_port_id:
+            raise ValueError("value preview source port must be non-empty")
+        if not self.port_type:
+            raise ValueError("value preview port type must be non-empty")
+        if not self.text:
+            raise ValueError("value preview text must be non-empty")
 
 
 class EngineClient(Protocol):
@@ -332,12 +357,16 @@ class EngineClient(Protocol):
     def metrics(self) -> EngineMetrics: ...
 
     def poll_image_previews(
-        self, after_sequences: Mapping[UUID, int] | None = None
+        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
     ) -> tuple[ImagePreview, ...]: ...
 
     def poll_note_previews(
         self, after_sequences: Mapping[UUID, int] | None = None
     ) -> tuple[NotePreview, ...]: ...
+
+    def poll_value_previews(
+        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
+    ) -> tuple[ValuePreview, ...]: ...
 
     def wait_until_idle(self, timeout_s: float = 5.0) -> bool: ...
 

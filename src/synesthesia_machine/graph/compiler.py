@@ -35,6 +35,11 @@ from synesthesia_machine.runtime.execution_plan import (
 class CompilationResult:
     report: ValidationReport
     plan: ExecutionPlan | None
+    # Concrete type settled by inference for every resolvable port. Populated even
+    # when the graph is invalid (plan is None), so dependents (e.g. the view-model
+    # projection) keep type-variable ports' resolved identity while an unrelated
+    # authoring error prevents a full plan.
+    resolved_types: Mapping[tuple[UUID, str, bool], PortType]
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,7 +139,7 @@ class GraphCompiler:
 
         report = ValidationReport(tuple(issues))
         if not report.is_valid:
-            return CompilationResult(report=report, plan=None)
+            return CompilationResult(report=report, plan=None, resolved_types=resolved_types)
 
         compiled_nodes = tuple(
             self._compile_node(
@@ -156,6 +161,7 @@ class GraphCompiler:
                 nodes=compiled_nodes,
                 demand_roots=frozenset(roots),
             ),
+            resolved_types=resolved_types,
         )
 
     def connection_compatibility(

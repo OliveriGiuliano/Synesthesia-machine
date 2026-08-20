@@ -18,6 +18,7 @@ from synesthesia_machine.contracts.engine_client import (
     ResetReason,
     SourceState,
     SourceStatus,
+    ValuePreview,
     freeze_uint8_preview,
 )
 from synesthesia_machine.contracts.engine_messages import (
@@ -58,6 +59,7 @@ from synesthesia_machine.contracts.engine_messages import (
     SourceStatusResponse,
     TransportAction,
     TransportCommand,
+    ValuePreviewsPublished,
     WaitUntilIdle,
     WriteSharedFrame,
 )
@@ -156,6 +158,8 @@ __all__ = [
     "TransportAction",
     "TransportCommand",
     "ValueArray",
+    "ValuePreview",
+    "ValuePreviewsPublished",
     "WaitUntilIdle",
     "WriteSharedFrame",
     "clock_id_of",

@@ -13,7 +13,8 @@ from synesthesia_machine.runtime import AttachedPreviewSlot, OwnedPreviewSlot
 def test_slot_round_trip_copies_uint8_metadata_and_unlinks_idempotently() -> None:
     node_id = uuid4()
     owner = OwnedPreviewSlot.create(
-        node_id=node_id,
+        owner_id=node_id,
+        source_port_id="image",
         generation=2,
         width=4,
         height=3,
@@ -24,7 +25,7 @@ def test_slot_round_trip_copies_uint8_metadata_and_unlinks_idempotently() -> Non
     data = freeze_uint8_preview(np.arange(36, dtype=np.uint8).reshape((3, 4, 3)))
     try:
         assert owner.read() is None
-        attachment.write(ImagePreview(node_id, 7, 11, 4, 3, 3, data))
+        attachment.write(ImagePreview(node_id, "image", 7, 11, 4, 3, 3, data))
 
         result = owner.read()
 
@@ -45,7 +46,8 @@ def test_slot_round_trip_copies_uint8_metadata_and_unlinks_idempotently() -> Non
 def test_slot_rejects_wrong_shape_without_corrupting_previous_frame() -> None:
     node_id = uuid4()
     owner = OwnedPreviewSlot.create(
-        node_id=node_id,
+        owner_id=node_id,
+        source_port_id="image",
         generation=1,
         width=2,
         height=2,
@@ -55,9 +57,9 @@ def test_slot_rejects_wrong_shape_without_corrupting_previous_frame() -> None:
     first = freeze_uint8_preview(np.full((2, 2, 3), 17, dtype=np.uint8))
     wrong = freeze_uint8_preview(np.zeros((3, 2, 3), dtype=np.uint8))
     try:
-        attachment.write(ImagePreview(node_id, 1, 1, 2, 2, 3, first))
+        attachment.write(ImagePreview(node_id, "image", 1, 1, 2, 2, 3, first))
         with pytest.raises(ValueError, match="dimensions"):
-            attachment.write(ImagePreview(node_id, 2, 2, 2, 3, 3, wrong))
+            attachment.write(ImagePreview(node_id, "image", 2, 2, 2, 3, 3, wrong))
 
         result = owner.read()
 

@@ -34,6 +34,8 @@ from synesthesia_machine.persistence.node_migrations import (
     NodeMigrationRegistry,
     NodeMigrationResult,
     NodeMigrationStep,
+    migrate_channel_display_v1_to_v2,
+    migrate_display_image_data_v1_to_v2,
     migrate_hue_v1_to_v2,
     migrate_load_video_v0_to_v1,
     migrate_number_v0_to_v1,
@@ -48,6 +50,7 @@ from synesthesia_machine.persistence.schemas import (
     NodeSchemaV1,
     migrate_graph_data,
     migrate_v0_to_v1,
+    migrate_v1_to_v2,
 )
 
 __all__ = [
@@ -82,11 +85,14 @@ __all__ = [
     "graph_to_json",
     "load_graph",
     "media_fingerprint",
+    "migrate_channel_display_v1_to_v2",
+    "migrate_display_image_data_v1_to_v2",
     "migrate_graph_data",
     "migrate_hue_v1_to_v2",
     "migrate_load_video_v0_to_v1",
     "migrate_number_v0_to_v1",
     "migrate_v0_to_v1",
+    "migrate_v1_to_v2",
     "remap_fragment",
     "save_graph",
     "verify_relink_candidate",

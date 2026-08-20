@@ -37,13 +37,16 @@ class OwnedPreviewSlot:
     def create(
         cls,
         *,
-        node_id: UUID,
+        owner_id: UUID,
+        source_port_id: str,
         generation: int,
         width: int,
         height: int,
         channels: int,
     ) -> OwnedPreviewSlot:
         _validate_generation(generation)
+        if not source_port_id:
+            raise ValueError("preview slot source port must be non-empty")
         shared_memory = SharedMemory(
             create=True,
             size=preview_slot_size(width, height, channels),
@@ -51,7 +54,8 @@ class OwnedPreviewSlot:
         buffer = _shared_memory_buffer(shared_memory)
         buffer[:] = b"\x00" * len(buffer)
         descriptor = PreviewSlotDescriptor(
-            node_id,
+            owner_id,
+            source_port_id,
             shared_memory.name,
             generation,
             width,
@@ -94,7 +98,8 @@ class OwnedPreviewSlot:
             after = _HEADER.unpack_from(buffer)
             if before == after and after[0] % 2 == 0:
                 return ImagePreview(
-                    descriptor.node_id,
+                    descriptor.owner_id,
+                    descriptor.source_port_id,
                     sequence,
                     tick_index,
                     width,
@@ -140,8 +145,10 @@ class AttachedPreviewSlot:
         if self._closed:
             raise RuntimeError("Preview slot is closed")
         descriptor = self.descriptor
-        if preview.node_id != descriptor.node_id:
-            raise ValueError("Preview node does not match the shared-memory slot")
+        if preview.owner_id != descriptor.owner_id:
+            raise ValueError("Preview owner does not match the shared-memory slot")
+        if preview.source_port_id != descriptor.source_port_id:
+            raise ValueError("Preview source port does not match the shared-memory slot")
         if (
             preview.width != descriptor.width
             or preview.height != descriptor.height

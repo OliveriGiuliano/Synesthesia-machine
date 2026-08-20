@@ -38,6 +38,7 @@ from synesthesia_machine.persistence import (
     save_graph,
 )
 from synesthesia_machine.ui.commands import (
+    PREVIEW_VISIBLE_KEY,
     AddConnectionCommand,
     AddGroupCommand,
     AddNodeCommand,
@@ -53,6 +54,7 @@ from synesthesia_machine.ui.commands import (
     RelinkMediaCommand,
     RemoveConnectionCommand,
     ReplaceConnectionCommand,
+    SetConnectionPreviewCommand,
     SetParameterCommand,
 )
 from synesthesia_machine.ui.translations import tr
@@ -284,6 +286,21 @@ class DocumentSession(QObject):
                 node_id,
                 parameter_id,
                 value,
+                self._command_change_callback,
+            )
+        )
+
+    def set_connection_preview_visible(self, connection_id: UUID, visible: bool) -> None:
+        connection = self.document.connection(connection_id)
+        if connection is None:
+            return
+        if bool(connection.ui_state.get(PREVIEW_VISIBLE_KEY, True)) == visible:
+            return
+        self.push(
+            SetConnectionPreviewCommand(
+                self.document,
+                connection_id,
+                visible,
                 self._command_change_callback,
             )
         )
