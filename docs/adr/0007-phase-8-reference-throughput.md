@@ -24,7 +24,8 @@ effect. GPU work would not address it.
 
 ## Decision
 
-Keep the original result and `passed: false` value in `docs/phase-8-optimized.json`; do not round or
+Keep the original result and `passed: false` value in
+`docs/history/v0-development/phase-8-optimized.json`; do not round or
 silently relax it.
 
 For this Windows/CPU reference configuration, accept Phase 8 when all of the following revised gates
@@ -52,8 +53,8 @@ two-slot latest-frame mailbox remains unchanged.
 
 ## References
 
-- `docs/phase-8-baseline.json`
-- `docs/phase-8-optimized.json`
-- `docs/phase-8-soak.json`
-- `docs/phase-8-profiler-overhead.json`
-- `synesthesia_machine_design/phase_packets/phase_8_performance_diagnostics.md`
+- `docs/history/v0-development/phase-8-baseline.json`
+- `docs/history/v0-development/phase-8-optimized.json`
+- `docs/history/v0-development/phase-8-soak.json`
+- `docs/history/v0-development/phase-8-profiler-overhead.json`
+- `docs/history/v0-development/phase-packets/phase_8_performance_diagnostics.md`

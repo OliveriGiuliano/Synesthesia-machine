@@ -1,4 +1,4 @@
-"""Stateful Phase 5 temporal image nodes."""
+"""Stateful temporal image nodes."""
 
 from __future__ import annotations
 

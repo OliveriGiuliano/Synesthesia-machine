@@ -34,10 +34,10 @@ foreach ($target in @($outputRoot, $workRoot, $deploymentRoot)) {
 }
 
 if (-not [Environment]::Is64BitOperatingSystem -or -not [Environment]::Is64BitProcess) {
-    throw 'Phase 9 release builds require a 64-bit Windows process on Windows x64'
+    throw 'Release builds require a 64-bit Windows process on Windows x64'
 }
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
-    throw 'Phase 9 release builds are supported only on Windows'
+    throw 'Release builds are supported only on Windows'
 }
 
 Push-Location $repository
@@ -50,7 +50,7 @@ try {
 
     uv sync --locked --group packaging
     Assert-NativeSuccess -Operation 'uv sync'
-    uv run python -m tools.phase9_release check
+    uv run python -m tools.release check
     Assert-NativeSuccess -Operation 'release configuration check'
     if (-not $SkipTests) {
         uv run check
@@ -93,25 +93,25 @@ try {
     New-Item -ItemType Directory -Force $smokeDirectory | Out-Null
     Copy-Item -LiteralPath (Join-Path $repository 'packaging\smoke_test.ps1') `
         -Destination (Join-Path $smokeDirectory 'smoke_test.ps1')
-    Copy-Item -LiteralPath (Join-Path $repository 'examples\phase9\media\h264-smoke.mp4') `
+    Copy-Item -LiteralPath (Join-Path $repository 'packaging\fixtures\h264-smoke.mp4') `
         -Destination (Join-Path $smokeDirectory 'h264-smoke.mp4')
     Copy-Item -LiteralPath (Join-Path $repository 'LICENSE-or-NOTICE.md') -Destination $artifact
     Copy-Item -LiteralPath (Join-Path $repository 'packaging\RUNNING.md') -Destination $artifact
     Copy-Item -LiteralPath (Join-Path $repository 'packaging\licensing-review.md') -Destination $artifact
 
-    uv run python -m tools.phase9_release inventory `
+    uv run python -m tools.release inventory `
         --output (Join-Path $artifact 'dependency-inventory.json') `
         --notices (Join-Path $artifact 'THIRD_PARTY_NOTICES.md') `
         --licenses (Join-Path $artifact 'licenses')
     Assert-NativeSuccess -Operation 'dependency inventory generation'
-    uv run python -m tools.phase9_release provenance `
+    uv run python -m tools.release provenance `
         --artifact $artifact --output (Join-Path $artifact 'build-provenance.json')
     Assert-NativeSuccess -Operation 'build provenance generation'
 
     $version = uv run python -c 'from synesthesia_machine import __version__; print(__version__)'
     Assert-NativeSuccess -Operation 'application version query'
     $archive = Join-Path $outputRoot "Synesthesia-Machine-$($version.Trim())-windows-x64.zip"
-    uv run python -m tools.phase9_release archive --artifact $artifact --output $archive
+    uv run python -m tools.release archive --artifact $artifact --output $archive
     Assert-NativeSuccess -Operation 'deterministic archive creation'
     $archiveHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
     Set-Content -LiteralPath (Join-Path $outputRoot 'SHA256SUMS.txt') `

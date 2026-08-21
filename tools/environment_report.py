@@ -1,4 +1,4 @@
-"""Generate the Phase 0 Windows, hardware, and dependency environment report."""
+"""Generate a Windows, hardware, and dependency environment report."""
 
 import argparse
 import importlib.metadata

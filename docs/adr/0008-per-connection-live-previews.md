@@ -51,7 +51,7 @@ original master architecture.
 
 ## References
 
-- `synesthesia_machine_design/00_master_architecture.md`, sections 10.6, 13.3, and 16.16
+- `docs/architecture/master.md`, sections 10.6, 13.3, and 16.16
 - `src/synesthesia_machine/runtime/previews.py`
 - `src/synesthesia_machine/ui/main_window.py`
 - `src/synesthesia_machine/persistence/clipboard.py`

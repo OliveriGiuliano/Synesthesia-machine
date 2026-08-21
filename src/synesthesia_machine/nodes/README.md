@@ -6,7 +6,7 @@ Stable node metadata, runtime protocols, registry behavior, and built-in utility
 
 Use `synesthesia_machine.nodes` for node definitions, port/parameter specifications,
 runtime/reset/error contracts, and `NodeRegistry`. Use
-`synesthesia_machine.nodes.utility.create_utility_registry()` for the Phase 1 Number,
+`synesthesia_machine.nodes.utility.create_utility_registry()` for the foundational Number,
 Pass Through, Conditional, Compare, Logic Operation, and scalar Math catalogue.
 
 ## Dependency direction

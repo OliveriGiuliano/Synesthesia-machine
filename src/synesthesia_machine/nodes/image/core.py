@@ -1,4 +1,4 @@
-"""Import-compatible Phase 3 facade for the split Phase 5 image catalogue."""
+"""Import-compatible facade for the split image catalogue."""
 
 from synesthesia_machine.nodes.image.catalogue import (
     create_image_definitions as create_image_definitions,

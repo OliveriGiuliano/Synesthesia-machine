@@ -7,6 +7,9 @@ settings, themes, and translations.
 
 - `DocumentSession` owns the mutable authoring document and undo stack. Widgets project its immutable
   view model and never mutate `GraphDocument` directly.
+- `DocumentSession.changed` covers every persisted edit for scene synchronization and autosave;
+  `runtimeChanged` is reserved for edits that require a new engine plan or demand-root set. Moving
+  nodes and editing groups/comments must not replace the active runtime generation.
 - `MainWindow` composes panels and coordinates the `EngineClient`; slow engine calls use its engine
   executor. Recovery writes are owned by `AutosaveController`, which coalesces immutable snapshots on
   a separate serial executor.
@@ -18,5 +21,5 @@ settings, themes, and translations.
 ## Change checklist
 
 Update both canvas and inspector projections, undo behavior, accessible names/tooltips, and French
-translations. Start with `tests/phase2/`; transport, preview, and process-supervision UI coverage also
-lives in `tests/phase3/`, `tests/phase4/`, and `tests/phase7/` as routed by the testing playbook.
+translations. Start with `tests/ui/`; cross-process UI behavior also has coverage in
+`tests/integration/` as routed by the testing playbook.

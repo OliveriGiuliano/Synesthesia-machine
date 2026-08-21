@@ -12,7 +12,7 @@ from synesthesia_machine.persistence import graph_to_json
 DOCUMENT_ID = UUID("65000000-0000-0000-0000-000000000000")
 
 
-def generate_catalogue(path: str | Path = "examples/phase6/catalogue.synmachine.json") -> Path:
+def generate_catalogue(path: str | Path = "examples/catalogue/current.synmachine.json") -> Path:
     registry = create_application_registry()
     nodes: list[NodeModel] = []
     for index, definition in enumerate(registry.definitions(), start=1):

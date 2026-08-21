@@ -1,6 +1,6 @@
 # Windows packaging
 
-Phase 9 uses the committed `pysidedeploy.spec` and `uv.lock` to build a Nuitka
+Release builds use the committed `pysidedeploy.spec` and `uv.lock` to build a Nuitka
 standalone-directory application. One-file packaging and an installer are intentionally deferred
 until this form has passed the clean-machine gate.
 

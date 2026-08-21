@@ -49,7 +49,7 @@ class _VisualizerRuntime:
 
 
 def create_visualization_definitions() -> tuple[NodeDefinition, ...]:
-    """Return permanent Phase 3 visualizer definitions in stable display order."""
+    """Return permanent visualizer definitions in stable display order."""
 
     return (
         NodeDefinition(

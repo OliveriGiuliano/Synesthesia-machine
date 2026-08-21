@@ -14,7 +14,7 @@
    application-facing compatibility name.
 5. Test defaults and invalid parameters, nominal behavior, `NoData`, non-finite values, metadata and
    immutability, dynamic type/clock resolution, state reset/close, compilation, and persistence as
-   applicable. Image/channel nodes should reuse the Phase 5 conformance helpers where suitable.
+   applicable. Image/channel nodes should reuse `tests/support/image_conformance.py` where suitable.
 6. If persisted behavior changes, preserve IDs. Bump `implementation_version` and add a pure,
    sequential node migration when an old payload needs transformation. Do not put compatibility
    branches into the runtime.
@@ -25,7 +25,7 @@
    uv run python -m tools.generate_catalogue
    ```
 
-   This command overwrites `examples/phase6/catalogue.synmachine.json`. Run it only when the built-in
+   This command overwrites `examples/catalogue/current.synmachine.json`. Run it only when the built-in
    registry intentionally changes. Do not rewrite a historical phase catalogue unless the task
    explicitly calls for it.
 
@@ -40,5 +40,5 @@
   replace the last valid active runtime.
 - When changing state-retention keys or plan replacement, test both reusable and invalidated runtime
   paths, including factory/reset/close failures.
-- Add focused Phase 1 tests and relevant in-process/process integration coverage. Scheduler changes
-  often also require Phase 3, Phase 4, Phase 5 conformance, and Phase 8 profiling checks.
+- Add focused domain tests and relevant in-process/process integration coverage. Scheduler changes
+  often also require runtime, image-node conformance, saved-graph integration, and profiling checks.

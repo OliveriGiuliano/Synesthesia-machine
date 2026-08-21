@@ -1,0 +1,190 @@
+{
+  "application_version": "0.1.0",
+  "connections": [
+    {
+      "destination_node_id": "80000000-0000-0000-0000-000000000002",
+      "destination_port_id": "image",
+      "id": "80000000-0000-0000-0001-000000000001",
+      "source_node_id": "80000000-0000-0000-0000-000000000001",
+      "source_port_id": "image"
+    },
+    {
+      "destination_node_id": "80000000-0000-0000-0000-000000000003",
+      "destination_port_id": "image",
+      "id": "80000000-0000-0000-0001-000000000002",
+      "source_node_id": "80000000-0000-0000-0000-000000000002",
+      "source_port_id": "image"
+    },
+    {
+      "destination_node_id": "80000000-0000-0000-0000-000000000004",
+      "destination_port_id": "image",
+      "id": "80000000-0000-0000-0001-000000000003",
+      "source_node_id": "80000000-0000-0000-0000-000000000003",
+      "source_port_id": "image"
+    },
+    {
+      "destination_node_id": "80000000-0000-0000-0000-000000000005",
+      "destination_port_id": "image",
+      "id": "80000000-0000-0000-0001-000000000004",
+      "source_node_id": "80000000-0000-0000-0000-000000000004",
+      "source_port_id": "image"
+    },
+    {
+      "destination_node_id": "80000000-0000-0000-0000-000000000006",
+      "destination_port_id": "value",
+      "id": "80000000-0000-0000-0001-000000000005",
+      "source_node_id": "80000000-0000-0000-0000-000000000005",
+      "source_port_id": "channel_1"
+    },
+    {
+      "destination_node_id": "80000000-0000-0000-0000-000000000007",
+      "destination_port_id": "midi",
+      "id": "80000000-0000-0000-0001-000000000006",
+      "source_node_id": "80000000-0000-0000-0000-000000000006",
+      "source_port_id": "midi"
+    },
+    {
+      "destination_node_id": "80000000-0000-0000-0000-000000000008",
+      "destination_port_id": "image",
+      "id": "80000000-0000-0000-0001-000000000007",
+      "source_node_id": "80000000-0000-0000-0000-000000000004",
+      "source_port_id": "image"
+    },
+    {
+      "destination_node_id": "80000000-0000-0000-0000-000000000009",
+      "destination_port_id": "channel",
+      "id": "80000000-0000-0000-0001-000000000008",
+      "source_node_id": "80000000-0000-0000-0000-000000000008",
+      "source_port_id": "channel"
+    }
+  ],
+  "document_id": "80000000-0000-0000-0000-000000000000",
+  "document_settings": {},
+  "groups": [],
+  "nodes": [
+    {
+      "collapsed": false,
+      "id": "80000000-0000-0000-0000-000000000001",
+      "implementation_version": 1,
+      "parameters": {
+        "file_path": "synthetic-500x500-60fps.mp4",
+        "loop": true,
+        "process_every_nth_frame": 1,
+        "stream_index": 0
+      },
+      "position": [0.0, 100.0],
+      "size": null,
+      "type_id": "synmachine.input.load_video",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "80000000-0000-0000-0000-000000000002",
+      "implementation_version": 1,
+      "parameters": {
+        "fit_mode": "STRETCH",
+        "height": 500,
+        "interpolation": "AUTO",
+        "preserve_aspect": false,
+        "width": 500
+      },
+      "position": [300.0, 100.0],
+      "size": null,
+      "type_id": "synmachine.image.resize",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "80000000-0000-0000-0000-000000000003",
+      "implementation_version": 1,
+      "parameters": {
+        "border_mode": "REFLECT_101",
+        "kernel_height": 5,
+        "kernel_width": 5,
+        "sigma_x": 0.0,
+        "sigma_y": 0.0
+      },
+      "position": [600.0, 100.0],
+      "size": null,
+      "type_id": "synmachine.image.gaussian_blur",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "80000000-0000-0000-0000-000000000004",
+      "implementation_version": 1,
+      "parameters": {"target_colour_space": "HSV"},
+      "position": [900.0, 100.0],
+      "size": null,
+      "type_id": "synmachine.image.change_colour_space",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "80000000-0000-0000-0000-000000000005",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [1200.0, 0.0],
+      "size": null,
+      "type_id": "synmachine.image.separate_channels",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "80000000-0000-0000-0000-000000000006",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [1500.0, 0.0],
+      "size": null,
+      "type_id": "synmachine.synesthesia.channel_to_pitch",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "80000000-0000-0000-0000-000000000007",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [1800.0, 0.0],
+      "size": null,
+      "type_id": "synmachine.visualization.note_visualizer",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "80000000-0000-0000-0000-000000000008",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [1200.0, 350.0],
+      "size": null,
+      "type_id": "synmachine.image.canny",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "80000000-0000-0000-0000-000000000009",
+      "implementation_version": 1,
+      "parameters": {
+        "fit_mode": "CONTAIN",
+        "max_dimension": 800,
+        "preview_fps": 30,
+        "show_histogram": false,
+        "value_display_mode": "NOMINAL_RANGE"
+      },
+      "position": [1500.0, 350.0],
+      "size": null,
+      "type_id": "synmachine.visualization.channel_display",
+      "ui_state": {},
+      "user_label": null
+    }
+  ],
+  "schema_version": 1,
+  "ui_state": {}
+}

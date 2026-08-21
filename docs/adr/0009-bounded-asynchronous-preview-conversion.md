@@ -50,4 +50,4 @@ delay graph execution or cause source frames to accumulate.
 - `docs/adr/0008-per-connection-live-previews.md`
 - `src/synesthesia_machine/runtime/in_process_engine.py`
 - `src/synesthesia_machine/runtime/previews.py`
-- `docs/phase-8-completion-report.md`
+- `docs/history/v0-development/phase-8-completion-report.md`

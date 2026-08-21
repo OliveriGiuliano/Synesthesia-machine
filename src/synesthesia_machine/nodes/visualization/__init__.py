@@ -1,4 +1,4 @@
-"""Phase 3 image and MIDI visualization demand-root definitions."""
+"""Image and MIDI visualization demand-root definitions."""
 
 from synesthesia_machine.nodes.visualization.core import (
     CHANNEL_DISPLAY_TYPE_ID,

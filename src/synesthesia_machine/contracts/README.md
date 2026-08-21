@@ -4,7 +4,7 @@ Framework-independent values shared across process, graph, node, and runtime bou
 
 ## Public imports
 
-Import runtime values and Phase 0 engine messages from `synesthesia_machine.contracts`,
+Import runtime values and engine messages from `synesthesia_machine.contracts`,
 not from implementation modules. The facade exports `FrameContext`, `ImageFrame`,
 `ChannelFrame`, `ColorValue`, `MidiStateFrame`, `NoData`, `PortType`, and the versioned
 engine-message dataclasses. Device catalogue descriptors keep engine-owned identifiers separate

@@ -1,4 +1,4 @@
-"""Phase 5 compositing and descriptor-backed channel node definitions."""
+"""Compositing and descriptor-backed channel node definitions."""
 
 from __future__ import annotations
 

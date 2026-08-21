@@ -1,0 +1,225 @@
+{
+  "application_version": "0.1.0",
+  "connections": [
+    {
+      "destination_node_id": "30000000-0000-0000-0000-000000000002",
+      "destination_port_id": "image",
+      "id": "30000000-0000-0000-0000-000000000101",
+      "source_node_id": "30000000-0000-0000-0000-000000000001",
+      "source_port_id": "image",
+      "ui_state": {}
+    },
+    {
+      "destination_node_id": "30000000-0000-0000-0000-000000000003",
+      "destination_port_id": "image",
+      "id": "30000000-0000-0000-0000-000000000102",
+      "source_node_id": "30000000-0000-0000-0000-000000000002",
+      "source_port_id": "image",
+      "ui_state": {}
+    },
+    {
+      "destination_node_id": "30000000-0000-0000-0000-000000000004",
+      "destination_port_id": "image",
+      "id": "30000000-0000-0000-0000-000000000103",
+      "source_node_id": "30000000-0000-0000-0000-000000000003",
+      "source_port_id": "image",
+      "ui_state": {}
+    },
+    {
+      "destination_node_id": "30000000-0000-0000-0000-000000000005",
+      "destination_port_id": "value",
+      "id": "30000000-0000-0000-0000-000000000104",
+      "source_node_id": "30000000-0000-0000-0000-000000000004",
+      "source_port_id": "channel_1",
+      "ui_state": {}
+    },
+    {
+      "destination_node_id": "30000000-0000-0000-0000-000000000006",
+      "destination_port_id": "image",
+      "id": "30000000-0000-0000-0000-000000000105",
+      "source_node_id": "30000000-0000-0000-0000-000000000002",
+      "source_port_id": "image",
+      "ui_state": {}
+    },
+    {
+      "destination_node_id": "30000000-0000-0000-0000-000000000007",
+      "destination_port_id": "midi",
+      "id": "30000000-0000-0000-0000-000000000106",
+      "source_node_id": "30000000-0000-0000-0000-000000000005",
+      "source_port_id": "midi",
+      "ui_state": {}
+    },
+    {
+      "destination_node_id": "30000000-0000-0000-0000-000000000008",
+      "destination_port_id": "midi",
+      "id": "30000000-0000-0000-0000-000000000107",
+      "source_node_id": "30000000-0000-0000-0000-000000000005",
+      "source_port_id": "midi",
+      "ui_state": {}
+    }
+  ],
+  "document_id": "30000000-0000-0000-0000-000000000000",
+  "document_settings": {},
+  "groups": [],
+  "nodes": [
+    {
+      "collapsed": false,
+      "id": "30000000-0000-0000-0000-000000000001",
+      "implementation_version": 1,
+      "parameters": {
+        "file_path": "media\\hue-chord.mp4",
+        "loop": true,
+        "process_every_nth_frame": 1,
+        "stream_index": 0
+      },
+      "position": [
+        0.0,
+        0.0
+      ],
+      "size": null,
+      "type_id": "synmachine.input.load_video",
+      "ui_state": {},
+      "user_label": "Looping hue demo"
+    },
+    {
+      "collapsed": false,
+      "id": "30000000-0000-0000-0000-000000000002",
+      "implementation_version": 1,
+      "parameters": {
+        "fit_mode": "STRETCH",
+        "height": 500,
+        "interpolation": "AUTO",
+        "preserve_aspect": false,
+        "width": 500
+      },
+      "position": [
+        280.0,
+        0.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.resize",
+      "ui_state": {},
+      "user_label": "Diagnostic size"
+    },
+    {
+      "collapsed": false,
+      "id": "30000000-0000-0000-0000-000000000003",
+      "implementation_version": 1,
+      "parameters": {
+        "target_colour_space": "HSV"
+      },
+      "position": [
+        560.0,
+        0.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.change_colour_space",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "30000000-0000-0000-0000-000000000004",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        840.0,
+        0.0
+      ],
+      "size": null,
+      "type_id": "synmachine.image.separate_channels",
+      "ui_state": {},
+      "user_label": "Hue is channel 1"
+    },
+    {
+      "collapsed": false,
+      "id": "30000000-0000-0000-0000-000000000005",
+      "implementation_version": 1,
+      "parameters": {
+        "binning_mode": "LINEAR_NOMINAL_RANGE",
+        "custom_scale_mask": "111111111111",
+        "ignore_non_finite": true,
+        "maximum_a": 1.0,
+        "maximum_a_enabled": false,
+        "maximum_b": 1.0,
+        "maximum_b_enabled": false,
+        "maximum_polyphony": 4,
+        "maximum_velocity": 100,
+        "midi_channel": 1,
+        "midi_maximum": 71,
+        "midi_minimum": 60,
+        "minimum_a": 0.0,
+        "minimum_b": 0.0,
+        "minimum_velocity": 100,
+        "occupancy_threshold_percent": 25.0,
+        "root_pitch_class": "C",
+        "scale": "major"
+      },
+      "position": [
+        1120.0,
+        0.0
+      ],
+      "size": null,
+      "type_id": "synmachine.synesthesia.channel_to_pitch",
+      "ui_state": {},
+      "user_label": "C major · C4 to B4"
+    },
+    {
+      "collapsed": false,
+      "id": "30000000-0000-0000-0000-000000000006",
+      "implementation_version": 2,
+      "parameters": {
+        "checkerboard_alpha": true,
+        "fit_mode": "CONTAIN",
+        "show_histogram": false,
+        "value_display_mode": "DISPLAY_TRANSFORM"
+      },
+      "position": [
+        560.0,
+        360.0
+      ],
+      "size": null,
+      "type_id": "synmachine.visualization.display_image_data",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "30000000-0000-0000-0000-000000000007",
+      "implementation_version": 1,
+      "parameters": {},
+      "position": [
+        1400.0,
+        0.0
+      ],
+      "size": null,
+      "type_id": "synmachine.visualization.note_visualizer",
+      "ui_state": {},
+      "user_label": null
+    },
+    {
+      "collapsed": false,
+      "id": "30000000-0000-0000-0000-000000000008",
+      "implementation_version": 1,
+      "parameters": {
+        "attack_ms": 10.0,
+        "enabled": false,
+        "max_voices": 32,
+        "output_device": "",
+        "release_ms": 80.0,
+        "volume": 0.15,
+        "waveform": "SINE"
+      },
+      "position": [
+        1400.0,
+        300.0
+      ],
+      "size": null,
+      "type_id": "synmachine.output.generate_audio",
+      "ui_state": {},
+      "user_label": "Opt-in debug audio"
+    }
+  ],
+  "schema_version": 2,
+  "ui_state": {}
+}

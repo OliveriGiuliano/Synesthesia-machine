@@ -12,7 +12,7 @@ Windows-native implementations.
 
 Use PyAV 18.x for FFmpeg-backed file decode and presentation timestamps, NumPy float32 arrays for
 runtime values, and OpenCV 4.13.x for camera and CPU-first image processing. OpenCV 5 and mandatory
-GPU backends are excluded from Phase 0.
+GPU backends are excluded from the initial release.
 
 ## Consequences
 

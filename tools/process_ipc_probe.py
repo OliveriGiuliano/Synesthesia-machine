@@ -144,7 +144,7 @@ def engine_child(connection: DuplexConnection) -> None:
 
 
 class EngineProbeProcess:
-    """Small parent-side lifecycle wrapper used by the Phase 0 tests."""
+    """Small parent-side lifecycle wrapper used by the IPC smoke tests."""
 
     def __init__(self) -> None:
         self._context: SpawnContext = get_context("spawn")

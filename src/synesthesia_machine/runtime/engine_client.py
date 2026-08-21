@@ -13,7 +13,7 @@ from multiprocessing import get_context
 from multiprocessing.context import SpawnContext
 from multiprocessing.process import BaseProcess
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Protocol, cast, get_args
 from uuid import UUID, uuid4
 
 from synesthesia_machine.contracts.engine_client import (
@@ -41,7 +41,6 @@ from synesthesia_machine.contracts.engine_messages import (
     DeviceCatalogueResponse,
     EngineAsyncEvent,
     EngineCommand,
-    EngineErrorPublished,
     EngineResponse,
     GraphActivationAcknowledged,
     Handshake,
@@ -128,29 +127,10 @@ class _PendingRequest:
     error: BaseException | None = None
 
 
-_RESPONSE_TYPES = (
-    HandshakeAcknowledged,
-    GraphActivationAcknowledged,
-    SourceStatusResponse,
-    MidiOutputStatusResponse,
-    NodeMemoryDiagnosticsResponse,
-    NodeProfilesResponse,
-    MetricsResponse,
-    IdleResponse,
-    PreviewSlotConfigured,
-    CommandAcknowledged,
-    CommandFailed,
-    ProtocolMismatch,
-    ShutdownAcknowledged,
-)
-
-_ASYNC_EVENT_TYPES = (
-    Heartbeat,
-    PreviewFormatChanged,
-    NotePreviewsPublished,
-    ValuePreviewsPublished,
-    EngineErrorPublished,
-)
+# Keep runtime validation sourced from the protocol unions. A duplicated allow-list can otherwise
+# reject a newly added, valid response and incorrectly mark the engine as crashed.
+_RESPONSE_TYPES: tuple[type[object], ...] = get_args(EngineResponse)
+_ASYNC_EVENT_TYPES: tuple[type[object], ...] = get_args(EngineAsyncEvent)
 
 
 class ProcessEngineClient:
@@ -601,7 +581,7 @@ class ProcessEngineClient:
                         f"Unsupported engine response: {type(raw_response).__name__}"
                     )
                     return
-                response: EngineResponse = raw_response
+                response = cast(EngineResponse, raw_response)
                 if response.protocol_version != ENGINE_PROTOCOL_VERSION:
                     self._mark_disconnected(
                         f"Unsupported engine response protocol {response.protocol_version}"
@@ -629,7 +609,7 @@ class ProcessEngineClient:
                 return
             if not isinstance(raw_event, _ASYNC_EVENT_TYPES):
                 continue
-            event: EngineAsyncEvent = raw_event
+            event = cast(EngineAsyncEvent, raw_event)
             if event.protocol_version != ENGINE_PROTOCOL_VERSION:
                 continue
             try:

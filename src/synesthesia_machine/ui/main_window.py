@@ -653,7 +653,7 @@ class MainWindow(QMainWindow):
     def _connect_signals(self) -> None:
         self.session.changed.connect(self._refresh_document_ui)
         self.session.changed.connect(self._schedule_autosave)
-        self.session.changed.connect(self._schedule_engine_activation)
+        self.session.runtimeChanged.connect(self._schedule_engine_activation)
         self.session.pathChanged.connect(self._refresh_document_ui)
         self.session.dirtyChanged.connect(self._on_dirty_changed)
         self.session.validationChanged.connect(self.issues_panel.set_report)

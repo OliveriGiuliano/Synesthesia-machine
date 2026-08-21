@@ -1,4 +1,4 @@
-"""Phase 5 image-dimension and geometric utility node definitions."""
+"""Image-dimension and geometric utility node definitions."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Phase 5 image-filter node definitions and thin runtime adapters."""
+"""Image-filter node definitions and thin runtime adapters."""
 
 from __future__ import annotations
 

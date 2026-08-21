@@ -20,7 +20,7 @@
   validation tests. Run the read-only graph validator after changing persistence:
 
   ```powershell
-  uv run python -m tools.phase7_validate_graphs examples tests/fixtures/phase7
+  uv run python -m tools.validate_graphs examples tests/fixtures/compatibility
   ```
 
 ## Adding or changing model fields

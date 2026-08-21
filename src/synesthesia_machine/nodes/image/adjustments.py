@@ -1,4 +1,4 @@
-"""Phase 5 image-adjustment node definitions and thin runtime adapters."""
+"""Image-adjustment node definitions and thin runtime adapters."""
 
 from __future__ import annotations
 

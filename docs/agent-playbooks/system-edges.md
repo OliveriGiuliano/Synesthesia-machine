@@ -10,19 +10,19 @@
 - Automated tests must not open a physical camera, send MIDI, or play audio. Inject capture factories,
   use `MockMidiBackend`, and call audio callbacks with preallocated arrays.
 - Hardware commands are opt-in. `tools.camera_probe` opens cameras, `tools.audio_probe --play` emits
-  sound, and `tools.phase4_midi_evidence` sends real MIDI only after two exact matching port arguments.
+  sound, and `tools.midi_hardware_evidence` sends real MIDI only after two exact matching port arguments.
 - Diagnostic bundles are bounded, redact filesystem paths by default, exclude frame/image pixels, and
   include paths only with explicit user consent. Never add credentials, environment secrets, or raw
   user media to logs or evidence.
 - Performance changes need correctness tests first and measurements second. Do not make performance
   claims from one noisy run, change a gate to bless a regression, or round a failing result into a
-  pass. ADR-0007 documents the accepted Phase 8 throughput interpretation.
+  pass. ADR-0007 documents the accepted reference-throughput interpretation.
 
 ## Changing packaging or versions
 
 - The source version in `src/synesthesia_machine/version.py`, project version in `pyproject.toml`, and
   product/file versions in `pysidedeploy.spec` must agree. Use
-  `uv run python -m tools.phase9_release check` to verify them.
+  `uv run python -m tools.release check` to verify them.
 - Read all of `packaging/README.md`, `packaging/release-checklist.md`, and
   `packaging/licensing-review.md` before release work.
 - `packaging/build.ps1` is not an ordinary test command. It synchronizes packaging dependencies,

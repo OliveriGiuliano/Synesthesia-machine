@@ -1,4 +1,4 @@
-"""Phase 5 channel-to-scalar and scalar conversion utility nodes."""
+"""Channel-to-scalar and scalar conversion utility nodes."""
 
 from __future__ import annotations
 

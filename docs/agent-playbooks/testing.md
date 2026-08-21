@@ -1,20 +1,23 @@
 # Testing playbook
 
-Use the narrowest relevant tests during development, then widen coverage according to risk.
+Use the narrowest relevant domain suite while iterating, then widen coverage according to risk.
 
 | Area changed | Start with |
 | --- | --- |
-| Runtime values, definitions, graph, compiler, scheduler, persistence boundaries | `tests/phase1/` |
-| Editor shell, commands, clipboard, autosave, session | `tests/phase2/` |
-| Video vertical slice, previews, debug synth, in-process client | `tests/phase3/` |
-| Spawned engine, plan swap, camera, MIDI, shared memory, supervision | `tests/phase4/` |
-| Image/channel nodes, immutability, catalogue, soak behavior | `tests/phase5/` |
-| Synesthesia algorithms, MIDI utilities, examples, benchmarks | `tests/phase6/` |
-| Groups/layout, settings, recovery, relinking, migrations, large graph | `tests/phase7/` |
-| Profiling, diagnostics, benchmark/soak harnesses, native-thread behavior | `tests/phase8/` |
-| Release configuration, packaged smoke, archive reproducibility | `tests/phase9/` |
+| Dependency direction and registry composition | `tests/architecture/` |
+| Immutable values and client/process contracts | `tests/contracts/` |
+| Authoring model, validation, layout, and compiler | `tests/graph/` |
+| Graph JSON, clipboard, backups, recovery, relinking, and migrations | `tests/persistence/` |
+| Video and camera behavior | `tests/media/` |
+| MIDI output and debug synthesis | `tests/midi/` |
+| Image, synesthesia, and utility definitions/runtimes | `tests/nodes/` |
+| Scheduler, engine clients, IPC, previews, profiling, and native threads | `tests/runtime/` |
+| Editor shell, commands, transport, settings, previews, and profiler UI | `tests/ui/` |
+| Diagnostic bundles and privacy rules | `tests/diagnostics/` |
+| Cross-domain saved-graph and lifecycle behavior | `tests/integration/` |
+| Benchmark and soak harnesses | `tests/benchmarks/` |
+| Release configuration, packaged smoke, and archive reproducibility | `tests/packaging/` |
 | Dependency/environment adapters and bootstrap smoke | `tests/smoke/` |
-| Cross-phase requested behavior | Root-level `tests/test_*.py` files |
 
 ## Testing rules
 
@@ -22,23 +25,23 @@ Use the narrowest relevant tests during development, then widen coverage accordi
   `numpy.testing.assert_allclose` with a deliberate node-specific tolerance for numeric image work.
 - Assert semantic outcomes in addition to shapes or opaque golden data: metadata, ranges, edge
   positions, frequency peaks, note state, lifecycle calls, and source clocks.
-- Assert negative behavior as well as the happy path: an unrelated consumer remains unchanged, stale
-  data is absent, a threshold suppresses the current value, and invalid replacement preserves the
-  working state where applicable.
-- Use deterministic UUIDs, seeds, arrays, generated videos, clocks, and timestamps. Do not make tests
-  depend on ordering accidents, wall-clock sleeps, the network, or local hardware.
+- Assert negative behavior as well as the happy path: unrelated consumers remain unchanged, stale
+  data is absent, invalid values are rejected, and a failed replacement preserves working state.
+- Use deterministic UUIDs, seeds, arrays, generated videos, clocks, and timestamps. Do not depend on
+  ordering accidents, wall-clock sleeps, the network, or local hardware.
 - Put temporary files under pytest's `tmp_path`. Process tests must clean up clients and shared memory
   in `finally` blocks or fixtures.
 - A behavior fix needs a regression test that fails for the original defect. Do not weaken an existing
   assertion merely to make a new implementation pass.
+- Shared factories and conformance assertions belong in `tests/support`; compatibility inputs belong
+  in `tests/fixtures/compatibility`. Neither is a user-facing example.
 - `uv run check` applies strict Pyright to `src` and `tools`. CI additionally runs
-  `uv run pyright --project pyright-tests.json` in basic mode over `tests`; this catches stale public
-  call signatures and protocol fakes while allowing deliberate white-box assertions against private
-  Qt/runtime state. Run that test-call-site gate after changing a public protocol.
-- Run `uv run check` after code changes. Before final handoff, run `uv run pytest -q` unless the task is
-  documentation-only or the suite cannot reasonably run; report any unrun gate and why.
+  `uv run pyright --project pyright-tests.json` over tests. Run that call-site gate after changing a
+  public protocol.
+- Run `uv run check` after code changes. Before final handoff, run `uv run pytest -q` unless the task
+  is documentation-only or the suite cannot reasonably run; report any unrun gate and why.
 
-CI on `windows-latest` sets `QT_QPA_PLATFORM=offscreen`, installs the locked development group, then
-runs both type gates, `uv run pytest -q`, and the real application-shell smoke test. Local success on
-another platform is not evidence that
-Windows spawn, devices, Qt deployment, or case-insensitive filesystem behavior is correct.
+CI on `windows-latest` sets `QT_QPA_PLATFORM=offscreen`, installs the locked development group, runs
+both type gates, executes the full suite, and launches the real application-shell smoke test. Local
+success elsewhere is not evidence for Windows spawn, devices, Qt deployment, or case-insensitive
+filesystem behavior.

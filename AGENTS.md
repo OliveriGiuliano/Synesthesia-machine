@@ -22,7 +22,7 @@ schema-versioned JSON persistence.
 3. Read `README.md`, `docs/agent-playbooks/README.md`, every playbook it routes to for the planned
    change, the local package `README.md` for every package you will touch, the relevant tests, and the
    public package facade (`__init__.py`) before changing an interface.
-4. Consult `synesthesia_machine_design/00_master_architecture.md` for the architectural baseline and
+4. Consult `docs/architecture/master.md` for the architectural baseline and
    the accepted records under `docs/adr/` for binding decisions. A deliberate architectural
    deviation requires a new ADR before implementation.
 5. Treat phase packets and completion reports as design history and acceptance evidence, not as a
@@ -67,8 +67,8 @@ uv run synmachine --smoke-test            # launch and close the real applicatio
 uv run check                              # Ruff format check, Ruff lint, strict Pyright
 uv run test                               # complete pytest suite
 uv run pytest -q                          # the test command used by CI
-uv run pytest -q tests/phase5/test_batch3_filters.py
-uv run pytest -q tests/phase4/test_process_engine.py -k handshake
+uv run pytest -q tests/nodes/image/test_filters.py
+uv run pytest -q tests/runtime/test_process_engine.py -k handshake
 uv run ruff format path/to/changed.py     # format only intentionally changed files
 ```
 
@@ -96,11 +96,12 @@ Pyright. Prefer formatting only the files in scope instead of mechanically rewri
 | `src/synesthesia_machine/persistence/` | Strict graph JSON conversion, pure sequential migrations, atomic save/backup, clipboard, recovery, and media relinking. |
 | `src/synesthesia_machine/ui/` | PySide6 editor, view models, undo commands, canvas, inspectors, previews, profiler, transport, settings, themes, and translations. |
 | `src/synesthesia_machine/diagnostics/` | Hardware summaries, structured logs, and bounded/redacted diagnostic bundles. Never include frame pixels or unapproved personal paths. |
-| `tests/` | Hardware-independent phase and smoke coverage. Tests use deterministic media, injected capture factories, mock MIDI, direct audio callbacks, and offscreen Qt. |
+| `tests/` | Hardware-independent domain, integration, benchmark, packaging, and smoke coverage. Tests use deterministic media, injected capture factories, mock MIDI, direct audio callbacks, and offscreen Qt. |
 | `tools/` | Risk probes, deterministic fixture generation, validation, benchmarks, soak tests, evidence generation, and release tooling. Read `tools/README.md` before running them. |
-| `examples/` | Persisted portable graphs and deterministic bundled media. Phase 6 contains the current generated all-definition catalogue; earlier catalogues may be historical acceptance artifacts. |
+| `examples/` | Current portable graphs, deterministic bundled media, and the generated all-definition catalogue. Historical catalogues are compatibility fixtures under `tests/fixtures/`. |
+| `benchmarks/fixtures/` | Deterministic non-user graph inputs owned by performance harnesses. |
 | `docs/` | ADRs, phase completion reports, node reference, committed benchmark/evidence JSON, and screenshots. |
-| `synesthesia_machine_design/` | Master architecture and historical implementation phase packets. |
+| `docs/architecture/` | Active master architecture. Historical delivery packets and completion evidence live under `docs/history/v0-development/`. |
 | `packaging/` | Locked standalone build, clean-machine smoke procedure, notices, provenance, and release gates. |
 | `SynesthesiaMachine.py` | Packaging entry script. Development should normally use `uv run synmachine`. |
 
@@ -111,7 +112,7 @@ Pyright. Prefer formatting only the files in scope instead of mechanically rewri
 - `contracts` is the lowest layer. It may use the standard library and NumPy value representation,
   but it must not import `app`, `graph`, `nodes`, `persistence`, `runtime`, or `ui`.
 - `graph`, `nodes`, `runtime`, and `persistence` are headless. They must not import PySide6 or
-  `synesthesia_machine.app`. `tests/phase1/test_boundaries.py` enforces this.
+  `synesthesia_machine.app`. `tests/architecture/test_boundaries.py` enforces this.
 - `graph` may consume public contracts, immutable node definitions, and execution-plan value types;
   it must not depend on the scheduler, persistence, Qt, or concrete application composition.
 - Concrete nodes may depend on contracts plus reusable media/MIDI services, never on UI classes.

@@ -44,4 +44,4 @@ names and audio device names continue to be accepted when opening a device.
 
 - `docs/adr/0004-midi-stack.md`
 - `docs/adr/0005-ui-engine-process-separation.md`
-- `synesthesia_machine_design/00_master_architecture.md`
+- `docs/architecture/master.md`

@@ -1,4 +1,4 @@
-"""Document/session/controller ownership for the Phase 2 editor."""
+"""Document, session, and controller ownership for the node editor."""
 
 from __future__ import annotations
 
@@ -69,6 +69,7 @@ class DocumentSession(QObject):
     """Own the single mutable document, undo stack, path, and validation projection."""
 
     changed = Signal()
+    runtimeChanged = Signal()
     pathChanged = Signal(object)
     dirtyChanged = Signal(bool)
     validationChanged = Signal(object)
@@ -86,7 +87,12 @@ class DocumentSession(QObject):
             if (session := session_reference()) is not None:
                 session._refresh()
 
+        def refresh_presentation() -> None:
+            if (session := session_reference()) is not None:
+                session._refresh(runtime_changed=False)
+
         self._command_change_callback = refresh_session
+        self._presentation_change_callback = refresh_presentation
         self.current_path: Path | None = None
         self.report = ValidationReport()
         self._device_catalogue = DeviceCatalogue()
@@ -229,12 +235,18 @@ class DocumentSession(QObject):
         color: str = "#46515f",
     ) -> UUID:
         group = GroupModel(uuid4(), kind, title, text, position, size, color)
-        self.push(AddGroupCommand(self.document, group, self._command_change_callback))
+        self.push(AddGroupCommand(self.document, group, self._presentation_change_callback))
         return group.id
 
     def delete_groups(self, group_ids: set[UUID]) -> None:
         if group_ids:
-            self.push(DeleteGroupsCommand(self.document, group_ids, self._command_change_callback))
+            self.push(
+                DeleteGroupsCommand(
+                    self.document,
+                    group_ids,
+                    self._presentation_change_callback,
+                )
+            )
 
     def move_groups(
         self,
@@ -247,7 +259,7 @@ class DocumentSession(QObject):
                     self.document,
                     old_positions,
                     new_positions,
-                    self._command_change_callback,
+                    self._presentation_change_callback,
                 )
             )
 
@@ -273,7 +285,13 @@ class DocumentSession(QObject):
             color=group.color if color is None else color,
         )
         if updated != group:
-            self.push(EditGroupCommand(self.document, updated, self._command_change_callback))
+            self.push(
+                EditGroupCommand(
+                    self.document,
+                    updated,
+                    self._presentation_change_callback,
+                )
+            )
 
     def delete_nodes(self, node_ids: set[UUID]) -> None:
         if node_ids:
@@ -312,7 +330,7 @@ class DocumentSession(QObject):
                     self.document,
                     old_positions,
                     new_positions,
-                    self._command_change_callback,
+                    self._presentation_change_callback,
                 )
             )
 
@@ -560,11 +578,13 @@ class DocumentSession(QObject):
             self.undo_stack.endMacro()
         return node_id
 
-    def _refresh(self) -> None:
+    def _refresh(self, *, runtime_changed: bool = True) -> None:
         self._compilation = self.compiler.compile(self.document.snapshot())
         self.report = self._compilation.report
         self.validationChanged.emit(self.report)
         self.changed.emit()
+        if runtime_changed:
+            self.runtimeChanged.emit()
 
     @Slot(bool)
     def _on_clean_changed(self, clean: bool) -> None:

@@ -1,4 +1,4 @@
-"""Phase 3 final-shaped in-process engine client and latest-frame graph worker."""
+"""In-process engine client and latest-frame graph worker."""
 
 from __future__ import annotations
 
@@ -564,7 +564,7 @@ class _FailedSource:
 
 
 class InProcessEngineClient:
-    """Phase 3 implementation of the transport-independent EngineClient protocol."""
+    """In-process implementation of the transport-independent EngineClient protocol."""
 
     def __init__(
         self,

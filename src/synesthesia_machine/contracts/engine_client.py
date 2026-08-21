@@ -1,6 +1,6 @@
 """Client-facing engine control, status, metrics, and preview contracts.
 
-These values intentionally describe the UI-side API rather than the Phase 3
+These values intentionally describe the stable UI-side API rather than the
 in-process implementation.  A later process-backed client can implement the
 same protocol without changing transport or widget code.
 """

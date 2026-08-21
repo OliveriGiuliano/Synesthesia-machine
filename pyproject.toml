@@ -67,5 +67,5 @@ pythonPlatform = "Windows"
 typeCheckingMode = "strict"
 venvPath = "."
 venv = ".venv"
-# Several native Phase 0 libraries do not publish complete typing metadata.
+# Several native dependencies do not publish complete typing metadata.
 reportMissingTypeStubs = "none"
