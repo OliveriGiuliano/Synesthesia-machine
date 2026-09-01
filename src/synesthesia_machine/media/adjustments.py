@@ -109,7 +109,11 @@ def colour_levels_image(
         raise ValueError("colour levels gamma must be positive")
 
     def transform(values: NDArray[np.float32]) -> NDArray[np.float32]:
-        normalized = (values - np.float32(input_black)) / np.float32(input_white - input_black)
+        normalized = np.clip(
+            (values - np.float32(input_black)) / np.float32(input_white - input_black),
+            np.float32(0.0),
+            np.float32(1.0),
+        )
         with np.errstate(invalid="ignore", over="ignore"):
             corrected = np.power(normalized, np.float32(1.0 / gamma))
         return corrected * np.float32(output_white - output_black) + np.float32(output_black)

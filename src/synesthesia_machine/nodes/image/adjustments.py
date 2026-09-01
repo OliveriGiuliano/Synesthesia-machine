@@ -452,7 +452,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
         _definition(
             "synmachine.image.colour_levels",
             "Colour Levels",
-            "Map selected input levels through gamma to explicit output levels.",
+            "Clamp normalized selected levels, then apply gamma to explicit output levels.",
             (
                 _float_parameter("input_black", "Input black", 0.0),
                 _float_parameter("input_white", "Input white", 1.0),

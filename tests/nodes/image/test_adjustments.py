@@ -250,6 +250,38 @@ def test_colour_levels_applies_normalization_gamma_and_output_range(
     assert result.data[0, 0, 3] == pytest.approx(0.4)
 
 
+def test_colour_levels_clamps_out_of_range_inputs_before_fractional_gamma(
+    rgba_image: ImageFrame,
+) -> None:
+    source = _image(
+        np.array([[[0.2, 0.94, 1.8, 0.4]]], dtype=np.float32),
+        ColorSpace.RGBA,
+        rgba_image,
+    )
+
+    result = _process(
+        "synmachine.image.colour_levels",
+        source,
+        {
+            "input_black": 0.3,
+            "input_white": 1.58,
+            "gamma": 1.18,
+            "output_black": 0.1,
+            "output_white": 0.9,
+        },
+    )
+
+    normalized = np.clip(
+        (source.data[..., :3] - np.float32(0.3)) / np.float32(1.58 - 0.3),
+        np.float32(0.0),
+        np.float32(1.0),
+    )
+    expected = np.power(normalized, np.float32(1.0 / 1.18)) * np.float32(0.8) + np.float32(0.1)
+    assert np.isfinite(result.data[..., :3]).all()
+    assert np.allclose(result.data[..., :3], expected, atol=1e-6)
+    assert result.data[0, 0, 3] == pytest.approx(0.4)
+
+
 def test_hue_and_saturation_convert_rgba_and_preserve_alpha(rgba_image: ImageFrame) -> None:
     red = _image(
         np.array([[[1.0, 0.0, 0.0, 0.25]]], dtype=np.float32),

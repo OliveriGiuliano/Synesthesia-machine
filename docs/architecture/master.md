@@ -1188,7 +1188,7 @@ Connectable minimum and maximum, default 0 and 1. Applied to selected channels; 
 
 #### Colour Levels
 
-Parameters: input black, input white, gamma, output black, output white, independently connectable where useful. Apply normalized levels per selected channels. Reject `input_white <= input_black` and gamma <= 0.
+Parameters: input black, input white, gamma, output black, output white, independently connectable where useful. Normalize and clamp selected channels to 0..1 before applying gamma and mapping to output levels. Reject `input_white <= input_black` and gamma <= 0.
 
 #### Hue
 
