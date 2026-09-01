@@ -705,6 +705,7 @@
       "parameters": {
         "file_path": "",
         "loop": false,
+        "playback_speed": 1.0,
         "process_every_nth_frame": 1,
         "stream_index": 0
       },

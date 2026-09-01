@@ -160,12 +160,13 @@ class _ManualVideoFactory:
         file_path: str | Path,
         *,
         process_every_nth_frame: int,
+        playback_speed: float,
         loop: bool,
         stream_index: int,
         on_frame: object,
         on_reset: object,
     ) -> _ManualVideoSource:
-        del process_every_nth_frame, loop, stream_index, on_reset
+        del process_every_nth_frame, playback_speed, loop, stream_index, on_reset
         assert callable(on_frame)
         source = _ManualVideoSource(
             node_id,

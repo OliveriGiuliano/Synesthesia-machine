@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QApplication, QLabel
 from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.graph import ValidationIssue, ValidationReport, ValidationSeverity
 from synesthesia_machine.ui.graphics import NodeGraphicsItem
+from synesthesia_machine.ui.parameter_editors import FloatRangeParameterEditor
 from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.theme import DEFAULT_THEME
 from synesthesia_machine.ui.transport import resolve_transport_target
@@ -108,5 +109,13 @@ def test_inspector_renders_parameter_help_as_visible_text(qapp: QApplication) ->
         for label in inspector.findChildren(QLabel)
         if label.objectName().startswith("parameter_help_")
     }
+    playback_speed = inspector.findChild(FloatRangeParameterEditor, "parameter_playback_speed")
     assert "Path to a saved video file." in visible_help
     assert any("N=2 processes source frames" in text for text in visible_help)
+    assert any("Scale PTS playback timing from 0.25x to 4x" in text for text in visible_help)
+    assert playback_speed is not None
+    assert (playback_speed.minimum(), playback_speed.maximum(), playback_speed.value()) == (
+        0.25,
+        4.0,
+        1.0,
+    )

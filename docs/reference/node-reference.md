@@ -93,6 +93,16 @@ and exposed through one reusable editor group/view model.
 - Requires at least two inputs but has no upper input-count limit. All inputs must match the execution
   clock; duplicate channel/note keys resolve to maximum velocity in stable numeric port order.
 
+## Input sources
+
+### Load Video
+
+- **Type:** `synmachine.input.load_video`
+- **Speed:** Playback speed is an optional persisted `0.25×`–`4×` control with a default of `1×`. It
+  scales the wall-clock interval between the original PyAV presentation timestamps without changing
+  the media timestamps attached to emitted frames. Updating it restarts the source and resets its
+  source-clock component.
+
 ## Runtime and diagnostic contract
 
 Required-input `NoData` is propagated by the Scheduler before these runtimes execute. Runtime validation

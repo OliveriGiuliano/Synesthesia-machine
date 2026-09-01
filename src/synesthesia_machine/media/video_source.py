@@ -13,6 +13,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, auto
+from math import isfinite
 from pathlib import Path
 from typing import Protocol
 from uuid import UUID
@@ -120,7 +121,10 @@ PresentedVideoFrame = PresentedSourceFrame
 class PtsPlaybackTimeline:
     """Map media PTS values to one monotonic playback timeline."""
 
-    def __init__(self) -> None:
+    def __init__(self, playback_speed: float = 1.0) -> None:
+        if not isfinite(playback_speed) or playback_speed <= 0.0:
+            raise ValueError("playback_speed must be finite and positive")
+        self._playback_speed = playback_speed
         self._first_pts_s: float | None = None
         self._anchor_ns: int | None = None
         self._paused_at_ns: int | None = None
@@ -138,7 +142,9 @@ class PtsPlaybackTimeline:
         if self._first_pts_s is None or self._anchor_ns is None:
             self._first_pts_s = pts_seconds
             self._anchor_ns = now_ns
-        offset_ns = round((pts_seconds - self._first_pts_s) * _NANOSECONDS_PER_SECOND)
+        offset_ns = round(
+            (pts_seconds - self._first_pts_s) * _NANOSECONDS_PER_SECOND / self._playback_speed
+        )
         return self._anchor_ns + offset_ns
 
     def pause(self, now_ns: int) -> None:
@@ -207,6 +213,7 @@ class VideoSourceService:
         file_path: str | Path,
         *,
         process_every_nth_frame: int = 1,
+        playback_speed: float = 1.0,
         loop: bool = False,
         stream_index: int = 0,
         on_frame: FrameCallback,
@@ -217,6 +224,8 @@ class VideoSourceService:
     ) -> None:
         if process_every_nth_frame < 1:
             raise ValueError("process_every_nth_frame must be at least 1")
+        if not isfinite(playback_speed) or playback_speed <= 0.0:
+            raise ValueError("playback_speed must be finite and positive")
         if decode_queue_size < 1:
             raise ValueError("decode_queue_size must be at least 1")
         if max_decode_failures < 1:
@@ -236,7 +245,7 @@ class VideoSourceService:
         self._decode_queue: queue.Queue[_DecodeItem] = queue.Queue(decode_queue_size)
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
-        self._timeline = PtsPlaybackTimeline()
+        self._timeline = PtsPlaybackTimeline(playback_speed)
         self._decode_thread: threading.Thread | None = None
         self._presentation_thread: threading.Thread | None = None
 

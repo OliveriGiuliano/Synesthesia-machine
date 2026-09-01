@@ -521,6 +521,7 @@ class _FakeVideoSource:
 class _FakeVideoFactory:
     sources: list[_FakeVideoSource] = field(default_factory=lambda: list[_FakeVideoSource]())
     events: list[str] = field(default_factory=lambda: list[str]())
+    playback_speeds: list[float] = field(default_factory=lambda: list[float]())
 
     def __call__(
         self,
@@ -528,12 +529,14 @@ class _FakeVideoFactory:
         file_path: str | Path,
         *,
         process_every_nth_frame: int,
+        playback_speed: float,
         loop: bool,
         stream_index: int,
         on_frame: object,
         on_reset: object,
     ) -> _FakeVideoSource:
         del process_every_nth_frame, loop, stream_index, on_frame, on_reset
+        self.playback_speeds.append(playback_speed)
         source = _FakeVideoSource(node_id, str(file_path), self.events)
         self.sources.append(source)
         return source
@@ -559,6 +562,7 @@ def test_source_controller_retention_restart_and_new_source_start_policy() -> No
     try:
         assert client.activate(document.snapshot()).activated
         original = factory.sources[0]
+        assert factory.playback_speeds == [1.0]
         client.play(source_id)
 
         document.set_position(source_id, (10.0, 20.0))
@@ -577,6 +581,13 @@ def test_source_controller_retention_restart_and_new_source_start_policy() -> No
             "first.mp4:close",
             "replacement.mp4:play",
         ]
+
+        document.set_parameter(source_id, "playback_speed", 0.5)
+        assert client.activate(document.snapshot()).activated
+        speed_adjusted_source = factory.sources[2]
+        assert replacement_source.close_count == 1
+        assert speed_adjusted_source.state is SourceState.PLAYING
+        assert factory.playback_speeds == [1.0, 1.0, 0.5]
 
         new_source_id = document.add_node(
             "synmachine.input.load_video",

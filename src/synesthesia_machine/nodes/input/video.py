@@ -17,6 +17,7 @@ from synesthesia_machine.nodes.base import (
     ExecutionKind,
     NodeDefinition,
     OutputPortSpec,
+    ParameterEditorHint,
     ParameterSpec,
     ParameterUpdateMode,
     ResetReason,
@@ -68,6 +69,20 @@ def create_input_definitions() -> tuple[NodeDefinition, ...]:
                     "",
                     help_text="Path to a saved video file.",
                     update_mode=ParameterUpdateMode.RESTART_SOURCE,
+                ),
+                ParameterSpec(
+                    "playback_speed",
+                    "Playback speed",
+                    PortType.FLOAT,
+                    1.0,
+                    help_text=(
+                        "Scale PTS playback timing from 0.25x to 4x; changing it restarts the "
+                        "source."
+                    ),
+                    minimum=0.25,
+                    maximum=4.0,
+                    update_mode=ParameterUpdateMode.RESTART_SOURCE,
+                    editor_hint=ParameterEditorHint.SLIDER,
                 ),
                 ParameterSpec(
                     "process_every_nth_frame",

@@ -62,6 +62,12 @@ def test_load_video_definition_has_stable_source_contract() -> None:
     assert definition.execution_kind is ExecutionKind.SOURCE
     assert tuple(port.id for port in definition.outputs) == ("image", "processed_index")
     assert definition.parameter("process_every_nth_frame").minimum == 1  # type: ignore[union-attr]
+    assert definition.parameter("playback_speed").default == 1.0  # type: ignore[union-attr]
+    assert definition.parameter("playback_speed").minimum == 0.25  # type: ignore[union-attr]
+    assert definition.parameter("playback_speed").maximum == 4.0  # type: ignore[union-attr]
+    assert definition.parameter("playback_speed").update_mode is (  # type: ignore[union-attr]
+        ParameterUpdateMode.RESTART_SOURCE
+    )
     assert definition.parameter("file_path").update_mode is (  # type: ignore[union-attr]
         ParameterUpdateMode.RESTART_SOURCE
     )
@@ -232,3 +238,29 @@ def test_pts_timeline_uses_actual_intervals_and_excludes_pause_duration() -> Non
     timeline.pause(1_020_000_000)
     timeline.resume(3_020_000_000)
     assert timeline.target_ns(5.15, 3_020_000_000) == 3_150_000_000
+
+
+@pytest.mark.parametrize(
+    ("playback_speed", "second_target_ns"),
+    [(0.5, 1_080_000_000), (2.0, 1_020_000_000), (4.0, 1_010_000_000)],
+)
+def test_pts_timeline_scales_media_intervals_by_playback_speed(
+    playback_speed: float, second_target_ns: int
+) -> None:
+    timeline = PtsPlaybackTimeline(playback_speed)
+
+    assert timeline.target_ns(5.0, 1_000_000_000) == 1_000_000_000
+    assert timeline.target_ns(5.04, 1_000_000_000) == second_target_ns
+
+
+@pytest.mark.parametrize("playback_speed", (0.0, -1.0, float("inf"), float("nan")))
+def test_video_source_rejects_invalid_playback_speed(tmp_path: Path, playback_speed: float) -> None:
+    path = generate_test_video(tmp_path / "invalid-speed.mp4", frame_count=1)
+
+    with pytest.raises(ValueError, match="playback_speed must be finite and positive"):
+        VideoSourceService(
+            SOURCE_ID,
+            path,
+            playback_speed=playback_speed,
+            on_frame=lambda _frame: None,
+        )

@@ -415,7 +415,11 @@ def test_parameter_randomization_preserves_context_dependent_video_identity() ->
     assert node is not None
     assert node.parameters["file_path"] == "clip.mkv"
     assert node.parameters["stream_index"] == 3
-    assert node.parameters["process_every_nth_frame"] != 1 or node.parameters["loop"] is True
+    assert (
+        node.parameters["process_every_nth_frame"] != 1
+        or node.parameters["loop"] is True
+        or node.parameters["playback_speed"] != 1.0
+    )
 
 
 def test_randomize_nodes_replaces_selection_with_random_sized_valid_subgraph() -> None:
