@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,6 +37,7 @@ from synesthesia_machine.contracts import (
     ValuePreview,
 )
 from synesthesia_machine.graph import GraphSnapshot, ValidationReport
+from synesthesia_machine.graph.validation import ValidationIssue, ValidationSeverity
 from synesthesia_machine.ui.main_window import MainWindow
 
 
@@ -320,6 +322,49 @@ def test_engine_crash_keeps_document_and_undo_history_then_restart_rebuilds(
         assert window.session.undo_stack.count() == undo_count
         assert not window.action_registry.require("restart_engine").isEnabled()
         assert "Engine STOPPED" in window._engine_status.text()  # pyright: ignore[reportPrivateUsage]
+    finally:
+        window.session.new_document()
+        window.close()
+
+
+def test_broken_graph_activation_reports_the_engine_as_stopped(
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    class BrokenActivationClient(_SupervisionClient):
+        def activate(
+            self, snapshot: GraphSnapshot, *, demand_roots: Iterable[UUID] | None = None
+        ) -> EngineActivation:
+            del demand_roots
+            report = ValidationReport(
+                issues=(
+                    ValidationIssue(
+                        ValidationSeverity.ERROR,
+                        "unknown_node_type",
+                        "Unknown node type",
+                    ),
+                )
+            )
+            return EngineActivation(snapshot.revision, report, False)
+
+    client = BrokenActivationClient(EngineStatus(EngineConnectionState.CONNECTED))
+    window = MainWindow(
+        create_application_registry(),
+        _paths(tmp_path),
+        client,
+        settings=QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat),
+        offer_recovery=False,
+    )
+    try:
+        window._activate_graph()  # pyright: ignore[reportPrivateUsage]
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            qapp.processEvents()
+            if "engine stopped" in window.statusBar().currentMessage():
+                break
+            time.sleep(0.01)
+
+        assert window.statusBar().currentMessage() == "Graph has 1 error(s); engine stopped"
     finally:
         window.session.new_document()
         window.close()

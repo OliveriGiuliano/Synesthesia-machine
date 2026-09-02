@@ -1395,11 +1395,9 @@ class MainWindow(QMainWindow):
             )
             return
         count = len(activation.report.errors)
+        self._clear_runtime_previews()
         self.statusBar().showMessage(
-            trf(
-                "Graph has {count} error(s); previous valid runtime remains active",
-                count=count,
-            ),
+            trf("Graph has {count} error(s); engine stopped", count=count),
             5000,
         )
 

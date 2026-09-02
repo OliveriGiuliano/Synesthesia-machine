@@ -597,7 +597,10 @@ Structural edits are debounced for approximately 100 ms, then the UI sends a new
 5. closes removed runtimes;
 6. reports success or validation errors.
 
-The old valid plan continues to run if compilation of the new snapshot fails.
+If compilation of the new snapshot fails, the engine stops (sources stop, MIDI
+outputs panic, previews clear, state `STOPPED`) instead of keeping the previous
+plan running; it resumes automatically when the graph becomes valid again
+(ADR 0013).
 
 ### 9.6 Demand roots
 
@@ -2140,7 +2143,7 @@ Mitigation: state-frame abstraction, centralized diffing, explicit tracked notes
 
 ### Risk 4 — UI graph and engine graph diverge during live edits
 
-Mitigation: immutable graph revisions, compile-then-atomic-swap, acknowledgements with revision IDs, old plan retained on compile failure, and commands as the only graph mutation path.
+Mitigation: immutable graph revisions, compile-then-atomic-swap, acknowledgements with revision IDs, engine auto-stop when a broken graph is activated (ADR 0013), and commands as the only graph mutation path.
 
 ### Risk 5 — Windows device APIs are inconsistent
 

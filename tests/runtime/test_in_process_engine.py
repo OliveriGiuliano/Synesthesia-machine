@@ -167,3 +167,41 @@ def test_runtime_node_errors_are_exposed_through_typed_engine_metrics(tmp_path: 
         assert error.tick_index == 2
     finally:
         client.close()
+
+
+def test_broken_graph_stops_the_runtime_and_a_valid_graph_restarts_it(
+    tmp_path: Path,
+) -> None:
+    video = generate_test_video(tmp_path / "stop.mp4", frame_count=10, fps=1)
+    document = GraphDocument()
+    source_id = document.add_node(
+        "synmachine.input.load_video",
+        parameters={"file_path": str(video)},
+    )
+    client = InProcessEngineClient(create_application_registry())
+    try:
+        assert client.activate(document.snapshot()).activated
+        client.play(source_id)
+        assert client.metrics().state is EngineState.RUNNING
+
+        # Breaking the document stops the engine: sources are torn down, the
+        # previous plan no longer produces output, and the client stays open.
+        document.add_node("unknown.node")
+        rejected = client.activate(document.snapshot())
+
+        assert not rejected.activated
+        assert not rejected.report.is_valid
+        assert client.metrics().state is EngineState.STOPPED
+        assert client.source_status() == ()
+        assert client.midi_output_status() == ()
+
+        # A valid graph resumes the engine without any manual re-activation.
+        restarted = GraphDocument()
+        restarted_source_id = restarted.add_node(
+            "synmachine.input.load_video",
+            parameters={"file_path": str(video)},
+        )
+        assert client.activate(restarted.snapshot()).activated
+        assert client.source_status(restarted_source_id)[0].state is SourceState.READY
+    finally:
+        client.close()

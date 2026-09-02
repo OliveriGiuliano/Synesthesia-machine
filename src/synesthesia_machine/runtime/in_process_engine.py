@@ -609,6 +609,10 @@ class InProcessEngineClient:
             )
             plan = prepared.plan
             if plan is None:
+                # A graph that no longer compiles stops the engine: the previous
+                # plan must not keep producing output from a broken document.
+                prepared.close()
+                self._stop_runtime_for_invalid_graph()
                 return EngineActivation(snapshot.revision, prepared.result.report, False)
             try:
                 preview_configuration = self._preview_broker.prepare(plan)
@@ -1003,6 +1007,28 @@ class InProcessEngineClient:
             self._state = EngineState.PAUSED
         else:
             self._state = EngineState.STOPPED
+
+    def _stop_runtime_for_invalid_graph(self) -> None:
+        """Stop and tear down the runtime after a broken graph (client stays open)."""
+
+        sources = tuple(self._sources.values())
+        self._sources = {}
+        for source in sources:
+            with suppress(Exception):
+                source.stop()
+        worker = self._worker
+        self._worker = None
+        if worker is not None:
+            with suppress(Exception):
+                worker.close()
+        with suppress(Exception):
+            self._facade.stop()
+        with suppress(Exception):
+            self._preview_broker.clear()
+        for source in sources:
+            with suppress(Exception):
+                source.close()
+        self._state = EngineState.STOPPED
 
     def _close_runtime(self) -> None:
         sources = tuple(self._sources.values())

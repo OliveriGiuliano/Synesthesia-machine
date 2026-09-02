@@ -111,6 +111,21 @@ class EngineFacade:
         if previous is not None:
             previous.close(reset_reason)
 
+    def stop(self, reason: ResetReason = ResetReason.PLAN_REPLACED) -> None:
+        """Tear down the active runtime: panic MIDI outputs, then close node runtimes.
+
+        Used when a graph no longer compiles: the engine stops instead of
+        keeping a previous plan running. Idempotent and safe after close.
+        """
+
+        scheduler = self._scheduler
+        self._scheduler = None
+        self._plan = None
+        if scheduler is None:
+            return
+        scheduler.panic()
+        scheduler.close(reason)
+
     def tick(
         self, context: FrameContext, *, source_values: Mapping[PortKey, RuntimeValue] | None = None
     ) -> TickResult:

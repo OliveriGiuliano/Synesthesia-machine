@@ -16,6 +16,7 @@ from synesthesia_machine.contracts import (
     EngineActivation,
     EngineConnectionState,
     EngineState,
+    SourceState,
 )
 from synesthesia_machine.contracts.engine_messages import (
     ENGINE_PROTOCOL_VERSION,
@@ -183,6 +184,36 @@ def test_invalid_candidate_does_not_replace_active_revision(
     assert rejected.graph_revision == invalid_snapshot.revision
     assert process_client.status().graph_revision == valid_snapshot.revision
     assert process_client.metrics().graph_revision == valid_snapshot.revision
+
+
+def test_invalid_candidate_stops_the_engine_and_valid_candidate_restarts_it(
+    process_client: ProcessEngineClient,
+    tmp_path: Path,
+) -> None:
+    video = generate_test_video(tmp_path / "process-stop.mp4", frame_count=10, fps=1)
+    document = GraphDocument()
+    source_id = document.add_node(
+        "synmachine.input.load_video",
+        parameters={"file_path": str(video)},
+    )
+    valid_snapshot = document.snapshot()
+    assert process_client.activate(valid_snapshot).activated
+    process_client.play(source_id)
+    assert _wait_until(lambda: process_client.metrics().state is EngineState.RUNNING)
+
+    # A broken document stops the child engine's runtime instead of keeping
+    # the previous plan producing output.
+    document.add_node("unknown.node")
+    rejected = process_client.activate(document.snapshot())
+
+    assert not rejected.activated
+    assert not rejected.report.is_valid
+    assert process_client.metrics().state is EngineState.STOPPED
+    assert process_client.source_status() == ()
+
+    # A valid candidate restarts the engine through the same IPC path.
+    assert process_client.activate(valid_snapshot).activated
+    assert process_client.source_status(source_id)[0].state is SourceState.READY
 
 
 def test_forced_crash_fails_boundedly_and_restart_rebuilds_latest_valid_graph(

@@ -383,7 +383,7 @@ _FRENCH: dict[str, str] = {
     "{verb} the {target} source": "{verb} la source {target}",
     "Engine activation failed: {error}": "Échec de l’activation du moteur : {error}",
     "Activated graph revision {revision}": "Révision {revision} du graphe activée",
-    "Graph has {count} error(s); previous valid runtime remains active": "Le graphe comporte {count} erreur(s) ; l’exécution valide précédente reste active",
+    "Graph has {count} error(s); engine stopped": "Le graphe comporte {count} erreur(s) ; le moteur est arrêté",
     "no source": "aucune source",
     "Unknown source error": "Erreur de source inconnue",
     "MIDI output is unavailable": "La sortie MIDI n’est pas disponible",
