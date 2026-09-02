@@ -66,6 +66,20 @@ def _issue_text(issues: tuple[ValidationIssue, ...]) -> str:
     )
 
 
+def _bounded_translation_axis(
+    delta: float, start: float, size: float, lower: float, upper: float
+) -> float:
+    """Clamp a translation so the item edge stays within [lower, upper]."""
+
+    minimum = lower - start
+    maximum = upper - size - start
+    if maximum < minimum:
+        # The item is larger than the graph area on this axis; pin its leading
+        # edge so it remains reachable instead of stranding it beyond the edge.
+        return minimum
+    return min(max(delta, minimum), maximum)
+
+
 class GroupGraphicsItem(QGraphicsObject):
     """Movable persisted group/comment projection rendered behind graph nodes."""
 
@@ -83,6 +97,9 @@ class GroupGraphicsItem(QGraphicsObject):
         self._resize_start_scene = QPointF()
         self._resize_start_position = model.position
         self._resize_start_size = model.size
+        self._move_start_scene = QPointF()
+        self._move_items: list[GroupGraphicsItem] = []
+        self._move_start_positions: list[QPointF] = []
         self.setFlags(
             QGraphicsItem.GraphicsItemFlag.ItemIsMovable
             | QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
@@ -91,6 +108,22 @@ class GroupGraphicsItem(QGraphicsObject):
         self.setZValue(-3.0 if model.kind is GroupKind.GROUP else -0.75)
         self.setToolTip(format_tooltip(model.text or model.title))
         self.setAcceptHoverEvents(True)
+
+    def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value: object) -> object:
+        if change is QGraphicsItem.GraphicsItemChange.ItemPositionChange:
+            scene = cast("object | None", self.scene())
+            if scene is not None:
+                proposed = value
+                if isinstance(proposed, QPointF):
+                    width, height = self.boundingRect().width(), self.boundingRect().height()
+                    clamped = cast("GraphSceneProtocol", scene).clamp_position_to_scene(
+                        proposed.x(), proposed.y(), width, height
+                    )
+                    if (clamped[0], clamped[1]) != (proposed.x(), proposed.y()):
+                        # Groups are dragged through the Qt base item handler, so
+                        # this net keeps them inside the graph area at every step.
+                        return QPointF(clamped[0], clamped[1])
+        return super().itemChange(change, value)
 
     def boundingRect(self) -> QRectF:
         return self._body_rect().adjusted(
@@ -191,9 +224,30 @@ class GroupGraphicsItem(QGraphicsObject):
         super().mousePressEvent(event)
         scene = cast("GraphSceneProtocol", self.scene())
         self._drag_origin = scene.selected_group_positions()
+        if self.isSelected():
+            self._move_items = scene.selected_group_items()
+        else:
+            self._move_items = [self]
+        self._move_start_scene = event.scenePos()
+        self._move_start_positions = [item.pos() for item in self._move_items]
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         if self._resize_edges is None:
+            if self._move_items:
+                scene = cast("object | None", self.scene())
+                if scene is not None:
+                    # Move the selected groups together, bounded so the set stays
+                    # inside the graph area (mirrors node drag behaviour).
+                    desired = event.scenePos() - self._move_start_scene
+                    translation = self._bounded_move_translation(
+                        desired, cast("GraphSceneProtocol", scene)
+                    )
+                    for item, start in zip(
+                        self._move_items, self._move_start_positions, strict=True
+                    ):
+                        item.setPos(start.x() + translation.x(), start.y() + translation.y())
+                    event.accept()
+                    return
             super().mouseMoveEvent(event)
             return
         delta = event.scenePos() - self._resize_start_scene
@@ -230,6 +284,24 @@ class GroupGraphicsItem(QGraphicsObject):
         scene = cast("GraphSceneProtocol", self.scene())
         scene.commit_group_move(self._drag_origin)
         self._drag_origin = {}
+        self._move_items = []
+        self._move_start_positions = []
+
+    def _bounded_move_translation(self, desired: QPointF, scene: GraphSceneProtocol) -> QPointF:
+        """Intersect the per-group translation bounds so the selection moves as a unit."""
+
+        rect = scene.sceneRect()
+        translation_x = desired.x()
+        translation_y = desired.y()
+        for item, start in zip(self._move_items, self._move_start_positions, strict=True):
+            width, height = item.boundingRect().width(), item.boundingRect().height()
+            translation_x = _bounded_translation_axis(
+                translation_x, start.x(), width, rect.left(), rect.right()
+            )
+            translation_y = _bounded_translation_axis(
+                translation_y, start.y(), height, rect.top(), rect.bottom()
+            )
+        return QPointF(translation_x, translation_y)
 
     def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         cast("GraphSceneProtocol", self.scene()).edit_group(self.model.id)
@@ -337,6 +409,9 @@ class NodeGraphicsItem(QGraphicsObject):
         self._detail_visible = True
         self._heat_level: float | None = None
         self._drag_origin: dict[UUID, tuple[float, float]] = {}
+        self._drag_start_scene = QPointF()
+        self._drag_items: list[NodeGraphicsItem] = []
+        self._drag_start_positions: list[QPointF] = []
         self._width = self._layout_width()
         self._height = self._layout_height()
         self.setFlags(
@@ -624,22 +699,77 @@ class NodeGraphicsItem(QGraphicsObject):
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value: object) -> object:
         if change is QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged and bool(value):
             self.ensure_parameter_editors()
-        if change is QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
-            scene = cast("object | None", self.scene())
-            if scene is not None:
-                cast("GraphSceneProtocol", scene).update_connections()
+        scene = cast("object | None", self.scene())
+        if change is QGraphicsItem.GraphicsItemChange.ItemPositionChange and scene is not None:
+            proposed = value
+            if isinstance(proposed, QPointF):
+                width, height = self.boundingRect().width(), self.boundingRect().height()
+                clamped = cast("GraphSceneProtocol", scene).clamp_position_to_scene(
+                    proposed.x(), proposed.y(), width, height
+                )
+                if (clamped[0], clamped[1]) != (proposed.x(), proposed.y()):
+                    # Any position source (drag, arrow keys, programmatic sync)
+                    # must keep the node inside the graph area.
+                    return QPointF(clamped[0], clamped[1])
+        if change is QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged and scene is not None:
+            cast("GraphSceneProtocol", scene).update_connections()
         return super().itemChange(change, value)
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         super().mousePressEvent(event)
         scene = cast("GraphSceneProtocol", self.scene())
         self._drag_origin = scene.selected_node_positions()
+        if event.button() is not Qt.MouseButton.LeftButton:
+            self._drag_items = []
+            return
+        # Drag the whole selection so it can never leave the graph area as a group;
+        # an unselected press has already selected exactly this item.
+        if self.isSelected():
+            self._drag_items = [item for item in scene.selected_node_items()]
+        else:
+            self._drag_items = [self]
+        self._drag_start_scene = event.scenePos()
+        self._drag_start_positions = [item.pos() for item in self._drag_items]
+
+    def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        if self._drag_items:
+            scene = cast("GraphSceneProtocol", self.scene())
+            self._drag_selected_items(scene, event.scenePos())
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def _drag_selected_items(self, scene: GraphSceneProtocol, release_scene_pos: QPointF) -> None:
+        """Move the drag set by the cursor delta, bounded so every node stays in the graph area."""
+
+        desired = release_scene_pos - self._drag_start_scene
+        translation = self._bounded_translation(desired, scene)
+        for item, start in zip(self._drag_items, self._drag_start_positions, strict=True):
+            item.setPos(start.x() + translation.x(), start.y() + translation.y())
+
+    def _bounded_translation(self, desired: QPointF, scene: GraphSceneProtocol) -> QPointF:
+        """Intersect the per-item translation bounds so the whole selection moves together."""
+
+        rect = scene.sceneRect()
+        translation_x = desired.x()
+        translation_y = desired.y()
+        for item, start in zip(self._drag_items, self._drag_start_positions, strict=True):
+            width, height = item.boundingRect().width(), item.boundingRect().height()
+            translation_x = _bounded_translation_axis(
+                translation_x, start.x(), width, rect.left(), rect.right()
+            )
+            translation_y = _bounded_translation_axis(
+                translation_y, start.y(), height, rect.top(), rect.bottom()
+            )
+        return QPointF(translation_x, translation_y)
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         super().mouseReleaseEvent(event)
         scene = cast("GraphSceneProtocol", self.scene())
         scene.commit_node_move(self._drag_origin)
         self._drag_origin = {}
+        self._drag_items = []
+        self._drag_start_positions = []
 
 
 def _interpolate_color(start: QColor, end: QColor, amount: float) -> QColor:
@@ -999,8 +1129,14 @@ class GraphSceneProtocol:
     def update_connection_drag(self, position: QPointF) -> None: ...
     def end_connection_drag(self, position: QPointF) -> None: ...
     def update_connections(self) -> None: ...
+    def sceneRect(self) -> QRectF: ...
+    def clamp_position_to_scene(
+        self, x: float, y: float, width: float, height: float
+    ) -> tuple[float, float]: ...
+    def selected_node_items(self) -> list[NodeGraphicsItem]: ...
     def selected_node_positions(self) -> dict[UUID, tuple[float, float]]: ...
     def commit_node_move(self, origins: dict[UUID, tuple[float, float]]) -> None: ...
+    def selected_group_items(self) -> list[GroupGraphicsItem]: ...
     def selected_group_positions(self) -> dict[UUID, tuple[float, float]]: ...
     def commit_group_move(self, origins: dict[UUID, tuple[float, float]]) -> None: ...
     def commit_group_resize(

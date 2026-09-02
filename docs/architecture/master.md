@@ -934,6 +934,10 @@ Node graphics and domain state are separate. The scene item observes a `NodeView
 - optional grid snapping, disabled by default;
 - alignment guides and tidy-selection command;
 - comments/groups for organization;
+- dropping an operating-system video file creates a Load Video node at the drop
+  position with its file path already set (one undo step);
+- dropping a saved graph file opens it through the same flow as File → Open
+  (including the unsaved-changes confirmation);
 - minimap is deferred unless large-graph testing demonstrates need.
 
 ### 13.6 Node creation
@@ -941,6 +945,7 @@ Node graphics and domain state are separate. The scene item observes a `NodeView
 Nodes can be created by:
 
 - drag from the left library;
+- drop a video file from the operating system;
 - double-click or Enter from the library;
 - right-click/Space on empty graph to open fuzzy search;
 - dropping a connection on empty graph to open type-filtered search.

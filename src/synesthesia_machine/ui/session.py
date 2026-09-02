@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -206,9 +207,34 @@ class DocumentSession(QObject):
         self.pathChanged.emit(destination)
         return destination
 
-    def add_node(self, type_id: str, position: tuple[float, float]) -> UUID:
+    def add_node(
+        self,
+        type_id: str,
+        position: tuple[float, float],
+        *,
+        parameters: Mapping[str, LiteralValue] | None = None,
+    ) -> UUID:
+        """Add one node as a single undo step, optionally with initial parameters.
+
+        Explicit parameters are sanitized against the node definition so the
+        committed document stays canonical (mirrors set_parameter semantics).
+        """
+
         definition = self.registry.require(type_id)
-        node = NodeModel(uuid4(), type_id, definition.implementation_version, position=position)
+        initial_parameters: dict[str, LiteralValue] = {}
+        if parameters is not None:
+            for parameter_id, value in parameters.items():
+                spec = definition.parameter(parameter_id)
+                if spec is None:
+                    raise KeyError(f"Unknown parameter {parameter_id!r} on {type_id}")
+                initial_parameters[parameter_id] = spec.sanitize_value(value)
+        node = NodeModel(
+            uuid4(),
+            type_id,
+            definition.implementation_version,
+            position=position,
+            parameters=initial_parameters,
+        )
         replaced_node_ids = {
             existing.id
             for existing in self.document.nodes

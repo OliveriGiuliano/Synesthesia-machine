@@ -662,6 +662,9 @@ class MainWindow(QMainWindow):
         self.scene.connectionDroppedOnEmpty.connect(self._search_compatible_node)
         self.scene.connectionInspectRequested.connect(self._inspect_connection)
         self.view.requestSearch.connect(self._search_nodes)
+        # Dropping a saved graph file opens it with the exact File > Open flow
+        # (dirty-document confirmation, recovery handling, recent files, status).
+        self.view.openGraphFileRequested.connect(self.open_path)
         self.library.nodeActivated.connect(self._add_library_node)
         self._autosave_timer.timeout.connect(self._autosave)
         self._activation_timer.timeout.connect(self._activate_graph)

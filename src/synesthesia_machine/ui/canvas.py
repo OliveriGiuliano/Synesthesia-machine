@@ -3,9 +3,22 @@
 from __future__ import annotations
 
 import math
+import re
+from pathlib import Path
 from uuid import UUID
 
-from PySide6.QtCore import QObject, QPoint, QPointF, QRect, QRectF, QSignalBlocker, Qt, Signal, Slot
+from PySide6.QtCore import (
+    QMimeData,
+    QObject,
+    QPoint,
+    QPointF,
+    QRect,
+    QRectF,
+    QSignalBlocker,
+    Qt,
+    Signal,
+    Slot,
+)
 from PySide6.QtGui import (
     QBrush,
     QContextMenuEvent,
@@ -19,7 +32,7 @@ from PySide6.QtGui import (
     QPen,
     QWheelEvent,
 )
-from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QInputDialog
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsScene, QGraphicsView, QInputDialog
 
 from synesthesia_machine.graph import (
     AlignMode,
@@ -29,6 +42,7 @@ from synesthesia_machine.graph import (
     distribute_boxes,
     tidy_boxes,
 )
+from synesthesia_machine.nodes.input.video import LOAD_VIDEO_TYPE_ID
 from synesthesia_machine.ui.commands import PREVIEW_VISIBLE_KEY
 from synesthesia_machine.ui.graphics import (
     ConnectionGraphicsItem,
@@ -37,6 +51,7 @@ from synesthesia_machine.ui.graphics import (
     PortGraphicsItem,
     TemporaryConnectionGraphicsItem,
 )
+from synesthesia_machine.ui.parameter_editors import FilePathParameterEditor
 from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.theme import Theme
 from synesthesia_machine.ui.translations import tr
@@ -45,6 +60,19 @@ NODE_MIME_TYPE = "application/x-synesthesia-node-type"
 LARGE_GRAPH_NODE_THRESHOLD = 200
 ORGANIZE_NODE_PREVIEW_CLEARANCE = 24.0
 ORGANIZE_MINIMUM_HORIZONTAL_GAP = 96.0
+# The graph area spans +/- these extents (40000 x 30000 scene units, five times
+# the legacy 8000 x 6000 rectangle) so large graphs can be arranged without
+# running into the canvas edge.
+SCENE_EXTENT_X = 20000.0
+SCENE_EXTENT_Y = 15000.0
+# File kinds the canvas accepts from the operating system: video files become
+# Load Video nodes; saved graph files (".synmachine.json" reports its suffix as
+# ".json") open into the editor.
+VIDEO_FILE_SUFFIXES = frozenset(
+    f".{extension}"
+    for extension in re.findall(r"\*\.([A-Za-z0-9]+)", FilePathParameterEditor.VIDEO_FILTER)
+)
+GRAPH_FILE_SUFFIXES = frozenset({".json"})
 
 
 class GraphScene(QGraphicsScene):
@@ -71,7 +99,9 @@ class GraphScene(QGraphicsScene):
         self._selection_outline_rect = QRectF()
         self.grid_snap_enabled = False
         self.grid_spacing = theme.metrics.grid_size
-        self.setSceneRect(-4000.0, -3000.0, 8000.0, 6000.0)
+        self.setSceneRect(
+            -SCENE_EXTENT_X, -SCENE_EXTENT_Y, 2.0 * SCENE_EXTENT_X, 2.0 * SCENE_EXTENT_Y
+        )
         session.changed.connect(self.sync_from_session)
         session.deviceCatalogueChanged.connect(self._rebuild_device_editors)
         self.selectionChanged.connect(self.update_selection_outline)
@@ -96,6 +126,7 @@ class GraphScene(QGraphicsScene):
             if group_id not in self.group_items:
                 item = GroupGraphicsItem(group, self.theme)
                 self.addItem(item)
+                self._place_item_in_bounds(item)
                 item.setSelected(group_id in selected_groups)
                 self.group_items[group_id] = item
 
@@ -122,6 +153,7 @@ class GraphScene(QGraphicsScene):
                 item.set_detail_visible(self._detail_visible)
                 item.set_heat_level(self._node_heat_levels.get(node.node_id))
                 self.addItem(item)
+                self._place_item_in_bounds(item)
                 item.setSelected(node.node_id in selected_nodes)
                 self.node_items[node.node_id] = item
         for connection in view_model.connections:
@@ -156,6 +188,47 @@ class GraphScene(QGraphicsScene):
     @property
     def large_graph_mode(self) -> bool:
         return self._large_graph_mode
+
+    def clamp_position_to_scene(
+        self, x: float, y: float, width: float, height: float
+    ) -> tuple[float, float]:
+        """Clamp an item's top-left position so it stays inside the graph area.
+
+        Items larger than the scene on an axis are pinned to that axis' edge so
+        they remain reachable; everything else is clamped fully inside.
+        """
+
+        rect = self.sceneRect()
+        return (
+            self._clamped_axis(x, width, rect.left(), rect.width()),
+            self._clamped_axis(y, height, rect.top(), rect.height()),
+        )
+
+    @staticmethod
+    def _clamped_axis(value: float, size: float, lower: float, span: float) -> float:
+        if size >= span:
+            return lower
+        return min(max(value, lower), lower + span - size)
+
+    def clamp_new_node_anchor(self, position: QPointF) -> tuple[float, float]:
+        """Keep a dropped node's top-left inside the graph area (fresh nodes always fit)."""
+
+        metrics = self.theme.metrics
+        minimum_height = metrics.header_height + metrics.row_height + 8.0
+        return self.clamp_position_to_scene(
+            position.x(), position.y(), float(metrics.node_width), minimum_height
+        )
+
+    def _place_item_in_bounds(self, item: QGraphicsItem) -> None:
+        """Bring a freshly synced item inside the graph area (documents may contain
+        positions beyond the bounds that clamping now enforces)."""
+
+        x, y = item.pos().x(), item.pos().y()
+        clamped = self.clamp_position_to_scene(
+            x, y, item.boundingRect().width(), item.boundingRect().height()
+        )
+        if clamped != (x, y):
+            item.setPos(*clamped)
 
     def set_detail_level(self, scale: float) -> None:
         detail_visible = scale >= 0.55
@@ -274,6 +347,9 @@ class GraphScene(QGraphicsScene):
         node = self.node_items.get(node_id)
         return None if node is None else node.ports.get((port_id, is_output))
 
+    def selected_node_items(self) -> list[NodeGraphicsItem]:
+        return [self.node_items[node_id] for node_id in sorted(self.selected_node_ids(), key=str)]
+
     def selected_node_ids(self) -> set[UUID]:
         return {
             item.view_model.node_id
@@ -287,6 +363,11 @@ class GraphScene(QGraphicsScene):
             for item in self.selectedItems()
             if isinstance(item, ConnectionGraphicsItem)
         }
+
+    def selected_group_items(self) -> list[GroupGraphicsItem]:
+        return [
+            self.group_items[group_id] for group_id in sorted(self.selected_group_ids(), key=str)
+        ]
 
     def selected_group_ids(self) -> set[UUID]:
         return {
@@ -304,13 +385,15 @@ class GraphScene(QGraphicsScene):
         self.connectionInspectRequested.emit(connection_id)
 
     def commit_node_move(self, origins: dict[UUID, tuple[float, float]]) -> None:
-        current = {
-            node_id: self._snapped_position(
-                self.node_items[node_id].pos().x(), self.node_items[node_id].pos().y()
+        current: dict[UUID, tuple[float, float]] = {}
+        for node_id in origins:
+            item = self.node_items.get(node_id)
+            if item is None:
+                continue
+            x, y = self._snapped_position(item.pos().x(), item.pos().y())
+            current[node_id] = self.clamp_position_to_scene(
+                x, y, item.boundingRect().width(), item.boundingRect().height()
             )
-            for node_id in origins
-            if node_id in self.node_items
-        }
         self.session.move_nodes(origins, current)
 
     def selected_group_positions(self) -> dict[UUID, tuple[float, float]]:
@@ -321,13 +404,15 @@ class GraphScene(QGraphicsScene):
         }
 
     def commit_group_move(self, origins: dict[UUID, tuple[float, float]]) -> None:
-        current = {
-            group_id: self._snapped_position(
-                self.group_items[group_id].pos().x(), self.group_items[group_id].pos().y()
+        current: dict[UUID, tuple[float, float]] = {}
+        for group_id in origins:
+            item = self.group_items.get(group_id)
+            if item is None:
+                continue
+            x, y = self._snapped_position(item.pos().x(), item.pos().y())
+            current[group_id] = self.clamp_position_to_scene(
+                x, y, item.boundingRect().width(), item.boundingRect().height()
             )
-            for group_id in origins
-            if group_id in self.group_items
-        }
         self.session.move_groups(origins, current)
 
     def commit_group_resize(
@@ -336,7 +421,10 @@ class GraphScene(QGraphicsScene):
         position: tuple[float, float],
         size: tuple[float, float],
     ) -> None:
-        self.session.update_group(group_id, position=position, size=size)
+        clamped = self.clamp_position_to_scene(
+            position[0], position[1], float(size[0]), float(size[1])
+        )
+        self.session.update_group(group_id, position=clamped, size=size)
 
     def configure_grid_snap(self, *, enabled: bool, spacing: float) -> None:
         if not math.isfinite(spacing) or spacing <= 0.0:
@@ -434,11 +522,20 @@ class GraphScene(QGraphicsScene):
 
     def _apply_layout(self, positions: dict[UUID, tuple[float, float]]) -> None:
         old_positions: dict[UUID, tuple[float, float]] = {}
-        for node_id in positions:
+        clamped: dict[UUID, tuple[float, float]] = {}
+        for node_id, position in positions.items():
             node = self.session.document.node(node_id)
-            if node is not None:
-                old_positions[node_id] = node.position
-        self.session.move_nodes(old_positions, positions)
+            if node is None:
+                continue
+            old_positions[node_id] = node.position
+            item = self.node_items.get(node_id)
+            if item is None:
+                clamped[node_id] = position
+                continue
+            clamped[node_id] = self.clamp_position_to_scene(
+                position[0], position[1], item.boundingRect().width(), item.boundingRect().height()
+            )
+        self.session.move_nodes(old_positions, clamped)
 
     def begin_connection_drag(self, port: PortGraphicsItem, position: QPointF) -> None:
         self.cancel_connection_drag()
@@ -556,6 +653,7 @@ class GraphScene(QGraphicsScene):
 
 class GraphView(QGraphicsView):
     requestSearch = Signal(object)
+    openGraphFileRequested = Signal(Path)
 
     def __init__(self, scene: GraphScene, theme: Theme) -> None:
         super().__init__(scene)
@@ -698,18 +796,55 @@ class GraphView(QGraphicsView):
             self.graph_scene.set_detail_level(self.transform().m11())
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if event.mimeData().hasFormat(NODE_MIME_TYPE):
+        if event.mimeData().hasFormat(NODE_MIME_TYPE) or self._dropped_file_kind(event.mimeData()):
             event.acceptProposedAction()
 
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
-        if event.mimeData().hasFormat(NODE_MIME_TYPE):
+        if event.mimeData().hasFormat(NODE_MIME_TYPE) or self._dropped_file_kind(event.mimeData()):
             event.acceptProposedAction()
 
     def dropEvent(self, event: QDropEvent) -> None:
-        if event.mimeData().hasFormat(NODE_MIME_TYPE):
-            raw = event.mimeData().data(NODE_MIME_TYPE).data()
+        mime_data = event.mimeData()
+        if mime_data.hasFormat(NODE_MIME_TYPE):
+            raw = mime_data.data(NODE_MIME_TYPE).data()
             payload = raw.tobytes() if isinstance(raw, memoryview) else raw
             type_id = payload.decode("utf-8")
             position = self.mapToScene(event.position().toPoint())
-            self.graph_scene.session.add_node(type_id, (position.x(), position.y()))
+            self.graph_scene.session.add_node(
+                type_id, self.graph_scene.clamp_new_node_anchor(position)
+            )
             event.acceptProposedAction()
+            return
+        kind = self._dropped_file_kind(mime_data)
+        if kind is None:
+            return
+        urls = mime_data.urls()
+        if not urls or not urls[0].isLocalFile():
+            return
+        path = Path(urls[0].toLocalFile())
+        position = self.mapToScene(event.position().toPoint())
+        if kind == "video":
+            # A dropped video becomes a Load Video node whose path is already set,
+            # as one undo step.
+            self.graph_scene.session.add_node(
+                LOAD_VIDEO_TYPE_ID,
+                self.graph_scene.clamp_new_node_anchor(position),
+                parameters={"file_path": path.as_posix()},
+            )
+        else:
+            self.openGraphFileRequested.emit(path)
+        event.acceptProposedAction()
+
+    @staticmethod
+    def _dropped_file_kind(mime_data: QMimeData) -> str | None:
+        """Classify the first dropped local file as a video or a saved graph."""
+
+        urls = mime_data.urls()
+        if not urls or not urls[0].isLocalFile():
+            return None
+        suffix = Path(urls[0].toLocalFile()).suffix.lower()
+        if suffix in VIDEO_FILE_SUFFIXES:
+            return "video"
+        if suffix in GRAPH_FILE_SUFFIXES:
+            return "graph"
+        return None
