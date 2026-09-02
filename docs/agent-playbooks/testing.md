@@ -41,7 +41,7 @@ Use the narrowest relevant domain suite while iterating, then widen coverage acc
 - Run `uv run check` after code changes. Before final handoff, run `uv run pytest -q` unless the task
   is documentation-only or the suite cannot reasonably run; report any unrun gate and why.
 
-CI on `windows-latest` sets `QT_QPA_PLATFORM=offscreen`, installs the locked development group, runs
-both type gates, executes the full suite, and launches the real application-shell smoke test. Local
-success elsewhere is not evidence for Windows spawn, devices, Qt deployment, or case-insensitive
-filesystem behavior.
+CI runs the quality job on `windows-latest` and `ubuntu-latest` with `QT_QPA_PLATFORM=offscreen`,
+installs the locked development group, runs both type gates, executes the full suite, and launches
+the real application-shell smoke test. Local success on one platform is not evidence for the other
+platform's spawn, devices, Qt deployment, or filesystem behaviour.

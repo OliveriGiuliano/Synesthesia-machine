@@ -1,10 +1,13 @@
 # Clean-machine smoke procedure
 
-Run this gate on a current Windows 11 x64 VM or newly created standard user account with no Python,
-`uv`, compiler, repository checkout, or developer tools on `PATH`.
+Run this gate on a current Windows 11 x64 VM or newly created standard user account, or a clean
+Linux x64 machine, with no Python, `uv`, compiler, repository checkout, or developer tools on
+`PATH`. The Linux machine must provide the desktop base libraries (Qt GL/EGL, fontconfig,
+xkbcommon); `libportaudio2` is required for the audio check and otherwise reported as skipped.
 
 1. Verify the ZIP SHA-256 against `SHA256SUMS.txt`, extract it, and run the bundled
-   `smoke\smoke_test.ps1` with Windows PowerShell. Preserve its JSON report.
+   `smoke\smoke_test.ps1` with Windows PowerShell (Windows) or `smoke/smoke_test.sh` with bash
+   (Linux), passing the extracted application directory. Preserve its JSON report.
 2. Confirm the automated report passes graph save/open, H.264/MP4 decode, real MIDI enumeration,
    mock send/panic, PortAudio loading and debug-synth rendering, engine crash/restart, autosave
    recovery, and diagnostic export. A missing camera is an explicit skip; a detected camera must
@@ -21,6 +24,6 @@ Run this gate on a current Windows 11 x64 VM or newly created standard user acco
 7. Delete the extracted application directory. Confirm the graph saved under Documents remains and
    can be opened after extracting the same or previous accepted release.
 
-Record Windows build, VM image, account type, hardware/driver presence, artifact hash, report path,
-manual observations, and tester. Any failed required row blocks the release. Hardware-absent rows are
-`skipped`, not silently passed.
+Record platform/OS build, VM image or base system, account type, hardware/driver presence, artifact
+hash, report path, manual observations, and tester. Any failed required row blocks the release.
+Hardware-absent rows are `skipped`, not silently passed.

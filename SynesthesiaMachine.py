@@ -1,4 +1,4 @@
-"""Nuitka entry point for the Windows standalone distribution."""
+"""Nuitka entry point for the standalone distribution (Windows and Linux)."""
 
 from synesthesia_machine.app.bootstrap import main
 

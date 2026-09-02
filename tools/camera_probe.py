@@ -1,7 +1,8 @@
-"""Probe OpenCV camera indexes off the UI thread using Windows backend fallback."""
+"""Probe OpenCV camera indexes off the UI thread using the platform backend order."""
 
 import argparse
 import json
+import os
 from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import asdict, dataclass
@@ -24,6 +25,15 @@ class CaptureHandle(Protocol):
 class CameraBackend(IntEnum):
     MEDIA_FOUNDATION = cv2.CAP_MSMF
     DIRECTSHOW = cv2.CAP_DSHOW
+    V4L2 = cv2.CAP_V4L2
+
+
+def _backend_order() -> tuple[CameraBackend, ...]:
+    """Platform AUTO order: Windows prefers Media Foundation, Linux uses V4L2."""
+
+    if os.name == "nt":
+        return (CameraBackend.MEDIA_FOUNDATION, CameraBackend.DIRECTSHOW)
+    return (CameraBackend.V4L2,)
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,10 +59,10 @@ def probe_camera_index(
     *,
     capture_factory: CaptureFactory = _default_capture_factory,
 ) -> CameraProbeResult:
-    """Try Media Foundation, then DirectShow, always releasing every handle."""
+    """Try the platform backend order, always releasing every handle."""
 
     errors: list[str] = []
-    for backend in CameraBackend:
+    for backend in _backend_order():
         capture: CaptureHandle | None = None
         try:
             capture = capture_factory(index, int(backend))

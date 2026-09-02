@@ -1,5 +1,6 @@
 """Qt application factory and main-window facade."""
 
+import os
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -12,10 +13,20 @@ from synesthesia_machine.ui.main_window import MainWindow
 __all__ = ["MainWindow", "create_application"]
 
 
+def _application_icon_name() -> str:
+    """Window icon file name for the host platform.
+
+    Windows shells use the multi-resolution .ico resource; Linux desktops get the
+    PNG master so taskbars and window managers render it without ICO decoding.
+    """
+
+    return "synesthesia-machine.ico" if os.name == "nt" else "app-icon-master.png"
+
+
 def _application_icon_path() -> Path:
     """Return the icon path for source and Nuitka standalone layouts."""
 
-    return Path(__file__).resolve().parents[1] / "resources" / "synesthesia-machine.ico"
+    return Path(__file__).resolve().parents[1] / "resources" / _application_icon_name()
 
 
 def create_application(argv: Sequence[str] | None = None) -> QApplication:

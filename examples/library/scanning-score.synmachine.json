@@ -43,7 +43,7 @@
       "id": "65300000-0000-0000-0000-000000000001",
       "implementation_version": 1,
       "parameters": {
-        "file_path": "media\\reference.mp4",
+        "file_path": "media/reference.mp4",
         "loop": true,
         "process_every_nth_frame": 1,
         "stream_index": 0

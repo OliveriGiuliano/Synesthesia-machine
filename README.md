@@ -1,11 +1,11 @@
 # Synesthesia Machine
 
-Synesthesia Machine is a Windows desktop instrument that transforms video and camera data into
-live MIDI note states through a typed visual node graph.
+Synesthesia Machine is a desktop instrument for Windows and Linux that transforms video and
+camera data into live MIDI note states through a typed visual node graph.
 
 ## Requirements and setup
 
-- Windows 11 x64
+- Windows 11 x64 or Linux x64 (glibc); see [ADR-0012](docs/adr/0012-windows-and-linux-platform-support.md)
 - [`uv`](https://docs.astral.sh/uv/)
 - No system Python is required; `uv` manages the supported CPython 3.12 runtime.
 
@@ -14,12 +14,18 @@ uv python install 3.12
 uv sync --locked
 ```
 
+On a fresh Linux machine also install the Qt shared libraries used by the offscreen platform
+(`libgl1`, `libegl1`, `libxkbcommon0`, `libfontconfig1`, `libglib2.0-0`) and, for the optional
+debug-audio feature, `libportaudio2` (sounddevice loads PortAudio from the system on Linux).
+
 The committed `.python-version` constrains commands to Python 3.12. The synchronized environment
 lives in the ignored repository-local `.venv` directory.
 
 ## Development commands
 
-```powershell
+The same `uv` commands run on Windows (PowerShell) and Linux (bash):
+
+```bash
 uv run synmachine
 uv run synmachine --smoke-test
 uv run check

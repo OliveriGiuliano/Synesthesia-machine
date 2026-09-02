@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "synesthesia-machine"
 version = "0.1.0"
-description = "A visual video-to-MIDI instrument for Windows."
+description = "A visual video-to-MIDI instrument for Windows and Linux."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { text = "License not yet selected; see LICENSE-or-NOTICE.md" }
@@ -63,7 +63,8 @@ include = ["src", "tools"]
 exclude = [".venv", "build", "dist"]
 extraPaths = ["src"]
 pythonVersion = "3.12"
-pythonPlatform = "Windows"
+# pythonPlatform is intentionally unset so strict Pyright type-checks both the
+# Windows and Linux code paths in a single configuration on any build host.
 typeCheckingMode = "strict"
 venvPath = "."
 venv = ".venv"

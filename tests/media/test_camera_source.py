@@ -34,6 +34,9 @@ from synesthesia_machine.media import (
     camera_index_from_device_id,
     open_camera,
 )
+from synesthesia_machine.media.camera_source import (
+    _backend_order,  # pyright: ignore[reportPrivateUsage]
+)
 from synesthesia_machine.nodes import ExecutionKind, ParameterUpdateMode, ResetReason
 from synesthesia_machine.nodes.input import LOAD_CAMERA_TYPE_ID, create_input_definitions
 from synesthesia_machine.nodes.registry import NodeRegistry
@@ -204,6 +207,7 @@ def test_load_camera_definition_has_stable_restart_source_contract() -> None:
         "AUTO",
         "MEDIA_FOUNDATION",
         "DIRECTSHOW",
+        "V4L2",
     )
     assert definition.parameter("process_every_nth_frame").minimum == 1  # type: ignore[union-attr]
     assert definition.aliases == ("camera", "webcam", "live camera")
@@ -226,6 +230,10 @@ def test_camera_device_ids_reject_non_enumerated_syntax(device_id: str) -> None:
         camera_index_from_device_id(device_id)
 
 
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="Media Foundation and DirectShow backends only exist on Windows",
+)
 def test_open_camera_falls_back_to_dshow_and_reports_negotiated_properties() -> None:
     failed_msmf = _FakeCapture(opened=False)
     dshow = _FakeCapture(
@@ -259,6 +267,43 @@ def test_open_camera_falls_back_to_dshow_and_reports_negotiated_properties() -> 
             (cv2.CAP_PROP_FRAME_HEIGHT, 720.0),
             (cv2.CAP_PROP_FPS, 60.0),
         ]
+    finally:
+        opened.capture.release()
+
+
+def test_auto_camera_backend_order_follows_the_host_platform() -> None:
+    if os.name == "nt":
+        expected = (CameraBackend.MEDIA_FOUNDATION, CameraBackend.DIRECTSHOW)
+    else:
+        expected = (CameraBackend.V4L2,)
+
+    assert _backend_order(CameraBackendPreference.AUTO) == expected
+    assert _backend_order(CameraBackendPreference.V4L2) == (CameraBackend.V4L2,)
+    assert _backend_order(CameraBackendPreference.DIRECTSHOW) == (CameraBackend.DIRECTSHOW,)
+
+
+def test_explicit_v4l2_backend_opens_and_reports_negotiated_properties() -> None:
+    v4l2 = _FakeCapture(
+        properties={
+            cv2.CAP_PROP_FRAME_WIDTH: 640.0,
+            cv2.CAP_PROP_FRAME_HEIGHT: 480.0,
+            cv2.CAP_PROP_FPS: 25.0,
+        }
+    )
+    factory = _CaptureFactory.from_captures(v4l2)
+
+    opened = open_camera(
+        6,
+        backend_preference=CameraBackendPreference.V4L2,
+        requested_width=1280,
+        requested_height=720,
+        capture_factory=factory,
+    )
+    try:
+        assert factory.calls == [(6, int(CameraBackend.V4L2))]
+        assert opened.capture is v4l2
+        assert opened.backend is CameraBackend.V4L2
+        assert (opened.width, opened.height, opened.fps) == (640, 480, 25.0)
     finally:
         opened.capture.release()
 
@@ -314,13 +359,15 @@ def test_camera_enumeration_is_deduplicated_off_thread_and_cached() -> None:
         assert duplicate is first
         allow_probe.set()
 
-        expected = (CameraDevice("opencv:4", "Camera 4", 4, "MEDIA_FOUNDATION", 1920, 1080, 30.0),)
+        auto_backend = "MEDIA_FOUNDATION" if os.name == "nt" else "V4L2"
+        auto_constant = CameraBackend.MEDIA_FOUNDATION if os.name == "nt" else CameraBackend.V4L2
+        expected = (CameraDevice("opencv:4", "Camera 4", 4, auto_backend, 1920, 1080, 30.0),)
         assert first.result(timeout=1.0) == expected
         assert service.cached() == expected
         cached = service.enumerate_async()
         assert cached is not first
         assert cached.done() and cached.result() == expected
-        assert factory_calls == [(4, int(CameraBackend.MEDIA_FOUNDATION))]
+        assert factory_calls == [(4, int(auto_constant))]
         assert factory_threads and factory_threads[0] != main_thread_id
         assert captures[0].release_count == 1
     finally:

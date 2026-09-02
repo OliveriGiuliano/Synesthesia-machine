@@ -1,4 +1,4 @@
-"""Windows-spawn ping/pong and shared-memory RGB transport proof."""
+"""Spawn-based ping/pong and shared-memory RGB transport proof (Windows and POSIX)."""
 
 import argparse
 import os
@@ -109,7 +109,7 @@ def _validate_protocol(protocol_version: int) -> None:
 
 
 def engine_child(connection: DuplexConnection) -> None:
-    """Top-level child target required by the Windows spawn start method."""
+    """Top-level child target required by the spawn start method on Windows and POSIX."""
 
     try:
         while True:

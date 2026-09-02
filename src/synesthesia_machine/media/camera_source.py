@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import threading
 import time
@@ -41,11 +42,13 @@ class CameraBackendPreference(StrEnum):
     AUTO = "AUTO"
     MEDIA_FOUNDATION = "MEDIA_FOUNDATION"
     DIRECTSHOW = "DIRECTSHOW"
+    V4L2 = "V4L2"
 
 
 class CameraBackend(IntEnum):
     MEDIA_FOUNDATION = cv2.CAP_MSMF
     DIRECTSHOW = cv2.CAP_DSHOW
+    V4L2 = cv2.CAP_V4L2
 
 
 class CameraUnavailableError(RuntimeError):
@@ -124,7 +127,13 @@ def _backend_order(preference: CameraBackendPreference) -> tuple[CameraBackend, 
         return (CameraBackend.MEDIA_FOUNDATION,)
     if preference is CameraBackendPreference.DIRECTSHOW:
         return (CameraBackend.DIRECTSHOW,)
-    return (CameraBackend.MEDIA_FOUNDATION, CameraBackend.DIRECTSHOW)
+    if preference is CameraBackendPreference.V4L2:
+        return (CameraBackend.V4L2,)
+    # AUTO follows the host platform so documents stay portable: the preference is
+    # stored per platform family, not per machine.
+    if os.name == "nt":
+        return (CameraBackend.MEDIA_FOUNDATION, CameraBackend.DIRECTSHOW)
+    return (CameraBackend.V4L2,)
 
 
 def open_camera(
@@ -136,7 +145,7 @@ def open_camera(
     requested_fps: float = 0.0,
     capture_factory: CameraCaptureFactory = _default_capture_factory,
 ) -> OpenedCamera:
-    """Open one exact index using the requested Windows backend policy."""
+    """Open one exact index using the requested backend policy (platform-aware for AUTO)."""
 
     if index < 0:
         raise ValueError("camera index cannot be negative")
@@ -183,7 +192,7 @@ def enumerate_cameras(
     *,
     capture_factory: CameraCaptureFactory = _default_capture_factory,
 ) -> tuple[CameraDevice, ...]:
-    """Probe camera indexes with MSMF-to-DSHOW fallback and close every handle."""
+    """Probe camera indexes with the platform AUTO fallback order and close every handle."""
 
     devices: list[CameraDevice] = []
     for index in indexes:

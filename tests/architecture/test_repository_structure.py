@@ -17,7 +17,7 @@ ACTIVE_ROOTS = (
     ROOT / "docs/architecture",
     ROOT / "docs/reference",
 )
-TEXT_SUFFIXES = {".md", ".py", ".ps1", ".toml"}
+TEXT_SUFFIXES = {".md", ".py", ".ps1", ".sh", ".toml"}
 PHASE_PATH = re.compile(r"^phase[_-]?\d", re.IGNORECASE)
 STALE_ACTIVE_REFERENCE = re.compile(
     r"(?:tools\.phase\d|(?:tests|examples|docs)[/\\]phase[_-]?\d|synesthesia_machine_design)"

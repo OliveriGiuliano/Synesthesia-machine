@@ -141,8 +141,14 @@ def _midi_probe() -> str:
     return f"enumerated {len(real_names)} real output(s); mock send and panic passed"
 
 
-def _audio_probe() -> str:
-    raw_devices = sd.query_devices()  # pyright: ignore[reportUnknownMemberType]
+def _audio_probe() -> tuple[str, str]:
+    try:
+        raw_devices = sd.query_devices()  # pyright: ignore[reportUnknownMemberType]
+    except OSError as error:
+        # Linux resolves PortAudio from the system (libportaudio2); a machine
+        # without it cannot use the optional debug-audio feature but every other
+        # release check still applies, so this is a skip, not a failure.
+        return "skipped", f"PortAudio runtime unavailable: {error}"
     devices = cast("list[dict[str, object]]", raw_devices)
     stream_holder: list[_MemoryAudioStream] = []
 
@@ -179,8 +185,9 @@ def _audio_probe() -> str:
             audible.close()
         hardware_detail = "brief hardware output stream passed"
     return (
+        "passed",
         f"PortAudio loaded with {len(devices)} device record(s); "
-        f"synth render passed; {hardware_detail}"
+        f"synth render passed; {hardware_detail}",
     )
 
 
@@ -253,7 +260,7 @@ def run_packaged_smoke(
             _run_check("create_save_open_graph", lambda: _graph_round_trip(root)),
             _run_optional_check("camera_enumeration_capture", _camera_probe),
             _run_check("midi_enumeration_mock_send", _midi_probe),
-            _run_check("debug_audio", _audio_probe),
+            _run_optional_check("debug_audio", _audio_probe),
             _run_check("engine_crash_restart", lambda: _engine_restart(root)),
             _run_check(
                 "autosave_recovery_diagnostics",

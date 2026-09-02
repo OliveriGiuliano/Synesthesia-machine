@@ -1,0 +1,4 @@
+# Synesthesia Machine keeps LF line endings on every platform.
+# Python sources, JSON graph documents, and CI scripts must be byte-stable
+# between Windows and Linux checkouts.
+* text=auto eol=lf

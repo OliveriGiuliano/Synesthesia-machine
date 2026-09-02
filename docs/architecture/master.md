@@ -3,14 +3,14 @@
 
 **Document version:** 1.0  
 **Date:** 29 July 2026  
-**Target platform:** Windows 11, 64-bit  
+**Target platform:** Windows 11, 64-bit, and Linux, 64-bit (glibc); ADR-0012
 **Audience:** project owner, software architects, and coding agents implementing individual work packages
 
 ---
 
 ## 1. Purpose of this document
 
-This document defines the product architecture for **Synesthesia Machine**, a Windows desktop application that transforms video and camera data into live MIDI note states through a visual node graph.
+This document defines the product architecture for **Synesthesia Machine**, a Windows and Linux desktop application that transforms video and camera data into live MIDI note states through a visual node graph.
 
 It is deliberately implementation-oriented. It fixes the major technical decisions, defines runtime and data contracts, specifies the behaviour of the initial node catalogue, and establishes repository boundaries. Active repository ownership is domain-based; the delivery sequence retained in section 19 is historical context only.
 
@@ -49,13 +49,13 @@ The first stable release shall include:
 - graph save/load, autosave recovery, clipboard operations, undo, and redo;
 - live performance metrics and per-node profiling;
 - safe MIDI note lifecycle management, including automatic note-off and panic behaviour;
-- a packaged Windows desktop build.
+- a packaged standalone desktop build (Windows and Linux).
 
 ### 3.2 Explicit non-goals for version 1
 
 The following are deferred:
 
-- macOS or Linux support;
+- macOS support;
 - a browser or cloud version;
 - collaborative editing;
 - a general DAW, sequencer, piano roll, or MIDI-effects workstation;
@@ -138,7 +138,7 @@ Output nodes compare the new desired state with their previously sent state and 
 
 ### AD-009 — MIDI I/O uses Mido with python-rtmidi initially
 
-Use **Mido** for MIDI message objects and port abstraction, with **python-rtmidi** as the first Windows backend. Mido supports MIDI 1.0 messages and output ports; python-rtmidi wraps RtMidi and uses the Windows Multimedia MIDI API. [R7][R8]
+Use **Mido** for MIDI message objects and port abstraction, with **python-rtmidi** as the first backend (WinMM on Windows, ALSA on Linux). Mido supports MIDI 1.0 messages and output ports; python-rtmidi wraps RtMidi and uses the Windows Multimedia MIDI API. [R7][R8]
 
 The application connects to enumerated physical or virtual MIDI ports. It does not create its own virtual Windows MIDI driver in version 1. Users who need app-to-app routing may select a separately installed virtual loopback port. A later backend may target Windows MIDI Services when its deployment and Python integration are sufficiently stable.
 
@@ -156,9 +156,9 @@ The file includes a schema version, application version, nodes, node versions, c
 
 ### AD-012 — Packaging uses Qt's deployment path
 
-Development uses `uv`, `pyproject.toml`, and a committed `uv.lock`. `uv` supports locked, synchronized Windows project environments. [R9]
+Development uses `uv`, `pyproject.toml`, and a committed `uv.lock`. `uv` supports locked, synchronized project environments on Windows and Linux. [R9]
 
-Release packaging uses `pyside6-deploy` in standalone mode first. The tool wraps Nuitka and produces a Windows executable with its required files. A one-file executable is not the initial target because startup extraction, antivirus false positives, and debugging are worse. [R10]
+Release packaging uses `pyside6-deploy` in standalone mode first. The tool wraps Nuitka and produces a platform-native executable with its required files (`pysidedeploy.spec` on Windows, `pysidedeploy.linux.spec` on Linux). A one-file executable is not the initial target because startup extraction, antivirus false positives, and debugging are worse. [R10]
 
 ---
 
@@ -664,7 +664,7 @@ The source's “Process every Nth frame” rule is applied before entering the e
 
 ### 10.5 Engine IPC
 
-Use `multiprocessing` with the Windows `spawn` start method.
+Use `multiprocessing` with the `spawn` start method on Windows and POSIX alike.
 
 Control path:
 
@@ -748,7 +748,7 @@ Play, Pause, Stop, Reload. Seeking is deferred from the minimum vertical slice b
 
 ### 11.2 Load Camera
 
-Use OpenCV `VideoCapture` with an explicit Windows backend preference, initially Media Foundation with a DirectShow fallback. OpenCV's Video I/O layer supports multiple capture backends behind `VideoCapture`. [R6]
+Use OpenCV `VideoCapture` with an explicit platform backend preference: Media Foundation with a DirectShow fallback on Windows and V4L2 on Linux. OpenCV's Video I/O layer supports multiple capture backends behind `VideoCapture`. [R6]
 
 #### Parameters
 
@@ -850,7 +850,7 @@ Add an essential variadic utility node not present in the original list:
 
 ### 12.6 Generate Audio debug synthesizer
 
-Use `sounddevice`/PortAudio with a callback-driven stereo output stream. The Windows wheel includes the necessary PortAudio binary. The audio callback must not allocate, block, log, or perform graph operations. [R12][R13]
+Use `sounddevice`/PortAudio with a callback-driven stereo output stream. The Windows wheel includes the necessary PortAudio binary; on Linux the runtime loads the system PortAudio (`libportaudio2`). The audio callback must not allocate, block, log, or perform graph operations. [R12][R13]
 
 The synth is intentionally simple:
 
@@ -1004,7 +1004,7 @@ Connections reference source node/port and destination node/port by stable IDs.
 
 ### 14.2 File paths
 
-- Save paths in normalized Windows form.
+- Save relative media paths in normalized POSIX form (ADR-0012).
 - Prefer paths relative to the graph file when the media lies inside the graph's directory tree.
 - Preserve an absolute fallback and a media fingerprint when feasible.
 - On missing files, offer locate/relink; do not silently substitute by filename.
@@ -1081,7 +1081,7 @@ Hardware:
 - NVIDIA VRAM through optional NVML support when present;
 - GPU metrics show “unavailable” rather than failing on unsupported hardware.
 
-psutil supports Windows CPU, memory, process, disk, and other system metrics. [R14]
+psutil supports Windows and Linux CPU, memory, process, disk, and other system metrics. [R14]
 
 ### 15.2 Profiler UI
 
@@ -1721,7 +1721,7 @@ Do not introduce a framework merely to reduce ten lines of explicit code. The pr
 3. **Process integration tests** for spawn, IPC, shared-memory cleanup, crash recovery, and graph plan swaps.
 4. **UI tests** for commands and key workflows using `pytest-qt` or Qt test helpers.
 5. **Performance tests** run on designated hardware and reported separately from correctness CI.
-6. **Packaged smoke tests** on a clean Windows user account or VM.
+6. **Packaged smoke tests** on a clean Windows or Linux machine.
 
 pytest is the standard test runner and supports scalable fixtures and configuration through `pyproject.toml`. [R15]
 

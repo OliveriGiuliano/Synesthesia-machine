@@ -6,9 +6,9 @@ change.
 
 ## Project in one paragraph
 
-Synesthesia Machine is a Windows 11 x64 desktop instrument that turns video or camera frames into
-live desired MIDI note states through a typed visual node graph. It is written for CPython 3.12,
-managed with `uv`, rendered with PySide6/Qt Widgets, and packaged as a standalone Windows directory.
+Synesthesia Machine is a desktop instrument for Windows 11 x64 and Linux x64 that turns video or
+camera frames into live desired MIDI note states through a typed visual node graph. It is written for CPython 3.12,
+managed with `uv`, rendered with PySide6/Qt Widgets, and packaged as a platform-native standalone directory.
 The UI owns graph editing and Qt objects; a spawned engine process owns sources, runtime nodes,
 full-resolution image data, MIDI output, audio, and profiling. The graph is a directed acyclic graph
 with deterministic compilation, source-driven execution, bounded latest-frame transport, and
@@ -37,7 +37,8 @@ asks for them.
 
 ## Supported environment and setup
 
-- Supported development and packaging platform: Windows 11 x64.
+- Supported development and packaging platforms: Windows 11 x64 and Linux x64 (glibc). See
+  ADR-0012; macOS is out of scope.
 - Shell examples in this repository use PowerShell.
 - Supported interpreter: 64-bit CPython 3.12 only. `.python-version` and `pyproject.toml` enforce the
   minor version.
@@ -45,12 +46,18 @@ asks for them.
   globally installed packages.
 - The synchronized virtual environment is the ignored repository-local `.venv`.
 
-From the repository root:
+From the repository root (identical on both platforms; use PowerShell on Windows and bash on
+Linux):
 
 ```powershell
 uv python install 3.12
 uv sync --locked --group dev
 ```
+
+On a fresh Linux machine also install the Qt shared libraries needed even for the offscreen
+platform (`libgl1`, `libegl1`, `libxkbcommon0`, `libfontconfig1`, `libglib2.0-0`) and, for the
+optional debug-audio feature, `libportaudio2` (sounddevice resolves PortAudio from the system on
+Linux).
 
 `uv.lock` is part of the reproducibility contract. If a dependency change is truly necessary,
 explain why the standard library and current stack are insufficient, update `pyproject.toml` and
@@ -79,6 +86,10 @@ $env:QT_QPA_PLATFORM = "offscreen"
 uv run synmachine --smoke-test
 ```
 
+```bash
+QT_QPA_PLATFORM=offscreen uv run synmachine --smoke-test
+```
+
 `uv run check` does not format files for you; it runs `ruff format --check`, `ruff check`, and strict
 Pyright. Prefer formatting only the files in scope instead of mechanically rewriting the repository.
 
@@ -102,7 +113,7 @@ Pyright. Prefer formatting only the files in scope instead of mechanically rewri
 | `benchmarks/fixtures/` | Deterministic non-user graph inputs owned by performance harnesses. |
 | `docs/` | ADRs, phase completion reports, node reference, committed benchmark/evidence JSON, and screenshots. |
 | `docs/architecture/` | Active master architecture. Historical delivery packets and completion evidence live under `docs/history/v0-development/`. |
-| `packaging/` | Locked standalone build, clean-machine smoke procedure, notices, provenance, and release gates. |
+| `packaging/` | Locked standalone builds (`build.ps1`/`smoke_test.ps1` for Windows, `build.sh`/`smoke_test.sh` for Linux), clean-machine smoke procedures, notices, provenance, and release gates. |
 | `SynesthesiaMachine.py` | Packaging entry script. Development should normally use `uv run synmachine`. |
 
 ## Architectural rules that must not be weakened
@@ -131,7 +142,7 @@ Pyright. Prefer formatting only the files in scope instead of mechanically rewri
   stay in the engine process.
 - Do not send live NumPy image arrays through ordinary multiprocessing queues. Control/events use
   versioned dataclasses; bounded shared memory carries throttled preview bytes.
-- Preserve Windows `spawn` compatibility: process entry points and transferred values must be
+- Preserve `spawn` start-method compatibility on Windows and POSIX: process entry points and transferred values must be
   importable/picklable, module import must not start work, and the application entry point must keep
   `freeze_support()`.
 - The system prefers recent data and bounded latency over processing every live frame. Do not turn a
@@ -269,8 +280,9 @@ diagnostic, benchmark, evidence generator, hardware probe, or release command.
   disposable when it may contain user evidence.
 - Graph saves intentionally create a sibling `.bak`. Tests and tools should keep such outputs in
   temporary directories unless the task is specifically about a checked-in example.
-- The application owns logs and recovery under `%LOCALAPPDATA%\SynesthesiaMachine`; user graph paths
-  are separate and must never be removed as cleanup.
+- The application owns logs and recovery under `%LOCALAPPDATA%\SynesthesiaMachine` (Windows) or
+  `$XDG_DATA_HOME/SynesthesiaMachine` (Linux); user graph paths are separate and must never be
+  removed as cleanup.
 
 ## Definition of done
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import configparser
 import hashlib
 import json
+import os
 import struct
 from pathlib import Path
 
@@ -23,21 +24,32 @@ def _sha256(path: Path) -> str:
 
 def test_release_configuration_is_standalone_versioned_and_console_free() -> None:
     release.check_release_configuration()
+    is_windows = os.name == "nt"
+    spec_file = ROOT / ("pysidedeploy.spec" if is_windows else "pysidedeploy.linux.spec")
     parser = configparser.ConfigParser()
-    parser.read(ROOT / "pysidedeploy.spec", encoding="utf-8")
+    parser.read(spec_file, encoding="utf-8")
 
     assert parser.get("nuitka", "mode") == "standalone"
     assert parser.get("app", "input_file") == "SynesthesiaMachine.py"
     assert parser.get("python", "packages") == "Nuitka==4.1.3"
     extra_args = parser.get("nuitka", "extra_args")
-    assert "--windows-console-mode=disable" in extra_args
+    assert "--assume-yes-for-downloads" in extra_args
+    assert "--include-package=synesthesia_machine" in extra_args
     assert "--include-module=av.utils" in extra_args
-    assert f"--product-version={__version__}" in extra_args
-    assert f"--file-version={__version__}.0" in extra_args
+    assert "--no-prefer-source-code" in extra_args
+    assert "--noinclude-qt-translations" in extra_args
+    assert "--include-data-files=" in extra_args
     assert "--onefile" not in extra_args
     assert "--include-package-data=sounddevice" not in extra_args
-    assert "--no-prefer-source-code" in extra_args
-    assert "--noinclude-dlls=*asio*.dll" in extra_args
+    if is_windows:
+        assert "--windows-console-mode=disable" in extra_args
+        assert f"--product-version={__version__}" in extra_args
+        assert f"--file-version={__version__}.0" in extra_args
+        assert "--noinclude-dlls=*asio*.dll" in extra_args
+    else:
+        # The Linux deployment must not carry Windows-only Nuitka options.
+        assert "--windows-console-mode" not in extra_args
+        assert "--noinclude-dlls" not in extra_args
 
 
 def test_windows_icon_contains_all_required_resolutions() -> None:
@@ -78,6 +90,7 @@ def test_packaged_smoke_report_fails_closed_and_records_skips(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     monkeypatch.setattr(release_smoke, "_graph_round_trip", lambda _root: "graph ok")
     monkeypatch.setattr(release_smoke, "_decode_h264", lambda _path: "h264 ok")
     monkeypatch.setattr(
@@ -86,7 +99,7 @@ def test_packaged_smoke_report_fails_closed_and_records_skips(
         lambda: ("skipped", "no camera"),
     )
     monkeypatch.setattr(release_smoke, "_midi_probe", lambda: "midi ok")
-    monkeypatch.setattr(release_smoke, "_audio_probe", lambda: "audio ok")
+    monkeypatch.setattr(release_smoke, "_audio_probe", lambda: ("passed", "audio ok"))
     monkeypatch.setattr(release_smoke, "_engine_restart", lambda _root: "engine ok")
     monkeypatch.setattr(
         release_smoke,
@@ -131,7 +144,14 @@ def test_inventory_covers_locked_native_runtime_and_licence_files() -> None:
     assert all(item["version"] for item in packages.values())
     assert any(item["license_files"] for item in packages.values())
     native_distributions = {item["distribution"] for item in inventory["native_files"]}
-    assert {"av", "opencv-python", "python-rtmidi", "sounddevice"} <= native_distributions
+    if os.name == "nt":
+        # Windows wheels bundle the PortAudio binary inside the sounddevice wheel.
+        expected_native = {"av", "opencv-python", "python-rtmidi", "sounddevice"}
+    else:
+        # Linux resolves PortAudio from the system (libportaudio2), so the
+        # sounddevice wheel carries no native files of its own.
+        expected_native = {"av", "opencv-python", "python-rtmidi"}
+    assert expected_native <= native_distributions
     ffmpeg = inventory["ffmpeg_runtime"]
     assert "h264" in ffmpeg["available_codecs"]
     assert ffmpeg["build_configuration_exposed_by_runtime"] is False
@@ -162,6 +182,14 @@ def test_build_and_clean_machine_scripts_enforce_release_boundaries() -> None:
     assert "libportaudio64bit.dll" in build
     assert "--packaged-smoke-report" in smoke
     assert "'*rtmidi*.pyd'" in smoke
-    assert 'PATH\'] = "$env:SystemRoot\\System32;$env:SystemRoot"' in smoke
     assert "Remove-Item -LiteralPath $portableCopy" in smoke
     assert "documentSentinel" in smoke
+
+    linux_build = (ROOT / "packaging/build.sh").read_text(encoding="utf-8")
+    linux_smoke = (ROOT / "packaging/smoke_test.sh").read_text(encoding="utf-8")
+    assert "uv sync --locked --group packaging" in linux_build
+    assert "pyside6-deploy" in linux_build
+    assert "tools.release provenance" in linux_build
+    assert "libportaudio2" in linux_build
+    assert "--packaged-smoke-report" in linux_smoke
+    assert "document_sentinel" in linux_smoke

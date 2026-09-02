@@ -557,7 +557,7 @@ def engine_server_main(
     crash_log_path: str | None = None,
     log_directory: str | None = None,
 ) -> None:
-    """Top-level Windows-spawn target; never imports or creates Qt objects."""
+    """Top-level spawn target; never imports or creates Qt objects."""
 
     crash_path = None if crash_log_path is None else Path(crash_log_path)
     crash_capture_path = None if crash_path is None else Path(f"{crash_path}.pending")

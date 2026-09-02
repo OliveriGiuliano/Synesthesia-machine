@@ -36,10 +36,12 @@ MANIFEST
 *.manifest
 *.spec
 !/pysidedeploy.spec
+!/pysidedeploy.linux.spec
 
 # Synesthesia Machine deployment intermediates and local release artifacts
 /deployment/
 /packaging/out/
+/packaging/out-windows-previous/
 /packaging/work/
 
 # Installer logs

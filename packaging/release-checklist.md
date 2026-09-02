@@ -5,18 +5,19 @@
 - [ ] Application licence and distribution model approved in writing.
 - [ ] Third-party/codec review in `licensing-review.md` approved by competent counsel.
 - [ ] Worktree clean; annotated candidate commit reviewed.
-- [ ] `pyproject.toml`, `version.py`, and `pysidedeploy.spec` versions agree.
-- [ ] `uv.lock` is current and the build uses Windows 11 x64.
-- [ ] `packaging/build.ps1` completes without `-AllowDirty` or `-SkipTests`.
+- [ ] `pyproject.toml`, `version.py`, and the platform `pysidedeploy.spec` versions agree.
+- [ ] `uv.lock` is current and the build runs on the deliverable platform (Windows 11 x64 or Linux x64).
+- [ ] `packaging/build.ps1` (Windows) or `packaging/build.sh` (Linux) completes without dirty/skip flags.
 - [ ] Archive hash matches `SHA256SUMS.txt`; provenance records `dirty: false`.
-- [ ] Clean-machine automated and manual smoke matrix passes with evidence.
+- [ ] Clean-machine automated and manual smoke matrix passes with evidence on the deliverable platform.
 - [ ] No console window, source/tests/caches, credentials, user media, or unreviewed DLLs ship.
 - [ ] Previous accepted standalone archive and its hash remain available for rollback.
 
 ## Version and tag
 
-Use semantic versions. Update the project, source, and four-component Windows file version together;
-run the full build; then create an annotated tag `vMAJOR.MINOR.PATCH` at the exact clean source commit.
+Use semantic versions. Update the project, source, and platform version metadata (four-component
+Windows file version) together; run the full build on each deliverable platform; then create an
+annotated tag `vMAJOR.MINOR.PATCH` at the exact clean source commit.
 Never move or reuse a published tag. Store the ZIP, SHA-256 file, provenance, dependency inventory,
 notices, smoke evidence, and approval record together.
 

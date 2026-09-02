@@ -35,5 +35,6 @@
 - The repository does not yet declare an approved application license or distribution model. Do not
   publish or represent an artifact as legally cleared. Dependency/codec and third-party notice review
   remain release blockers until explicitly approved.
-- Never delete user graph documents or `%LOCALAPPDATA%\SynesthesiaMachine` during packaging, rollback,
-  uninstall, or smoke testing.
+- Never delete user graph documents or the application data root (`%LOCALAPPDATA%\SynesthesiaMachine`
+  on Windows, `~/.local/share/SynesthesiaMachine` on Linux) during packaging, rollback, uninstall, or
+  smoke testing.

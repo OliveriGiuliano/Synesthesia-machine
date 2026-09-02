@@ -335,10 +335,12 @@ def _resolve_media_path(value: str, graph_directory: Path) -> str:
 def _persisted_media_path(value: str, graph_directory: Path) -> str:
     candidate = normalize_media_path(value)
     if not candidate.is_absolute():
-        return str(candidate)
+        # Graph documents are plain JSON text; relative media paths are persisted in
+        # POSIX form so a document saved on Windows opens unchanged on Linux.
+        return candidate.as_posix()
     resolved = candidate.resolve()
     try:
-        return str(resolved.relative_to(graph_directory))
+        return resolved.relative_to(graph_directory).as_posix()
     except ValueError:
         return str(resolved)
 

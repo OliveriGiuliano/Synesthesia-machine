@@ -1,6 +1,7 @@
 # Diagnostics and evidence tools
 
-Run commands from the repository root through `uv`. Enumeration-only commands are safe without
+Run commands from the repository root through `uv` on Windows (PowerShell) or Linux (bash). The
+command lines below are identical on both shells. Enumeration-only commands are safe without
 hardware. Commands that open a camera or output device are explicitly opt-in.
 
 ## Environment and device probes

@@ -31,10 +31,20 @@ from synesthesia_machine import __version__
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_FILE = REPOSITORY_ROOT / "pyproject.toml"
 LOCK_FILE = REPOSITORY_ROOT / "uv.lock"
-DEPLOY_SPEC = REPOSITORY_ROOT / "pysidedeploy.spec"
 VERSION_FILE = REPOSITORY_ROOT / "src" / "synesthesia_machine" / "version.py"
 LICENSE_PREFIXES = ("license", "licence", "copying", "notice")
 NATIVE_DISTRIBUTIONS = ("av", "opencv-python", "python-rtmidi", "sounddevice")
+
+
+def deploy_spec_path() -> Path:
+    """Return the committed pyside6-deploy specification for the build host platform."""
+
+    if platform.system() == "Windows":
+        return REPOSITORY_ROOT / "pysidedeploy.spec"
+    if platform.system() == "Linux":
+        return REPOSITORY_ROOT / "pysidedeploy.linux.spec"
+    msg = f"release builds support Windows and Linux only, found {platform.system()!r}"
+    raise RuntimeError(msg)
 
 
 def _sha256(path: Path) -> str:
@@ -70,17 +80,35 @@ def _source_version() -> str:
 def check_release_configuration() -> None:
     project_version = _project_version()
     source_version = _source_version()
+    deploy_spec = deploy_spec_path()
+    if not deploy_spec.is_file():
+        raise RuntimeError(f"deployment specification is missing: {deploy_spec}")
     parser = configparser.ConfigParser()
-    parser.read(DEPLOY_SPEC, encoding="utf-8")
+    parser.read(deploy_spec, encoding="utf-8")
     mode = parser.get("nuitka", "mode")
     extra_args = parser.get("nuitka", "extra_args")
-    expected_windows_version = f"{project_version}.0"
+    is_windows = platform.system() == "Windows"
+    # Tokens shared by the Windows and Linux deployment specifications.
     expected_tokens = (
-        "--windows-console-mode=disable",
-        f"--file-version={expected_windows_version}",
-        f"--product-version={project_version}",
+        "--assume-yes-for-downloads",
         "--include-package=synesthesia_machine",
+        "--include-module=av.utils",
+        "--include-package=mido.backends",
+        "--include-package=rtmidi",
+        "--no-prefer-source-code",
+        "--noinclude-qt-translations",
+        "--include-data-files=",
     )
+    if is_windows:
+        expected_tokens += (
+            "--windows-console-mode=disable",
+            f"--file-version={project_version}.0",
+            f"--product-version={project_version}",
+            "--noinclude-dlls=*asio*.dll",
+            # The Windows sounddevice wheel bundles PortAudio in a companion
+            # package; the Linux runtime loads the system libportaudio2 instead.
+            "--include-package=_sounddevice_data",
+        )
     failures: list[str] = []
     if __version__ != project_version or source_version != project_version:
         failures.append(
@@ -92,14 +120,23 @@ def check_release_configuration() -> None:
     for token in expected_tokens:
         if token not in extra_args:
             failures.append(f"missing Nuitka release option: {token}")
+    if not is_windows and "--windows-console-mode" in extra_args:
+        failures.append("Linux deployment must not pass Windows-only Nuitka options")
+    if not is_windows and "--include-package=_sounddevice_data" in extra_args:
+        failures.append(
+            "Linux deployment must not include the Windows-only PortAudio companion package"
+        )
     icon = (REPOSITORY_ROOT / parser.get("app", "icon")).resolve()
     if not icon.is_file():
         failures.append(f"application icon does not exist: {icon}")
     if not LOCK_FILE.is_file():
         failures.append("uv.lock is missing")
-    if platform.system() != "Windows" or platform.machine().lower() not in {"amd64", "x86_64"}:
+    if is_windows:
+        if platform.machine().lower() not in {"amd64", "x86_64"}:
+            failures.append(f"release builds require Windows x64, found {platform.machine()}")
+    elif platform.system() != "Linux" or platform.machine() != "x86_64":
         failures.append(
-            f"release builds require Windows x64, found {platform.system()} {platform.machine()}"
+            f"release builds require Linux x86_64, found {platform.system()} {platform.machine()}"
         )
     if failures:
         raise RuntimeError("; ".join(failures))
@@ -189,7 +226,7 @@ def _native_files(
         for package_path in distribution.files or ():
             relative = str(package_path).replace("\\", "/")
             lower = relative.casefold()
-            if not lower.endswith((".dll", ".pyd")):
+            if not lower.endswith((".dll", ".pyd", ".so")):
                 continue
             if distribution_name == "av" and not lower.startswith(("av", "av.libs")):
                 continue
@@ -275,8 +312,9 @@ def write_notices(path: Path, inventory: Mapping[str, object]) -> None:
         "# Third-party notices",
         "",
         f"This inventory accompanies Synesthesia Machine {__version__}. It is generated from the",
-        "exact locked Windows build environment and is not a substitute for legal review. The",
-        "release directory includes the licence files reported below under `licenses/`.",
+        f"exact locked {platform.system()} build environment and is not a substitute for legal",
+        "review. The release directory includes the licence files reported below under",
+        "`licenses/`.",
         "",
         "External distribution remains blocked by `LICENSE-or-NOTICE.md` and",
         "`packaging/licensing-review.md` until the application licence/distribution model and",
@@ -356,7 +394,7 @@ def create_provenance(artifact: Path, output: Path) -> None:
             "source_date_epoch": os.environ.get("SOURCE_DATE_EPOCH", ""),
             "pyproject_sha256": _sha256(PROJECT_FILE),
             "uv_lock_sha256": _sha256(LOCK_FILE),
-            "pysidedeploy_spec_sha256": _sha256(DEPLOY_SPEC),
+            "pysidedeploy_spec_sha256": _sha256(deploy_spec_path()),
         },
         "toolchain": {
             "python": platform.python_version(),
