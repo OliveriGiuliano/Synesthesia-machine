@@ -10,12 +10,30 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # Bundled inside the artifact the script sits in <artifact>/smoke; the app root
 # is one level up. From the repository the default is the repository root.
-app_dir="${1:-$(cd "$script_dir/.." && pwd -P)}"
-
-headless=0
+app_dir="$(cd "$script_dir/.." && pwd -P)"
+app_dir_given=0
+on_display=0
 for argument in "$@"; do
     case "$argument" in
-        --headless) headless=1 ;;
+        --display) on_display=1 ;;
+        -h | --help)
+            echo "usage: $(basename "$0") [--display] [APP_DIRECTORY]"
+            echo "--display: run the Qt UI on the real display (default is the offscreen platform)"
+            exit 0
+            ;;
+        --) break ;;
+        -*)
+            echo "unknown option: $argument" >&2
+            exit 2
+            ;;
+        *)
+            if (( app_dir_given )); then
+                echo "unexpected argument: $argument" >&2
+                exit 2
+            fi
+            app_dir="$argument"
+            app_dir_given=1
+            ;;
     esac
 done
 
@@ -64,10 +82,25 @@ report_path="$smoke_root/packaged-smoke.json"
 start_packaged_process() {
     # All positional arguments are forwarded to the packaged executable verbatim;
     # PATH is sanitized and per-user state is redirected into the smoke sandbox.
+    # The offscreen Qt platform is the default so the smoke also passes on
+    # display-less machines; --display uses the real display like smoke_test.ps1.
     local code
-    env -i PATH="/usr/bin:/bin" HOME="$HOME" XDG_DATA_HOME="$data_home" \
-        QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}" \
-        "$executable" "$@"
+    if (( on_display )); then
+        # --display: run on the real display, forwarding the caller's
+        # QT_QPA_PLATFORM only when they set one.
+        if [[ -n "${QT_QPA_PLATFORM:-}" ]]; then
+            env -i PATH="/usr/bin:/bin" HOME="$HOME" XDG_DATA_HOME="$data_home" \
+                QT_QPA_PLATFORM="$QT_QPA_PLATFORM" \
+                "$executable" "$@"
+        else
+            env -i PATH="/usr/bin:/bin" HOME="$HOME" XDG_DATA_HOME="$data_home" \
+                "$executable" "$@"
+        fi
+    else
+        env -i PATH="/usr/bin:/bin" HOME="$HOME" XDG_DATA_HOME="$data_home" \
+            QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}" \
+            "$executable" "$@"
+    fi
     code=$?
     if [[ "$code" -ne 0 ]]; then
         echo "packaged process exited with code $code" >&2

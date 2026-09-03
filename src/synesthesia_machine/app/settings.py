@@ -21,7 +21,9 @@ def data_base() -> str:
             return local_app_data
         return str(Path.home() / "AppData" / "Local")
     xdg_data_home = environ.get("XDG_DATA_HOME")
-    if xdg_data_home:
+    # The XDG spec: an empty or relative $XDG_DATA_HOME must be interpreted as
+    # being relative to $HOME (fall back to the default).
+    if xdg_data_home and os.path.isabs(xdg_data_home):
         return xdg_data_home
     return str(Path.home() / ".local" / "share")
 

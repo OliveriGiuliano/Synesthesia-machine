@@ -272,17 +272,20 @@ class GroupGraphicsItem(QGraphicsObject):
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         if self._resize_edges is not None:
             self._resize_edges = None
+            self._move_items = []
+            self._move_start_positions = []
             position = (self.pos().x(), self.pos().y())
             size = self._display_size
             self.unsetCursor()
-            cast("GraphSceneProtocol", self.scene()).commit_group_resize(
-                self.model.id, position, size
-            )
+            scene = cast("object | None", self.scene())
+            if scene is not None:
+                cast("GraphSceneProtocol", scene).commit_group_resize(self.model.id, position, size)
             event.accept()
             return
         super().mouseReleaseEvent(event)
-        scene = cast("GraphSceneProtocol", self.scene())
-        scene.commit_group_move(self._drag_origin)
+        scene = cast("object | None", self.scene())
+        if scene is not None:
+            cast("GraphSceneProtocol", scene).commit_group_move(self._drag_origin)
         self._drag_origin = {}
         self._move_items = []
         self._move_start_positions = []
@@ -733,9 +736,10 @@ class NodeGraphicsItem(QGraphicsObject):
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         if self._drag_items:
-            scene = cast("GraphSceneProtocol", self.scene())
-            self._drag_selected_items(scene, event.scenePos())
-            event.accept()
+            scene = cast("object | None", self.scene())
+            if scene is not None:
+                self._drag_selected_items(cast("GraphSceneProtocol", scene), event.scenePos())
+                event.accept()
             return
         super().mouseMoveEvent(event)
 
@@ -765,8 +769,9 @@ class NodeGraphicsItem(QGraphicsObject):
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         super().mouseReleaseEvent(event)
-        scene = cast("GraphSceneProtocol", self.scene())
-        scene.commit_node_move(self._drag_origin)
+        scene = cast("object | None", self.scene())
+        if scene is not None:
+            cast("GraphSceneProtocol", scene).commit_node_move(self._drag_origin)
         self._drag_origin = {}
         self._drag_items = []
         self._drag_start_positions = []

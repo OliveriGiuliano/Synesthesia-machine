@@ -385,16 +385,20 @@ class GraphScene(QGraphicsScene):
         self.connectionInspectRequested.emit(connection_id)
 
     def commit_node_move(self, origins: dict[UUID, tuple[float, float]]) -> None:
+        # Nodes deleted between press and release drop out of the move entirely;
+        # the old/new maps must cover the same (surviving) IDs.
         current: dict[UUID, tuple[float, float]] = {}
-        for node_id in origins:
+        surviving: dict[UUID, tuple[float, float]] = {}
+        for node_id, origin in origins.items():
             item = self.node_items.get(node_id)
             if item is None:
                 continue
+            surviving[node_id] = origin
             x, y = self._snapped_position(item.pos().x(), item.pos().y())
             current[node_id] = self.clamp_position_to_scene(
                 x, y, item.boundingRect().width(), item.boundingRect().height()
             )
-        self.session.move_nodes(origins, current)
+        self.session.move_nodes(surviving, current)
 
     def selected_group_positions(self) -> dict[UUID, tuple[float, float]]:
         return {
@@ -404,16 +408,20 @@ class GraphScene(QGraphicsScene):
         }
 
     def commit_group_move(self, origins: dict[UUID, tuple[float, float]]) -> None:
+        # Groups deleted between press and release drop out of the move entirely;
+        # the old/new maps must cover the same (surviving) IDs.
         current: dict[UUID, tuple[float, float]] = {}
-        for group_id in origins:
+        surviving: dict[UUID, tuple[float, float]] = {}
+        for group_id, origin in origins.items():
             item = self.group_items.get(group_id)
             if item is None:
                 continue
+            surviving[group_id] = origin
             x, y = self._snapped_position(item.pos().x(), item.pos().y())
             current[group_id] = self.clamp_position_to_scene(
                 x, y, item.boundingRect().width(), item.boundingRect().height()
             )
-        self.session.move_groups(origins, current)
+        self.session.move_groups(surviving, current)
 
     def commit_group_resize(
         self,

@@ -42,7 +42,9 @@ compiled self-test, launch/close/relaunch the Qt UI, check native media/MIDI/aud
 development-file exclusions, delete the portable copy, and verify that a sentinel user document
 survives. The Windows runner needs PowerShell; the Linux runner needs bash and the desktop base
 libraries (Qt GL/EGL/fontconfig/xkbcommon, `libportaudio2` for the audio check, which is reported
-skipped rather than failed when absent).
+skipped rather than failed when absent). The Linux runner uses the offscreen Qt platform by default
+so it also passes on display-less machines; pass `--display` to run the Qt UI on the real display,
+mirroring the Windows runner's default.
 
 See `RUNNING.md`, `licensing-review.md`, `release-checklist.md`, and `clean-machine-smoke.md` for the
 operational and release gates.

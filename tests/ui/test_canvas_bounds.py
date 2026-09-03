@@ -234,3 +234,62 @@ def test_new_node_anchor_is_clamped_to_the_graph_area(canvas: GraphScene) -> Non
     assert rect.top() <= clamped[1] <= rect.bottom()
     assert clamped[0] == pytest.approx(rect.right() - DEFAULT_THEME.metrics.node_width)
     assert clamped[1] == pytest.approx(rect.top())
+
+
+def test_deleting_a_node_mid_drag_commits_only_the_survivors(canvas: GraphScene) -> None:
+    """A node deleted between press and release must not raise on commit.
+
+    ``MoveNodesCommand`` requires identical key sets in the old/new position
+    maps; deleted nodes must drop out of both maps, not crash the release.
+    """
+
+    right_id = canvas.session.add_node("synmachine.utility.number", (0.0, 0.0))
+    left_id = canvas.session.add_node("synmachine.utility.number", (200.0, 0.0))
+    right = canvas.node_items[right_id]
+    left = canvas.node_items[left_id]
+    del left
+
+    canvas.select_node_ids({right_id, left_id})
+    press_point = right.pos() + QPointF(15.0, 15.0)
+    right.mousePressEvent(
+        _scene_mouse_event(
+            QGraphicsSceneMouseEvent.Type.MouseButtonPress,
+            press_point,
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+        )
+    )
+    # Delete one of the in-flight drag set, like a Delete key would.
+    canvas.session.delete_selection({left_id}, set(), set())
+    right.mouseMoveEvent(
+        _scene_mouse_event(
+            QGraphicsSceneMouseEvent.Type.MouseMove,
+            press_point + QPointF(30.0, 0.0),
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.LeftButton,
+        )
+    )
+    right.mouseReleaseEvent(
+        _scene_mouse_event(
+            QGraphicsSceneMouseEvent.Type.MouseButtonRelease,
+            press_point + QPointF(30.0, 0.0),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+        )
+    )
+
+    assert canvas.session.document.node(left_id) is None
+    moved = canvas.session.document.node(right_id)
+    assert moved is not None
+    assert moved.position == (30.0, 0.0)
+
+
+def test_commit_node_move_with_all_origins_deleted_is_a_no_op(canvas: GraphScene) -> None:
+    node_id = canvas.session.add_node("synmachine.utility.number", (0.0, 0.0))
+    canvas.session.delete_selection({node_id}, set(), set())
+
+    # Every origin is gone: the commit must be a silent no-op, not a ValueError,
+    # and must not push a command.
+    count_before = canvas.session.undo_stack.count()
+    canvas.commit_node_move({node_id: (0.0, 0.0)})
+    assert canvas.session.undo_stack.count() == count_before
