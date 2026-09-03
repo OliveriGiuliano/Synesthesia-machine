@@ -73,7 +73,9 @@ class SeparateChannelsRuntime(StatelessImageRuntime):
         context: FrameContext,
     ) -> Mapping[str, RuntimeValue]:
         del parameters, context
-        channels = separate_image_channels(image_value(inputs["image"]))
+        # Sources never carry an alpha channel, so the node exposes the three
+        # descriptor channels; a fourth (alpha) view would be dead clutter.
+        channels = separate_image_channels(image_value(inputs["image"]))[:3]
         return {
             f"channel_{index}": NoData if channel is None else channel
             for index, channel in enumerate(channels, start=1)
@@ -189,14 +191,14 @@ def create_channel_definitions() -> tuple[NodeDefinition, ...]:
         ),
         NodeDefinition(
             "synmachine.image.separate_channels",
-            1,
+            2,
             "Separate Channels",
             "Image / Channel",
-            "Publish up to four descriptor-backed read-only channel views.",
+            "Publish the three descriptor-backed read-only colour channel views.",
             (InputPortSpec("image", "Image", PortType.IMAGE),),
             tuple(
                 OutputPortSpec(f"channel_{index}", f"Channel {index}", PortType.CHANNEL)
-                for index in range(1, 5)
+                for index in range(1, 4)
             ),
             (),
             ExecutionKind.STATELESS,
@@ -205,7 +207,7 @@ def create_channel_definitions() -> tuple[NodeDefinition, ...]:
         ),
         NodeDefinition(
             "synmachine.image.combine_channels",
-            1,
+            2,
             "Combine Channels",
             "Image / Channel",
             "Assemble descriptor-labeled channels into one declared colour space.",
@@ -216,7 +218,7 @@ def create_channel_definitions() -> tuple[NodeDefinition, ...]:
                     PortType.CHANNEL,
                     required=False,
                 )
-                for index in range(1, 5)
+                for index in range(1, 4)
             ),
             (OutputPortSpec("image", "Image", PortType.IMAGE),),
             (
@@ -225,7 +227,11 @@ def create_channel_definitions() -> tuple[NodeDefinition, ...]:
                     "Target colour space",
                     PortType.STRING,
                     ColorSpace.SRGB.value,
-                    choices=tuple(space.value for space in ColorSpace),
+                    # RGBA is not offered: the app's sources never carry an
+                    # alpha channel, so a fourth input would be dead weight.
+                    choices=tuple(
+                        space.value for space in ColorSpace if space is not ColorSpace.RGBA
+                    ),
                     update_mode=ParameterUpdateMode.RECOMPILE,
                 ),
             ),

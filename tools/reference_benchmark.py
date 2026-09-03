@@ -168,12 +168,14 @@ def create_reference_document(media_path: str) -> GraphDocument:
     document.add_node(
         "synmachine.image.change_colour_space",
         node_id=HSV_ID,
+        implementation_version=2,
         parameters={"target_colour_space": "HSV"},
         position=(900.0, 100.0),
     )
     document.add_node(
         "synmachine.image.separate_channels",
         node_id=CHANNELS_ID,
+        implementation_version=2,
         position=(1200.0, 0.0),
     )
     document.add_node(

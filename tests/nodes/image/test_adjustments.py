@@ -13,7 +13,6 @@ from tests.support.image_conformance import (
 )
 
 from synesthesia_machine.contracts import (
-    AlphaMode,
     ColorSpace,
     ImageFrame,
     ParameterValue,
@@ -38,7 +37,6 @@ BATCH2_IDS = (
     "synmachine.image.hue",
     "synmachine.image.saturation",
     "synmachine.image.invert_colour",
-    "synmachine.image.opacity",
     "synmachine.image.stretch_contrast",
     "synmachine.image.gamma",
     "synmachine.image.add_scalar",
@@ -49,7 +47,7 @@ BATCH2_IDS = (
 PARAMETER_IDS = {
     "synmachine.image.brightness": ("offset", "channels"),
     "synmachine.image.contrast": ("factor", "pivot", "channels"),
-    "synmachine.image.clamp": ("minimum", "maximum", "channels", "include_alpha"),
+    "synmachine.image.clamp": ("minimum", "maximum", "channels"),
     "synmachine.image.colour_levels": (
         "input_black",
         "input_white",
@@ -60,8 +58,7 @@ PARAMETER_IDS = {
     ),
     "synmachine.image.hue": ("turns",),
     "synmachine.image.saturation": ("factor",),
-    "synmachine.image.invert_colour": ("invert_alpha",),
-    "synmachine.image.opacity": ("factor",),
+    "synmachine.image.invert_colour": (),
     "synmachine.image.stretch_contrast": (
         "mode",
         "lower_percentile",
@@ -79,7 +76,7 @@ PARAMETER_IDS = {
 CONNECTABLE_IDS: Mapping[str, frozenset[str]] = {
     "synmachine.image.brightness": frozenset({"offset"}),
     "synmachine.image.contrast": frozenset({"factor", "pivot"}),
-    "synmachine.image.clamp": frozenset({"minimum", "maximum", "include_alpha"}),
+    "synmachine.image.clamp": frozenset({"minimum", "maximum"}),
     "synmachine.image.colour_levels": frozenset(
         {
             "input_black",
@@ -91,8 +88,7 @@ CONNECTABLE_IDS: Mapping[str, frozenset[str]] = {
     ),
     "synmachine.image.hue": frozenset({"turns"}),
     "synmachine.image.saturation": frozenset({"factor"}),
-    "synmachine.image.invert_colour": frozenset({"invert_alpha"}),
-    "synmachine.image.opacity": frozenset({"factor"}),
+    "synmachine.image.invert_colour": frozenset(),
     "synmachine.image.stretch_contrast": frozenset(
         {"lower_percentile", "upper_percentile", "ignore_non_finite"}
     ),
@@ -210,7 +206,7 @@ def test_contrast_applies_factor_around_pivot_without_clipping(rgba_image: Image
     assert result.data[..., :3].min() < 0.0
 
 
-def test_clamp_preserves_or_includes_alpha_and_has_explicit_non_finite_semantics(
+def test_clamp_preserves_alpha_and_has_explicit_non_finite_semantics(
     rgba_image: ImageFrame,
 ) -> None:
     source = _image(
@@ -220,10 +216,8 @@ def test_clamp_preserves_or_includes_alpha_and_has_explicit_non_finite_semantics
     )
     preserved = _process("synmachine.image.clamp", source)
     assert np.isnan(preserved.data[0, 0, 0])
-    assert np.array_equal(preserved.data[0, 0, 1:], (1.0, 0.0, 2.0))
-
-    included = _process("synmachine.image.clamp", source, {"include_alpha": True})
-    assert included.data[0, 0, 3] == 1.0
+    assert np.array_equal(preserved.data[0, 0, 1:3], (1.0, 0.0))
+    assert np.array_equal(preserved.data[0, 0, 3], 2.0)
 
 
 def test_colour_levels_applies_normalization_gamma_and_output_range(
@@ -331,38 +325,16 @@ def test_hue_allows_and_preserves_non_finite_alpha(rgba_image: ImageFrame) -> No
     assert np.isnan(result.data[0, 0, 3])
 
 
-def test_invert_colour_preserves_alpha_by_default_and_can_include_it(
-    rgba_image: ImageFrame,
-) -> None:
+def test_invert_colour_preserves_alpha(rgba_image: ImageFrame) -> None:
     preserved = _process("synmachine.image.invert_colour", rgba_image)
     assert np.allclose(preserved.data[..., :3], 1.0 - rgba_image.data[..., :3])
     assert np.array_equal(preserved.data[..., 3], rgba_image.data[..., 3])
-
-    included = _process("synmachine.image.invert_colour", rgba_image, {"invert_alpha": True})
-    assert np.allclose(included.data, 1.0 - rgba_image.data)
 
 
 def test_invert_colour_rejects_non_normalized_descriptors(rgb_image: ImageFrame) -> None:
     lab = _image(np.array([[[50.0, 0.0, 0.0]]], dtype=np.float32), ColorSpace.LAB, rgb_image)
     with pytest.raises(ExpectedNodeError, match=r"normalized 0\.\.1"):
         _process("synmachine.image.invert_colour", lab)
-
-
-def test_opacity_creates_rgba_and_multiplies_existing_alpha(
-    rgb_image: ImageFrame, rgba_image: ImageFrame
-) -> None:
-    created = _process("synmachine.image.opacity", rgb_image, {"factor": 0.25})
-    assert created.color_space is ColorSpace.RGBA
-    assert created.channel_names == ("R", "G", "B", "A")
-    assert created.alpha_mode is AlphaMode.STRAIGHT
-    assert created.data.shape == (*rgb_image.data.shape[:2], 4)
-    assert np.allclose(created.data[..., :3], rgb_image.data, atol=1e-6)
-    assert np.all(created.data[..., 3] == np.float32(0.25))
-    assert created.context is rgb_image.context and created.provenance is rgb_image.provenance
-
-    multiplied = _process("synmachine.image.opacity", rgba_image, {"factor": 0.5})
-    assert np.array_equal(multiplied.data[..., :3], rgba_image.data[..., :3])
-    assert np.allclose(multiplied.data[..., 3], rgba_image.data[..., 3] * np.float32(0.5))
 
 
 def test_stretch_contrast_supports_per_channel_and_combined_modes(rgb_image: ImageFrame) -> None:
@@ -460,7 +432,7 @@ def test_gamma_clamps_negative_selected_values_and_preserves_ieee_values(
     assert np.array_equal(result.data[..., 3], source.data[..., 3])
 
 
-def test_scalar_arithmetic_uses_selected_channels_and_all_can_include_alpha(
+def test_scalar_arithmetic_uses_selected_channels(
     rgba_image: ImageFrame,
 ) -> None:
     added = _process(
@@ -510,13 +482,15 @@ def test_divide_scalar_near_zero_policies_are_explicit(rgb_image: ImageFrame) ->
         )
 
 
-def test_unavailable_channel_selection_is_recoverable(rgb_image: ImageFrame) -> None:
-    with pytest.raises(ExpectedNodeError, match="CHANNEL_4 is unavailable"):
-        _process(
-            "synmachine.image.brightness",
-            rgb_image,
-            {"channels": "CHANNEL_4"},
-        )
+def test_retired_channel_selection_is_rejected_at_validation() -> None:
+    # CHANNEL_4 is no longer an offered choice; the literal is rejected and
+    # the parameter falls back to its COLOUR default.
+    values, errors = _definition("synmachine.image.brightness").parameter_values(
+        {"channels": "CHANNEL_4"}
+    )
+    assert len(errors) == 1
+    assert "expected one of" in errors[0]
+    assert values["channels"] == "COLOUR"
 
 
 @pytest.mark.parametrize(
@@ -542,7 +516,6 @@ def test_unavailable_channel_selection_is_recoverable(rgb_image: ImageFrame) -> 
         ("synmachine.image.gamma", {"gamma": 0.0}, "at least"),
         ("synmachine.image.divide_scalar", {"epsilon": 0.0}, "at least"),
         ("synmachine.image.saturation", {"factor": float("nan")}, "factor must be finite"),
-        ("synmachine.image.opacity", {"factor": float("nan")}, "factor must be finite"),
     ],
 )
 def test_definition_validators_reject_invalid_literals(
@@ -552,7 +525,7 @@ def test_definition_validators_reject_invalid_literals(
     assert any(message in error for error in errors)
 
 
-@pytest.mark.parametrize("type_id", ["synmachine.image.saturation", "synmachine.image.opacity"])
+@pytest.mark.parametrize("type_id", ["synmachine.image.saturation"])
 def test_non_negative_factor_definitions_accept_zero(type_id: str) -> None:
     _, errors = _definition(type_id).parameter_values({"factor": 0.0})
     assert not errors
@@ -562,7 +535,6 @@ def test_non_negative_factor_definitions_accept_zero(type_id: str) -> None:
     ("type_id", "connected", "message"),
     [
         ("synmachine.image.saturation", {"factor": -1.0}, "non-negative"),
-        ("synmachine.image.opacity", {"factor": -1.0}, "non-negative"),
         ("synmachine.image.gamma", {"gamma": 0.0}, "positive"),
         (
             "synmachine.image.colour_levels",

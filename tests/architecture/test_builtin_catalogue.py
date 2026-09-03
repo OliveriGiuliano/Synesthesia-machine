@@ -31,7 +31,6 @@ EXPECTED_IMAGE_TYPE_IDS = (
     "synmachine.image.hue",
     "synmachine.image.saturation",
     "synmachine.image.invert_colour",
-    "synmachine.image.opacity",
     "synmachine.image.stretch_contrast",
     "synmachine.image.gamma",
     "synmachine.image.add_scalar",
@@ -67,7 +66,7 @@ def test_image_catalogue_has_exact_stable_order_and_unique_type_ids() -> None:
     type_ids = tuple(definition.type_id for definition in definitions)
 
     assert type_ids == EXPECTED_IMAGE_TYPE_IDS
-    assert len(type_ids) == len(set(type_ids)) == 36
+    assert len(type_ids) == len(set(type_ids)) == 35
     assert tuple(definition.type_id for definition in create_catalogue_definitions()) == type_ids
 
 
@@ -89,7 +88,10 @@ def test_builtin_registry_preserves_compatibility_catalogue_as_50_definition_sub
     }
 
     assert len(type_ids) == len(set(type_ids))
-    assert len(compatibility_ids) == 50
+    # The historical catalogue holds 50 nodes; the v3-to-v4 graph migration
+    # drops the retired opacity node, so loading yields 49 unique type IDs.
+    assert len(compatibility_ids) == 49
+    assert "synmachine.image.opacity" not in compatibility_ids
     assert compatibility_ids <= set(type_ids)
     assert tuple(type_id for type_id in type_ids if type_id.startswith("synmachine.image.")) == (
         tuple(sorted(EXPECTED_IMAGE_TYPE_IDS))

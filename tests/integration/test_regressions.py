@@ -134,8 +134,9 @@ def test_dynamic_image_node_resolves_to_channel_and_hides_image_only_parameters(
     document = GraphDocument()
     source = document.add_node("synmachine.input.load_video")
     luminance = document.add_node("synmachine.image.to_luminance")
-    add = document.add_node("synmachine.image.add_scalar")
-    # Fresh nodes are stamped at the definition's current implementation version.
+    add = document.add_node("synmachine.image.add_scalar", implementation_version=2)
+    # GraphDocument.add_node defaults to implementation version 1; the editor
+    # stamps the definition's current version, but raw documents do not.
     display = document.add_node(
         "synmachine.visualization.channel_display", implementation_version=2
     )
@@ -425,7 +426,9 @@ def test_parameter_randomization_preserves_context_dependent_video_identity() ->
 def test_randomize_nodes_replaces_selection_with_random_sized_valid_subgraph() -> None:
     registry = create_application_registry()
     size_deltas: list[int] = []
-    for seed in range(5):
+    # Seeded runs are process-stable (node IDs derive from the seed), so a
+    # wide seed set makes the both-directions size property robust.
+    for seed in range(20):
         original = generate_random_graph(registry, seed=seed)
         selected = {node.id for node in original.nodes}
 

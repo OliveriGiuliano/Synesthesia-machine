@@ -32,7 +32,10 @@ def test_compatibility_catalogue_preserves_each_historical_definition_once() -> 
     expected = tuple(definition.type_id for definition in registry.definitions())
     actual = tuple(node.type_id for node in snapshot.nodes)
 
-    assert len(actual) == len(set(actual)) == 50
+    # Loading the v3 file applies the v3-to-v4 migration, which drops the
+    # retired opacity node, so 49 of the 50 historical definitions survive.
+    assert len(actual) == len(set(actual)) == 49
+    assert "synmachine.image.opacity" not in actual
     assert set(actual) <= set(expected)
     assert not snapshot.connections
 

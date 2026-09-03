@@ -191,7 +191,6 @@ def test_batch5_metadata_has_exact_order_ports_defaults_and_policies() -> None:
         "channel_1",
         "channel_2",
         "channel_3",
-        "channel_4",
     )
     assert not separate.parameters
 
@@ -199,7 +198,6 @@ def test_batch5_metadata_has_exact_order_ports_defaults_and_policies() -> None:
         "channel_1",
         "channel_2",
         "channel_3",
-        "channel_4",
     )
     assert all(not port.required for port in combine.inputs)
     assert combine.handles_no_data
@@ -207,7 +205,9 @@ def test_batch5_metadata_has_exact_order_ports_defaults_and_policies() -> None:
     assert target.id == "target_colour_space"
     assert target.default == ColorSpace.SRGB.value
     assert target.update_mode is ParameterUpdateMode.RECOMPILE
-    assert target.choices == tuple(space.value for space in ColorSpace)
+    assert target.choices == tuple(
+        space.value for space in ColorSpace if space is not ColorSpace.RGBA
+    )
 
     assert tuple(port.id for port in luminance.inputs) == ("image",)
     assert tuple(port.id for port in luminance.outputs) == ("channel",)
@@ -229,12 +229,15 @@ def test_scheduler_propagates_no_data_for_standard_batch5_nodes(type_id: str) ->
 def test_combine_required_inputs_follow_target_descriptor() -> None:
     definition = _definition("synmachine.image.combine_channels")
     srgb_parameters = _parameters(definition)
-    rgba_parameters = _parameters(definition, {"target_colour_space": ColorSpace.RGBA.value})
     assert definition.required_inputs(srgb_parameters) == frozenset(
         {"channel_1", "channel_2", "channel_3"}
     )
-    assert definition.required_inputs(rgba_parameters) == frozenset(
-        {"channel_1", "channel_2", "channel_3", "channel_4"}
+    # RGBA is not an offered target, so no four-channel requirement is reachable.
+    parameters, errors = definition.parameter_values({"target_colour_space": "RGBA"})
+    assert errors
+    assert parameters["target_colour_space"] == "SRGB"
+    assert definition.required_inputs(parameters) == frozenset(
+        {"channel_1", "channel_2", "channel_3"}
     )
 
 
@@ -257,13 +260,15 @@ def test_compiler_enforces_descriptor_driven_combine_requirements() -> None:
         for issue in srgb.report.errors
     )
 
-    document.set_parameter(combine_id, "target_colour_space", ColorSpace.RGBA.value)
-    rgba = compiler.compile(document.snapshot(), demand_roots=(combine_id,))
+    connection = document.incoming_connection(combine_id, "channel_3")
+    assert connection is not None
+    document.remove_connection(connection.id)
+    incomplete = compiler.compile(document.snapshot(), demand_roots=(combine_id,))
     assert any(
         issue.code == "required_input_missing"
         and issue.node_id == combine_id
-        and issue.port_id == "channel_4"
-        for issue in rgba.report.errors
+        and issue.port_id == "channel_3"
+        for issue in incomplete.report.errors
     )
 
 
@@ -409,7 +414,7 @@ def test_blend_parameter_validation_rejects_non_finite_opacity() -> None:
         assert "opacity" in errors[0]
 
 
-def test_separate_channels_emit_descriptor_views_and_nodata(
+def test_separate_channels_emit_descriptor_views(
     rgba_image: ImageFrame,
 ) -> None:
     data = np.array(rgba_image.data, copy=True)
@@ -417,8 +422,11 @@ def test_separate_channels_emit_descriptor_views_and_nodata(
     data[0, 1, 1] = np.inf
     source = _image(data, ColorSpace.RGBA, rgba_image)
     outputs = _separate(source)
+    # The node exposes the first three descriptor channels; alpha is no longer
+    # surfaced so four-channel sources keep only their colour views.
+    assert set(outputs) == {"channel_1", "channel_2", "channel_3"}
     descriptor = color_space_descriptor(ColorSpace.RGBA)
-    for index, expected in enumerate(descriptor.channels, start=1):
+    for index, expected in enumerate(descriptor.channels[:3], start=1):
         output = outputs[f"channel_{index}"]
         assert isinstance(output, ChannelFrame)
         assert output.semantic is expected.semantic
@@ -431,28 +439,27 @@ def test_separate_channels_emit_descriptor_views_and_nodata(
         assert np.array_equal(output.data, source.data[..., index - 1], equal_nan=True)
 
     rgb_outputs = _separate(convert_image(source, ColorSpace.SRGB))
-    assert rgb_outputs["channel_4"] is NoData
+    assert set(rgb_outputs) == {"channel_1", "channel_2", "channel_3"}
 
 
 def test_separate_and_combine_round_trip_preserves_values_descriptor_and_clock(
-    rgba_image: ImageFrame,
+    rgb_image: ImageFrame,
 ) -> None:
-    outputs = _separate(rgba_image)
+    outputs = _separate(rgb_image)
     channels = tuple(
         output
-        for index in range(1, 5)
+        for index in range(1, 4)
         if isinstance((output := outputs[f"channel_{index}"]), ChannelFrame)
     )
-    combined = _combine(channels, ColorSpace.RGBA)
+    combined = _combine(channels, ColorSpace.SRGB)
     assert isinstance(combined, ImageFrame)
-    assert np.array_equal(combined.data, rgba_image.data)
-    assert combined.color_space is ColorSpace.RGBA
-    assert combined.channel_names == ("R", "G", "B", "A")
-    assert combined.alpha_mode is AlphaMode.STRAIGHT
-    assert combined.context is rgba_image.context
+    assert np.array_equal(combined.data, rgb_image.data)
+    assert combined.color_space is ColorSpace.SRGB
+    assert combined.channel_names == ("R", "G", "B")
+    assert combined.context is rgb_image.context
     assert combined.provenance == FrameProvenance(NODE_ID, "combine_channels")
     assert combined.data.flags.c_contiguous and not combined.data.flags.writeable
-    assert not np.shares_memory(combined.data, rgba_image.data)
+    assert not np.shares_memory(combined.data, rgb_image.data)
 
 
 def test_combine_preserves_non_finite_channel_values(
@@ -510,29 +517,6 @@ def test_combine_rejects_dimension_and_clock_mismatches(
         _combine((red, green, blue), ColorSpace.SRGB)
 
 
-def test_combine_ignores_optional_channels_beyond_target_descriptor(
-    rgb_image: ImageFrame,
-) -> None:
-    red = _channel(np.zeros((2, 2), dtype=np.float32), ChannelSemantic.RED, rgb_image.context)
-    green = _channel(np.zeros((2, 2), dtype=np.float32), ChannelSemantic.GREEN, rgb_image.context)
-    blue = _channel(np.zeros((2, 2), dtype=np.float32), ChannelSemantic.BLUE, rgb_image.context)
-    alpha = _channel(np.ones((2, 2), dtype=np.float32), ChannelSemantic.ALPHA, rgb_image.context)
-    combined = _combine(
-        (red, green, blue),
-        ColorSpace.SRGB,
-        extras={"channel_4": alpha},
-    )
-    assert isinstance(combined, ImageFrame)
-    assert combined.data.shape == (2, 2, 3)
-
-    combined_without_optional_data = _combine(
-        (red, green, blue),
-        ColorSpace.SRGB,
-        extras={"channel_4": NoData},
-    )
-    assert isinstance(combined_without_optional_data, ImageFrame)
-
-
 def test_combine_returns_nodata_if_a_runtime_required_channel_is_nodata(
     rgb_image: ImageFrame,
 ) -> None:
@@ -587,7 +571,7 @@ def test_batch5_algorithms_do_not_mutate_inputs(
     b = _image(b_data, ColorSpace.RGBA, rgba_image)
     b_before = b.data.copy()
     separated = _separate(rgba_image)
-    channels = tuple(separated[f"channel_{index}"] for index in range(1, 5))
+    channels = tuple(separated[f"channel_{index}"] for index in range(1, 4))
     assert all(isinstance(channel, ChannelFrame) for channel in channels)
     channel_before = tuple(
         channel.data.copy() for channel in channels if isinstance(channel, ChannelFrame)
@@ -596,7 +580,7 @@ def test_batch5_algorithms_do_not_mutate_inputs(
     _blend(rgba_image, b)
     _combine(
         tuple(channel for channel in channels if isinstance(channel, ChannelFrame)),
-        ColorSpace.RGBA,
+        ColorSpace.SRGB,
     )
     _process("synmachine.image.to_luminance", {"image": rgba_image})
 

@@ -32,7 +32,6 @@ from synesthesia_machine.media import (
     hue_image,
     invert_colour_image,
     multiply_scalar_image,
-    opacity_image,
     saturation_image,
     stretch_contrast_image,
 )
@@ -143,7 +142,7 @@ def _clamp(
         _number(inputs, parameters, "minimum"),
         _number(inputs, parameters, "maximum"),
         _selection(parameters),
-        include_alpha=boolean_value(parameters["include_alpha"]),
+        include_alpha=False,
     )
 
 
@@ -184,16 +183,8 @@ def _invert(
     inputs: Mapping[str, RuntimeValue],
     parameters: Mapping[str, ParameterValue],
 ) -> ImageFrame:
-    del inputs
-    return invert_colour_image(image, invert_alpha=boolean_value(parameters["invert_alpha"]))
-
-
-def _opacity(
-    image: ImageFrame,
-    inputs: Mapping[str, RuntimeValue],
-    parameters: Mapping[str, ParameterValue],
-) -> ImageFrame:
-    return opacity_image(image, _number(inputs, parameters, "factor"))
+    del inputs, parameters
+    return invert_colour_image(image, invert_alpha=False)
 
 
 def _stretch(
@@ -274,7 +265,13 @@ def _channel_parameter() -> ParameterSpec:
         "Channels",
         PortType.STRING,
         ChannelSelection.COLOUR.value,
-        choices=tuple(selection.value for selection in ChannelSelection),
+        # Sources never carry a fourth (alpha) channel, so CHANNEL_4 is not
+        # offered as a selectable target.
+        choices=tuple(
+            selection.value
+            for selection in ChannelSelection
+            if selection is not ChannelSelection.CHANNEL_4
+        ),
         applicable_input_types=(PortType.IMAGE,),
     )
 
@@ -413,10 +410,11 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
         _definition(
             "synmachine.image.brightness",
             "Brightness",
-            "Add an unclipped offset to selected channels while preserving alpha by default.",
+            "Add an unclipped offset to selected channels.",
             (_float_parameter("offset", "Offset", 0.0), _channel_parameter()),
             _brightness,
             aliases=("exposure offset", "lighten", "darken"),
+            implementation_version=2,
         ),
         _definition(
             "synmachine.image.contrast",
@@ -428,6 +426,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
                 _channel_parameter(),
             ),
             _contrast,
+            implementation_version=2,
         ),
         _definition(
             "synmachine.image.clamp",
@@ -437,17 +436,11 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
                 _float_parameter("minimum", "Minimum", 0.0),
                 _float_parameter("maximum", "Maximum", 1.0),
                 _channel_parameter(),
-                ParameterSpec(
-                    "include_alpha",
-                    "Include alpha",
-                    PortType.BOOL,
-                    False,
-                    applicable_input_types=(PortType.IMAGE,),
-                ),
             ),
             _clamp,
             validator=_validate_clamp,
             dynamic=True,
+            implementation_version=2,
         ),
         _definition(
             "synmachine.image.colour_levels",
@@ -464,6 +457,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             _colour_levels,
             aliases=("levels", "black point", "white point"),
             validator=_validate_levels,
+            implementation_version=2,
         ),
         _definition(
             "synmachine.image.hue",
@@ -496,18 +490,11 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
         _definition(
             "synmachine.image.invert_colour",
             "Invert Colour",
-            "Invert normalized colour channels with optional alpha inversion.",
-            (ParameterSpec("invert_alpha", "Invert alpha", PortType.BOOL, False),),
+            "Invert normalized colour channels.",
+            (),
             _invert,
             aliases=("negative", "invert color"),
-        ),
-        _definition(
-            "synmachine.image.opacity",
-            "Opacity",
-            "Ensure straight RGBA output and multiply alpha by a non-negative factor.",
-            (_float_parameter("factor", "Factor", 1.0, minimum=0.0),),
-            _opacity,
-            aliases=("alpha", "transparency"),
+            implementation_version=2,
         ),
         _definition(
             "synmachine.image.stretch_contrast",
@@ -540,6 +527,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             _stretch,
             aliases=("normalize", "auto levels", "dynamic range"),
             validator=_validate_stretch,
+            implementation_version=2,
         ),
         _definition(
             "synmachine.image.gamma",
@@ -551,6 +539,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             ),
             _gamma,
             validator=_validate_positive("gamma"),
+            implementation_version=2,
         ),
         _definition(
             "synmachine.image.add_scalar",
@@ -560,6 +549,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             _add_scalar,
             aliases=("image offset",),
             dynamic=True,
+            implementation_version=2,
         ),
         _definition(
             "synmachine.image.multiply_scalar",
@@ -569,6 +559,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             _multiply_scalar,
             aliases=("image scale",),
             dynamic=True,
+            implementation_version=2,
         ),
         _definition(
             "synmachine.image.divide_scalar",
@@ -590,6 +581,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             aliases=("image ratio",),
             validator=_validate_positive("epsilon"),
             dynamic=True,
+            implementation_version=2,
         ),
     )
 

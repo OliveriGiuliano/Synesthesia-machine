@@ -204,7 +204,7 @@ def test_definition_and_registry_expose_region_grid_as_stateless_synesthesia() -
     assert len(definition.description) >= 250
 
     registry = create_application_registry()
-    assert len(registry.definitions()) == 65
+    assert len(registry.definitions()) == 64
     assert registry.require(REGION_GRID_TYPE_ID).type_id == REGION_GRID_TYPE_ID
 
 

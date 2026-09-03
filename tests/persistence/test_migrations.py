@@ -17,11 +17,18 @@ from synesthesia_machine.persistence import (
     GraphPersistenceError,
     NodeMigrationRegistry,
     graph_from_json,
+    migrate_adjustment_channel_selection_v1_to_v2,
+    migrate_change_colour_space_v1_to_v2,
     migrate_channel_display_v1_to_v2,
+    migrate_clamp_v1_to_v2,
+    migrate_combine_channels_v1_to_v2,
     migrate_display_image_data_v1_to_v2,
     migrate_hue_v1_to_v2,
+    migrate_invert_colour_v1_to_v2,
+    migrate_separate_channels_v1_to_v2,
     migrate_statistics_v1_to_v2,
     migrate_v2_to_v3,
+    migrate_v3_to_v4,
 )
 from synesthesia_machine.persistence.schemas import JsonObject, JsonValue
 
@@ -162,7 +169,7 @@ def test_validator_reports_fixture_migrations_and_invalid_file(tmp_path: Path) -
     assert report.invalid_files == 1
     assert report.migrated_files == 2
     legacy = next(result for result in report.results if "legacy_number" in result.path)
-    assert legacy.graph_migration_steps == 3
+    assert legacy.graph_migration_steps == 4
     assert legacy.node_migration_steps == 1
 
 
@@ -324,3 +331,354 @@ def test_saved_buffer_statistics_graph_migrates_and_compiles() -> None:
 
     result = GraphCompiler(create_application_registry()).compile(snapshot)
     assert result.report.is_valid, [issue.message for issue in result.report.issues]
+
+
+ALPHA_DOC_ID = "70000000-0000-0000-0000-000000000500"
+ALPHA_VIDEO_ID = "70000000-0000-0000-0000-000000000501"
+ALPHA_SEPARATE_ID = "70000000-0000-0000-0000-000000000502"
+ALPHA_COMBINE_ID = "70000000-0000-0000-0000-000000000503"
+ALPHA_CCS_ID = "70000000-0000-0000-0000-000000000504"
+ALPHA_CLAMP_ID = "70000000-0000-0000-0000-000000000505"
+ALPHA_INVERT_ID = "70000000-0000-0000-0000-000000000506"
+ALPHA_BRIGHT_ID = "70000000-0000-0000-0000-000000000507"
+ALPHA_OPACITY_ID = "70000000-0000-0000-0000-000000000508"
+
+
+def _alpha_v3_payload() -> dict[str, object]:
+    def node(node_id: str, type_id: str, version: int, **parameters: object) -> dict[str, object]:
+        return {
+            "id": node_id,
+            "type_id": type_id,
+            "implementation_version": version,
+            "position": [0.0, 0.0],
+            "size": None,
+            "parameters": parameters,
+            "ui_state": {},
+            "user_label": None,
+            "collapsed": False,
+        }
+
+    def connection(
+        connection_id: str,
+        source_id: str,
+        source_port: str,
+        destination_id: str,
+        destination_port: str,
+    ) -> dict[str, object]:
+        return {
+            "id": connection_id,
+            "source_node_id": source_id,
+            "source_port_id": source_port,
+            "destination_node_id": destination_id,
+            "destination_port_id": destination_port,
+            "ui_state": {},
+        }
+
+    return {
+        "schema_version": 3,
+        "application_version": "0.1.0",
+        "document_id": ALPHA_DOC_ID,
+        "nodes": [
+            node(ALPHA_VIDEO_ID, "synmachine.input.load_video", 1, file_path="media/reference.mp4"),
+            node(ALPHA_SEPARATE_ID, "synmachine.image.separate_channels", 1),
+            node(
+                ALPHA_COMBINE_ID, "synmachine.image.combine_channels", 1, target_colour_space="RGBA"
+            ),
+            node(
+                ALPHA_CCS_ID, "synmachine.image.change_colour_space", 1, target_colour_space="RGBA"
+            ),
+            node(
+                ALPHA_CLAMP_ID,
+                "synmachine.image.clamp",
+                1,
+                minimum=0.0,
+                maximum=1.0,
+                channels="CHANNEL_4",
+                include_alpha=True,
+            ),
+            node(ALPHA_INVERT_ID, "synmachine.image.invert_colour", 1, invert_alpha=True),
+            node(
+                ALPHA_BRIGHT_ID, "synmachine.image.brightness", 1, offset=0.0, channels="CHANNEL_4"
+            ),
+            node(ALPHA_OPACITY_ID, "synmachine.image.opacity", 1, factor=0.5),
+        ],
+        "connections": [
+            connection(
+                "70000000-0000-0000-0000-000000000510",
+                ALPHA_VIDEO_ID,
+                "image",
+                ALPHA_SEPARATE_ID,
+                "image",
+            ),
+            connection(
+                "70000000-0000-0000-0000-000000000511",
+                ALPHA_SEPARATE_ID,
+                "channel_1",
+                ALPHA_COMBINE_ID,
+                "channel_1",
+            ),
+            connection(
+                "70000000-0000-0000-0000-000000000512",
+                ALPHA_SEPARATE_ID,
+                "channel_2",
+                ALPHA_COMBINE_ID,
+                "channel_2",
+            ),
+            connection(
+                "70000000-0000-0000-0000-000000000513",
+                ALPHA_SEPARATE_ID,
+                "channel_3",
+                ALPHA_COMBINE_ID,
+                "channel_3",
+            ),
+            connection(
+                "70000000-0000-0000-0000-000000000514",
+                ALPHA_SEPARATE_ID,
+                "channel_4",
+                ALPHA_COMBINE_ID,
+                "channel_4",
+            ),
+            connection(
+                "70000000-0000-0000-0000-000000000515",
+                ALPHA_COMBINE_ID,
+                "image",
+                ALPHA_CCS_ID,
+                "image",
+            ),
+            connection(
+                "70000000-0000-0000-0000-000000000516",
+                ALPHA_CCS_ID,
+                "image",
+                ALPHA_CLAMP_ID,
+                "image",
+            ),
+            connection(
+                "70000000-0000-0000-0000-000000000517",
+                ALPHA_CLAMP_ID,
+                "image",
+                ALPHA_INVERT_ID,
+                "image",
+            ),
+            connection(
+                "70000000-0000-0000-0000-000000000518",
+                ALPHA_INVERT_ID,
+                "image",
+                ALPHA_BRIGHT_ID,
+                "image",
+            ),
+            connection(
+                "70000000-0000-0000-0000-000000000519",
+                ALPHA_BRIGHT_ID,
+                "image",
+                ALPHA_OPACITY_ID,
+                "image",
+            ),
+        ],
+        "groups": [],
+        "document_settings": {},
+        "ui_state": {},
+    }
+
+
+def test_v3_to_v4_drops_opacity_and_alpha_surfaces_purely() -> None:
+    source = _alpha_v3_payload()
+    original = deepcopy(source)
+
+    migrated = migrate_v3_to_v4(source)  # type: ignore[arg-type]
+
+    assert source == original
+    assert migrated["schema_version"] == 4
+    nodes = cast("list[JsonObject]", migrated["nodes"])
+    type_ids = [str(item["type_id"]) for item in nodes]
+    assert "synmachine.image.opacity" not in type_ids
+    assert len(type_ids) == 7
+
+    connections = cast("list[JsonObject]", migrated["connections"])
+    assert len(connections) == 8  # channel_4 bridge and opacity input are dropped
+    touched = {str(item["source_node_id"]) for item in connections} | {
+        str(item["destination_node_id"]) for item in connections
+    }
+    assert ALPHA_OPACITY_ID not in touched
+
+    # Parameter rewrites (RGBA target, CHANNEL_4 selection) are applied by the
+    # node migrations; the graph migration is structural only.
+    type_set = set(type_ids)
+    assert type_set == {
+        "synmachine.input.load_video",
+        "synmachine.image.separate_channels",
+        "synmachine.image.combine_channels",
+        "synmachine.image.change_colour_space",
+        "synmachine.image.clamp",
+        "synmachine.image.invert_colour",
+        "synmachine.image.brightness",
+    }
+
+
+@pytest.mark.parametrize(
+    ("migrate", "parameters"),
+    [
+        (migrate_separate_channels_v1_to_v2, {}),
+        (migrate_combine_channels_v1_to_v2, {"target_colour_space": "RGBA"}),
+        (migrate_change_colour_space_v1_to_v2, {"target_colour_space": "RGBA"}),
+        (migrate_clamp_v1_to_v2, {"channels": "CHANNEL_4", "include_alpha": True}),
+        (migrate_invert_colour_v1_to_v2, {"invert_alpha": True}),
+    ],
+)
+def test_v4_node_migrations_are_pure_and_rewrite_alpha_surfaces(
+    migrate: Callable[[JsonObject], dict[str, JsonValue]],
+    parameters: dict[str, object],
+) -> None:
+    source = {
+        "id": ALPHA_CLAMP_ID,
+        "type_id": "synmachine.image.clamp",
+        "implementation_version": 1,
+        "parameters": parameters,
+    }
+    original = deepcopy(source)
+
+    migrated = migrate(source)  # type: ignore[arg-type]
+
+    assert source == original
+    assert migrated["implementation_version"] == 2
+    if "target_colour_space" in parameters:
+        assert migrated["parameters"] == {"target_colour_space": "SRGB"}
+    elif "include_alpha" in parameters:
+        assert migrated["parameters"] == {"channels": "COLOUR"}
+    else:
+        assert migrated["parameters"] == {}
+
+
+@pytest.mark.parametrize(
+    "type_id",
+    [
+        "synmachine.image.contrast",
+        "synmachine.image.colour_levels",
+        "synmachine.image.stretch_contrast",
+        "synmachine.image.gamma",
+        "synmachine.image.add_scalar",
+        "synmachine.image.multiply_scalar",
+        "synmachine.image.divide_scalar",
+    ],
+)
+def test_v4_adjustment_selection_migration_is_pure_and_maps_channel_4(type_id: str) -> None:
+    source = {
+        "id": ALPHA_CLAMP_ID,
+        "type_id": type_id,
+        "implementation_version": 1,
+        "parameters": {"channels": "CHANNEL_4"},
+    }
+    original = deepcopy(source)
+
+    migrated = migrate_adjustment_channel_selection_v1_to_v2(source)  # type: ignore[arg-type]
+
+    assert source == original
+    assert migrated["implementation_version"] == 2
+    assert migrated["parameters"] == {"channels": "COLOUR"}
+
+
+def test_saved_v3_alpha_graph_migrates_and_compiles() -> None:
+    payload = _alpha_v3_payload()
+
+    snapshot = graph_from_json(json.dumps(payload), create_application_registry())
+
+    by_type = {node.type_id: node for node in snapshot.nodes}
+    assert "synmachine.image.opacity" not in by_type
+    assert len(snapshot.nodes) == 7
+    assert len(snapshot.connections) == 8
+
+    parameters = {node.id: node.parameters for node in snapshot.nodes}
+    combine = by_type["synmachine.image.combine_channels"]
+    assert parameters[combine.id]["target_colour_space"] == "SRGB"
+    ccs = by_type["synmachine.image.change_colour_space"]
+    assert parameters[ccs.id]["target_colour_space"] == "SRGB"
+    clamp = by_type["synmachine.image.clamp"]
+    assert parameters[clamp.id]["channels"] == "COLOUR"
+    assert "include_alpha" not in parameters[clamp.id]
+    invert = by_type["synmachine.image.invert_colour"]
+    assert parameters[invert.id] == {}
+    bright = by_type["synmachine.image.brightness"]
+    assert parameters[bright.id]["channels"] == "COLOUR"
+
+    result = GraphCompiler(create_application_registry()).compile(snapshot)
+    assert result.report.is_valid, [issue.message for issue in result.report.issues]
+
+
+def test_v3_to_v4_graph_through_opacity_loads_invalid_not_unparseable() -> None:
+    # Wiring a required input through the retired Opacity node must load (the
+    # node and its connections are dropped) and surface as a normal
+    # required-input validation error, never as a parse or unknown-port failure.
+    payload = {
+        "schema_version": 3,
+        "application_version": "0.1.0",
+        "document_id": ALPHA_DOC_ID,
+        "nodes": [
+            {
+                "id": ALPHA_VIDEO_ID,
+                "type_id": "synmachine.input.load_video",
+                "implementation_version": 1,
+                "position": [0.0, 0.0],
+                "size": None,
+                "parameters": {"file_path": "media/reference.mp4"},
+                "ui_state": {},
+                "user_label": None,
+                "collapsed": False,
+            },
+            {
+                "id": ALPHA_OPACITY_ID,
+                "type_id": "synmachine.image.opacity",
+                "implementation_version": 1,
+                "position": [0.0, 0.0],
+                "size": None,
+                "parameters": {"factor": 0.5},
+                "ui_state": {},
+                "user_label": None,
+                "collapsed": False,
+            },
+            {
+                "id": ALPHA_INVERT_ID,
+                "type_id": "synmachine.visualization.display_image_data",
+                "implementation_version": 2,
+                "position": [0.0, 0.0],
+                "size": None,
+                "parameters": {},
+                "ui_state": {},
+                "user_label": None,
+                "collapsed": False,
+            },
+        ],
+        "connections": [
+            {
+                "id": "70000000-0000-0000-0000-000000000521",
+                "source_node_id": ALPHA_VIDEO_ID,
+                "source_port_id": "image",
+                "destination_node_id": ALPHA_OPACITY_ID,
+                "destination_port_id": "image",
+                "ui_state": {},
+            },
+            {
+                "id": "70000000-0000-0000-0000-000000000522",
+                "source_node_id": ALPHA_OPACITY_ID,
+                "source_port_id": "image",
+                "destination_node_id": ALPHA_INVERT_ID,
+                "destination_port_id": "image",
+                "ui_state": {},
+            },
+        ],
+        "groups": [],
+        "document_settings": {},
+        "ui_state": {},
+    }
+
+    snapshot = graph_from_json(json.dumps(payload), create_application_registry())
+
+    assert {node.type_id for node in snapshot.nodes} == {
+        "synmachine.input.load_video",
+        "synmachine.visualization.display_image_data",
+    }
+    assert len(snapshot.connections) == 0
+
+    result = GraphCompiler(create_application_registry()).compile(snapshot)
+    assert not result.report.is_valid
+    codes = {(issue.code, issue.port_id) for issue in result.report.errors}
+    assert ("required_input_missing", "image") in codes
+    assert all(code == "required_input_missing" for code, _ in codes)

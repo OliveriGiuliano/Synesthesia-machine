@@ -118,13 +118,13 @@ SYNESTHESIA_DESCRIPTION_DETAILS = {
 }
 
 
-def test_catalogue_is_the_exact_current_65_definition_registry() -> None:
+def test_catalogue_is_the_exact_current_64_definition_registry() -> None:
     registry = create_application_registry()
     snapshot = load_graph(CATALOGUE_PATH, registry)
     expected = tuple(definition.type_id for definition in registry.definitions())
     actual = tuple(node.type_id for node in snapshot.nodes)
 
-    assert len(expected) == len(actual) == len(set(actual)) == 65
+    assert len(expected) == len(actual) == len(set(actual)) == 64
     assert actual == expected
     assert not snapshot.connections
 
@@ -155,7 +155,10 @@ def test_compatibility_catalogue_remains_an_exact_50_node_historical_subset() ->
     compatibility_ids = tuple(node.type_id for node in compatibility.nodes)
     current_ids = tuple(node.type_id for node in current.nodes)
 
-    assert len(compatibility_ids) == len(set(compatibility_ids)) == 50
+    # The historical file holds 50 nodes; loading applies the v3-to-v4
+    # migration, which drops the retired opacity node.
+    assert len(compatibility_ids) == len(set(compatibility_ids)) == 49
+    assert "synmachine.image.opacity" not in compatibility_ids
     assert set(compatibility_ids) < set(current_ids)
 
 

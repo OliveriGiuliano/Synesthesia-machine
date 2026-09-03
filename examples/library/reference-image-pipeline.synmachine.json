@@ -132,7 +132,7 @@
     {
       "collapsed": false,
       "id": "52000000-0000-0000-0000-000000000004",
-      "implementation_version": 1,
+      "implementation_version": 2,
       "parameters": {
         "target_colour_space": "HSV"
       },
@@ -148,7 +148,7 @@
     {
       "collapsed": false,
       "id": "52000000-0000-0000-0000-000000000005",
-      "implementation_version": 1,
+      "implementation_version": 2,
       "parameters": {},
       "position": [
         1120.0,
@@ -245,6 +245,6 @@
       "user_label": null
     }
   ],
-  "schema_version": 3,
+  "schema_version": 4,
   "ui_state": {}
 }

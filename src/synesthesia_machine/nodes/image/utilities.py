@@ -50,7 +50,7 @@ def create_utility_definitions() -> tuple[NodeDefinition, ...]:
     return (
         NodeDefinition(
             "synmachine.image.change_colour_space",
-            1,
+            2,
             "Change Colour Space",
             "Image / Utility",
             "Explicitly convert image colour values and descriptor metadata.",
@@ -62,7 +62,12 @@ def create_utility_definitions() -> tuple[NodeDefinition, ...]:
                     "Target colour space",
                     PortType.STRING,
                     ColorSpace.HSV.value,
-                    choices=tuple(space.value for space in ColorSpace),
+                    # RGBA is not offered: sources never carry an alpha
+                    # channel, so converting into it would only add a
+                    # fourth channel that nothing downstream can use.
+                    choices=tuple(
+                        space.value for space in ColorSpace if space is not ColorSpace.RGBA
+                    ),
                 ),
             ),
             ExecutionKind.STATELESS,

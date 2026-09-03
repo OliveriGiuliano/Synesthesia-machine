@@ -406,7 +406,7 @@ def test_definition_presets_registry_and_range_validation_contracts() -> None:
     assert definition.parameter("grid_columns").default == 4  # type: ignore[union-attr]
     assert definition.parameter_groups[0].id == "musical"
     registry = create_application_registry()
-    assert len(registry.definitions()) == 65
+    assert len(registry.definitions()) == 64
     assert registry.require(OPTICAL_FLOW_TYPE_ID).type_id == OPTICAL_FLOW_TYPE_ID
     for overrides, expected in (
         ({"minimum_motion_magnitude": float("nan")}, "finite"),

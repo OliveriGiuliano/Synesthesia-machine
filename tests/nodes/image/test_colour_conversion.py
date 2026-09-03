@@ -14,7 +14,6 @@ from synesthesia_machine.contracts import (
     FrameContext,
     FrameProvenance,
     ImageFrame,
-    NoData,
     read_only_float32,
 )
 from synesthesia_machine.media import (
@@ -84,7 +83,7 @@ def test_separate_channels_are_read_only_views_with_descriptor_ranges() -> None:
     assert hue.nominal_min == 0.0 and hue.nominal_max == 1.0
     assert np.shares_memory(hue.data, hsv.data)
     assert not hue.data.flags.writeable
-    assert outputs["channel_4"] is NoData
+    assert set(outputs) == {"channel_1", "channel_2", "channel_3"}
 
 
 def test_resize_and_luminance_do_not_mutate_shared_input() -> None:

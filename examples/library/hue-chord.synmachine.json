@@ -104,7 +104,7 @@
     {
       "collapsed": false,
       "id": "30000000-0000-0000-0000-000000000003",
-      "implementation_version": 1,
+      "implementation_version": 2,
       "parameters": {
         "target_colour_space": "HSV"
       },
@@ -120,7 +120,7 @@
     {
       "collapsed": false,
       "id": "30000000-0000-0000-0000-000000000004",
-      "implementation_version": 1,
+      "implementation_version": 2,
       "parameters": {},
       "position": [
         840.0,
@@ -220,6 +220,6 @@
       "user_label": "Opt-in debug audio"
     }
   ],
-  "schema_version": 3,
+  "schema_version": 4,
   "ui_state": {}
 }

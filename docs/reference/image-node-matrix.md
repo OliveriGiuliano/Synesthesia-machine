@@ -25,7 +25,7 @@ are persistent identities.
 - Image outputs are read-only C-contiguous `float32`, preserve the input context/provenance and
   colour descriptor unless a contract explicitly changes them, and never alias mutable storage.
 - `COLOUR` channel selection means every descriptor channel except alpha; `ALL` includes alpha;
-  `CHANNEL_1` through `CHANNEL_4` select descriptor positions and reject unavailable positions.
+  `CHANNEL_1` through `CHANNEL_3` select descriptor positions and reject unavailable positions; sources never expose a fourth (alpha) channel (ADR-0015).
 - The spatial border enum is `REFLECT_101`, `REFLECT`, `REPLICATE`, `CONSTANT`, `WRAP`; default is
   `REFLECT_101`. The interpolation enum remains `AUTO`, `NEAREST`, `LINEAR`, `AREA`, `CUBIC`,
   `LANCZOS`.
@@ -47,12 +47,11 @@ are persistent identities.
 | 1 | `synmachine.image.rotate` | `image: IMAGE -> image: IMAGE` | `angle_degrees=0` (connectable FLOAT), `centre_x=0.5`, `centre_y=0.5` (connectable FLOAT, 0–1), `expand_canvas=false`, `interpolation=AUTO`, `border_mode=REFLECT_101`, `border_colour=(0,0,0,0)` | Processes alpha with colour channels; constant border uses descriptor-converted colour/alpha; propagates non-finite values. |
 | 2 | `synmachine.image.brightness` | `image: IMAGE -> image: IMAGE` | `offset=0` (connectable FLOAT), `channels=COLOUR` | Preserves alpha by default; IEEE propagation. |
 | 2 | `synmachine.image.contrast` | `image: IMAGE -> image: IMAGE` | `factor=1`, `pivot=0.5` (connectable FLOAT), `channels=COLOUR` | Preserves alpha by default; IEEE propagation. |
-| 2 | `synmachine.image.clamp` | `image: IMAGE -> image: IMAGE` | `minimum=0`, `maximum=1` (connectable FLOAT), `channels=COLOUR`, `include_alpha=false` | Alpha optional; NumPy clamp leaves NaN as NaN and maps infinities to selected bounds. |
+| 2 | `synmachine.image.clamp` | `image: IMAGE -> image: IMAGE` | `minimum=0`, `maximum=1` (connectable FLOAT), `channels=COLOUR` | Alpha is preserved; NumPy clamp leaves NaN as NaN and maps infinities to selected bounds. |
 | 2 | `synmachine.image.colour_levels` | `image: IMAGE -> image: IMAGE` | `input_black=0`, `input_white=1`, `gamma=1`, `output_black=0`, `output_white=1` (connectable FLOAT), `channels=COLOUR` | Preserves alpha by default; rejects invalid ranges/gamma; IEEE propagation. |
 | 2 | `synmachine.image.hue` | `image: IMAGE -> image: IMAGE` | `turns=0` (connectable FLOAT, 0–1 slider) | Preserves alpha; wraps hue modulo one; finite colour input required for OpenCV conversion. |
 | 2 | `synmachine.image.saturation` | `image: IMAGE -> image: IMAGE` | `factor=1` (connectable non-negative FLOAT) | Preserves alpha; finite colour input required for conversion. |
-| 2 | `synmachine.image.invert_colour` | `image: IMAGE -> image: IMAGE` | `invert_alpha=false` | Preserves alpha unless enabled; IEEE propagation. |
-| 2 | `synmachine.image.opacity` | `image: IMAGE -> image: IMAGE` | `factor=1` (connectable non-negative FLOAT) | Creates straight alpha when absent and multiplies existing alpha; IEEE propagation. |
+| 2 | `synmachine.image.invert_colour` | `image: IMAGE -> image: IMAGE` | none | Preserves alpha; IEEE propagation. |
 | 2 | `synmachine.image.stretch_contrast` | `image: IMAGE -> image: IMAGE` | `mode=PER_CHANNEL`, `lower_percentile=0`, `upper_percentile=100`, `ignore_non_finite=true`, `constant_policy=PRESERVE`, `channels=COLOUR` | Preserves alpha by default; optionally ignores non-finite samples and preserves their positions. |
 | 2 | `synmachine.image.gamma` | `image: IMAGE -> image: IMAGE` | `gamma=1` (connectable positive FLOAT), `channels=COLOUR` | Preserves alpha by default; selected negative values become zero; NaN propagates and infinities follow power semantics. |
 | 2 | `synmachine.image.add_scalar` | `image: IMAGE -> image: IMAGE` | `value=0` (connectable FLOAT), `channels=COLOUR` | Preserves alpha by default; IEEE propagation. |
@@ -70,8 +69,8 @@ are persistent identities.
 | 4 | `synmachine.image.high_pass` | `image: IMAGE -> image: IMAGE` | `sigma=1`, `display_offset=0`, `gain=1`, `border_mode=REFLECT_101` | Processes non-alpha channels and preserves alpha; no clipping; IEEE/OpenCV propagation. |
 | 4 | `synmachine.image.low_pass` | `image: IMAGE -> image: IMAGE` | `sigma=1`, `border_mode=REFLECT_101` | Blurs non-alpha channels and preserves alpha; IEEE/OpenCV propagation. |
 | 5 | `synmachine.image.blend_images` | `a: IMAGE`, `b: IMAGE`, optional `mask: CHANNEL -> image: IMAGE` | `blend_mode=NORMAL`, `opacity=1` (connectable FLOAT, 0–1), `alpha_policy=COMPOSITE` | Requires equal dimensions/clock/colour descriptor; Normal uses straight-alpha source-over interpolation; mask must match shape/clock and non-finite mask values are rejected. |
-| 5 | `synmachine.image.separate_channels` | `image: IMAGE -> channel_1..channel_4: CHANNEL` | none | Emits descriptor-backed read-only 2D views; missing outputs are `NoData`; non-finite values are unchanged. |
-| 5 | `synmachine.image.combine_channels` | optional `channel_1..channel_4: CHANNEL -> image: IMAGE` | `target_colour_space=SRGB` (`RECOMPILE`) | Required count/semantics come from descriptor; requires equal dimensions/clock; never infers unlabeled semantics; non-finite values are unchanged. |
+| 5 | `synmachine.image.separate_channels` | `image: IMAGE -> channel_1..channel_3: CHANNEL` | none | Emits the first three descriptor channels as read-only 2D views; alpha is never surfaced; non-finite values are unchanged. |
+| 5 | `synmachine.image.combine_channels` | optional `channel_1..channel_3: CHANNEL -> image: IMAGE` | `target_colour_space=SRGB` (`RECOMPILE`); RGBA is not offered | Required count/semantics come from descriptor; requires equal dimensions/clock; never infers unlabeled semantics; non-finite values are unchanged. |
 | 5 | `synmachine.image.to_luminance` | `image: IMAGE -> channel: CHANNEL` | none | Ignores alpha; preserves clock; finite RGB-family conversion input required. |
 | 6 | `synmachine.utility.channel_statistics` | `channel: CHANNEL -> value: FLOAT` | `statistic=MEAN`, `percentile=50`, `ignore_non_finite=true` | Finite-only reduction by default; empty finite selection is recoverable; does not mutate input. |
 | 6 | `synmachine.utility.remap_number` | `value: FLOAT -> value: FLOAT` | `input_minimum=0`, `input_maximum=1`, `output_minimum=0`, `output_maximum=1` (connectable FLOAT), `clamp=false` | Rejects equal input endpoints; IEEE scalar non-finite values propagate unless clamping maps infinities. |

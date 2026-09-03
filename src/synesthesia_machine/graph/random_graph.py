@@ -81,9 +81,14 @@ def generate_random_graph(
     def add(type_id: str) -> UUID:
         nonlocal x_position
         definition = registry.require(type_id)
-        node_id = document.add_node(
+        # Derive node IDs from the seeded stream (not uuid4): the snapshot
+        # orders nodes by ID string, so process-stable IDs keep seeded runs
+        # reproducible across processes.
+        node_id = _random_uuid(generator)
+        document.add_node(
             type_id,
             implementation_version=definition.implementation_version,
+            node_id=node_id,
             position=(x_position, generator.uniform(-72.0, 72.0)),
         )
         x_position += 300.0

@@ -8,7 +8,7 @@ from typing import TypedDict, cast
 
 from synesthesia_machine.version import __version__
 
-GRAPH_SCHEMA_VERSION = 3
+GRAPH_SCHEMA_VERSION = 4
 
 type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
 type JsonObject = dict[str, JsonValue]
@@ -163,6 +163,65 @@ def migrate_v2_to_v3(data: JsonObject) -> JsonObject:
     return migrated
 
 
+def migrate_v3_to_v4(data: JsonObject) -> JsonObject:
+    """Drop retired alpha-channel surfaces so saved graphs stay valid.
+
+    Sources never carry an alpha channel, so the node catalogue no longer
+    offers a fourth channel: the Opacity node was removed and Separate/
+    Combine Channels lost their ``channel_4`` sockets. This migration drops
+    Opacity nodes and any connection touching a retired socket so the graph
+    loads without unknown-port or unknown-node errors. Parameter rewrites
+    (RGBA target, CHANNEL_4 selection) live in the node migrations.
+    """
+
+    migrated = deepcopy(data)
+    migrated["schema_version"] = 4
+    nodes = migrated.get("nodes")
+    if not isinstance(nodes, list):
+        return migrated
+    opacity_ids: set[str] = set()
+    separate_ids: set[str] = set()
+    combine_ids: set[str] = set()
+    for raw_node in nodes:
+        if not isinstance(raw_node, dict):
+            continue
+        node = cast(dict[str, JsonValue], raw_node)
+        node_id = node.get("id")
+        if not isinstance(node_id, str):
+            continue
+        type_id = node.get("type_id")
+        if type_id == "synmachine.image.opacity":
+            opacity_ids.add(node_id)
+        elif type_id == "synmachine.image.separate_channels":
+            separate_ids.add(node_id)
+        elif type_id == "synmachine.image.combine_channels":
+            combine_ids.add(node_id)
+    if opacity_ids:
+        migrated["nodes"] = [
+            node for node in nodes if not (isinstance(node, dict) and node.get("id") in opacity_ids)
+        ]
+    connections = migrated.get("connections")
+    if not isinstance(connections, list):
+        return migrated
+    kept: list[JsonValue] = []
+    for raw_connection in connections:
+        if not isinstance(raw_connection, dict):
+            kept.append(raw_connection)
+            continue
+        connection = cast(dict[str, JsonValue], raw_connection)
+        source = connection.get("source_node_id")
+        destination = connection.get("destination_node_id")
+        if source in opacity_ids or destination in opacity_ids:
+            continue
+        if destination in combine_ids and connection.get("destination_port_id") == "channel_4":
+            continue
+        if source in separate_ids and connection.get("source_port_id") == "channel_4":
+            continue
+        kept.append(raw_connection)
+    migrated["connections"] = kept
+    return migrated
+
+
 def _schema_version(data: JsonObject) -> int:
     value = data.get("schema_version", 0)
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -201,4 +260,5 @@ _MIGRATIONS: dict[int, GraphMigration] = {
     0: migrate_v0_to_v1,
     1: migrate_v1_to_v2,
     2: migrate_v2_to_v3,
+    3: migrate_v3_to_v4,
 }

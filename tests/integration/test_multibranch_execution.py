@@ -40,6 +40,7 @@ def test_fan_out_image_branches_merge_to_midi_after_levels_black_point() -> None
     document.add_node(
         "synmachine.image.colour_levels",
         node_id=LEVELS_ID,
+        implementation_version=2,
         parameters={
             "input_black": 0.3,
             "input_white": 1.58,

@@ -1199,7 +1199,7 @@ Applies `(x - pivot) * factor + pivot`. Factor is connectable, default 1.0. Pivo
 
 #### Clamp
 
-Connectable minimum and maximum, default 0 and 1. Applied to selected channels; alpha may be included via a boolean.
+Connectable minimum and maximum, default 0 and 1. Applied to selected channels; alpha is preserved.
 
 #### Colour Levels
 
@@ -1215,11 +1215,7 @@ Multiplies saturation by a non-negative factor. Convert as required. Default 1.0
 
 #### Invert Colour
 
-For normalized non-alpha colour channels, output `1 - x`. Alpha is preserved unless `invert_alpha` is enabled.
-
-#### Opacity
-
-Ensures RGBA output. Multiplies existing alpha by a connectable factor, or creates alpha=1 before multiplication. Default 1.0.
+For normalized non-alpha colour channels, output `1 - x`. Alpha is preserved.
 
 #### Stretch Contrast
 
@@ -1344,13 +1340,13 @@ Input/output `IMAGE`; target colour space is a non-connectable enum. The node up
 
 #### Separate Channels
 
-Because output count and labels vary by selected colour space, use a definition with four fixed optional outputs: `channel_1` through `channel_4`, plus metadata labels displayed dynamically. Missing channels emit `NoData`.
+Because output labels vary by selected colour space, use a definition with three fixed outputs: `channel_1` through `channel_3`, plus metadata labels displayed dynamically. Sources never carry an alpha channel, so the fourth (alpha) descriptor channel is never surfaced (ADR-0015).
 
 The node outputs read-only 2D views when possible. The UI labels sockets R/G/B/A, H/S/V, L/a/b, etc., based on the latest static colour-space information; runtime metadata remains authoritative.
 
 #### Combine Channels
 
-Inputs: up to four `CHANNEL` ports. Parameter: target colour space. Required input count comes from the target descriptor. All channels must share dimensions and clock. Output is `IMAGE`, preserving channel values and declaring the chosen colour space.
+Inputs: up to three `CHANNEL` ports. Parameter: target colour space (RGBA is not offered; the sources never carry an alpha channel). Required input count comes from the target descriptor. All channels must share dimensions and clock. Output is `IMAGE`, preserving channel values and declaring the chosen colour space.
 
 This is “colour-space agnostic” in the sense that the same implementation uses descriptors rather than RGB-specific code; it does not infer arbitrary semantics from unlabeled channels.
 

@@ -145,6 +145,81 @@ def migrate_statistics_v1_to_v2(data: JsonObject) -> JsonObject:
     return migrated
 
 
+def migrate_separate_channels_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Separate Channels v2 dropped the unreachable fourth (alpha) output.
+
+    Sources never carry an alpha channel; the ``channel_4`` socket removal
+    and any saved connections to it live in the v3 -> v4 graph migration.
+    """
+
+    migrated = deepcopy(data)
+    migrated["implementation_version"] = 2
+    return migrated
+
+
+def _rewritten_target(data: JsonObject) -> JsonObject:
+    """Rewrite the retired RGBA target to the SRGB default."""
+    parameters = _parameters(data)
+    if parameters.get("target_colour_space") == "RGBA":
+        parameters["target_colour_space"] = "SRGB"
+    return data
+
+
+def migrate_combine_channels_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Combine Channels v2 dropped the fourth input and the RGBA target."""
+
+    migrated = deepcopy(data)
+    _rewritten_target(migrated)
+    migrated["implementation_version"] = 2
+    return migrated
+
+
+def migrate_change_colour_space_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Change Colour Space v2 no longer offers RGBA as a target."""
+
+    migrated = deepcopy(data)
+    _rewritten_target(migrated)
+    migrated["implementation_version"] = 2
+    return migrated
+
+
+def migrate_invert_colour_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Invert Colour v2 dropped the alpha-inversion parameter."""
+
+    migrated = deepcopy(data)
+    parameters = _parameters(migrated)
+    parameters.pop("invert_alpha", None)
+    migrated["implementation_version"] = 2
+    return migrated
+
+
+def migrate_clamp_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Clamp v2 dropped the alpha parameters and the CHANNEL_4 target."""
+
+    migrated = deepcopy(data)
+    parameters = _parameters(migrated)
+    parameters.pop("include_alpha", None)
+    _rewrite_channel_selection(migrated)
+    migrated["implementation_version"] = 2
+    return migrated
+
+
+def _rewrite_channel_selection(data: JsonObject) -> None:
+    """Rewrite the retired CHANNEL_4 selection to the COLOUR default."""
+    parameters = _parameters(data)
+    if parameters.get("channels") == "CHANNEL_4":
+        parameters["channels"] = "COLOUR"
+
+
+def migrate_adjustment_channel_selection_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Adjustment v2 dropped the unreachable CHANNEL_4 selection target."""
+
+    migrated = deepcopy(data)
+    _rewrite_channel_selection(migrated)
+    migrated["implementation_version"] = 2
+    return migrated
+
+
 def _parameters(data: JsonObject) -> JsonObject:
     raw_parameters = data.get("parameters")
     if not isinstance(raw_parameters, dict):
@@ -161,7 +236,20 @@ def _implementation_version(data: JsonObject) -> int:
 
 BUILTIN_NODE_MIGRATIONS = NodeMigrationRegistry(
     {
+        ("synmachine.image.add_scalar", 1): migrate_adjustment_channel_selection_v1_to_v2,
+        ("synmachine.image.brightness", 1): migrate_adjustment_channel_selection_v1_to_v2,
+        ("synmachine.image.clamp", 1): migrate_clamp_v1_to_v2,
+        ("synmachine.image.change_colour_space", 1): migrate_change_colour_space_v1_to_v2,
+        ("synmachine.image.combine_channels", 1): migrate_combine_channels_v1_to_v2,
+        ("synmachine.image.colour_levels", 1): migrate_adjustment_channel_selection_v1_to_v2,
+        ("synmachine.image.contrast", 1): migrate_adjustment_channel_selection_v1_to_v2,
+        ("synmachine.image.divide_scalar", 1): migrate_adjustment_channel_selection_v1_to_v2,
+        ("synmachine.image.gamma", 1): migrate_adjustment_channel_selection_v1_to_v2,
         ("synmachine.image.hue", 1): migrate_hue_v1_to_v2,
+        ("synmachine.image.invert_colour", 1): migrate_invert_colour_v1_to_v2,
+        ("synmachine.image.multiply_scalar", 1): migrate_adjustment_channel_selection_v1_to_v2,
+        ("synmachine.image.separate_channels", 1): migrate_separate_channels_v1_to_v2,
+        ("synmachine.image.stretch_contrast", 1): migrate_adjustment_channel_selection_v1_to_v2,
         ("synmachine.input.load_video", 0): migrate_load_video_v0_to_v1,
         ("synmachine.utility.number", 0): migrate_number_v0_to_v1,
         ("synmachine.utility.statistics", 1): migrate_statistics_v1_to_v2,
@@ -177,10 +265,16 @@ __all__ = [
     "NodeMigrationRegistry",
     "NodeMigrationResult",
     "NodeMigrationStep",
+    "migrate_adjustment_channel_selection_v1_to_v2",
+    "migrate_change_colour_space_v1_to_v2",
     "migrate_channel_display_v1_to_v2",
+    "migrate_clamp_v1_to_v2",
+    "migrate_combine_channels_v1_to_v2",
     "migrate_display_image_data_v1_to_v2",
     "migrate_hue_v1_to_v2",
+    "migrate_invert_colour_v1_to_v2",
     "migrate_load_video_v0_to_v1",
     "migrate_number_v0_to_v1",
+    "migrate_separate_channels_v1_to_v2",
     "migrate_statistics_v1_to_v2",
 ]
