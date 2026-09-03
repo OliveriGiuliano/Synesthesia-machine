@@ -305,12 +305,9 @@ def create_fourier_definitions() -> tuple[NodeDefinition, ...]:
             "Fourier",
             "Synesthesia",
             (
-                "Analyze the channel's two-dimensional spatial frequencies with an FFT after "
-                "optional mean removal and windowing. Radial, horizontal, or vertical frequency "
-                "cells are grouped into one band per allowed note; each band's mean or percentile "
-                "log magnitude controls velocity after the floor, ceiling, and activation "
-                "threshold are applied. DC exclusion removes constant or very broad image "
-                "structure; the cache affects performance only, not musical history."
+                "Turns the texture and detail of a picture into notes by analysing its "
+                "frequencies. You can look at the frequencies radially, horizontally, or "
+                "vertically; each frequency band becomes one note and stronger bands play louder."
             ),
             (InputPortSpec("value", "Value", PortType.CHANNEL),),
             (OutputPortSpec("midi", "MIDI state", PortType.MIDI_STATE),),

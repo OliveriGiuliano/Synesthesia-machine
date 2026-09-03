@@ -53,7 +53,7 @@ def create_utility_definitions() -> tuple[NodeDefinition, ...]:
             2,
             "Change Colour Space",
             "Image / Utility",
-            "Explicitly convert image colour values and descriptor metadata.",
+            "Converts the image to a different colour model, for example from RGB to HSV.",
             (InputPortSpec("image", "Image", PortType.IMAGE),),
             (OutputPortSpec("image", "Image", PortType.IMAGE),),
             (

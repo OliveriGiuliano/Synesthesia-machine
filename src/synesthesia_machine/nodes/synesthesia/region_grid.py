@@ -182,13 +182,10 @@ def create_region_grid_definitions() -> tuple[NodeDefinition, ...]:
             "Region Grid to Notes",
             "Synesthesia",
             (
-                "Divide each image into a fixed grid and assign every physical region to a note "
-                "in row-major order, from the top-left cell to the bottom-right cell. Each cell is "
-                "measured independently using brightness, RMS contrast, saturation, HSV value, "
-                "or an RGB channel. A cell plays only when its normalized measurement is above "
-                "the activation threshold; its distance above that threshold controls velocity. "
-                "The configured root, scale, MIDI range, channel, velocity range, and polyphony "
-                "are then applied to the resulting desired MIDI state."
+                "Splits the picture into a grid of cells and lets each cell play its own note. "
+                "You choose what to measure in each cell (brightness, contrast, colour strength, "
+                "...). A cell plays only when the measurement passes your threshold, and stronger "
+                "measurements play louder."
             ),
             (InputPortSpec("image", "Image", PortType.IMAGE),),
             (OutputPortSpec("midi", "MIDI state", PortType.MIDI_STATE),),

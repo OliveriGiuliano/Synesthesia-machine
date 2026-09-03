@@ -410,7 +410,8 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
         _definition(
             "synmachine.image.brightness",
             "Brightness",
-            "Add an unclipped offset to selected channels.",
+            "Makes the image brighter or darker. A positive offset lightens it, a negative one "
+            "darkens it.",
             (_float_parameter("offset", "Offset", 0.0), _channel_parameter()),
             _brightness,
             aliases=("exposure offset", "lighten", "darken"),
@@ -419,7 +420,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
         _definition(
             "synmachine.image.contrast",
             "Contrast",
-            "Scale selected channels around a configurable pivot without clipping.",
+            "Strengthens or softens the differences between the light and dark parts of the image.",
             (
                 _float_parameter("factor", "Factor", 1.0),
                 _float_parameter("pivot", "Pivot", 0.5),
@@ -431,7 +432,8 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
         _definition(
             "synmachine.image.clamp",
             "Clamp",
-            "Clamp selected channels to explicit finite bounds.",
+            "Keeps the values inside the minimum and maximum you set. Anything above or below is "
+            "brought back to the limits.",
             (
                 _float_parameter("minimum", "Minimum", 0.0),
                 _float_parameter("maximum", "Maximum", 1.0),
@@ -445,7 +447,8 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
         _definition(
             "synmachine.image.colour_levels",
             "Colour Levels",
-            "Clamp normalized selected levels, then apply gamma to explicit output levels.",
+            "Rebalances the dark and light parts of the image, like the levels control in a photo "
+            "editor.",
             (
                 _float_parameter("input_black", "Input black", 0.0),
                 _float_parameter("input_white", "Input white", 1.0),
@@ -462,7 +465,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
         _definition(
             "synmachine.image.hue",
             "Hue",
-            "Rotate hue by normalized turns while preserving the original descriptor and alpha.",
+            "Shifts the colours around the colour wheel, for example turning reds toward magentas.",
             (
                 ParameterSpec(
                     "turns",
@@ -483,14 +486,16 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
         _definition(
             "synmachine.image.saturation",
             "Saturation",
-            "Multiply colour saturation through descriptor-aware conversion.",
+            "Makes the colours more or less intense. Below 1 the image fades toward grey, above 1 "
+            "the colours stand out more.",
             (_float_parameter("factor", "Factor", 1.0, minimum=0.0),),
             _saturation,
         ),
         _definition(
             "synmachine.image.invert_colour",
             "Invert Colour",
-            "Invert normalized colour channels.",
+            "Flips the image like a photograph negative: dark becomes light and light "
+            "becomes dark.",
             (),
             _invert,
             aliases=("negative", "invert color"),
@@ -499,7 +504,8 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
         _definition(
             "synmachine.image.stretch_contrast",
             "Stretch Contrast",
-            "Map percentile bounds to 0..1 per channel or across selected channels.",
+            "Spreads the image's tones across the full brightness range so washed-out pictures "
+            "gain contrast.",
             (
                 ParameterSpec(
                     "mode",
@@ -532,7 +538,8 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
         _definition(
             "synmachine.image.gamma",
             "Gamma",
-            "Apply max(x, 0) raised to a positive gamma on selected channels.",
+            "Brightens or darkens the middle tones of the image without touching the pure blacks "
+            "and whites.",
             (
                 _float_parameter("gamma", "Gamma", 1.0, minimum=1e-6),
                 _channel_parameter(),
@@ -544,7 +551,8 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
         _definition(
             "synmachine.image.add_scalar",
             "Image Add Scalar",
-            "Add one connectable scalar to selected image channels.",
+            "Adds a fixed amount to the chosen channels. Positive values brighten the image, "
+            "negative values darken it.",
             (_float_parameter("value", "Value", 0.0), _channel_parameter()),
             _add_scalar,
             aliases=("image offset",),
@@ -554,7 +562,8 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
         _definition(
             "synmachine.image.multiply_scalar",
             "Image Multiply Scalar",
-            "Multiply selected image channels by one connectable scalar.",
+            "Multiplies the chosen channels by a value. Above 1 the image brightens, below 1 it "
+            "darkens.",
             (_float_parameter("value", "Value", 1.0), _channel_parameter()),
             _multiply_scalar,
             aliases=("image scale",),
@@ -564,7 +573,8 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
         _definition(
             "synmachine.image.divide_scalar",
             "Image Divide Scalar",
-            "Divide selected image channels using an explicit near-zero policy.",
+            "Divides the chosen channels by a value, with a safety setting for values close to "
+            "zero.",
             (
                 _float_parameter("value", "Value", 1.0),
                 ParameterSpec(

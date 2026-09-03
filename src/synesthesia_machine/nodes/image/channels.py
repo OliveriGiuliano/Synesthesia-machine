@@ -176,7 +176,8 @@ def create_channel_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Blend Images",
             "Image / Compositing",
-            "Blend B over A with explicit opacity, mask, blend mode, and alpha policy.",
+            "Mixes two images together. You choose how much of the top image shows and how the "
+            "colours combine.",
             (
                 InputPortSpec("a", "A", PortType.IMAGE),
                 InputPortSpec("b", "B", PortType.IMAGE),
@@ -194,7 +195,8 @@ def create_channel_definitions() -> tuple[NodeDefinition, ...]:
             2,
             "Separate Channels",
             "Image / Channel",
-            "Publish the three descriptor-backed read-only colour channel views.",
+            "Splits an image into its individual channels, for example R, G and B, so you can use "
+            "them separately.",
             (InputPortSpec("image", "Image", PortType.IMAGE),),
             tuple(
                 OutputPortSpec(f"channel_{index}", f"Channel {index}", PortType.CHANNEL)
@@ -210,7 +212,7 @@ def create_channel_definitions() -> tuple[NodeDefinition, ...]:
             2,
             "Combine Channels",
             "Image / Channel",
-            "Assemble descriptor-labeled channels into one declared colour space.",
+            "Joins separate channels back together into one image in the colour model you choose.",
             tuple(
                 InputPortSpec(
                     f"channel_{index}",
@@ -246,7 +248,7 @@ def create_channel_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Image to Luminance",
             "Image / Channel",
-            "Convert finite colour values to one linear-light luminance channel.",
+            "Turns a colour image into a single black-and-white brightness channel.",
             (InputPortSpec("image", "Image", PortType.IMAGE),),
             (OutputPortSpec("channel", "Luminance", PortType.CHANNEL),),
             (),

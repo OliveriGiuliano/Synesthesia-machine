@@ -287,7 +287,8 @@ def create_output_definitions(
             1,
             "Play MIDI as Audio",
             "Output / Audio",
-            "Hear the incoming MIDI notes through a simple built-in synthesizer.",
+            "Plays the notes as sound using a small built-in synth, so you can hear what the "
+            "graph does.",
             (InputPortSpec("midi", "MIDI State", PortType.MIDI_STATE),),
             (),
             (

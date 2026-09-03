@@ -311,7 +311,7 @@ def _create_all_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Difference",
             "Image / Compositing",
-            "Compute the absolute per-sample difference between two matching images.",
+            "Shows only what is different between two images. Identical areas become black.",
             (
                 InputPortSpec("a", "A", PortType.IMAGE),
                 InputPortSpec("b", "B", PortType.IMAGE),
@@ -327,7 +327,8 @@ def _create_all_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Modulo Accumulator",
             "Utility / Temporal",
-            "Accumulate a scalar, image, or channel every frame and wrap by a modulo.",
+            "Adds the input to a running total every frame. When the total passes the limit, it "
+            "wraps around, keeping the remainder.",
             (InputPortSpec("value", "Value", T),),
             (OutputPortSpec("value", "Accumulated", T),),
             (ParameterSpec("modulo", "Modulo", PortType.FLOAT, 1.0, minimum=1e-12),),
@@ -340,7 +341,8 @@ def _create_all_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Buffer",
             "Utility / Temporal",
-            "Keep a bounded FIFO of scalar, image, or channel values and publish it each cycle.",
+            "Remembers the last few values (numbers, images, or channels) and passes them on as a "
+            "group each frame.",
             (InputPortSpec("value", "Value", T),),
             (OutputPortSpec("values", "Values", T_ARRAY),),
             (
@@ -364,8 +366,9 @@ def _create_all_definitions() -> tuple[NodeDefinition, ...]:
             2,
             "Statistics",
             "Utility / Analysis",
-            "Calculate an element-wise statistic over one or more connected scalar, "
-            "image, or channel values, or over a Buffer of them.",
+            "Calculates a statistic (mean, median, minimum, maximum, and more) across everything "
+            "connected to it, or across a Buffer of values. For numbers it returns one number; "
+            "for images and channels it calculates the statistic pixel by pixel.",
             (),
             (OutputPortSpec("value", "Value", T),),
             (
@@ -402,7 +405,7 @@ def _create_all_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Normalize",
             "Utility / Transform",
-            "Normalize a scalar, image, or channel from an explicit or current data range.",
+            "Scales a value into a range you choose (by default 0 to 1).",
             (InputPortSpec("value", "Value", T),),
             (OutputPortSpec("value", "Normalized", T),),
             (
@@ -428,7 +431,8 @@ def _create_all_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Curve",
             "Utility / Transform",
-            "Apply a nonlinear response curve to a scalar, image, or channel.",
+            "Bends a value along a curve, so equal changes in the input give bigger or smaller "
+            "changes in the output.",
             (InputPortSpec("value", "Value", T),),
             (OutputPortSpec("value", "Curved", T),),
             (

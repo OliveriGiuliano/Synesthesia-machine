@@ -14,6 +14,7 @@ from synesthesia_machine.ui.graphics import NodeGraphicsItem
 from synesthesia_machine.ui.parameter_editors import FloatRangeParameterEditor
 from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.theme import DEFAULT_THEME
+from synesthesia_machine.ui.tooltips import format_tooltip
 from synesthesia_machine.ui.transport import resolve_transport_target
 from synesthesia_machine.ui.widgets import InspectorPanel, ValidationIssuePanel
 
@@ -70,7 +71,9 @@ def test_node_title_and_error_badge_have_separate_tooltips(qapp: QApplication) -
     title_help = item._tooltip_for_position(QPointF(20.0, 10.0))
     issue_help = item._tooltip_for_position(item._issue_badge_rect().center())
 
-    assert node.description in title_help
+    # format_tooltip may HTML-wrap long descriptions, so compare the full
+    # formatted text rather than a raw substring.
+    assert title_help == format_tooltip(node.description)
     assert node.issues[0].message not in title_help
     assert node.issues[0].message in issue_help
     assert node.issues[0].code in issue_help

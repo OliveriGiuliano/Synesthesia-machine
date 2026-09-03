@@ -57,7 +57,7 @@ def create_visualization_definitions() -> tuple[NodeDefinition, ...]:
             2,
             "Display Image Data",
             "Visualization",
-            "Publish a capped, display-transformed image preview for the UI.",
+            "Shows an image as a preview on your screen.",
             (InputPortSpec("image", "Image", PortType.IMAGE),),
             (),
             (
@@ -93,7 +93,7 @@ def create_visualization_definitions() -> tuple[NodeDefinition, ...]:
             2,
             "Channel Display",
             "Visualization",
-            "Publish a bounded nominal-range channel preview for the UI.",
+            "Shows a channel as a preview on your screen.",
             (InputPortSpec("channel", "Channel", PortType.CHANNEL),),
             (),
             (
@@ -123,7 +123,7 @@ def create_visualization_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Note Visualizer",
             "Visualization",
-            "Publish compact active-note summaries for a UI-rendered velocity chart.",
+            "Shows the notes the graph is playing right now.",
             (InputPortSpec("midi", "MIDI State", PortType.MIDI_STATE),),
             (),
             (),

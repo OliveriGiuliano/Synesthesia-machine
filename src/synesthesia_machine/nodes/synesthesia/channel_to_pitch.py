@@ -193,11 +193,9 @@ def create_synesthesia_definitions() -> tuple[NodeDefinition, ...]:
             "Channel to Pitch",
             "Synesthesia",
             (
-                "Build a histogram from all valid pixels in the Value channel, dividing its "
-                "nominal range across the notes allowed by the selected root, scale, and MIDI "
-                "range. Optional Parameter A/B channels filter pixels before binning. Bins above "
-                "the occupancy threshold become notes, occupancy controls velocity, and the "
-                "strongest notes survive the polyphony limit."
+                "Turns a channel into notes using a histogram of its values. Values that appear "
+                "often get louder notes; you choose the root, the scale, and the note range. "
+                "Optional extra channels can filter which pixels are counted."
             ),
             (
                 InputPortSpec("value", "Value", PortType.CHANNEL),

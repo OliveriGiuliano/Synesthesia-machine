@@ -55,7 +55,7 @@ def create_input_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Load Video",
             "Input",
-            "Decode and present a saved video using its PyAV presentation timestamps.",
+            "Plays a video file.",
             (),
             (
                 OutputPortSpec("image", "Image", PortType.IMAGE),

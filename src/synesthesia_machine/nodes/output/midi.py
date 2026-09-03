@@ -116,7 +116,7 @@ def create_midi_output_definitions(
             1,
             "Send MIDI",
             "Output / MIDI",
-            "Send the incoming MIDI notes to a selected MIDI output.",
+            "Sends the notes to a MIDI device such as a synth or a music program.",
             (InputPortSpec("midi", "MIDI State", PortType.MIDI_STATE),),
             (),
             (

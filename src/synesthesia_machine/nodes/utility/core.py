@@ -201,7 +201,7 @@ def create_utility_registry() -> NodeRegistry:
             1,
             "Number",
             "Utility",
-            "Static scalar literal.",
+            "A fixed number that never changes.",
             (),
             (OutputPortSpec("value", "Value", PortType.FLOAT),),
             (
@@ -222,7 +222,7 @@ def create_utility_registry() -> NodeRegistry:
             1,
             "Pass Through",
             "Utility",
-            "Forwards a value without copying.",
+            "Passes the value through to the next node, unchanged.",
             (InputPortSpec("value", "Value", T),),
             (OutputPortSpec("value", "Value", T),),
             (),
@@ -235,7 +235,7 @@ def create_utility_registry() -> NodeRegistry:
             1,
             "Conditional",
             "Utility",
-            "Selects one pre-evaluated branch.",
+            "Picks one of several values based on a condition, like an if/else.",
             (
                 InputPortSpec("condition", "Condition", PortType.BOOL),
                 InputPortSpec("if_true", "If true", T),
@@ -252,7 +252,7 @@ def create_utility_registry() -> NodeRegistry:
             1,
             "Compare",
             "Utility",
-            "Compares numeric scalars.",
+            "Compares two numbers: is one bigger, smaller, equal to, or close to the other?",
             (InputPortSpec("a", "A", PortType.FLOAT), InputPortSpec("b", "B", PortType.FLOAT)),
             (OutputPortSpec("value", "Value", PortType.BOOL),),
             (
@@ -279,7 +279,7 @@ def create_utility_registry() -> NodeRegistry:
             1,
             "Logic Operation",
             "Utility",
-            "Combines booleans.",
+            "Combines true/false values with AND, OR, XOR, NAND, NOR, or XNOR.",
             (InputPortSpec("a", "A", PortType.BOOL), InputPortSpec("b", "B", PortType.BOOL)),
             (OutputPortSpec("value", "Value", PortType.BOOL),),
             (
@@ -300,7 +300,8 @@ def create_utility_registry() -> NodeRegistry:
             1,
             "Math",
             "Utility",
-            "Performs scalar arithmetic.",
+            "Does arithmetic on numbers: add, subtract, multiply, divide, and many other "
+            "operations, from powers to rounding and trigonometry.",
             (
                 InputPortSpec("a", "A", PortType.FLOAT),
                 InputPortSpec("b", "B", PortType.FLOAT, required=False),

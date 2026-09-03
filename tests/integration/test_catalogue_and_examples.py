@@ -80,40 +80,36 @@ EXPECTED_TYPE_IDS = {
 
 SYNESTHESIA_DESCRIPTION_DETAILS = {
     "synmachine.synesthesia.channel_to_pitch": (
-        "histogram",
-        "parameter a/b",
-        "occupancy controls velocity",
-        "polyphony limit",
+        "histogram of its values",
+        "louder notes",
+        "note range",
+        "filter which pixels",
     ),
     "synmachine.synesthesia.scanline": (
-        "processed frame",
-        "left-to-right",
-        "activation threshold",
-        "resets restart",
+        "sweep direction",
+        "left to right",
+        "back to the start",
     ),
     "synmachine.synesthesia.edges_to_pitch": (
-        "contours",
-        "nested shapes",
-        "orientation",
-        "explicit ranges",
+        "edge or mask channel",
+        "position, size, roundness",
+        "sets the volume",
+        "smaller than your limits",
     ),
     "synmachine.synesthesia.fourier": (
-        "fft",
-        "spatial frequencies",
-        "one band per allowed note",
-        "cache affects performance only",
+        "analysing its frequencies",
+        "radially",
+        "each frequency band becomes one note",
     ),
     "synmachine.synesthesia.optical_flow": (
-        "farnebäck",
-        "reference image",
-        "grid cells",
-        "previous or held frame",
+        "last frame and the current one",
+        "direction, position, or speed",
     ),
     "synmachine.synesthesia.region_grid": (
-        "row-major order",
-        "rms contrast",
-        "activation threshold",
-        "controls velocity",
+        "grid of cells",
+        "measure in each cell",
+        "passes your threshold",
+        "play louder",
     ),
 }
 
@@ -144,7 +140,9 @@ def test_complex_synesthesia_nodes_have_explanatory_hover_descriptions() -> None
         description = definition.description.casefold()
 
         assert definition.category == "Synesthesia"
-        assert len(definition.description) >= 250
+        # Descriptions are plain-language tooltips; this floor only guards
+        # against stub text, not against a particular writing style.
+        assert len(definition.description) >= 150
         assert all(detail in description for detail in expected_details)
 
 

@@ -182,7 +182,7 @@ def create_temporal_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Hold Image",
             "Image / Utility",
-            "Output an immutable image reference from a bounded number of processed frames ago.",
+            "Delays the image by a few frames, like a short memory of the recent picture.",
             (InputPortSpec("image", "Image", PortType.IMAGE),),
             (OutputPortSpec("image", "Image", PortType.IMAGE),),
             (
@@ -214,7 +214,8 @@ def create_temporal_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Posterize Time",
             "Image / Utility",
-            "Sample an image every N frames and hold it between samples.",
+            "Updates the picture only every few frames and holds it in between, like a lower "
+            "frame rate.",
             (InputPortSpec("image", "Image", PortType.IMAGE),),
             (OutputPortSpec("image", "Image", PortType.IMAGE),),
             (

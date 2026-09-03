@@ -177,7 +177,7 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Resize",
             "Image / Dimension",
-            "Resize with explicit fit, aspect, and interpolation policies; alpha is processed.",
+            "Changes the size of the image. You can stretch it or keep its proportions.",
             image_input,
             image_output,
             (
@@ -227,7 +227,7 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Crop",
             "Image / Dimension",
-            "Crop normalized or exclusive pixel bounds with explicit out-of-bounds behavior.",
+            "Cuts out a rectangular area of the image.",
             image_input,
             image_output,
             (
@@ -268,7 +268,7 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Flip",
             "Image / Utility",
-            "Flip every image channel horizontally, vertically, or on both axes.",
+            "Mirrors the image horizontally, vertically, or both.",
             image_input,
             image_output,
             (
@@ -290,7 +290,7 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Rotate",
             "Image / Utility",
-            "Rotate counter-clockwise around a normalized centre with explicit borders.",
+            "Turns the image by an angle around a point you choose.",
             image_input,
             image_output,
             (

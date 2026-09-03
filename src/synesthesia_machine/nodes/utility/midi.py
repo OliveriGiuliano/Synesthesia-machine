@@ -150,7 +150,7 @@ def create_midi_utility_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Multiply Velocity",
             "Utility / MIDI",
-            "Scale every active MIDI velocity without emitting raw messages.",
+            "Turns the volume of every active note up or down.",
             midi_input,
             midi_output,
             (
@@ -174,7 +174,8 @@ def create_midi_utility_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Transpose",
             "Utility / MIDI",
-            "Shift MIDI notes by semitones and discard out-of-range results.",
+            "Moves all the notes up or down by a number of semitones. Notes that fall outside the "
+            "MIDI range are dropped.",
             midi_input,
             midi_output,
             (
@@ -198,7 +199,8 @@ def create_midi_utility_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "MIDI Merge",
             "Utility / MIDI",
-            "Merge two or more same-clock desired MIDI states by maximum velocity.",
+            "Combines several MIDI note streams into one. Where notes overlap, the loudest one "
+            "wins.",
             (),
             midi_output,
             (),

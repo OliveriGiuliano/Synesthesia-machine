@@ -201,7 +201,7 @@ def test_definition_and_registry_expose_region_grid_as_stateless_synesthesia() -
     assert definition.parameter("metric").choices == REGION_METRICS  # type: ignore[union-attr]
     assert definition.parameter("activation_threshold").editor_hint is ParameterEditorHint.SLIDER  # type: ignore[union-attr]
     assert definition.parameter_groups[0].id == "musical"
-    assert len(definition.description) >= 250
+    assert "grid of cells" in definition.description.casefold()
 
     registry = create_application_registry()
     assert len(registry.definitions()) == 64

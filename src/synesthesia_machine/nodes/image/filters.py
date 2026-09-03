@@ -624,7 +624,7 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
         _definition(
             "synmachine.image.gaussian_blur",
             "Gaussian Blur",
-            "Blur non-alpha channels with explicit odd kernels, sigma, and border behavior.",
+            "Blurs the image with a soft, natural-looking blur.",
             gaussian_parameters,
             _gaussian_blur,
             aliases=("blur", "soften", "gaussian"),
@@ -633,7 +633,7 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
         _definition(
             "synmachine.image.sharpen",
             "Sharpen",
-            "Apply unclipped thresholded unsharp masking while preserving alpha.",
+            "Makes the edges and fine detail stand out more.",
             sharpen_parameters,
             _sharpen,
             aliases=("unsharp mask", "detail"),
@@ -642,7 +642,7 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
         _definition(
             "synmachine.image.add_noise",
             "Add Noise",
-            "Add deterministic Gaussian, Uniform, or Salt and Pepper noise.",
+            "Adds random grain to the image.",
             noise_parameters,
             _add_noise,
             aliases=("grain", "random", "salt pepper"),
@@ -651,7 +651,7 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
         _definition(
             "synmachine.image.posterize",
             "Posterize",
-            "Quantize selected normalized channels with optional input clamping.",
+            "Reduces the number of levels in a channel you choose, for a flat, poster-like look.",
             posterize_parameters,
             _posterize,
             aliases=("quantize", "colour levels", "color levels"),
@@ -661,7 +661,9 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Threshold",
             "Image / Analysis",
-            "Apply OpenCV-compatible threshold modes to one channel.",
+            "Compares every pixel to a brightness limit and rewrites it according to the mode you "
+            "choose: for example, pixels above the limit become one value and the rest another, "
+            "or one side is set to zero.",
             (InputPortSpec("channel", "Channel", PortType.CHANNEL),),
             (OutputPortSpec("channel", "Channel", PortType.CHANNEL),),
             threshold_parameters,
@@ -675,7 +677,7 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Canny",
             "Image / Analysis",
-            "Detect luminance edges and emit a normalized channel mask.",
+            "Finds the outlines in the image and outputs a black-and-white map of the edges.",
             (InputPortSpec("image", "Image", PortType.IMAGE),),
             (OutputPortSpec("channel", "Channel", PortType.CHANNEL),),
             canny_parameters,
@@ -687,7 +689,7 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
         _definition(
             "synmachine.image.convolve",
             "Convolve",
-            "Filter non-alpha channels with a bounded user-editable matrix.",
+            "Applies a custom filter matrix to the image, for effects you build yourself.",
             convolve_parameters,
             _convolve,
             aliases=("kernel", "filter 2d"),
@@ -696,7 +698,7 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
         _definition(
             "synmachine.image.dilate",
             "Dilate",
-            "Apply configurable maximum morphology to image channels.",
+            "Thickens the bright parts of the image.",
             morph_parameters,
             _dilate,
             aliases=("expand", "maximum filter"),
@@ -705,7 +707,7 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
         _definition(
             "synmachine.image.erode",
             "Erode",
-            "Apply configurable minimum morphology to image channels.",
+            "Thins the bright parts of the image.",
             morph_parameters,
             _erode,
             aliases=("shrink", "minimum filter"),
@@ -714,7 +716,7 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
         _definition(
             "synmachine.image.high_pass",
             "High Pass",
-            "Extract unclipped Gaussian detail with configurable gain and offset.",
+            "Keeps only the fine detail and texture, and removes the broad shapes.",
             high_pass_parameters,
             _high_pass,
             aliases=("detail", "edges"),
@@ -723,7 +725,7 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
         _definition(
             "synmachine.image.low_pass",
             "Low Pass",
-            "Apply a simplified automatic-kernel Gaussian low-pass filter.",
+            "Smooths out the fine detail, keeping only the broad shapes.",
             low_pass_parameters,
             _low_pass,
             aliases=("soften", "blur"),

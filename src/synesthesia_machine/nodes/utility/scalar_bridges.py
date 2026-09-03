@@ -144,7 +144,8 @@ def create_scalar_bridge_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Remap Number",
             "Utility / Scalar",
-            "Map a scalar between explicit input and output ranges.",
+            "Takes a number from one range and puts it into another, for example from 0 to 100 "
+            "into 0 to 1.",
             (InputPortSpec("value", "Value", PortType.FLOAT),),
             (OutputPortSpec("value", "Value", PortType.FLOAT),),
             (
@@ -164,7 +165,7 @@ def create_scalar_bridge_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Float to Integer",
             "Utility / Scalar",
-            "Convert a finite floating-point value to an integer using an explicit mode.",
+            "Turns a decimal number into a whole number, rounding it the way you choose.",
             (InputPortSpec("value", "Value", PortType.FLOAT),),
             (OutputPortSpec("value", "Value", PortType.INT),),
             (

@@ -191,11 +191,10 @@ def create_scanline_definitions() -> tuple[NodeDefinition, ...]:
             "Scanline",
             "Synesthesia",
             (
-                "Move a horizontal band through the channel once per processed frame. The band "
-                "is averaged or maximized, then resampled left-to-right across the allowed notes; "
-                "values above the activation threshold become notes and control their velocity. "
-                "Direction, row advance, and thickness shape the scan, while resets restart its "
-                "position."
+                "Sends a line across the picture, like a scanner, and turns each row it passes "
+                "into notes from left to right; stronger values play louder. You choose the sweep "
+                "direction — up, down, or back and forth — and how fast the line advances. A "
+                "reset sends the line back to the start."
             ),
             (InputPortSpec("value", "Value", PortType.CHANNEL),),
             (OutputPortSpec("midi", "MIDI state", PortType.MIDI_STATE),),

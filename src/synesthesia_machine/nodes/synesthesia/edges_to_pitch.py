@@ -249,11 +249,10 @@ def create_edges_to_pitch_definitions() -> tuple[NodeDefinition, ...]:
             "Edges to Pitch",
             "Synesthesia",
             (
-                "Find contours in the non-zero edge channel, optionally including nested shapes, "
-                "then reject contours below the area or perimeter limits. Each remaining shape is "
-                "measured for position, size, orientation, circularity, and edge strength. The "
-                "chosen pitch and velocity features are normalized by their explicit ranges and "
-                "mapped into the selected scale, subject to contour and polyphony limits."
+                "Finds the shapes in an edge or mask channel and turns each one into a note. You "
+                "choose which property of the shape (its position, size, roundness, or "
+                "orientation) sets the pitch and which sets the volume, which can also follow "
+                "edge strength. Shapes smaller than your limits are ignored."
             ),
             (InputPortSpec("edges", "Edges", PortType.CHANNEL),),
             (OutputPortSpec("midi", "MIDI state", PortType.MIDI_STATE),),

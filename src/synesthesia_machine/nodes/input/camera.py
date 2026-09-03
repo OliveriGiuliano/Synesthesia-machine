@@ -56,7 +56,7 @@ def create_camera_definitions() -> tuple[NodeDefinition, ...]:
             1,
             "Load Camera",
             "Input",
-            "Capture live video from a connected camera and reconnect if it drops out.",
+            "Brings in live video from a camera and reconnects if it drops out.",
             (),
             (
                 OutputPortSpec("image", "Image", PortType.IMAGE),
