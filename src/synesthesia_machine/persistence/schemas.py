@@ -8,7 +8,7 @@ from typing import TypedDict, cast
 
 from synesthesia_machine.version import __version__
 
-GRAPH_SCHEMA_VERSION = 2
+GRAPH_SCHEMA_VERSION = 3
 
 type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
 type JsonObject = dict[str, JsonValue]
@@ -125,6 +125,44 @@ def migrate_v1_to_v2(data: JsonObject) -> JsonObject:
     return migrated
 
 
+def migrate_v2_to_v3(data: JsonObject) -> JsonObject:
+    """Point Statistics inputs at their first variadic socket.
+
+    The Statistics node replaced its single ``values`` input with an indexed
+    ``values_1``... socket family so one node can combine several connected
+    values or a Buffer. Saved connections still target the legacy ``values``
+    port, which now means the first socket.
+    """
+
+    migrated = deepcopy(data)
+    migrated["schema_version"] = 3
+    nodes = migrated.get("nodes")
+    statistics_ids: set[str] = set()
+    if isinstance(nodes, list):
+        for raw_node in nodes:
+            if not isinstance(raw_node, dict):
+                continue
+            node = cast(dict[str, JsonValue], raw_node)
+            if node.get("type_id") == "synmachine.utility.statistics":
+                node_id = node.get("id")
+                if isinstance(node_id, str):
+                    statistics_ids.add(node_id)
+    if not statistics_ids:
+        return migrated
+    connections = migrated.get("connections")
+    if not isinstance(connections, list):
+        return migrated
+    for raw_connection in connections:
+        if not isinstance(raw_connection, dict):
+            continue
+        connection = cast(dict[str, JsonValue], raw_connection)
+        destination = connection.get("destination_node_id")
+        port = connection.get("destination_port_id")
+        if destination in statistics_ids and port == "values":
+            connection["destination_port_id"] = "values_1"
+    return migrated
+
+
 def _schema_version(data: JsonObject) -> int:
     value = data.get("schema_version", 0)
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -159,4 +197,8 @@ def _copy_json_value(value: object, path: str) -> JsonValue:
     raise ValueError(msg)
 
 
-_MIGRATIONS: dict[int, GraphMigration] = {0: migrate_v0_to_v1, 1: migrate_v1_to_v2}
+_MIGRATIONS: dict[int, GraphMigration] = {
+    0: migrate_v0_to_v1,
+    1: migrate_v1_to_v2,
+    2: migrate_v2_to_v3,
+}

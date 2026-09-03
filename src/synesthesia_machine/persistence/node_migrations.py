@@ -133,6 +133,18 @@ def migrate_channel_display_v1_to_v2(data: JsonObject) -> JsonObject:
     return migrated
 
 
+def migrate_statistics_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Statistics v2 replaced its single ``values`` input with variadic sockets.
+
+    No parameter payload changed; the input-port rename lives in the v2 -> v3
+    graph migration, so this step only advances the implementation version.
+    """
+
+    migrated = deepcopy(data)
+    migrated["implementation_version"] = 2
+    return migrated
+
+
 def _parameters(data: JsonObject) -> JsonObject:
     raw_parameters = data.get("parameters")
     if not isinstance(raw_parameters, dict):
@@ -152,6 +164,7 @@ BUILTIN_NODE_MIGRATIONS = NodeMigrationRegistry(
         ("synmachine.image.hue", 1): migrate_hue_v1_to_v2,
         ("synmachine.input.load_video", 0): migrate_load_video_v0_to_v1,
         ("synmachine.utility.number", 0): migrate_number_v0_to_v1,
+        ("synmachine.utility.statistics", 1): migrate_statistics_v1_to_v2,
         ("synmachine.visualization.channel_display", 1): migrate_channel_display_v1_to_v2,
         ("synmachine.visualization.display_image_data", 1): migrate_display_image_data_v1_to_v2,
     }
@@ -169,4 +182,5 @@ __all__ = [
     "migrate_hue_v1_to_v2",
     "migrate_load_video_v0_to_v1",
     "migrate_number_v0_to_v1",
+    "migrate_statistics_v1_to_v2",
 ]

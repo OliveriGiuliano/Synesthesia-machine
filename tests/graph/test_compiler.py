@@ -29,11 +29,38 @@ CONNECTION_B = UUID("00000000-0000-0000-0000-00000000001b")
 DOCUMENT_ID = UUID("00000000-0000-0000-0000-000000000100")
 
 
+def _expected_type_compatibility(source: PortType, destination: PortType) -> bool:
+    if source is destination or (source is PortType.INT and destination is PortType.FLOAT):
+        return True
+    if destination is PortType.SCALAR_ARRAY:
+        return source in {PortType.FLOAT, PortType.INT}
+    if destination is PortType.IMAGE_ARRAY:
+        return source is PortType.IMAGE
+    if destination is PortType.CHANNEL_ARRAY:
+        return source is PortType.CHANNEL
+    return False
+
+
 @pytest.mark.parametrize("source", list(PortType))
 @pytest.mark.parametrize("destination", list(PortType))
 def test_all_type_compatibility_combinations(source: PortType, destination: PortType) -> None:
-    expected = source is destination or (source is PortType.INT and destination is PortType.FLOAT)
-    assert types_compatible(source, destination) is expected
+    assert types_compatible(source, destination) is _expected_type_compatibility(
+        source, destination
+    )
+
+
+def test_single_element_feeds_its_array_socket() -> None:
+    # A lone value may feed an array input socket (e.g. one image into a
+    # Statistics socket that otherwise carries a Buffer's ValueArray).
+    assert types_compatible(PortType.FLOAT, PortType.SCALAR_ARRAY)
+    assert types_compatible(PortType.INT, PortType.SCALAR_ARRAY)
+    assert types_compatible(PortType.IMAGE, PortType.IMAGE_ARRAY)
+    assert types_compatible(PortType.CHANNEL, PortType.CHANNEL_ARRAY)
+    # The reverse (an array into a single-value socket) stays rejected.
+    assert not types_compatible(PortType.SCALAR_ARRAY, PortType.FLOAT)
+    assert not types_compatible(PortType.IMAGE_ARRAY, PortType.IMAGE)
+    # A scalar element cannot feed an image or channel array socket.
+    assert not types_compatible(PortType.FLOAT, PortType.IMAGE_ARRAY)
 
 
 def test_graph_document_replaces_ordinary_input_connection() -> None:
@@ -253,3 +280,112 @@ def test_compiler_exposes_resolved_types_for_invalid_graphs() -> None:
 
 def _codes(result: CompilationResult) -> set[str]:
     return {issue.code for issue in result.report.errors}
+
+
+STATS_SOURCE_A = UUID("00000000-0000-0000-0000-0000000002a1")
+STATS_SOURCE_B = UUID("00000000-0000-0000-0000-0000000002a2")
+STATS_BUFFER = UUID("00000000-0000-0000-0000-0000000002a3")
+STATS_NODE = UUID("00000000-0000-0000-0000-0000000002a4")
+
+
+def test_statistics_combines_multiple_connected_scalars() -> None:
+    document = GraphDocument(document_id=DOCUMENT_ID)
+    first = document.add_node(
+        "synmachine.utility.number",
+        node_id=STATS_SOURCE_A,
+        parameters={"number_type": "FLOAT", "float_value": 1.0},
+    )
+    second = document.add_node(
+        "synmachine.utility.number",
+        node_id=STATS_SOURCE_B,
+        parameters={"number_type": "FLOAT", "float_value": 3.0},
+    )
+    statistics = document.add_node(
+        "synmachine.utility.statistics",
+        node_id=STATS_NODE,
+        implementation_version=2,
+        parameters={"statistic": "MEAN"},
+    )
+    document.add_connection(first, "value", statistics, "values_1")
+    document.add_connection(second, "value", statistics, "values_2")
+
+    result = GraphCompiler(create_utility_registry()).compile(document.snapshot())
+
+    assert result.report.is_valid, [issue.message for issue in result.report.issues]
+    node = result.plan.node(STATS_NODE)
+    assert node is not None
+    assert node.output_types["value"] is PortType.FLOAT
+    assert sorted(node.input_bindings) == ["values_1", "values_2"]
+
+
+def test_statistics_accepts_a_buffer_output() -> None:
+    document = GraphDocument(document_id=DOCUMENT_ID)
+    source = document.add_node(
+        "synmachine.utility.number",
+        node_id=STATS_SOURCE_A,
+        parameters={"number_type": "FLOAT", "float_value": 2.0},
+    )
+    buffer = document.add_node(
+        "synmachine.utility.buffer",
+        node_id=STATS_BUFFER,
+        parameters={"capacity": 4},
+    )
+    statistics = document.add_node(
+        "synmachine.utility.statistics",
+        node_id=STATS_NODE,
+        implementation_version=2,
+        parameters={"statistic": "MEAN"},
+    )
+    document.add_connection(source, "value", buffer, "value")
+    document.add_connection(buffer, "values", statistics, "values_1")
+
+    result = GraphCompiler(create_utility_registry()).compile(document.snapshot())
+
+    assert result.report.is_valid, [issue.message for issue in result.report.issues]
+    node = result.plan.node(STATS_NODE)
+    assert node is not None
+    assert node.output_types["value"] is PortType.FLOAT
+    assert sorted(node.input_bindings) == ["values_1"]
+
+
+def test_statistics_mixes_direct_and_buffered_scalars() -> None:
+    document = GraphDocument(document_id=DOCUMENT_ID)
+    source = document.add_node(
+        "synmachine.utility.number",
+        node_id=STATS_SOURCE_A,
+        parameters={"number_type": "FLOAT", "float_value": 2.0},
+    )
+    buffer = document.add_node(
+        "synmachine.utility.buffer",
+        node_id=STATS_BUFFER,
+        parameters={"capacity": 4},
+    )
+    statistics = document.add_node(
+        "synmachine.utility.statistics",
+        node_id=STATS_NODE,
+        implementation_version=2,
+        parameters={"statistic": "MEAN"},
+    )
+    document.add_connection(source, "value", buffer, "value")
+    document.add_connection(source, "value", statistics, "values_1")
+    document.add_connection(buffer, "values", statistics, "values_2")
+
+    result = GraphCompiler(create_utility_registry()).compile(document.snapshot())
+
+    assert result.report.is_valid, [issue.message for issue in result.report.issues]
+    node = result.plan.node(STATS_NODE)
+    assert node is not None
+    assert node.output_types["value"] is PortType.FLOAT
+
+
+def test_statistics_requires_at_least_one_input() -> None:
+    document = GraphDocument(document_id=DOCUMENT_ID)
+    document.add_node(
+        "synmachine.utility.statistics",
+        node_id=STATS_NODE,
+        implementation_version=2,
+    )
+
+    result = GraphCompiler(create_utility_registry()).compile(document.snapshot())
+
+    assert "required_input_missing" in _codes(result)

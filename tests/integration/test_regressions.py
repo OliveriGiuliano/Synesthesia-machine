@@ -202,7 +202,7 @@ def test_buffer_statistics_and_modulo_accumulator_process_scalars() -> None:
     statistics_parameters, errors = statistics.parameter_values({"statistic": "MEAN"})
     assert not errors
     mean = statistics.runtime_factory(NODE_ID).process(
-        {"values": latest}, statistics_parameters, context
+        {"values_1": latest}, statistics_parameters, context
     )["value"]
     assert mean == 14.0 / 3.0
 
@@ -272,7 +272,7 @@ def test_dynamic_statistics_and_accumulator_respect_channel_descriptors() -> Non
     assert not errors
     with pytest.raises(ExpectedNodeError, match="matching descriptors"):
         statistics.runtime_factory(NODE_ID).process(
-            {"values": ValueArray(PortType.CHANNEL, (generic, hue))},
+            {"values_1": ValueArray(PortType.CHANNEL, (generic, hue))},
             statistics_parameters,
             generic.context,
         )
@@ -456,3 +456,53 @@ def test_non_native_video_dialog_has_explicit_dark_palette_rules() -> None:
     assert "QTableWidget, QTableView" in style
     assert f"background: {DEFAULT_THEME.colors.canvas}" in style
     assert f"color: {DEFAULT_THEME.colors.text}" in style
+
+
+def test_statistics_combines_multiple_direct_scalar_connections() -> None:
+    registry = create_application_registry()
+    context = frame_context(clock_id=NODE_ID)
+    statistics = registry.require("synmachine.utility.statistics")
+    parameters, errors = statistics.parameter_values({"statistic": "MEAN"})
+    assert not errors
+    runtime = statistics.runtime_factory(NODE_ID)
+
+    # Several independent single-value connections combine into one statistic.
+    mean = runtime.process({"values_1": 1.0, "values_2": 3.0}, parameters, context)["value"]
+    assert mean == 2.0
+
+    min_parameters, _ = statistics.parameter_values({"statistic": "MINIMUM"})
+    minimum = runtime.process(
+        {"values_1": 5, "values_2": 2, "values_3": 9}, min_parameters, context
+    )["value"]
+    assert minimum == 2
+    assert isinstance(minimum, int)
+
+
+def test_statistics_combines_multiple_direct_image_connections() -> None:
+    registry = create_application_registry()
+    context = frame_context(clock_id=NODE_ID)
+
+    def make_image(fill: float) -> ImageFrame:
+        return ImageFrame(
+            read_only_float32(np.full((4, 4, 3), fill, dtype=np.float32)),
+            ColorSpace.SRGB,
+            ("R", "G", "B"),
+            AlphaMode.NONE,
+            context,
+            FrameProvenance(NODE_ID, "statistics-test"),
+        )
+
+    dark = make_image(0.0)
+    bright = make_image(2.0)
+    statistics = registry.require("synmachine.utility.statistics")
+    parameters, errors = statistics.parameter_values({"statistic": "MEAN"})
+    assert not errors
+    result = statistics.runtime_factory(NODE_ID).process(
+        {"values_1": dark, "values_2": bright}, parameters, context
+    )["value"]
+
+    assert isinstance(result, ImageFrame)
+    assert result.data.shape == (4, 4, 3)
+    assert np.allclose(result.data, 1.0)
+    assert result.color_space is dark.color_space
+    assert result.channel_names == dark.channel_names

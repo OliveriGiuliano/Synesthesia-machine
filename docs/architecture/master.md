@@ -282,7 +282,9 @@ The graph also supports compile-time type variables used only by generic nodes:
 
 - `T` for Pass Through;
 - `T` shared by both data inputs and the output of Conditional;
-- `MIDI_STATE...` for variadic MIDI Merge inputs.
+- `MIDI_STATE...` for variadic MIDI Merge inputs;
+- `T` / `T[]` for the Buffer value socket and the variadic Statistics `values` sockets, where
+  a socket may carry either one element or a Buffer's `ValueArray`.
 
 Generic ports must resolve to a concrete type during graph validation. `ANY` is not a persisted runtime type.
 
@@ -291,7 +293,12 @@ Generic ports must resolve to a concrete type during graph validation. `ANY` is 
 Connections are allowed when types are identical, or when the compatibility matrix explicitly permits widening:
 
 - `INT -> FLOAT` is allowed and inserts a compiler-owned scalar conversion.
-- No other implicit conversions are allowed.
+- No other implicit *value* conversions are allowed.
+- An array-typed input socket may also accept a single element of its own family
+  (`FLOAT`/`INT` -> `SCALAR_ARRAY`, `IMAGE` -> `IMAGE_ARRAY`, `CHANNEL` -> `CHANNEL_ARRAY`);
+  this changes the socket's shape, not the value, so the runtime treats the lone element as a
+  one-item batch and no conversion is inserted. The reverse (an array into a single-value
+  socket) stays rejected.
 - Image colour-space conversion is always explicit through Change Colour Space.
 - Image-to-channel conversion is explicit through Separate Channels.
 - Channel-to-image conversion is explicit through Combine Channels.

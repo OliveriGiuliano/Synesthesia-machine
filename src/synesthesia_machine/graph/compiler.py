@@ -662,7 +662,18 @@ class GraphCompiler:
 
 
 def types_compatible(source: PortType, destination: PortType) -> bool:
-    return source is destination or (source is PortType.INT and destination is PortType.FLOAT)
+    if source is destination or (source is PortType.INT and destination is PortType.FLOAT):
+        return True
+    # A single element may feed an array input socket: the runtime treats the
+    # lone value as a one-item batch (e.g. one image into a Statistics socket
+    # that otherwise carries a Buffer's ValueArray).
+    if destination is PortType.SCALAR_ARRAY:
+        return source in {PortType.FLOAT, PortType.INT}
+    if destination is PortType.IMAGE_ARRAY:
+        return source is PortType.IMAGE
+    if destination is PortType.CHANNEL_ARRAY:
+        return source is PortType.CHANNEL
+    return False
 
 
 def _input_socket_ids(

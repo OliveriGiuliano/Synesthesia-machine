@@ -1187,7 +1187,7 @@
     {
       "collapsed": false,
       "id": "65000000-0000-0000-0000-000000000061",
-      "implementation_version": 1,
+      "implementation_version": 2,
       "parameters": {
         "percentile": 50.0,
         "statistic": "MEAN"
@@ -1269,6 +1269,6 @@
       "user_label": null
     }
   ],
-  "schema_version": 2,
+  "schema_version": 3,
   "ui_state": {}
 }

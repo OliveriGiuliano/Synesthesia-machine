@@ -133,7 +133,7 @@ def generate_random_graph(
         buffer_id = add("synmachine.utility.buffer")
         document.add_connection(current_id, current_port, buffer_id, "value")
         statistics_id = add("synmachine.utility.statistics")
-        document.add_connection(buffer_id, "values", statistics_id, "values")
+        document.add_connection(buffer_id, "values", statistics_id, "values_1")
         current_id, current_port = statistics_id, "value"
 
     musical_id = add(

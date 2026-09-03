@@ -146,7 +146,7 @@ def test_v0_migration_is_pure_and_sequential() -> None:
     migrated = migrate_graph_data(prototype)
 
     assert prototype == original
-    assert migrated["schema_version"] == 2
+    assert migrated["schema_version"] == 3
     migrated_nodes = migrated["nodes"]
     assert isinstance(migrated_nodes, list)
     migrated_node = migrated_nodes[0]
@@ -175,7 +175,7 @@ def test_v1_connection_payload_migrates_to_v2_and_round_trips() -> None:
     migrated = migrate_graph_data(v1_payload)
 
     assert v1_payload == original
-    assert migrated["schema_version"] == 2
+    assert migrated["schema_version"] == 3
     for raw_connection in cast("list[object]", migrated["connections"]):
         assert cast("dict[str, object]", raw_connection)["ui_state"] == {}
 

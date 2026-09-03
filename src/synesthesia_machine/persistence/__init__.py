@@ -39,6 +39,7 @@ from synesthesia_machine.persistence.node_migrations import (
     migrate_hue_v1_to_v2,
     migrate_load_video_v0_to_v1,
     migrate_number_v0_to_v1,
+    migrate_statistics_v1_to_v2,
 )
 from synesthesia_machine.persistence.schemas import (
     GRAPH_SCHEMA_VERSION,
@@ -51,6 +52,7 @@ from synesthesia_machine.persistence.schemas import (
     migrate_graph_data,
     migrate_v0_to_v1,
     migrate_v1_to_v2,
+    migrate_v2_to_v3,
 )
 
 __all__ = [
@@ -91,8 +93,10 @@ __all__ = [
     "migrate_hue_v1_to_v2",
     "migrate_load_video_v0_to_v1",
     "migrate_number_v0_to_v1",
+    "migrate_statistics_v1_to_v2",
     "migrate_v0_to_v1",
     "migrate_v1_to_v2",
+    "migrate_v2_to_v3",
     "remap_fragment",
     "save_graph",
     "verify_relink_candidate",

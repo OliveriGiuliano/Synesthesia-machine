@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections import deque
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from threading import Lock
 from uuid import UUID
 
@@ -34,6 +34,7 @@ from synesthesia_machine.nodes import (
     ParameterUpdateMode,
     ResetReason,
     TypeVariable,
+    VariadicInputSpec,
 )
 
 _DYNAMIC_TYPES = frozenset({PortType.FLOAT, PortType.INT, PortType.IMAGE, PortType.CHANNEL})
@@ -182,32 +183,38 @@ class StatisticsRuntime(_RuntimeBase):
         context: FrameContext,
     ) -> Mapping[str, RuntimeValue]:
         del context
-        values = inputs["values"]
-        if not isinstance(values, ValueArray) or not values.values:
-            raise ExpectedNodeError("statistics_empty", "Statistics requires a non-empty array")
+        samples = _flatten_samples(inputs.values())
+        if not samples:
+            raise ExpectedNodeError("statistics_empty", "Statistics requires a non-empty input")
         statistic = _text(parameters["statistic"])
         percentile = _number(parameters["percentile"])
-        if values.item_type in {PortType.FLOAT, PortType.INT}:
-            samples = np.asarray(values.values, dtype=np.float64)
-            result = _statistic(samples, statistic, percentile, axis=0)
-            scalar: float | int = float(result)
-            if values.item_type is PortType.INT and statistic in {"MINIMUM", "MAXIMUM"}:
-                scalar = int(scalar)
-            return {"value": scalar}
-        first = values.values[0]
+        first = samples[0]
         if isinstance(first, ImageFrame):
-            frames = tuple(_image(value) for value in values.values)
+            frames = tuple(_image(value) for value in samples)
             _require_matching_descriptors(frames)
             data = _statistic(
                 np.stack([frame.data for frame in frames]), statistic, percentile, axis=0
             )
             return {"value": frame_like(first, np.asarray(data, dtype=np.float32))}
-        channels = tuple(_channel(value) for value in values.values)
-        _require_matching_descriptors(channels)
-        data = _statistic(
-            np.stack([channel.data for channel in channels]), statistic, percentile, axis=0
+        if isinstance(first, ChannelFrame):
+            channels = tuple(_channel(value) for value in samples)
+            _require_matching_descriptors(channels)
+            data = _statistic(
+                np.stack([channel.data for channel in channels]), statistic, percentile, axis=0
+            )
+            return {"value": _channel_like(channels[0], np.asarray(data, dtype=np.float32))}
+        if isinstance(first, (int, float)) and not isinstance(first, bool):
+            # Every connected value resolves to the same scalar element type, so
+            # each sample is a number; _number guards against any other value.
+            sample_array = np.asarray([_number(value) for value in samples], dtype=np.float64)
+            result = _statistic(sample_array, statistic, percentile, axis=0)
+            scalar: float | int = float(result)
+            if isinstance(first, int) and statistic in {"MINIMUM", "MAXIMUM"}:
+                scalar = int(scalar)
+            return {"value": scalar}
+        raise ExpectedNodeError(
+            "statistics_type", "Statistics inputs must be scalar, image, or channel values"
         )
-        return {"value": _channel_like(_channel(first), np.asarray(data, dtype=np.float32))}
 
 
 class NormalizeRuntime(_RuntimeBase):
@@ -354,11 +361,12 @@ def _create_all_definitions() -> tuple[NodeDefinition, ...]:
         ),
         NodeDefinition(
             "synmachine.utility.statistics",
-            1,
+            2,
             "Statistics",
             "Utility / Analysis",
-            "Calculate an element-wise statistic over a scalar, image, or channel array.",
-            (InputPortSpec("values", "Values", T_ARRAY),),
+            "Calculate an element-wise statistic over one or more connected scalar, "
+            "image, or channel values, or over a Buffer of them.",
+            (),
             (OutputPortSpec("value", "Value", T),),
             (
                 ParameterSpec(
@@ -387,6 +395,7 @@ def _create_all_definitions() -> tuple[NodeDefinition, ...]:
             ExecutionKind.STATELESS,
             StatisticsRuntime,
             aliases=("array statistics", "mean", "median", "standard deviation"),
+            variadic_input=VariadicInputSpec("values", "Value", T_ARRAY, minimum_count=1),
         ),
         NodeDefinition(
             "synmachine.utility.normalize",
@@ -529,6 +538,24 @@ def _channel_like(channel: ChannelFrame, data: NDArray[np.floating]) -> ChannelF
         channel.cyclic,
         channel.context,
     )
+
+
+def _flatten_samples(values: Iterable[RuntimeValue]) -> list[RuntimeValue]:
+    """Flatten each connected value into samples.
+
+    A direct connection delivers a single scalar/image/channel value; a Buffer
+    connection delivers a ``ValueArray`` whose elements are the samples. Both
+    forms may share one statistics node, so every value is normalized to the
+    flat samples the statistic is computed over.
+    """
+
+    samples: list[RuntimeValue] = []
+    for value in values:
+        if isinstance(value, ValueArray):
+            samples.extend(value.values)
+        else:
+            samples.append(value)
+    return samples
 
 
 def _require_matching_descriptors(values: Sequence[ImageFrame | ChannelFrame]) -> None:
