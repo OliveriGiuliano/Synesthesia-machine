@@ -45,6 +45,7 @@ from synesthesia_machine.contracts import (
     EngineClient,
     EngineConnectionState,
     EngineMetrics,
+    EngineState,
     EngineStatus,
     MidiOutputConnectionState,
     MidiOutputStatus,
@@ -189,6 +190,7 @@ class MainWindow(QMainWindow):
         )
         self._engine_task_signals = _EngineTaskSignals(self)
         self._engine_tasks_inflight: set[str] = set()
+        self._engine_known_stopped = False
         self._pending_activation: tuple[GraphSnapshot, tuple[UUID, ...]] | None = None
         self._autosave_timer = QTimer(self)
         self._autosave_timer.setSingleShot(True)
@@ -1340,6 +1342,7 @@ class MainWindow(QMainWindow):
     @Slot(str, object)
     def _on_engine_task_failed(self, kind: str, error: object) -> None:
         self._engine_tasks_inflight.discard(kind)
+        self._engine_known_stopped = False
         if self._engine_closed:
             return
         detail = str(error)
@@ -1384,6 +1387,9 @@ class MainWindow(QMainWindow):
         self._start_pending_activation()
 
     def _apply_engine_activation(self, activation: EngineActivation) -> None:
+        # A (re)activation may have started, stopped, or failed the engine;
+        # force the next status tick to re-learn the real state.
+        self._engine_known_stopped = False
         if activation.activated:
             self._clear_runtime_previews()
             self.statusBar().showMessage(
@@ -1527,14 +1533,26 @@ class MainWindow(QMainWindow):
         }
         restart.setEnabled(failed)
         if failed:
+            self._engine_known_stopped = False
             self._show_engine_failure(engine_status)
             return
         self._engine_failure_signature = None
         if engine_status.connection_state is EngineConnectionState.RESTARTING:
+            self._engine_known_stopped = False
             self._engine_status.setText(tr("Engine RESTARTING"))
             return
         selected_nodes = self.scene.selected_node_ids()
         selected_node = next(iter(selected_nodes)) if len(selected_nodes) == 1 else None
+        if (
+            self._engine_known_stopped
+            and engine_status.connection_state is EngineConnectionState.CONNECTED
+            and selected_node is None
+        ):
+            # A stopped engine publishes no data, and the cheap liveness check
+            # above still catches crash and heartbeat timeouts. Skipping the
+            # periodic metrics round trip keeps the UI thread free for editing.
+            return
+        self._engine_known_stopped = False
         self._submit_engine_task(
             "refresh",
             partial(self._load_engine_refresh, selected_node),
@@ -1649,6 +1667,7 @@ class MainWindow(QMainWindow):
                 count=metrics.dropped_before_processing,
             )
         self._engine_status.setText(summary)
+        self._engine_known_stopped = metrics.state is EngineState.STOPPED
 
     @Slot(bool)
     def _on_profiler_visibility_changed(self, visible: bool) -> None:

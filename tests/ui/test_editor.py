@@ -1172,3 +1172,34 @@ def test_recovery_offer_restores_dirty_session_and_explicit_save_discards_recove
     assert explicit.exists()
     assert not recovery_path.exists()
     assert not window.session.is_dirty
+
+
+def test_preview_update_reaches_only_items_of_the_same_source_port(
+    window: MainWindow, qapp: QApplication
+) -> None:
+    first_id = window.session.add_node("synmachine.utility.number", (0.0, 0.0))
+    second_id = window.session.add_node("synmachine.utility.number", (420.0, 0.0))
+    sink_a = window.session.add_node("synmachine.utility.buffer", (200.0, 220.0))
+    sink_b = window.session.add_node("synmachine.utility.buffer", (620.0, 220.0))
+    connection_a = window.session.add_connection(first_id, "value", sink_a, "value")
+    connection_b = window.session.add_connection(second_id, "value", sink_b, "value")
+    qapp.processEvents()
+
+    item_a = window.scene.connection_items[connection_a]
+    item_b = window.scene.connection_items[connection_b]
+    assert item_a.takes_value_pill()
+    assert item_b.takes_value_pill()
+
+    window.scene.set_connection_value_preview(first_id, "value", "3.5")
+    qapp.processEvents()
+
+    assert item_a._value_text == "3.5"  # pyright: ignore[reportPrivateUsage]
+    assert item_b._value_text is None  # pyright: ignore[reportPrivateUsage]
+
+    # Removing the connection rebuilds the preview index: the update now hits
+    # nothing instead of a stale item.
+    window.session.remove_connection(connection_a)
+    qapp.processEvents()
+    window.scene.set_connection_value_preview(first_id, "value", "7.5")
+    qapp.processEvents()
+    assert item_a._value_text == "3.5"  # pyright: ignore[reportPrivateUsage]

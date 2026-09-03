@@ -109,6 +109,27 @@ class OwnedPreviewSlot:
                 )
         return None
 
+    def peek_sequence(self) -> int:
+        """Return the newest committed preview sequence without copying a frame.
+
+        UI pollers run at display cadence; the seqlock header is 28 bytes while
+        read() copies the whole frame. Callers compare the sequence against
+        their threshold and only pay for a full copy when a new frame arrived.
+        A writer mid-update yields 0; the missed sequence is picked up on the
+        next tick without data loss because the caller's threshold is untouched.
+        """
+
+        if self._closed:
+            return 0
+        buffer = _shared_memory_buffer(self._shared_memory)
+        for _ in range(_READ_ATTEMPTS):
+            header = _HEADER.unpack_from(buffer)
+            if header[0] == 0 or header[0] % 2:
+                continue
+            if _HEADER.unpack_from(buffer) == header:
+                return header[1]
+        return 0
+
     def close(self) -> None:
         if self._closed:
             return

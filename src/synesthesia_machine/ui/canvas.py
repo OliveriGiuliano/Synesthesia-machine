@@ -90,6 +90,7 @@ class GraphScene(QGraphicsScene):
         self.theme = theme
         self.node_items: dict[UUID, NodeGraphicsItem] = {}
         self.connection_items: dict[UUID, ConnectionGraphicsItem] = {}
+        self._connection_preview_index: dict[tuple[UUID, str], list[ConnectionGraphicsItem]] = {}
         self.group_items: dict[UUID, GroupGraphicsItem] = {}
         self._drag_port: PortGraphicsItem | None = None
         self._temporary: TemporaryConnectionGraphicsItem | None = None
@@ -163,6 +164,10 @@ class GraphScene(QGraphicsScene):
                 self.addItem(item)
                 item.setSelected(connection.connection_id in selected_connections)
                 self.connection_items[connection.connection_id] = item
+        # Preview updates arrive per source port at display cadence; index the
+        # items so set_connection_*_preview is an O(matching items) lookup
+        # instead of a scan over every connection in a large graph.
+        self._rebuild_connection_preview_index()
         self.update_connections()
         self._sync_connection_preview_visibility()
         selection_changed = (
@@ -243,28 +248,26 @@ class GraphScene(QGraphicsScene):
         for node_id, item in self.node_items.items():
             item.set_heat_level(self._node_heat_levels.get(node_id))
 
+    def _rebuild_connection_preview_index(self) -> None:
+        index: dict[tuple[UUID, str], list[ConnectionGraphicsItem]] = {}
+        for item in self.connection_items.values():
+            view_model = item.view_model
+            key = (view_model.source_node_id, view_model.source_port_id)
+            index.setdefault(key, []).append(item)
+        self._connection_preview_index = index
+
     def set_connection_value_preview(
         self, owner_node_id: UUID, source_port_id: str, text: str | None
     ) -> None:
-        for item in self.connection_items.values():
-            view_model = item.view_model
-            if (
-                view_model.source_node_id == owner_node_id
-                and view_model.source_port_id == source_port_id
-                and item.takes_value_pill()
-            ):
+        for item in self._connection_preview_index.get((owner_node_id, source_port_id), ()):
+            if item.takes_value_pill():
                 item.set_value_preview(text)
 
     def set_connection_image_preview(
         self, owner_node_id: UUID, source_port_id: str, image: QImage
     ) -> None:
-        for item in self.connection_items.values():
-            view_model = item.view_model
-            if (
-                view_model.source_node_id == owner_node_id
-                and view_model.source_port_id == source_port_id
-                and item.takes_image_pill()
-            ):
+        for item in self._connection_preview_index.get((owner_node_id, source_port_id), ()):
+            if item.takes_image_pill():
                 item.set_image_preview(image)
 
     def clear_connection_previews(self) -> None:

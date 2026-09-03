@@ -368,3 +368,70 @@ def test_broken_graph_activation_reports_the_engine_as_stopped(
     finally:
         window.session.new_document()
         window.close()
+
+
+def test_stopped_engine_skips_redundant_periodic_refreshes(
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    registry = create_application_registry()
+    client = _SupervisionClient(EngineStatus(EngineConnectionState.CONNECTED, child_process_id=222))
+    metrics_calls = 0
+    original_metrics = _SupervisionClient.metrics
+
+    def counting_metrics(self: _SupervisionClient) -> EngineMetrics:
+        nonlocal metrics_calls
+        metrics_calls += 1
+        return original_metrics(self)
+
+    monkeypatch.setattr(_SupervisionClient, "metrics", counting_metrics)
+    window = MainWindow(
+        registry,
+        _paths(tmp_path),
+        client,
+        settings=QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat),
+        offer_recovery=False,
+    )
+    try:
+        # Isolate the test from the real periodic timers and auto-activation.
+        for timer_name in (
+            "_preview_timer",
+            "_metrics_timer",
+            "_device_refresh_timer",
+            "_autosave_timer",
+            "_activation_timer",
+        ):
+            getattr(window, timer_name).stop()  # pyright: ignore[reportPrivateUsage]
+
+        def settle_refresh() -> None:
+            deadline = time.monotonic() + 5.0
+            while (
+                "refresh" in window._engine_tasks_inflight  # pyright: ignore[reportPrivateUsage]
+                and time.monotonic() < deadline
+            ):
+                qapp.processEvents()
+                time.sleep(0.01)
+
+        window._refresh_engine_status()  # pyright: ignore[reportPrivateUsage]
+        settle_refresh()
+        assert metrics_calls == 1
+        assert window._engine_known_stopped is True  # pyright: ignore[reportPrivateUsage]
+
+        # A stopped engine publishes no data: the repeated ticks keep the cheap
+        # liveness check but submit no further metrics round trips.
+        for _ in range(5):
+            window._refresh_engine_status()  # pyright: ignore[reportPrivateUsage]
+            qapp.processEvents()
+        assert metrics_calls == 1
+
+        # A selected node still forces a refresh for its memory diagnostic.
+        node_id = window.session.add_node("synmachine.utility.number", (10.0, 10.0))
+        window.scene.node_items[node_id].setSelected(True)
+        qapp.processEvents()
+        window._refresh_engine_status()  # pyright: ignore[reportPrivateUsage]
+        settle_refresh()
+        assert metrics_calls == 2
+    finally:
+        window.session.new_document()
+        window.close()

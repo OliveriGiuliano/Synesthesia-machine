@@ -367,14 +367,21 @@ class ProcessEngineClient:
     def poll_image_previews(
         self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
     ) -> tuple[ImagePreview, ...]:
+        # The UI polls at display cadence, so the cheap seqlock-header peek runs
+        # for every slot and the full frame copy only for slots that advanced
+        # past the caller's threshold. Slots idle at their last frame cost a
+        # 28-byte header read per tick instead of a full preview memcpy.
         thresholds = after_sequences or {}
         previews: list[ImagePreview] = []
         with self._preview_lock:
             for key, slot in sorted(
                 self._image_slots.items(), key=lambda item: (str(item[0][0]), item[0][1])
             ):
+                threshold = thresholds.get(key, 0)
+                if slot.peek_sequence() <= threshold:
+                    continue
                 preview = slot.read()
-                if preview is not None and preview.sequence > thresholds.get(key, 0):
+                if preview is not None and preview.sequence > threshold:
                     previews.append(preview)
         return tuple(previews)
 
