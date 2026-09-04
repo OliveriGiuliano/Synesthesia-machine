@@ -744,6 +744,11 @@ class MainWindow(QMainWindow):
             return
         self._clear_runtime_previews()
         self._engine_failure_signature = None
+        # The restarted engine may immediately auto-activate the last valid
+        # graph; drop the "known stopped" cache (a pre-crash metrics refresh
+        # could still hold it True) so the final refresh below re-learns the
+        # real state instead of skipping it.
+        self._engine_known_stopped = False
         if activation is None:
             snapshot = self.session.document.snapshot()
             if snapshot.nodes:

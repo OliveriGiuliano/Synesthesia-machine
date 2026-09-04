@@ -339,6 +339,22 @@ def test_transport_commands_invalidate_known_stopped_cache(
     assert window._engine_known_stopped is False
 
 
+def test_successful_restart_invalidate_known_stopped_cache(
+    runtime_window: tuple[MainWindow, _RecordingEngineClient],
+) -> None:
+    # A pre-crash metrics refresh can hold the "known stopped" cache True
+    # when the user restarts the engine; the restarted engine may
+    # auto-activate and run immediately, so the cache must be dropped at
+    # restart instead of at the next activation.
+    window, client = runtime_window
+    del client
+    window.session.add_node("synmachine.utility.number", (0.0, 0.0))
+
+    window._engine_known_stopped = True
+    window.restart_engine()
+    assert window._engine_known_stopped is False
+
+
 def test_transport_toolbar_has_named_visible_hover_press_controls_and_click_feedback(
     runtime_window: tuple[MainWindow, _RecordingEngineClient],
 ) -> None:
