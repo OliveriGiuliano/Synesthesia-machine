@@ -311,6 +311,34 @@ def test_transport_auto_targets_sole_source_resumes_paused_and_never_fans_out(
     assert len(client.calls) == count
 
 
+def test_transport_commands_invalidate_known_stopped_cache(
+    runtime_window: tuple[MainWindow, _RecordingEngineClient],
+) -> None:
+    # Transport commands change engine run state outside of an activation;
+    # without invalidating the cache, a stopped status read before the
+    # command would keep the UI showing a stale STOPPED engine and skip
+    # the periodic refresh until the next activation.
+    window, client = runtime_window
+    source_a = window.session.add_node("synmachine.input.load_video", (0.0, 0.0))
+    client.statuses[source_a] = _source_status(source_a)
+
+    window._engine_known_stopped = True
+    window.play()
+    assert client.calls[-1] == ("play", source_a)
+    assert window._engine_known_stopped is False
+
+    window._engine_known_stopped = True
+    client.statuses[source_a] = _source_status(source_a, SourceState.PAUSED)
+    window.play()
+    assert client.calls[-1] == ("resume", source_a)
+    assert window._engine_known_stopped is False
+
+    window._engine_known_stopped = True
+    window.stop()
+    assert client.calls[-1] == ("stop", source_a)
+    assert window._engine_known_stopped is False
+
+
 def test_transport_toolbar_has_named_visible_hover_press_controls_and_click_feedback(
     runtime_window: tuple[MainWindow, _RecordingEngineClient],
 ) -> None:

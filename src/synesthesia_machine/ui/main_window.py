@@ -700,6 +700,10 @@ class MainWindow(QMainWindow):
         except (KeyError, RuntimeError, TimeoutError, IndexError) as error:
             self.statusBar().showMessage(trf("Could not play source: {error}", error=error), 5000)
             return
+        # A transport command changes engine run state outside of an
+        # activation; drop the "known stopped" cache so the periodic
+        # refresh resumes instead of showing a stale STOPPED status.
+        self._engine_known_stopped = False
         self.statusBar().showMessage(
             trf("{verb} source {source}", verb=tr(verb), source=str(target)[:8]), 3000
         )
@@ -772,6 +776,9 @@ class MainWindow(QMainWindow):
                 trf("Could not control source: {error}", error=error), 5000
             )
             return
+        # Same as in play(): invalidate the "known stopped" cache so
+        # the periodic refresh reflects the new run state immediately.
+        self._engine_known_stopped = False
         self.statusBar().showMessage(
             trf(
                 "{verb} source {source}",
