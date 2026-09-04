@@ -205,22 +205,55 @@ def create_scanline_definitions() -> tuple[NodeDefinition, ...]:
                     "Direction",
                     PortType.STRING,
                     BOTTOM_TO_TOP,
+                    help_text=(
+                        "Chooses how the scan line moves across the image: bottom to top, top to "
+                        "bottom, or ping pong."
+                    ),
                     choices=(BOTTOM_TO_TOP, TOP_TO_BOTTOM, PING_PONG),
                 ),
                 ParameterSpec(
-                    "advance_rows", "Advance rows", PortType.INT, 1, minimum=1, maximum=8192
+                    "advance_rows",
+                    "Advance rows",
+                    PortType.INT,
+                    1,
+                    help_text=(
+                        "Rows the scan line moves per frame; larger values move faster across the "
+                        "image."
+                    ),
+                    minimum=1,
+                    maximum=8192,
                 ),
                 ParameterSpec(
-                    "line_thickness", "Line thickness", PortType.INT, 1, minimum=1, maximum=8192
+                    "line_thickness",
+                    "Line thickness",
+                    PortType.INT,
+                    1,
+                    help_text=(
+                        "Number of rows read at once under the scan line; thicker lines are less "
+                        "sensitive to noise."
+                    ),
+                    minimum=1,
+                    maximum=8192,
                 ),
                 ParameterSpec(
-                    "aggregation", "Aggregation", PortType.STRING, MEAN, choices=(MEAN, MAXIMUM)
+                    "aggregation",
+                    "Aggregation",
+                    PortType.STRING,
+                    MEAN,
+                    help_text=(
+                        "Chooses how the values under the line are combined: Mean averages them, "
+                        "and Maximum uses the strongest."
+                    ),
+                    choices=(MEAN, MAXIMUM),
                 ),
                 ParameterSpec(
                     "activation_threshold",
                     "Activation threshold",
                     PortType.FLOAT,
                     0.0,
+                    help_text=(
+                        "Rows below this normalized value stay silent; stronger rows play notes."
+                    ),
                     minimum=0.0,
                     maximum=1.0,
                     editor_hint=ParameterEditorHint.SLIDER,
@@ -230,6 +263,10 @@ def create_scanline_definitions() -> tuple[NodeDefinition, ...]:
                     "Velocity curve exponent",
                     PortType.FLOAT,
                     1.0,
+                    help_text=(
+                        "Shapes the velocity response; values above 1 make quiet rows quieter and "
+                        "loud rows louder."
+                    ),
                     minimum=0.01,
                     maximum=16.0,
                     editor_hint=ParameterEditorHint.SLIDER,

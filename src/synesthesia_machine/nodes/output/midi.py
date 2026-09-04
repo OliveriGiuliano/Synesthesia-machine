@@ -137,6 +137,11 @@ def create_midi_output_definitions(
                     "Velocity update policy",
                     PortType.STRING,
                     VelocityUpdatePolicy.IGNORE_WHILE_HELD.value,
+                    help_text=(
+                        "How a velocity change is delivered for a note that is already sounding: "
+                        "Ignore keeps the original velocity, Retrigger releases the note and "
+                        "presses it again, and Repeat note-on sends another note-on message."
+                    ),
                     choices=tuple(policy.value for policy in VelocityUpdatePolicy),
                 ),
                 ParameterSpec(
@@ -144,6 +149,9 @@ def create_midi_output_definitions(
                     "Velocity change threshold",
                     PortType.INT,
                     4,
+                    help_text=(
+                        "A note is only re-sent when its velocity changes by at least this much."
+                    ),
                     minimum=0,
                     maximum=127,
                 ),

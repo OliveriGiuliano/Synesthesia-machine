@@ -54,6 +54,10 @@ def common_musical_parameter_specs() -> tuple[ParameterSpec, ...]:
             "Root note",
             PortType.STRING,
             "C",
+            help_text=(
+                "Sets the tonic of the scale; the notes of the chosen scale start counting from "
+                "this note."
+            ),
             choices=PITCH_CLASS_NAMES,
             connectable=False,
         ),
@@ -62,6 +66,10 @@ def common_musical_parameter_specs() -> tuple[ParameterSpec, ...]:
             "Scale",
             PortType.STRING,
             "chromatic",
+            help_text=(
+                "Chooses the set of notes the mapped values snap to, from chromatic to pentatonic "
+                "and the modes."
+            ),
             choices=BUILTIN_SCALE_REGISTRY.ids,
             connectable=False,
         ),
@@ -73,27 +81,61 @@ def common_musical_parameter_specs() -> tuple[ParameterSpec, ...]:
             help_text="Twelve 0/1 values from the selected root pitch class.",
             connectable=False,
         ),
-        _live_integer_parameter("midi_minimum", "Minimum MIDI note", 0, 0, 127),
-        _live_integer_parameter("midi_maximum", "Maximum MIDI note", 127, 0, 127),
-        _live_integer_parameter("midi_channel", "MIDI channel", 1, 1, 16),
-        _live_integer_parameter("maximum_polyphony", "Maximum polyphony", 16, 1, 128),
-        _live_integer_parameter("minimum_velocity", "Minimum velocity", 1, 1, 127),
-        _live_integer_parameter("maximum_velocity", "Maximum velocity", 127, 1, 127),
+        _live_integer_parameter(
+            "midi_minimum",
+            "Minimum MIDI note",
+            0,
+            0,
+            127,
+            help_text="Lowest MIDI note the node can output (0 is C-1, 127 is G9).",
+        ),
+        _live_integer_parameter(
+            "midi_maximum",
+            "Maximum MIDI note",
+            127,
+            0,
+            127,
+            help_text="Highest MIDI note the node can output.",
+        ),
+        _live_integer_parameter(
+            "midi_channel",
+            "MIDI channel",
+            1,
+            1,
+            16,
+            help_text="MIDI channel of the output notes, from 1 to 16.",
+        ),
+        _live_integer_parameter(
+            "maximum_polyphony",
+            "Maximum polyphony",
+            16,
+            1,
+            128,
+            help_text="Maximum number of notes the node can hold down at once.",
+        ),
+        _live_integer_parameter(
+            "minimum_velocity",
+            "Minimum velocity",
+            1,
+            1,
+            127,
+            help_text="Softest note velocity; quieter results are lifted to this value.",
+        ),
+        _live_integer_parameter(
+            "maximum_velocity", "Maximum velocity", 127, 1, 127, help_text="Loudest note velocity."
+        ),
     )
 
 
 def _live_integer_parameter(
-    parameter_id: str,
-    label: str,
-    default: int,
-    minimum: int,
-    maximum: int,
+    parameter_id: str, label: str, default: int, minimum: int, maximum: int, help_text: str = ""
 ) -> ParameterSpec:
     return ParameterSpec(
         parameter_id,
         label,
         PortType.INT,
         default,
+        help_text=help_text,
         minimum=minimum,
         maximum=maximum,
         connectable=True,

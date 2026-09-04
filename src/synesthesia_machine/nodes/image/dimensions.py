@@ -186,6 +186,7 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
                     "Width",
                     PortType.INT,
                     500,
+                    help_text="Target width of the image in pixels.",
                     minimum=1,
                     maximum=8192,
                     connectable=True,
@@ -196,17 +197,32 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
                     "Height",
                     PortType.INT,
                     500,
+                    help_text="Target height of the image in pixels.",
                     minimum=1,
                     maximum=8192,
                     connectable=True,
                     connected_port_type=PortType.INT,
                 ),
-                ParameterSpec("preserve_aspect", "Preserve aspect", PortType.BOOL, True),
+                ParameterSpec(
+                    "preserve_aspect",
+                    "Preserve aspect",
+                    PortType.BOOL,
+                    True,
+                    help_text=(
+                        "When on, the aspect ratio is kept and the target size becomes a bounding "
+                        "box; when off the image is stretched to the exact size."
+                    ),
+                ),
                 ParameterSpec(
                     "fit_mode",
                     "Fit mode",
                     PortType.STRING,
                     FitMode.CONTAIN.value,
+                    help_text=(
+                        "Chooses how the target width and height are applied: Contain fits the "
+                        "picture inside the box, Cover fills the box and crops the overflow, and "
+                        "Stretch distorts the picture to the exact size."
+                    ),
                     choices=tuple(mode.value for mode in FitMode),
                 ),
                 ParameterSpec(
@@ -214,6 +230,11 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
                     "Interpolation",
                     PortType.STRING,
                     Interpolation.AUTO.value,
+                    help_text=(
+                        "Chooses the resampling used when pixels are mixed. Automatic picks the "
+                        "best method for the size change; Nearest keeps hard edges, and Cubic and "
+                        "Lanczos are smoother but slower."
+                    ),
                     choices=tuple(mode.value for mode in Interpolation),
                 ),
             ),
@@ -236,17 +257,54 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
                     "Coordinates",
                     PortType.STRING,
                     CoordinateMode.NORMALIZED.value,
+                    help_text=(
+                        "Normalized measures the crop box as fractions of the image size (0 to "
+                        "1); Pixels measures it in raw pixels."
+                    ),
                     choices=tuple(mode.value for mode in CoordinateMode),
                 ),
-                ParameterSpec("left", "Left", PortType.FLOAT, 0.0),
-                ParameterSpec("top", "Top", PortType.FLOAT, 0.0),
-                ParameterSpec("right", "Right", PortType.FLOAT, 1.0),
-                ParameterSpec("bottom", "Bottom", PortType.FLOAT, 1.0),
+                ParameterSpec(
+                    "left",
+                    "Left",
+                    PortType.FLOAT,
+                    0.0,
+                    help_text="Left edge of the crop box, in the units of the Coordinates setting.",
+                ),
+                ParameterSpec(
+                    "top",
+                    "Top",
+                    PortType.FLOAT,
+                    0.0,
+                    help_text="Top edge of the crop box, in the units of the Coordinates setting.",
+                ),
+                ParameterSpec(
+                    "right",
+                    "Right",
+                    PortType.FLOAT,
+                    1.0,
+                    help_text=(
+                        "Right edge of the crop box, in the units of the Coordinates setting."
+                    ),
+                ),
+                ParameterSpec(
+                    "bottom",
+                    "Bottom",
+                    PortType.FLOAT,
+                    1.0,
+                    help_text=(
+                        "Bottom edge of the crop box, in the units of the Coordinates setting."
+                    ),
+                ),
                 ParameterSpec(
                     "out_of_bounds",
                     "Out of bounds",
                     PortType.STRING,
                     CropOutOfBounds.CLAMP.value,
+                    help_text=(
+                        "Chooses what happens when the box extends past the image: Clamp cuts it "
+                        "to the image, Pad fills the rest with the pad colour, and Error makes "
+                        "the node fail."
+                    ),
                     choices=tuple(policy.value for policy in CropOutOfBounds),
                 ),
                 ParameterSpec(
@@ -254,6 +312,9 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
                     "Pad colour",
                     PortType.COLOR,
                     ColorValue(0.0, 0.0, 0.0, 0.0),
+                    help_text=(
+                        "Colour used to fill the areas outside the image when Out of bounds is Pad."
+                    ),
                     applicable_input_types=(PortType.IMAGE,),
                 ),
             ),
@@ -277,6 +338,7 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
                     "Mode",
                     PortType.STRING,
                     FlipMode.HORIZONTAL.value,
+                    help_text="Direction the image is flipped in: horizontal, vertical, or both.",
                     choices=tuple(mode.value for mode in FlipMode),
                 ),
             ),
@@ -299,6 +361,10 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
                     "Angle (degrees)",
                     PortType.FLOAT,
                     0.0,
+                    help_text=(
+                        "Angle the image is rotated by, in degrees; positive values rotate "
+                        "counter-clockwise."
+                    ),
                     connectable=True,
                     connected_port_type=PortType.FLOAT,
                 ),
@@ -307,6 +373,7 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
                     "Centre X",
                     PortType.FLOAT,
                     0.5,
+                    help_text="Rotation centre as a fraction of the image width (0 to 1).",
                     minimum=0.0,
                     maximum=1.0,
                     connectable=True,
@@ -318,18 +385,33 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
                     "Centre Y",
                     PortType.FLOAT,
                     0.5,
+                    help_text="Rotation centre as a fraction of the image height (0 to 1).",
                     minimum=0.0,
                     maximum=1.0,
                     connectable=True,
                     connected_port_type=PortType.FLOAT,
                     editor_hint=ParameterEditorHint.SLIDER,
                 ),
-                ParameterSpec("expand_canvas", "Expand canvas", PortType.BOOL, False),
+                ParameterSpec(
+                    "expand_canvas",
+                    "Expand canvas",
+                    PortType.BOOL,
+                    False,
+                    help_text=(
+                        "When on, the output grows so the whole rotated image fits; when off the "
+                        "canvas keeps its size."
+                    ),
+                ),
                 ParameterSpec(
                     "interpolation",
                     "Interpolation",
                     PortType.STRING,
                     Interpolation.AUTO.value,
+                    help_text=(
+                        "Chooses the resampling used when pixels are mixed. Automatic picks the "
+                        "best method for the size change; Nearest keeps hard edges, and Cubic and "
+                        "Lanczos are smoother but slower."
+                    ),
                     choices=tuple(mode.value for mode in Interpolation),
                 ),
                 ParameterSpec(
@@ -337,6 +419,11 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
                     "Border mode",
                     PortType.STRING,
                     BorderMode.REFLECT_101.value,
+                    help_text=(
+                        "Chooses how pixels outside the image edge are treated: Reflect mirrors "
+                        "the edge, Repeat copies the edge, Constant fills with black, and Wrap "
+                        "continues from the opposite edge."
+                    ),
                     choices=tuple(mode.value for mode in BorderMode),
                 ),
                 ParameterSpec(
@@ -344,6 +431,7 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
                     "Border colour",
                     PortType.COLOR,
                     ColorValue(0.0, 0.0, 0.0, 0.0),
+                    help_text="Colour painted into the areas outside the original image.",
                     applicable_input_types=(PortType.IMAGE,),
                 ),
             ),

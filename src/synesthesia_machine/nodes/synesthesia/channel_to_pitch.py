@@ -210,6 +210,10 @@ def create_synesthesia_definitions() -> tuple[NodeDefinition, ...]:
                     "Occupancy threshold (%)",
                     PortType.FLOAT,
                     0.0,
+                    help_text=(
+                        "A note only sounds when at least this percentage of the accepted pixels "
+                        "falls into its bin."
+                    ),
                     minimum=0.0,
                     maximum=100.0,
                     editor_hint=ParameterEditorHint.SLIDER,
@@ -219,15 +223,27 @@ def create_synesthesia_definitions() -> tuple[NodeDefinition, ...]:
                     "Minimum A",
                     PortType.FLOAT,
                     0.0,
+                    help_text="Pixels whose parameter A channel is below this value are ignored.",
                     connectable=True,
                     connected_port_type=PortType.FLOAT,
                 ),
-                ParameterSpec("maximum_a_enabled", "Enable maximum A", PortType.BOOL, False),
+                ParameterSpec(
+                    "maximum_a_enabled",
+                    "Enable maximum A",
+                    PortType.BOOL,
+                    False,
+                    help_text=(
+                        "When on, parameter A pixels above the maximum A value are also ignored."
+                    ),
+                ),
                 ParameterSpec(
                     "maximum_a",
                     "Maximum A",
                     PortType.FLOAT,
                     1.0,
+                    help_text=(
+                        "Highest parameter A value counted; only used when Enable maximum A is on."
+                    ),
                     connectable=True,
                     connected_port_type=PortType.FLOAT,
                 ),
@@ -236,24 +252,49 @@ def create_synesthesia_definitions() -> tuple[NodeDefinition, ...]:
                     "Minimum B",
                     PortType.FLOAT,
                     0.0,
+                    help_text="Pixels whose parameter B channel is below this value are ignored.",
                     connectable=True,
                     connected_port_type=PortType.FLOAT,
                 ),
-                ParameterSpec("maximum_b_enabled", "Enable maximum B", PortType.BOOL, False),
+                ParameterSpec(
+                    "maximum_b_enabled",
+                    "Enable maximum B",
+                    PortType.BOOL,
+                    False,
+                    help_text=(
+                        "When on, parameter B pixels above the maximum B value are also ignored."
+                    ),
+                ),
                 ParameterSpec(
                     "maximum_b",
                     "Maximum B",
                     PortType.FLOAT,
                     1.0,
+                    help_text=(
+                        "Highest parameter B value counted; only used when Enable maximum B is on."
+                    ),
                     connectable=True,
                     connected_port_type=PortType.FLOAT,
                 ),
-                ParameterSpec("ignore_non_finite", "Ignore non-finite values", PortType.BOOL, True),
+                ParameterSpec(
+                    "ignore_non_finite",
+                    "Ignore non-finite values",
+                    PortType.BOOL,
+                    True,
+                    help_text=(
+                        "When on, non-finite values (such as NaN or infinity) are skipped instead "
+                        "of making the node fail."
+                    ),
+                ),
                 ParameterSpec(
                     "binning_mode",
                     "Binning mode",
                     PortType.STRING,
                     LINEAR_NOMINAL_RANGE,
+                    help_text=(
+                        "Chooses how values are spread across the note bins; only linear binning "
+                        "across the channel's nominal range is available."
+                    ),
                     choices=(LINEAR_NOMINAL_RANGE,),
                 ),
             ),

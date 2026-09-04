@@ -98,6 +98,9 @@ def create_input_definitions() -> tuple[NodeDefinition, ...]:
                     "Loop",
                     PortType.BOOL,
                     False,
+                    help_text=(
+                        "When on, the video plays again from the start when it reaches the end."
+                    ),
                     update_mode=ParameterUpdateMode.RESTART_SOURCE,
                 ),
                 ParameterSpec(
@@ -105,6 +108,7 @@ def create_input_definitions() -> tuple[NodeDefinition, ...]:
                     "Video stream index",
                     PortType.INT,
                     0,
+                    help_text="Index of the video stream inside the file; 0 is the first stream.",
                     minimum=0,
                     update_mode=ParameterUpdateMode.RESTART_SOURCE,
                 ),

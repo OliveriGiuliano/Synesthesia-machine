@@ -292,12 +292,25 @@ def create_output_definitions(
             (InputPortSpec("midi", "MIDI State", PortType.MIDI_STATE),),
             (),
             (
-                ParameterSpec("enabled", "Enable audio output", PortType.BOOL, False),
+                ParameterSpec(
+                    "enabled",
+                    "Enable audio output",
+                    PortType.BOOL,
+                    False,
+                    help_text=(
+                        "When on, notes are sounded through the audio output; when off the node "
+                        "stays silent."
+                    ),
+                ),
                 ParameterSpec(
                     "waveform",
                     "Waveform",
                     PortType.STRING,
                     SynthWaveform.SINE.value,
+                    help_text=(
+                        "Shape of the sound each note makes: Sine is smooth, Triangle is softer, "
+                        "and Square is harsh."
+                    ),
                     choices=tuple(waveform.value for waveform in SynthWaveform),
                 ),
                 ParameterSpec(
@@ -305,6 +318,7 @@ def create_output_definitions(
                     "Master volume",
                     PortType.FLOAT,
                     0.15,
+                    help_text="Loudness of the audio output; 0 is silent and 1 is full volume.",
                     minimum=0.0,
                     maximum=1.0,
                     editor_hint=ParameterEditorHint.SLIDER,
@@ -314,6 +328,7 @@ def create_output_definitions(
                     "Attack (ms)",
                     PortType.FLOAT,
                     10.0,
+                    help_text="Milliseconds a note takes to reach full volume after it is pressed.",
                     minimum=0.0,
                     maximum=2000.0,
                     editor_hint=ParameterEditorHint.SLIDER,
@@ -323,12 +338,22 @@ def create_output_definitions(
                     "Release (ms)",
                     PortType.FLOAT,
                     80.0,
+                    help_text="Milliseconds a note takes to fade out after it is released.",
                     minimum=0.0,
                     maximum=5000.0,
                     editor_hint=ParameterEditorHint.SLIDER,
                 ),
                 ParameterSpec(
-                    "max_voices", "Maximum voices", PortType.INT, 32, minimum=1, maximum=128
+                    "max_voices",
+                    "Maximum voices",
+                    PortType.INT,
+                    32,
+                    help_text=(
+                        "Maximum number of notes sounding at once; when the limit is reached the "
+                        "quietest notes are dropped."
+                    ),
+                    minimum=1,
+                    maximum=128,
                 ),
                 ParameterSpec(
                     "output_device",

@@ -208,7 +208,10 @@ def create_region_grid_definitions() -> tuple[NodeDefinition, ...]:
                     "Grid rows",
                     PortType.INT,
                     4,
-                    help_text="Sets how many horizontal bands divide the image.",
+                    help_text=(
+                        "Sets how many horizontal bands divide the image; each band becomes one "
+                        "row of cells."
+                    ),
                     minimum=1,
                     maximum=64,
                 ),
@@ -217,7 +220,10 @@ def create_region_grid_definitions() -> tuple[NodeDefinition, ...]:
                     "Grid columns",
                     PortType.INT,
                     4,
-                    help_text="Sets how many vertical bands divide the image.",
+                    help_text=(
+                        "Sets how many vertical bands divide the image; each band becomes one "
+                        "column of cells."
+                    ),
                     minimum=1,
                     maximum=64,
                 ),

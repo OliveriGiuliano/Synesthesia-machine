@@ -62,6 +62,10 @@ def create_utility_definitions() -> tuple[NodeDefinition, ...]:
                     "Target colour space",
                     PortType.STRING,
                     ColorSpace.HSV.value,
+                    help_text=(
+                        "Colour space the image is converted to, which also changes what its "
+                        "channels mean."
+                    ),
                     # RGBA is not offered: sources never carry an alpha
                     # channel, so converting into it would only add a
                     # fourth channel that nothing downstream can use.

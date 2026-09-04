@@ -259,13 +259,19 @@ def create_edges_to_pitch_definitions() -> tuple[NodeDefinition, ...]:
             (
                 *common_musical_parameter_specs(),
                 ParameterSpec(
-                    "minimum_contour_area", "Minimum contour area", PortType.FLOAT, 1.0, minimum=0.0
+                    "minimum_contour_area",
+                    "Minimum contour area",
+                    PortType.FLOAT,
+                    1.0,
+                    help_text=("Contours with a smaller area, in square pixels, are ignored."),
+                    minimum=0.0,
                 ),
                 ParameterSpec(
                     "minimum_contour_perimeter",
                     "Minimum contour perimeter",
                     PortType.FLOAT,
                     1.0,
+                    help_text="Contours with a smaller perimeter, in pixels, are ignored.",
                     minimum=0.0,
                 ),
                 ParameterSpec(
@@ -273,6 +279,10 @@ def create_edges_to_pitch_definitions() -> tuple[NodeDefinition, ...]:
                     "Retrieval mode",
                     PortType.STRING,
                     EXTERNAL,
+                    help_text=(
+                        "External reads only the outermost contours; Tree reads the full "
+                        "hierarchy, including holes."
+                    ),
                     choices=(EXTERNAL, TREE),
                 ),
                 ParameterSpec(
@@ -280,6 +290,11 @@ def create_edges_to_pitch_definitions() -> tuple[NodeDefinition, ...]:
                     "Pitch feature",
                     PortType.STRING,
                     CENTROID_X,
+                    help_text=(
+                        "Chooses which contour measurement decides the pitch: size (Perimeter, "
+                        "Area), position (Centroid X, Centroid Y), direction (Orientation), or "
+                        "shape (Circularity)."
+                    ),
                     choices=PITCH_FEATURES,
                 ),
                 ParameterSpec(
@@ -287,14 +302,61 @@ def create_edges_to_pitch_definitions() -> tuple[NodeDefinition, ...]:
                     "Velocity feature",
                     PortType.STRING,
                     EDGE_STRENGTH,
+                    help_text=(
+                        "Chooses which contour measurement decides the note velocity; Edge "
+                        "Strength measures how strong the edge pixels of the contour are."
+                    ),
                     choices=VELOCITY_FEATURES,
                 ),
-                ParameterSpec("pitch_minimum", "Pitch minimum", PortType.FLOAT, 0.0),
-                ParameterSpec("pitch_maximum", "Pitch maximum", PortType.FLOAT, 1.0),
-                ParameterSpec("velocity_minimum", "Velocity minimum", PortType.FLOAT, 0.0),
-                ParameterSpec("velocity_maximum", "Velocity maximum", PortType.FLOAT, 1.0),
                 ParameterSpec(
-                    "contour_limit", "Contour limit", PortType.INT, 128, minimum=1, maximum=4096
+                    "pitch_minimum",
+                    "Pitch minimum",
+                    PortType.FLOAT,
+                    0.0,
+                    help_text=(
+                        "Lowest value of the pitch measurement; values between it and the maximum "
+                        "map across the scale."
+                    ),
+                ),
+                ParameterSpec(
+                    "pitch_maximum",
+                    "Pitch maximum",
+                    PortType.FLOAT,
+                    1.0,
+                    help_text=(
+                        "Highest value of the pitch measurement; values between the minimum and "
+                        "it map across the scale."
+                    ),
+                ),
+                ParameterSpec(
+                    "velocity_minimum",
+                    "Velocity minimum",
+                    PortType.FLOAT,
+                    0.0,
+                    help_text=(
+                        "Lowest value of the velocity measurement, mapped to the minimum velocity."
+                    ),
+                ),
+                ParameterSpec(
+                    "velocity_maximum",
+                    "Velocity maximum",
+                    PortType.FLOAT,
+                    1.0,
+                    help_text=(
+                        "Highest value of the velocity measurement, mapped to the maximum velocity."
+                    ),
+                ),
+                ParameterSpec(
+                    "contour_limit",
+                    "Contour limit",
+                    PortType.INT,
+                    128,
+                    help_text=(
+                        "Maximum number of contours analysed per frame; the kept ones are first "
+                        "in top-to-bottom, left-to-right order."
+                    ),
+                    minimum=1,
+                    maximum=4096,
                 ),
             ),
             ExecutionKind.STATELESS,

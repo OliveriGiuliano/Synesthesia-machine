@@ -77,6 +77,10 @@ def create_camera_definitions() -> tuple[NodeDefinition, ...]:
                     "Requested width",
                     PortType.INT,
                     1280,
+                    help_text=(
+                        "Width the camera is asked to use; the camera may pick the closest "
+                        "supported mode."
+                    ),
                     minimum=1,
                     update_mode=ParameterUpdateMode.RESTART_SOURCE,
                 ),
@@ -85,6 +89,10 @@ def create_camera_definitions() -> tuple[NodeDefinition, ...]:
                     "Requested height",
                     PortType.INT,
                     720,
+                    help_text=(
+                        "Height the camera is asked to use; the camera may pick the closest "
+                        "supported mode."
+                    ),
                     minimum=1,
                     update_mode=ParameterUpdateMode.RESTART_SOURCE,
                 ),
@@ -93,6 +101,10 @@ def create_camera_definitions() -> tuple[NodeDefinition, ...]:
                     "Requested FPS",
                     PortType.FLOAT,
                     30.0,
+                    help_text=(
+                        "Frame rate the camera is asked to use; it may pick the closest supported "
+                        "rate."
+                    ),
                     minimum=0.1,
                     update_mode=ParameterUpdateMode.RESTART_SOURCE,
                 ),
@@ -101,6 +113,10 @@ def create_camera_definitions() -> tuple[NodeDefinition, ...]:
                     "Camera compatibility",
                     PortType.STRING,
                     CameraBackendPreference.AUTO.value,
+                    help_text=(
+                        "Camera backends the engine is allowed to use; Automatic lets the engine "
+                        "decide."
+                    ),
                     choices=tuple(preference.value for preference in CameraBackendPreference),
                     update_mode=ParameterUpdateMode.RESTART_SOURCE,
                 ),
@@ -109,6 +125,7 @@ def create_camera_definitions() -> tuple[NodeDefinition, ...]:
                     "Use every Nth frame",
                     PortType.INT,
                     1,
+                    help_text="Uses every Nth captured frame; N=2 halves the processing load.",
                     minimum=1,
                     update_mode=ParameterUpdateMode.RESTART_SOURCE,
                 ),
@@ -117,6 +134,10 @@ def create_camera_definitions() -> tuple[NodeDefinition, ...]:
                     "Reconnect automatically",
                     PortType.BOOL,
                     True,
+                    help_text=(
+                        "When on, a lost camera is restarted automatically instead of stopping "
+                        "the node."
+                    ),
                     update_mode=ParameterUpdateMode.RESTART_SOURCE,
                 ),
             ),

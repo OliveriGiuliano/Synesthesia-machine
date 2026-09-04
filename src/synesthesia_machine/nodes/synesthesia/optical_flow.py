@@ -376,13 +376,25 @@ def create_optical_flow_definitions() -> tuple[NodeDefinition, ...]:
             (
                 *common_musical_parameter_specs(),
                 ParameterSpec(
-                    "flow_preset", "Flow preset", PortType.STRING, BALANCED, choices=FLOW_PRESETS
+                    "flow_preset",
+                    "Flow preset",
+                    PortType.STRING,
+                    BALANCED,
+                    help_text=(
+                        "Chooses the optical-flow computation preset: Fast, Balanced, or "
+                        "Accurate; faster presets are less precise but cheaper."
+                    ),
+                    choices=FLOW_PRESETS,
                 ),
                 ParameterSpec(
                     "minimum_motion_magnitude",
                     "Minimum motion magnitude",
                     PortType.FLOAT,
                     0.5,
+                    help_text=(
+                        "Pixels moving slower than this are treated as static and do not produce "
+                        "notes."
+                    ),
                     minimum=0.0,
                 ),
                 ParameterSpec(
@@ -390,6 +402,10 @@ def create_optical_flow_definitions() -> tuple[NodeDefinition, ...]:
                     "Pitch feature",
                     PortType.STRING,
                     DIRECTION,
+                    help_text=(
+                        "Chooses which flow property decides the pitch: Direction of motion, its "
+                        "Horizontal or Vertical position, or its Magnitude."
+                    ),
                     choices=PITCH_FEATURES,
                 ),
                 ParameterSpec(
@@ -397,24 +413,59 @@ def create_optical_flow_definitions() -> tuple[NodeDefinition, ...]:
                     "Velocity feature",
                     PortType.STRING,
                     MEAN_MAGNITUDE,
+                    help_text="Chooses which flow property decides the note velocity.",
                     choices=VELOCITY_FEATURES,
                 ),
-                ParameterSpec("grid_rows", "Grid rows", PortType.INT, 4, minimum=1, maximum=64),
                 ParameterSpec(
-                    "grid_columns", "Grid columns", PortType.INT, 4, minimum=1, maximum=64
+                    "grid_rows",
+                    "Grid rows",
+                    PortType.INT,
+                    4,
+                    help_text=(
+                        "Sets how many horizontal bands divide the image; each band becomes one "
+                        "row of cells."
+                    ),
+                    minimum=1,
+                    maximum=64,
+                ),
+                ParameterSpec(
+                    "grid_columns",
+                    "Grid columns",
+                    PortType.INT,
+                    4,
+                    help_text=(
+                        "Sets how many vertical bands divide the image; each band becomes one "
+                        "column of cells."
+                    ),
+                    minimum=1,
+                    maximum=64,
                 ),
                 ParameterSpec(
                     "aggregation",
                     "Aggregation",
                     PortType.STRING,
                     CELL_NOTES,
+                    help_text=(
+                        "Chooses how the cells become notes: Cell notes plays one note per grid "
+                        "cell, and Global histogram pools all cells into one histogram."
+                    ),
                     choices=AGGREGATIONS,
                 ),
                 ParameterSpec(
-                    "magnitude_minimum", "Magnitude minimum", PortType.FLOAT, 0.0, minimum=0.0
+                    "magnitude_minimum",
+                    "Magnitude minimum",
+                    PortType.FLOAT,
+                    0.0,
+                    help_text=("Lowest flow magnitude mapped to the minimum velocity."),
+                    minimum=0.0,
                 ),
                 ParameterSpec(
-                    "magnitude_maximum", "Magnitude maximum", PortType.FLOAT, 10.0, minimum=0.0
+                    "magnitude_maximum",
+                    "Magnitude maximum",
+                    PortType.FLOAT,
+                    10.0,
+                    help_text=("Highest flow magnitude mapped to the maximum velocity."),
+                    minimum=0.0,
                 ),
             ),
             ExecutionKind.STATELESS,

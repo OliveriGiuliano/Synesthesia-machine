@@ -124,12 +124,15 @@ def _validate_remap(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
     return ()
 
 
-def _connected_float_parameter(parameter_id: str, label: str, default: float) -> ParameterSpec:
+def _connected_float_parameter(
+    parameter_id: str, label: str, default: float, help_text: str = ""
+) -> ParameterSpec:
     return ParameterSpec(
         parameter_id,
         label,
         PortType.FLOAT,
         default,
+        help_text=help_text,
         connectable=True,
         connected_port_type=PortType.FLOAT,
     )
@@ -149,11 +152,40 @@ def create_scalar_bridge_definitions() -> tuple[NodeDefinition, ...]:
             (InputPortSpec("value", "Value", PortType.FLOAT),),
             (OutputPortSpec("value", "Value", PortType.FLOAT),),
             (
-                _connected_float_parameter("input_minimum", "Input minimum", 0.0),
-                _connected_float_parameter("input_maximum", "Input maximum", 1.0),
-                _connected_float_parameter("output_minimum", "Output minimum", 0.0),
-                _connected_float_parameter("output_maximum", "Output maximum", 1.0),
-                ParameterSpec("clamp", "Clamp", PortType.BOOL, False),
+                _connected_float_parameter(
+                    "input_minimum",
+                    "Input minimum",
+                    0.0,
+                    help_text="Lowest input value; it maps to the output minimum.",
+                ),
+                _connected_float_parameter(
+                    "input_maximum",
+                    "Input maximum",
+                    1.0,
+                    help_text="Highest input value; it maps to the output maximum.",
+                ),
+                _connected_float_parameter(
+                    "output_minimum",
+                    "Output minimum",
+                    0.0,
+                    help_text="Value output when the input is at its lowest.",
+                ),
+                _connected_float_parameter(
+                    "output_maximum",
+                    "Output maximum",
+                    1.0,
+                    help_text="Value output when the input is at its highest.",
+                ),
+                ParameterSpec(
+                    "clamp",
+                    "Clamp",
+                    PortType.BOOL,
+                    False,
+                    help_text=(
+                        "When on, inputs outside the input range are clamped to the output range; "
+                        "when off they pass through unchanged."
+                    ),
+                ),
             ),
             ExecutionKind.STATELESS,
             RemapNumberRuntime,
@@ -174,6 +206,10 @@ def create_scalar_bridge_definitions() -> tuple[NodeDefinition, ...]:
                     "Mode",
                     PortType.STRING,
                     IntegerConversionMode.ROUND.value,
+                    help_text=(
+                        "Chooses how a float is turned into an integer: Round, Floor, Ceil, or "
+                        "Truncate."
+                    ),
                     choices=tuple(mode.value for mode in IntegerConversionMode),
                 ),
             ),

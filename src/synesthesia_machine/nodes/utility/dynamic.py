@@ -341,7 +341,15 @@ def _create_all_definitions() -> tuple[NodeDefinition, ...]:
                 InputPortSpec("b", "B", PortType.IMAGE),
             ),
             (OutputPortSpec("image", "Difference", PortType.IMAGE),),
-            (ParameterSpec("normalize", "Normalize", PortType.BOOL, False),),
+            (
+                ParameterSpec(
+                    "normalize",
+                    "Normalize",
+                    PortType.BOOL,
+                    False,
+                    help_text="When on, the difference is scaled to use the full 0 to 1 range.",
+                ),
+            ),
             ExecutionKind.STATELESS,
             DifferenceRuntime,
             aliases=("image difference", "absolute difference", "diff"),
@@ -355,7 +363,19 @@ def _create_all_definitions() -> tuple[NodeDefinition, ...]:
             "wraps around, keeping the remainder.",
             (InputPortSpec("value", "Value", T),),
             (OutputPortSpec("value", "Accumulated", T),),
-            (ParameterSpec("modulo", "Modulo", PortType.FLOAT, 1.0, minimum=1e-12),),
+            (
+                ParameterSpec(
+                    "modulo",
+                    "Modulo",
+                    PortType.FLOAT,
+                    1.0,
+                    help_text=(
+                        "Value the accumulator wraps around; the output is the accumulated total "
+                        "taken modulo this value."
+                    ),
+                    minimum=1e-12,
+                ),
+            ),
             ExecutionKind.STATEFUL,
             ModuloAccumulatorRuntime,
             aliases=("wrapped accumulator", "mod accumulator"),
@@ -375,7 +395,9 @@ def _create_all_definitions() -> tuple[NodeDefinition, ...]:
                     "Capacity",
                     PortType.INT,
                     8,
-                    help_text="Image and channel history is limited to 256 MiB.",
+                    help_text=(
+                        "Number of past frames kept in the buffer; the buffer is capped at 256 MiB."
+                    ),
                     minimum=1,
                     maximum=600,
                     update_mode=ParameterUpdateMode.RECOMPILE,
@@ -401,6 +423,10 @@ def _create_all_definitions() -> tuple[NodeDefinition, ...]:
                     "Statistic",
                     PortType.STRING,
                     "MEAN",
+                    help_text=(
+                        "Chooses the value that summarizes the samples: Mean, Median, Minimum, "
+                        "Maximum, Standard deviation, or Percentile."
+                    ),
                     choices=(
                         "MEAN",
                         "MEDIAN",
@@ -415,6 +441,9 @@ def _create_all_definitions() -> tuple[NodeDefinition, ...]:
                     "Percentile",
                     PortType.FLOAT,
                     50.0,
+                    help_text=(
+                        "Percentile reported when the statistic is Percentile, from 0 to 100."
+                    ),
                     minimum=0.0,
                     maximum=100.0,
                 ),
@@ -438,12 +467,40 @@ def _create_all_definitions() -> tuple[NodeDefinition, ...]:
                     "Range",
                     PortType.STRING,
                     "DATA_RANGE",
+                    help_text=(
+                        "Data range reads the smallest and largest values present in the input; "
+                        "Explicit uses the input minimum and maximum below."
+                    ),
                     choices=("DATA_RANGE", "EXPLICIT"),
                 ),
-                ParameterSpec("input_minimum", "Input minimum", PortType.FLOAT, 0.0),
-                ParameterSpec("input_maximum", "Input maximum", PortType.FLOAT, 1.0),
-                ParameterSpec("output_minimum", "Output minimum", PortType.FLOAT, 0.0),
-                ParameterSpec("output_maximum", "Output maximum", PortType.FLOAT, 1.0),
+                ParameterSpec(
+                    "input_minimum",
+                    "Input minimum",
+                    PortType.FLOAT,
+                    0.0,
+                    help_text="Lowest input value when the range is explicit.",
+                ),
+                ParameterSpec(
+                    "input_maximum",
+                    "Input maximum",
+                    PortType.FLOAT,
+                    1.0,
+                    help_text="Highest input value when the range is explicit.",
+                ),
+                ParameterSpec(
+                    "output_minimum",
+                    "Output minimum",
+                    PortType.FLOAT,
+                    0.0,
+                    help_text="Lowest value the node outputs.",
+                ),
+                ParameterSpec(
+                    "output_maximum",
+                    "Output maximum",
+                    PortType.FLOAT,
+                    1.0,
+                    help_text="Highest value the node outputs.",
+                ),
             ),
             ExecutionKind.STATELESS,
             NormalizeRuntime,
@@ -465,11 +522,41 @@ def _create_all_definitions() -> tuple[NodeDefinition, ...]:
                     "Curve",
                     PortType.STRING,
                     "POWER",
+                    help_text=(
+                        "Chooses the curve shape applied to the value: Power, Sigmoid, "
+                        "Smoothstep, or Exponential."
+                    ),
                     choices=("POWER", "SIGMOID", "SMOOTHSTEP", "EXPONENTIAL"),
                 ),
-                ParameterSpec("exponent", "Exponent", PortType.FLOAT, 1.0, minimum=1e-12),
-                ParameterSpec("gain", "Gain", PortType.FLOAT, 4.0, minimum=1e-12),
-                ParameterSpec("midpoint", "Midpoint", PortType.FLOAT, 0.5),
+                ParameterSpec(
+                    "exponent",
+                    "Exponent",
+                    PortType.FLOAT,
+                    1.0,
+                    help_text=(
+                        "Used by the Power curve: raises the absolute value to this power, "
+                        "keeping the sign."
+                    ),
+                    minimum=1e-12,
+                ),
+                ParameterSpec(
+                    "gain",
+                    "Gain",
+                    PortType.FLOAT,
+                    4.0,
+                    help_text=(
+                        "Steepness of the Sigmoid and Exponential curves; higher values make the "
+                        "bend sharper."
+                    ),
+                    minimum=1e-12,
+                ),
+                ParameterSpec(
+                    "midpoint",
+                    "Midpoint",
+                    PortType.FLOAT,
+                    0.5,
+                    help_text="Centre of the Sigmoid curve; the input value that maps to 0.5.",
+                ),
             ),
             ExecutionKind.STATELESS,
             CurveRuntime,

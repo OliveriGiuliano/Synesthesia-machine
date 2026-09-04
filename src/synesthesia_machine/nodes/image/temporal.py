@@ -191,6 +191,11 @@ def create_temporal_definitions() -> tuple[NodeDefinition, ...]:
                     "Delay frames",
                     PortType.INT,
                     1,
+                    help_text=(
+                        "Number of frames a value is kept before a newer one replaces it; the "
+                        "output is the oldest value in that window, so 1 still lags the "
+                        "source by one frame."
+                    ),
                     minimum=1,
                     maximum=600,
                     update_mode=ParameterUpdateMode.RECOMPILE,
@@ -200,6 +205,11 @@ def create_temporal_definitions() -> tuple[NodeDefinition, ...]:
                     "Memory limit (MiB)",
                     PortType.INT,
                     256,
+                    help_text=(
+                        "Memory budget for the held frames (frame size times delay). If the "
+                        "estimate exceeds it, the node fails until the delay or "
+                        "frame size is reduced."
+                    ),
                     minimum=1,
                     maximum=4096,
                     update_mode=ParameterUpdateMode.RECOMPILE,
@@ -224,6 +234,10 @@ def create_temporal_definitions() -> tuple[NodeDefinition, ...]:
                     "Interval frames",
                     PortType.INT,
                     2,
+                    help_text=(
+                        "Number of frames between updates; the output only changes once every N "
+                        "frames."
+                    ),
                     minimum=1,
                     maximum=600,
                 ),

@@ -328,6 +328,11 @@ def _border_parameter() -> ParameterSpec:
         "Border mode",
         PortType.STRING,
         BorderMode.REFLECT_101.value,
+        help_text=(
+            "Chooses how pixels outside the image edge are treated: Reflect mirrors the edge, "
+            "Repeat copies the edge, Constant fills with black, and Wrap continues from the "
+            "opposite edge."
+        ),
         choices=tuple(mode.value for mode in BorderMode),
     )
 
@@ -338,6 +343,10 @@ def _channel_parameter() -> ParameterSpec:
         "Channels",
         PortType.STRING,
         ChannelSelection.COLOUR.value,
+        help_text=(
+            "Chooses which channels receive the change: Colour affects the colour channels, All "
+            "channels affects every channel, and Channel 1 to 3 affect only that channel."
+        ),
         # Sources never carry a fourth (alpha) channel, so CHANNEL_4 is not
         # offered as a selectable target.
         choices=tuple(
@@ -358,12 +367,14 @@ def _float_parameter(
     minimum: float | None = None,
     maximum: float | None = None,
     editor_hint: ParameterEditorHint = ParameterEditorHint.DEFAULT,
+    help_text: str = "",
 ) -> ParameterSpec:
     return ParameterSpec(
         parameter_id,
         label,
         PortType.FLOAT,
         default,
+        help_text=help_text,
         minimum=minimum,
         maximum=maximum,
         connectable=connectable,
@@ -519,16 +530,76 @@ def _dynamic_image_channel_type(
 
 def create_filter_definitions() -> tuple[NodeDefinition, ...]:
     gaussian_parameters = (
-        ParameterSpec("kernel_width", "Kernel width", PortType.INT, 3, minimum=1, step=2),
-        ParameterSpec("kernel_height", "Kernel height", PortType.INT, 3, minimum=1, step=2),
-        ParameterSpec("sigma_x", "Sigma X", PortType.FLOAT, 0.0, minimum=0.0),
-        ParameterSpec("sigma_y", "Sigma Y", PortType.FLOAT, 0.0, minimum=0.0),
+        ParameterSpec(
+            "kernel_width",
+            "Kernel width",
+            PortType.INT,
+            3,
+            help_text=(
+                "Width of the filter kernel in pixels; it must be an odd number and larger "
+                "kernels look at more of the image."
+            ),
+            minimum=1,
+            step=2,
+        ),
+        ParameterSpec(
+            "kernel_height",
+            "Kernel height",
+            PortType.INT,
+            3,
+            help_text=(
+                "Height of the filter kernel in pixels; it must be an odd number and larger "
+                "kernels look at more of the image."
+            ),
+            minimum=1,
+            step=2,
+        ),
+        ParameterSpec(
+            "sigma_x",
+            "Sigma X",
+            PortType.FLOAT,
+            0.0,
+            help_text=(
+                "Blur strength along the horizontal axis; 0 is derived from the kernel width."
+            ),
+            minimum=0.0,
+        ),
+        ParameterSpec(
+            "sigma_y",
+            "Sigma Y",
+            PortType.FLOAT,
+            0.0,
+            help_text="Blur strength along the vertical axis; 0 is derived from the kernel height.",
+            minimum=0.0,
+        ),
         _border_parameter(),
     )
     sharpen_parameters = (
-        ParameterSpec("amount", "Amount", PortType.FLOAT, 1.0),
-        ParameterSpec("sigma", "Sigma", PortType.FLOAT, 1.0, minimum=1e-6),
-        ParameterSpec("threshold", "Threshold", PortType.FLOAT, 0.0, minimum=0.0),
+        ParameterSpec(
+            "amount",
+            "Amount",
+            PortType.FLOAT,
+            1.0,
+            help_text="Strength of the sharpen; higher values emphasize detail more.",
+        ),
+        ParameterSpec(
+            "sigma",
+            "Sigma",
+            PortType.FLOAT,
+            1.0,
+            help_text="Blur radius used to find the detail that is amplified.",
+            minimum=1e-6,
+        ),
+        ParameterSpec(
+            "threshold",
+            "Threshold",
+            PortType.FLOAT,
+            0.0,
+            help_text=(
+                "Changes smaller than this are suppressed, which stops noise from being amplified."
+            ),
+            minimum=0.0,
+        ),
         _border_parameter(),
     )
     noise_parameters = (
@@ -537,17 +608,71 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
             "Noise type",
             PortType.STRING,
             NoiseType.GAUSSIAN.value,
+            help_text=(
+                "Chooses the kind of noise: Gaussian is bell-shaped, Uniform is evenly spread, "
+                "and Salt and Pepper is random black and white speckles."
+            ),
             choices=tuple(noise_type.value for noise_type in NoiseType),
         ),
-        ParameterSpec("amount", "Amount", PortType.FLOAT, 0.05, minimum=0.0),
-        ParameterSpec("seed", "Seed", PortType.INT, 0),
-        ParameterSpec("monochrome", "Monochrome", PortType.BOOL, False),
-        ParameterSpec("animate_seed", "Animate seed", PortType.BOOL, False),
+        ParameterSpec(
+            "amount",
+            "Amount",
+            PortType.FLOAT,
+            0.05,
+            help_text=(
+                "Strength of the noise. For Salt and Pepper this is the fraction of pixels that "
+                "become speckles."
+            ),
+            minimum=0.0,
+        ),
+        ParameterSpec(
+            "seed",
+            "Seed",
+            PortType.INT,
+            0,
+            help_text=(
+                "Seed of the random number generator; the same seed always produces the same noise."
+            ),
+        ),
+        ParameterSpec(
+            "monochrome",
+            "Monochrome",
+            PortType.BOOL,
+            False,
+            help_text=(
+                "When on, one noise value is shared by all selected channels so the noise does "
+                "not add colour."
+            ),
+        ),
+        ParameterSpec(
+            "animate_seed",
+            "Animate seed",
+            PortType.BOOL,
+            False,
+            help_text=(
+                "When on, the seed advances each frame so the noise pattern changes over time."
+            ),
+        ),
         _channel_parameter(),
     )
     posterize_parameters = (
-        ParameterSpec("levels", "Levels", PortType.INT, 4, minimum=2),
-        ParameterSpec("clamp_input", "Clamp input", PortType.BOOL, True),
+        ParameterSpec(
+            "levels",
+            "Levels",
+            PortType.INT,
+            4,
+            help_text=(
+                "Number of levels each channel is reduced to; fewer levels give a bolder look."
+            ),
+            minimum=2,
+        ),
+        ParameterSpec(
+            "clamp_input",
+            "Clamp input",
+            PortType.BOOL,
+            True,
+            help_text="When on, values outside 0 to 1 are clamped before they are quantized.",
+        ),
         _channel_parameter(),
     )
     threshold_parameters = (
@@ -556,16 +681,38 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
             "Mode",
             PortType.STRING,
             ThresholdMode.BINARY.value,
+            help_text=(
+                "Chooses how the comparison is applied: Binary and Inverse make pixels white or "
+                "black, Truncate caps them at the threshold, To zero keeps the original value "
+                "only where the condition is met, and To zero inverse keeps it only where it is "
+                "not."
+            ),
             choices=tuple(mode.value for mode in ThresholdMode),
         ),
-        _float_parameter("threshold", "Threshold", 0.5, connectable=True),
-        _float_parameter("maximum", "Maximum", 1.0, connectable=True),
+        _float_parameter(
+            "threshold",
+            "Threshold",
+            0.5,
+            help_text="Values above this pass the test (or become white, depending on the mode).",
+            connectable=True,
+        ),
+        _float_parameter(
+            "maximum",
+            "Maximum",
+            1.0,
+            help_text="Value that Binary and Inverse modes assign to the pixels they mark.",
+            connectable=True,
+        ),
     )
     canny_parameters = (
         _float_parameter(
             "low_threshold",
             "Low threshold",
             0.1,
+            help_text=(
+                "Lower Canny threshold as a fraction of the full range; weaker edges are only "
+                "kept when they connect to an edge above the high threshold."
+            ),
             minimum=0.0,
             maximum=1.0,
             editor_hint=ParameterEditorHint.SLIDER,
@@ -574,25 +721,67 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
             "high_threshold",
             "High threshold",
             0.3,
+            help_text=(
+                "Higher Canny threshold as a fraction of the full range; edges at or above it are "
+                "always kept."
+            ),
             minimum=0.0,
             maximum=1.0,
             editor_hint=ParameterEditorHint.SLIDER,
         ),
-        ParameterSpec("aperture_size", "Aperture size", PortType.INT, 3, choices=(3, 5, 7)),
-        ParameterSpec("l2_gradient", "L2 gradient", PortType.BOOL, False),
-        _float_parameter("pre_blur_sigma", "Pre-blur sigma", 0.0, minimum=0.0),
+        ParameterSpec(
+            "aperture_size",
+            "Aperture size",
+            PortType.INT,
+            3,
+            help_text="Size of the operator used to find gradients: 3, 5, or 7.",
+            choices=(3, 5, 7),
+        ),
+        ParameterSpec(
+            "l2_gradient",
+            "L2 gradient",
+            PortType.BOOL,
+            False,
+            help_text=(
+                "Combines the two gradient components with the L2 norm when on; when off their "
+                "absolute values are added (L1). The Sobel/Scharr operator choice is made by "
+                "Aperture size."
+            ),
+        ),
+        _float_parameter(
+            "pre_blur_sigma",
+            "Pre-blur sigma",
+            0.0,
+            help_text="Gaussian blur applied to the image before edge detection; 0 disables it.",
+            minimum=0.0,
+        ),
     )
     convolve_parameters = (
-        ParameterSpec("kernel", "Kernel", PortType.MATRIX, NumericMatrix(((1.0,),))),
+        ParameterSpec(
+            "kernel",
+            "Kernel",
+            PortType.MATRIX,
+            NumericMatrix(((1.0,),)),
+            help_text=(
+                "Kernel matrix applied to every pixel; the default single value of 1 leaves the "
+                "image unchanged."
+            ),
+        ),
         ParameterSpec(
             "normalization",
             "Normalization",
             PortType.STRING,
             ConvolutionNormalization.NONE.value,
+            help_text=(
+                "Chooses how the kernel is scaled before applying: none, scale so the values sum "
+                "to 1, or scale so the sum of their absolute values is 1."
+            ),
             choices=tuple(mode.value for mode in ConvolutionNormalization),
         ),
-        _float_parameter("scale", "Scale", 1.0),
-        _float_parameter("delta", "Delta", 0.0),
+        _float_parameter(
+            "scale", "Scale", 1.0, help_text="Multiplier applied to the filtered result."
+        ),
+        _float_parameter("delta", "Delta", 0.0, help_text="Value added to the filtered result."),
         _border_parameter(),
     )
     morph_parameters = (
@@ -601,30 +790,96 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
             "Kernel shape",
             PortType.STRING,
             MorphKernelShape.RECTANGLE.value,
+            help_text="Chooses the shape of the structuring element: Rectangle, Ellipse, or Cross.",
             choices=tuple(shape.value for shape in MorphKernelShape),
         ),
-        ParameterSpec("kernel_width", "Kernel width", PortType.INT, 3, minimum=1, step=2),
-        ParameterSpec("kernel_height", "Kernel height", PortType.INT, 3, minimum=1, step=2),
-        ParameterSpec("iterations", "Iterations", PortType.INT, 1, minimum=1),
-        ParameterSpec("anchor_x", "Anchor X", PortType.INT, -1, minimum=-1),
-        ParameterSpec("anchor_y", "Anchor Y", PortType.INT, -1, minimum=-1),
+        ParameterSpec(
+            "kernel_width",
+            "Kernel width",
+            PortType.INT,
+            3,
+            help_text="Width of the structuring element in pixels; it must be an odd number.",
+            minimum=1,
+            step=2,
+        ),
+        ParameterSpec(
+            "kernel_height",
+            "Kernel height",
+            PortType.INT,
+            3,
+            help_text="Height of the structuring element in pixels; it must be an odd number.",
+            minimum=1,
+            step=2,
+        ),
+        ParameterSpec(
+            "iterations",
+            "Iterations",
+            PortType.INT,
+            1,
+            help_text=(
+                "Applies the operation this many times in a row, which strengthens the effect."
+            ),
+            minimum=1,
+        ),
+        ParameterSpec(
+            "anchor_x",
+            "Anchor X",
+            PortType.INT,
+            -1,
+            help_text="Chooses the pivot pixel of the structuring element; -1 uses its centre.",
+            minimum=-1,
+        ),
+        ParameterSpec(
+            "anchor_y",
+            "Anchor Y",
+            PortType.INT,
+            -1,
+            help_text="Chooses the pivot pixel of the structuring element; -1 uses its centre.",
+            minimum=-1,
+        ),
         _border_parameter(),
         ParameterSpec(
             "process_alpha",
             "Process alpha",
             PortType.BOOL,
             False,
+            help_text="When on, the transparency channel is processed when the image has one.",
             applicable_input_types=(PortType.IMAGE,),
         ),
     )
     high_pass_parameters = (
-        _float_parameter("sigma", "Sigma", 1.0, minimum=1e-6),
-        _float_parameter("display_offset", "Display offset", 0.0),
-        _float_parameter("gain", "Gain", 1.0),
+        _float_parameter(
+            "sigma",
+            "Sigma",
+            1.0,
+            help_text=(
+                "Strength of the blur subtracted from the image; larger values keep only coarser "
+                "detail."
+            ),
+            minimum=1e-6,
+        ),
+        _float_parameter(
+            "display_offset",
+            "Display offset",
+            0.0,
+            help_text="Level added to the result; 0.5 makes zero detail appear as mid-grey.",
+        ),
+        _float_parameter(
+            "gain",
+            "Gain",
+            1.0,
+            help_text="Multiplier applied to the extracted detail; values above 1 emphasize it.",
+        ),
         _border_parameter(),
     )
     low_pass_parameters = (
-        _float_parameter("sigma", "Sigma", 1.0, minimum=1e-6),
+        _float_parameter(
+            "sigma",
+            "Sigma",
+            1.0,
+            help_text="Strength of the blur; larger values blur more.",
+            minimum=1e-6,
+        ),
         _border_parameter(),
     )
     return (

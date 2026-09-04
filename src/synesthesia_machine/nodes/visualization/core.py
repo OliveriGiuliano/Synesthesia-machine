@@ -66,6 +66,11 @@ def create_visualization_definitions() -> tuple[NodeDefinition, ...]:
                     "Fit mode",
                     PortType.STRING,
                     FitMode.CONTAIN.value,
+                    help_text=(
+                        "Chooses how the picture fits the panel: Stretch fills it exactly, "
+                        "Contain fits it inside with letterboxing, and Cover fills it and crops "
+                        "the overflow."
+                    ),
                     choices=tuple(mode.value for mode in FitMode),
                 ),
                 ParameterSpec(
@@ -73,15 +78,23 @@ def create_visualization_definitions() -> tuple[NodeDefinition, ...]:
                     "Checkerboard alpha",
                     PortType.BOOL,
                     True,
+                    help_text="Draws a checkerboard behind transparent areas of the image.",
                 ),
                 ParameterSpec(
                     "value_display_mode",
                     "Value display",
                     PortType.STRING,
                     "DISPLAY_TRANSFORM",
+                    help_text="Chooses how the image values are converted to colours for display.",
                     choices=("DISPLAY_TRANSFORM",),
                 ),
-                ParameterSpec("show_histogram", "Show histogram", PortType.BOOL, False),
+                ParameterSpec(
+                    "show_histogram",
+                    "Show histogram",
+                    PortType.BOOL,
+                    False,
+                    help_text="Shows a histogram of the image values below the picture.",
+                ),
             ),
             ExecutionKind.VISUALIZER,
             _VisualizerRuntime,
@@ -102,6 +115,11 @@ def create_visualization_definitions() -> tuple[NodeDefinition, ...]:
                     "Fit mode",
                     PortType.STRING,
                     FitMode.CONTAIN.value,
+                    help_text=(
+                        "Chooses how the picture fits the panel: Stretch fills it exactly, "
+                        "Contain fits it inside with letterboxing, and Cover fills it and crops "
+                        "the overflow."
+                    ),
                     choices=tuple(mode.value for mode in FitMode),
                 ),
                 ParameterSpec(
@@ -109,9 +127,19 @@ def create_visualization_definitions() -> tuple[NodeDefinition, ...]:
                     "Value display",
                     PortType.STRING,
                     "NOMINAL_RANGE",
+                    help_text=(
+                        "Chooses how the channel values are converted to colours; only the "
+                        "nominal range mode is available."
+                    ),
                     choices=("NOMINAL_RANGE",),
                 ),
-                ParameterSpec("show_histogram", "Show histogram", PortType.BOOL, False),
+                ParameterSpec(
+                    "show_histogram",
+                    "Show histogram",
+                    PortType.BOOL,
+                    False,
+                    help_text="Shows a histogram of the channel values below the picture.",
+                ),
             ),
             ExecutionKind.VISUALIZER,
             _VisualizerRuntime,

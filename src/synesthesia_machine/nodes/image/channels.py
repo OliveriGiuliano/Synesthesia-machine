@@ -149,6 +149,12 @@ def create_channel_definitions() -> tuple[NodeDefinition, ...]:
             "Blend mode",
             PortType.STRING,
             BlendMode.NORMAL.value,
+            help_text=(
+                "Chooses how the second image is mixed over the first: Normal replaces it by "
+                "opacity, Add and Multiply combine the pixel values, Screen lightens, Difference "
+                "keeps the gap between them, and Lighten and Darken pick the lighter or darker of "
+                "the two."
+            ),
             choices=tuple(mode.value for mode in BlendMode),
         ),
         ParameterSpec(
@@ -156,6 +162,10 @@ def create_channel_definitions() -> tuple[NodeDefinition, ...]:
             "Opacity",
             PortType.FLOAT,
             1.0,
+            help_text=(
+                "How strongly the second image shows; 0 keeps the first image and 1 replaces it. "
+                "A connected mask channel can vary it across the picture."
+            ),
             minimum=0.0,
             maximum=1.0,
             connectable=True,
@@ -167,6 +177,11 @@ def create_channel_definitions() -> tuple[NodeDefinition, ...]:
             "Alpha policy",
             PortType.STRING,
             AlphaPolicy.COMPOSITE.value,
+            help_text=(
+                "Chooses how transparency is handled: Composite merges the transparency of both "
+                "images, Preserve A keeps the first image's transparency, and Preserve B keeps "
+                "the second's."
+            ),
             choices=tuple(policy.value for policy in AlphaPolicy),
         ),
     )
@@ -229,6 +244,10 @@ def create_channel_definitions() -> tuple[NodeDefinition, ...]:
                     "Target colour space",
                     PortType.STRING,
                     ColorSpace.SRGB.value,
+                    help_text=(
+                        "Colour space that describes how the connected channels are combined into "
+                        "an image."
+                    ),
                     # RGBA is not offered: the app's sources never carry an
                     # alpha channel, so a fourth input would be dead weight.
                     choices=tuple(

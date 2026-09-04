@@ -265,6 +265,10 @@ def _channel_parameter() -> ParameterSpec:
         "Channels",
         PortType.STRING,
         ChannelSelection.COLOUR.value,
+        help_text=(
+            "Chooses which channels receive the change: Colour affects the colour channels, All "
+            "channels affects every channel, and Channel 1 to 3 affect only that channel."
+        ),
         # Sources never carry a fourth (alpha) channel, so CHANNEL_4 is not
         # offered as a selectable target.
         choices=tuple(
@@ -284,12 +288,14 @@ def _float_parameter(
     connectable: bool = True,
     minimum: float | None = None,
     maximum: float | None = None,
+    help_text: str = "",
 ) -> ParameterSpec:
     return ParameterSpec(
         parameter_id,
         label,
         PortType.FLOAT,
         default,
+        help_text=help_text,
         minimum=minimum,
         maximum=maximum,
         connectable=connectable,
@@ -412,7 +418,18 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             "Brightness",
             "Makes the image brighter or darker. A positive offset lightens it, a negative one "
             "darkens it.",
-            (_float_parameter("offset", "Offset", 0.0), _channel_parameter()),
+            (
+                _float_parameter(
+                    "offset",
+                    "Offset",
+                    0.0,
+                    help_text=(
+                        "Amount added to the brightness of the selected channels; negative values "
+                        "darken the image."
+                    ),
+                ),
+                _channel_parameter(),
+            ),
             _brightness,
             aliases=("exposure offset", "lighten", "darken"),
             implementation_version=2,
@@ -422,8 +439,21 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             "Contrast",
             "Strengthens or softens the differences between the light and dark parts of the image.",
             (
-                _float_parameter("factor", "Factor", 1.0),
-                _float_parameter("pivot", "Pivot", 0.5),
+                _float_parameter(
+                    "factor",
+                    "Factor",
+                    1.0,
+                    help_text=(
+                        "Amount of contrast applied; 1 is unchanged and higher values increase "
+                        "contrast."
+                    ),
+                ),
+                _float_parameter(
+                    "pivot",
+                    "Pivot",
+                    0.5,
+                    help_text="Value that stays fixed while the rest is scaled around it.",
+                ),
                 _channel_parameter(),
             ),
             _contrast,
@@ -435,8 +465,18 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             "Keeps the values inside the minimum and maximum you set. Anything above or below is "
             "brought back to the limits.",
             (
-                _float_parameter("minimum", "Minimum", 0.0),
-                _float_parameter("maximum", "Maximum", 1.0),
+                _float_parameter(
+                    "minimum",
+                    "Minimum",
+                    0.0,
+                    help_text="Lowest allowed value; pixels below it are raised to this value.",
+                ),
+                _float_parameter(
+                    "maximum",
+                    "Maximum",
+                    1.0,
+                    help_text="Highest allowed value; pixels above it are lowered to this value.",
+                ),
                 _channel_parameter(),
             ),
             _clamp,
@@ -450,11 +490,40 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             "Rebalances the dark and light parts of the image, like the levels control in a photo "
             "editor.",
             (
-                _float_parameter("input_black", "Input black", 0.0),
-                _float_parameter("input_white", "Input white", 1.0),
-                _float_parameter("gamma", "Gamma", 1.0, minimum=1e-6),
-                _float_parameter("output_black", "Output black", 0.0),
-                _float_parameter("output_white", "Output white", 1.0),
+                _float_parameter(
+                    "input_black",
+                    "Input black",
+                    0.0,
+                    help_text="Input values at or below this point become black.",
+                ),
+                _float_parameter(
+                    "input_white",
+                    "Input white",
+                    1.0,
+                    help_text=(
+                        "Input values at or above this point become white; values between the two "
+                        "points are stretched."
+                    ),
+                ),
+                _float_parameter(
+                    "gamma",
+                    "Gamma",
+                    1.0,
+                    help_text="Gamma correction applied after the black and white points.",
+                    minimum=1e-6,
+                ),
+                _float_parameter(
+                    "output_black",
+                    "Output black",
+                    0.0,
+                    help_text="Value the black point is mapped to.",
+                ),
+                _float_parameter(
+                    "output_white",
+                    "Output white",
+                    1.0,
+                    help_text="Value the white point is mapped to.",
+                ),
                 _channel_parameter(),
             ),
             _colour_levels,
@@ -472,6 +541,10 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
                     "Turns",
                     PortType.FLOAT,
                     0.0,
+                    help_text=(
+                        "Fraction of the hue circle the colours are rotated through; 0.5 is a "
+                        "half turn and 1 is a full turn."
+                    ),
                     minimum=0.0,
                     maximum=1.0,
                     connectable=True,
@@ -488,7 +561,17 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             "Saturation",
             "Makes the colours more or less intense. Below 1 the image fades toward grey, above 1 "
             "the colours stand out more.",
-            (_float_parameter("factor", "Factor", 1.0, minimum=0.0),),
+            (
+                _float_parameter(
+                    "factor",
+                    "Factor",
+                    1.0,
+                    help_text=(
+                        "Amount of colour saturation; 0 is fully greyscale and 1 is unchanged."
+                    ),
+                    minimum=0.0,
+                ),
+            ),
             _saturation,
         ),
         _definition(
@@ -512,20 +595,47 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
                     "Mode",
                     PortType.STRING,
                     StretchMode.PER_CHANNEL.value,
+                    help_text=(
+                        "Per channel stretches each channel between its own extremes; Combined "
+                        "stretches them together."
+                    ),
                     choices=tuple(mode.value for mode in StretchMode),
                 ),
                 _float_parameter(
-                    "lower_percentile", "Lower percentile", 0.0, minimum=0.0, maximum=100.0
+                    "lower_percentile",
+                    "Lower percentile",
+                    0.0,
+                    help_text=("Percentile of the input that becomes the darkest value."),
+                    minimum=0.0,
+                    maximum=100.0,
                 ),
                 _float_parameter(
-                    "upper_percentile", "Upper percentile", 100.0, minimum=0.0, maximum=100.0
+                    "upper_percentile",
+                    "Upper percentile",
+                    100.0,
+                    help_text=("Percentile of the input that becomes the brightest value."),
+                    minimum=0.0,
+                    maximum=100.0,
                 ),
-                ParameterSpec("ignore_non_finite", "Ignore non-finite", PortType.BOOL, True),
+                ParameterSpec(
+                    "ignore_non_finite",
+                    "Ignore non-finite",
+                    PortType.BOOL,
+                    True,
+                    help_text=(
+                        "When on, non-finite values (such as NaN or infinity) are skipped instead "
+                        "of making the node fail."
+                    ),
+                ),
                 ParameterSpec(
                     "constant_policy",
                     "Constant channel",
                     PortType.STRING,
                     ConstantChannelPolicy.PRESERVE.value,
+                    help_text=(
+                        "How a channel with no variation is handled: Preserve keeps it as is, "
+                        "Zero makes it black, and Midpoint makes it mid-grey."
+                    ),
                     choices=tuple(policy.value for policy in ConstantChannelPolicy),
                 ),
                 _channel_parameter(),
@@ -541,7 +651,16 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             "Brightens or darkens the middle tones of the image without touching the pure blacks "
             "and whites.",
             (
-                _float_parameter("gamma", "Gamma", 1.0, minimum=1e-6),
+                _float_parameter(
+                    "gamma",
+                    "Gamma",
+                    1.0,
+                    help_text=(
+                        "Gamma correction applied to the selected channels; values below 1 "
+                        "brighten the image and values above 1 darken it."
+                    ),
+                    minimum=1e-6,
+                ),
                 _channel_parameter(),
             ),
             _gamma,
@@ -553,7 +672,15 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             "Image Add Scalar",
             "Adds a fixed amount to the chosen channels. Positive values brighten the image, "
             "negative values darken it.",
-            (_float_parameter("value", "Value", 0.0), _channel_parameter()),
+            (
+                _float_parameter(
+                    "value",
+                    "Value",
+                    0.0,
+                    help_text="Number added to every pixel of the selected channels.",
+                ),
+                _channel_parameter(),
+            ),
             _add_scalar,
             aliases=("image offset",),
             dynamic=True,
@@ -564,7 +691,15 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             "Image Multiply Scalar",
             "Multiplies the chosen channels by a value. Above 1 the image brightens, below 1 it "
             "darkens.",
-            (_float_parameter("value", "Value", 1.0), _channel_parameter()),
+            (
+                _float_parameter(
+                    "value",
+                    "Value",
+                    1.0,
+                    help_text="Number every pixel of the selected channels is multiplied by.",
+                ),
+                _channel_parameter(),
+            ),
             _multiply_scalar,
             aliases=("image scale",),
             dynamic=True,
@@ -576,15 +711,30 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             "Divides the chosen channels by a value, with a safety setting for values close to "
             "zero.",
             (
-                _float_parameter("value", "Value", 1.0),
+                _float_parameter(
+                    "value",
+                    "Value",
+                    1.0,
+                    help_text="Number every pixel of the selected channels is divided by.",
+                ),
                 ParameterSpec(
                     "near_zero_policy",
                     "Near-zero policy",
                     PortType.STRING,
                     NearZeroPolicy.REPLACE_WITH_ZERO.value,
+                    help_text=(
+                        "How values close to zero are handled when dividing: replace them with "
+                        "zero, replace them with epsilon, or make the node fail."
+                    ),
                     choices=tuple(policy.value for policy in NearZeroPolicy),
                 ),
-                _float_parameter("epsilon", "Epsilon", 1e-6, minimum=1e-12),
+                _float_parameter(
+                    "epsilon",
+                    "Epsilon",
+                    1e-6,
+                    help_text="Smallest value that counts as nonzero for the near-zero policy.",
+                    minimum=1e-12,
+                ),
                 _channel_parameter(),
             ),
             _divide_scalar,

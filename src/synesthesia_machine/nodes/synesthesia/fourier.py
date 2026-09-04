@@ -313,13 +313,38 @@ def create_fourier_definitions() -> tuple[NodeDefinition, ...]:
             (OutputPortSpec("midi", "MIDI state", PortType.MIDI_STATE),),
             (
                 *common_musical_parameter_specs(),
-                ParameterSpec("window", "Window", PortType.STRING, HANN, choices=WINDOWS),
-                ParameterSpec("subtract_mean", "Subtract mean", PortType.BOOL, True),
+                ParameterSpec(
+                    "window",
+                    "Window",
+                    PortType.STRING,
+                    HANN,
+                    help_text=(
+                        "Analysis window applied to the image before the frequency analysis: "
+                        "none, Hann, or Hamming; windows reduce the ringing caused by the image "
+                        "edges."
+                    ),
+                    choices=WINDOWS,
+                ),
+                ParameterSpec(
+                    "subtract_mean",
+                    "Subtract mean",
+                    PortType.BOOL,
+                    True,
+                    help_text=(
+                        "When on, the average value is removed first so the overall brightness "
+                        "does not drown the detail."
+                    ),
+                ),
                 ParameterSpec(
                     "frequency_mapping",
                     "Frequency mapping",
                     PortType.STRING,
                     RADIAL_MAGNITUDE,
+                    help_text=(
+                        "Chooses how the frequencies are arranged: Radial spreads them out from "
+                        "the centre, and Horizontal and Vertical read them along the width or the "
+                        "height."
+                    ),
                     choices=FREQUENCY_MAPPINGS,
                 ),
                 ParameterSpec(
@@ -327,6 +352,10 @@ def create_fourier_definitions() -> tuple[NodeDefinition, ...]:
                     "Minimum normalized frequency",
                     PortType.FLOAT,
                     0.0,
+                    help_text=(
+                        "Lowest normalized frequency included; the bands between it and the "
+                        "maximum become the notes."
+                    ),
                     minimum=0.0,
                     maximum=1.0,
                     editor_hint=ParameterEditorHint.SLIDER,
@@ -336,17 +365,37 @@ def create_fourier_definitions() -> tuple[NodeDefinition, ...]:
                     "Maximum normalized frequency",
                     PortType.FLOAT,
                     1.0,
+                    help_text=(
+                        "Highest normalized frequency included; the bands between the minimum and "
+                        "it become the notes."
+                    ),
                     minimum=0.0,
                     maximum=1.0,
                     editor_hint=ParameterEditorHint.SLIDER,
                 ),
-                ParameterSpec("amplitude_floor", "Amplitude floor", PortType.FLOAT, 0.0),
-                ParameterSpec("amplitude_ceiling", "Amplitude ceiling", PortType.FLOAT, 10.0),
+                ParameterSpec(
+                    "amplitude_floor",
+                    "Amplitude floor",
+                    PortType.FLOAT,
+                    0.0,
+                    help_text="Amplitude treated as silent; lower values are not mapped to notes.",
+                ),
+                ParameterSpec(
+                    "amplitude_ceiling",
+                    "Amplitude ceiling",
+                    PortType.FLOAT,
+                    10.0,
+                    help_text="Amplitude treated as full velocity; higher values are not louder.",
+                ),
                 ParameterSpec(
                     "dc_exclusion_radius",
                     "DC exclusion radius",
                     PortType.FLOAT,
                     0.0,
+                    help_text=(
+                        "Frequencies within this normalized radius of the centre (the DC "
+                        "component) are ignored."
+                    ),
                     minimum=0.0,
                     maximum=1.0,
                     editor_hint=ParameterEditorHint.SLIDER,
@@ -356,6 +405,10 @@ def create_fourier_definitions() -> tuple[NodeDefinition, ...]:
                     "Band aggregation",
                     PortType.STRING,
                     BAND_MEAN,
+                    help_text=(
+                        "Chooses how the amplitudes inside a frequency band are combined: Mean "
+                        "averages them, and Percentile uses a single robust value."
+                    ),
                     choices=BAND_AGGREGATIONS,
                 ),
                 ParameterSpec(
@@ -363,6 +416,7 @@ def create_fourier_definitions() -> tuple[NodeDefinition, ...]:
                     "Percentile",
                     PortType.FLOAT,
                     90.0,
+                    help_text="Percentile used when Band aggregation is Percentile, from 0 to 100.",
                     minimum=0.0,
                     maximum=100.0,
                     editor_hint=ParameterEditorHint.SLIDER,
@@ -372,6 +426,10 @@ def create_fourier_definitions() -> tuple[NodeDefinition, ...]:
                     "Activation threshold",
                     PortType.FLOAT,
                     0.0,
+                    help_text=(
+                        "Bands below this normalized strength stay silent; stronger bands map "
+                        "velocity from the minimum to the maximum."
+                    ),
                     minimum=0.0,
                     maximum=1.0,
                     editor_hint=ParameterEditorHint.SLIDER,

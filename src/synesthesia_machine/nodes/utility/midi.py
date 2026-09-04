@@ -159,6 +159,9 @@ def create_midi_utility_definitions() -> tuple[NodeDefinition, ...]:
                     "Factor",
                     PortType.FLOAT,
                     1.0,
+                    help_text=(
+                        "Multiplies the velocity of every note by this factor; 1 is unchanged."
+                    ),
                     minimum=0.0,
                     connectable=True,
                     connected_port_type=PortType.FLOAT,
@@ -184,6 +187,9 @@ def create_midi_utility_definitions() -> tuple[NodeDefinition, ...]:
                     "Semitones",
                     PortType.INT,
                     0,
+                    help_text=(
+                        "Number of semitones the note numbers shift by; negative values go down."
+                    ),
                     minimum=-127,
                     maximum=127,
                     connectable=True,

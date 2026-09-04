@@ -206,10 +206,27 @@ def create_utility_registry() -> NodeRegistry:
             (OutputPortSpec("value", "Value", PortType.FLOAT),),
             (
                 ParameterSpec(
-                    "number_type", "Type", PortType.STRING, "FLOAT", choices=("FLOAT", "INT")
+                    "number_type",
+                    "Type",
+                    PortType.STRING,
+                    "FLOAT",
+                    help_text=("Chooses the type of number this node outputs: Float or Integer."),
+                    choices=("FLOAT", "INT"),
                 ),
-                ParameterSpec("float_value", "Float value", PortType.FLOAT, 0.0),
-                ParameterSpec("int_value", "Integer value", PortType.INT, 0),
+                ParameterSpec(
+                    "float_value",
+                    "Float value",
+                    PortType.FLOAT,
+                    0.0,
+                    help_text="The float value this node outputs; used when the type is Float.",
+                ),
+                ParameterSpec(
+                    "int_value",
+                    "Integer value",
+                    PortType.INT,
+                    0,
+                    help_text="The integer value this node outputs; used when the type is Integer.",
+                ),
             ),
             ExecutionKind.STATELESS,
             NumberRuntime,
@@ -261,13 +278,30 @@ def create_utility_registry() -> NodeRegistry:
                     "Operation",
                     PortType.STRING,
                     "EQ",
+                    help_text="Chooses the comparison applied to the two connected values.",
                     choices=("EQ", "NE", "LT", "LE", "GT", "GE", "APPROX"),
                 ),
                 ParameterSpec(
-                    "absolute_tolerance", "Absolute tolerance", PortType.FLOAT, 1e-9, minimum=0.0
+                    "absolute_tolerance",
+                    "Absolute tolerance",
+                    PortType.FLOAT,
+                    1e-9,
+                    help_text=(
+                        "Tolerance used by the Approx comparison: two values match if they differ "
+                        "by no more than this amount."
+                    ),
+                    minimum=0.0,
                 ),
                 ParameterSpec(
-                    "relative_tolerance", "Relative tolerance", PortType.FLOAT, 1e-9, minimum=0.0
+                    "relative_tolerance",
+                    "Relative tolerance",
+                    PortType.FLOAT,
+                    1e-9,
+                    help_text=(
+                        "Tolerance used by the Approx comparison: two values match if they differ "
+                        "by no more than this fraction of the other value."
+                    ),
+                    minimum=0.0,
                 ),
             ),
             ExecutionKind.STATELESS,
@@ -288,6 +322,10 @@ def create_utility_registry() -> NodeRegistry:
                     "Operation",
                     PortType.STRING,
                     "AND",
+                    help_text=(
+                        "Chooses the logic operation applied to the connected values, treating "
+                        "nonzero as true."
+                    ),
                     choices=("AND", "OR", "XOR", "NAND", "NOR", "XNOR"),
                 ),
             ),
@@ -313,6 +351,7 @@ def create_utility_registry() -> NodeRegistry:
                     "Operation",
                     PortType.STRING,
                     "ADD",
+                    help_text="Chooses the calculation applied to the connected values.",
                     choices=(
                         "ADD",
                         "SUBTRACT",
