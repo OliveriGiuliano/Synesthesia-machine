@@ -498,6 +498,55 @@ def test_statistics_combines_multiple_direct_scalar_connections() -> None:
     assert isinstance(mixed_max, float)
 
 
+def test_statistics_all_int_output_widens_to_float_at_the_scheduler_boundary() -> None:
+    # All-int Statistics samples emit an int for MINIMUM/MAXIMUM, but the
+    # compiler resolves the output type to FLOAT when it feeds a concrete
+    # FLOAT consumer (Math.a) without inserting a conversion. The scheduler
+    # applies the one implicit concrete conversion (INT -> FLOAT) at the
+    # output boundary, so the tick succeeds and the consumer receives a
+    # float (previously: invalid_node_output "expected FLOAT, got int" on
+    # every tick, and the consumer stayed NoData).
+    registry = create_application_registry()
+    document = GraphDocument()
+    first = document.add_node(
+        "synmachine.utility.number",
+        parameters={"number_type": "INT", "int_value": 5},
+    )
+    second = document.add_node(
+        "synmachine.utility.number",
+        parameters={"number_type": "INT", "int_value": 3},
+    )
+    statistics = document.add_node(
+        "synmachine.utility.statistics",
+        implementation_version=2,
+        parameters={"statistic": "MINIMUM"},
+    )
+    offset = document.add_node(
+        "synmachine.utility.number",
+        parameters={"number_type": "FLOAT", "float_value": 1.5},
+    )
+    math_node = document.add_node("synmachine.utility.math")
+    document.add_connection(first, "value", statistics, "values_1")
+    document.add_connection(second, "value", statistics, "values_2")
+    document.add_connection(statistics, "value", math_node, "a")
+    document.add_connection(offset, "value", math_node, "b")
+
+    result = GraphCompiler(registry).compile(document.snapshot(), demand_roots={math_node})
+    assert result.report.is_valid, [issue.message for issue in result.report.issues]
+    plan_node = result.plan.node(statistics)
+    assert plan_node is not None
+    assert plan_node.output_types["value"] is PortType.FLOAT
+
+    tick = Scheduler(result.plan).execute_tick(frame_context(clock_id=NODE_ID))
+    assert tick.errors == (), [(error.code, error.message) for error in tick.errors]
+    # MINIMUM of all-int samples is an int at runtime; the scheduler widens
+    # it to the declared FLOAT (the one implicit concrete conversion).
+    widened = tick.values[PortKey(statistics, "value")]
+    assert widened == 3.0
+    assert isinstance(widened, float)
+    assert tick.values[PortKey(math_node, "value")] == 4.5
+
+
 def test_statistics_combines_multiple_direct_image_connections() -> None:
     registry = create_application_registry()
     context = frame_context(clock_id=NODE_ID)

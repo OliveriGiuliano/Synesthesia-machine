@@ -187,6 +187,21 @@ class Scheduler:
                             context,
                         )
                     )
+                    # The compiler can resolve a type variable to FLOAT without
+                    # inserting a conversion (e.g. all-int Statistics samples
+                    # feeding a FLOAT consumer); apply the one implicit
+                    # concrete conversion (INT -> FLOAT) at the output
+                    # boundary, mirroring how converted inputs are
+                    # materialised above, so the emitted int is not rejected
+                    # as a contract violation.
+                    for output_port_id, expected_type in node.output_types.items():
+                        output_value = outputs.get(output_port_id)
+                        if (
+                            expected_type is PortType.FLOAT
+                            and isinstance(output_value, int)
+                            and not isinstance(output_value, bool)
+                        ):
+                            outputs[output_port_id] = float(output_value)
                     _validate_outputs(node, outputs)
                 except ExpectedNodeError as error:
                     failed = True

@@ -214,8 +214,9 @@ class StatisticsRuntime(_RuntimeBase):
             # FLOAT output: stay an int only when every sample is an int
             # (gating on the first sample alone would emit an int for a
             # mixed set). A downstream concrete-FLOAT consumer can still
-            # force a FLOAT output for an all-int set; the runtime cannot
-            # see the declared type, so that case is tracked separately.
+            # force a FLOAT declaration for an all-int set; the scheduler
+            # applies the implicit INT -> FLOAT conversion at the output
+            # boundary, so the emitted int is widened there.
             if statistic in {"MINIMUM", "MAXIMUM"} and all(
                 isinstance(value, int) and not isinstance(value, bool) for value in samples
             ):
