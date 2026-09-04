@@ -95,6 +95,20 @@ class ModuloAccumulatorRuntime(_RuntimeBase):
         del context
         value = inputs["value"]
         modulo = _positive_number(parameters["modulo"], "modulo")
+        if (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and not float(modulo).is_integer()
+        ):
+            # The declared output follows the input type (INT here), but
+            # wrapping an integer by a fractional modulo yields a float.
+            # Surface it as a recoverable usage error rather than a
+            # contract violation: the user can switch to a whole-number
+            # modulo or a fractional input.
+            raise ExpectedNodeError(
+                "modulo_not_whole",
+                "Modulo must be a whole number when the input value is an integer",
+            )
         with self._lock:
             if self._accumulator is None or not _compatible_values(self._accumulator, value):
                 self._accumulator = _modulo_value(value, modulo)

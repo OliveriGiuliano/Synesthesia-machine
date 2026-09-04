@@ -289,6 +289,28 @@ def test_dynamic_statistics_and_accumulator_respect_channel_descriptors() -> Non
     assert np.array_equal(reset_value.data, np.mod(hue.data, 5.0))
 
 
+def test_modulo_accumulator_rejects_fractional_modulo_for_integer_input() -> None:
+    # Wrapping an integer by a fractional modulo yields a float, but the
+    # node's declared output follows the input type (INT): that
+    # combination must surface as a recoverable usage error (visible on
+    # the node, engine keeps ticking) instead of an invalid-output
+    # contract violation, and the accumulator state must be untouched.
+    registry = create_application_registry()
+    accumulator = registry.require("synmachine.utility.modulo_accumulator")
+    fractional, errors = accumulator.parameter_values({"modulo": 2.5})
+    assert not errors
+    runtime = accumulator.runtime_factory(NODE_ID)
+    with pytest.raises(ExpectedNodeError, match="whole number"):
+        runtime.process({"value": 3}, fractional, frame_context(clock_id=NODE_ID))
+    # Whole-number modulos stay integers on integer input...
+    whole, _ = accumulator.parameter_values({"modulo": 5.0})
+    assert runtime.process({"value": 7}, whole, frame_context(clock_id=NODE_ID))["value"] == 2
+    # ...and fractional modulos are valid on fractional input.
+    result = runtime.process({"value": 2.5}, fractional, frame_context(clock_id=NODE_ID))["value"]
+    assert result == 0.0
+    assert isinstance(result, float)
+
+
 def test_dynamic_normalize_curve_and_filter_preserve_channel_metadata() -> None:
     registry = create_application_registry()
     source = _channel()
