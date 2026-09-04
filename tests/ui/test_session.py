@@ -67,6 +67,29 @@ def test_insert_and_connect_is_one_exact_undo_macro() -> None:
     assert semantic_state(session) == after
 
 
+def test_compatible_definitions_offer_variadic_input_sockets() -> None:
+    # "Add Compatible Node" must offer a node's variadic input sockets:
+    # Statistics v2 has no fixed inputs, so enumerating fixed sockets only
+    # would offer it through its connectable percentile parameter, wiring
+    # the source into percentile and leaving values_1 unconnected (an
+    # invalid graph) via the editor's own convenience path.
+    registry = create_utility_registry()
+    session = DocumentSession(registry)
+    source = session.add_node(
+        "synmachine.utility.number",
+        (0.0, 0.0),
+        parameters={"number_type": "FLOAT", "float_value": 1.0},
+    )
+
+    offered = {
+        port_id
+        for definition, port_id in session.compatible_definitions(source, "value", True)
+        if definition.type_id == "synmachine.utility.statistics"
+    }
+
+    assert offered == {"values_1"}
+
+
 def test_adding_visualizers_replaces_only_the_matching_slot_and_is_exactly_undoable() -> None:
     session = DocumentSession(create_application_registry())
     source = session.add_node("synmachine.input.load_video", (0.0, 0.0))

@@ -565,8 +565,12 @@ class DocumentSession(QObject):
                 definition.type_id, implementation_version=definition.implementation_version
             )
             if is_output:
+                # input_ports also yields the effective variadic sockets
+                # (e.g. Statistics values_1); enumerating fixed inputs only
+                # would offer such nodes solely through connectable
+                # parameters, wiring the source into the wrong socket.
                 candidates = (
-                    *(port.id for port in definition.inputs),
+                    *(port.id for port in definition.input_ports(include_next_variadic=True)),
                     *(parameter.id for parameter in definition.parameters if parameter.connectable),
                 )
                 pairs = ((node_id, port_id, candidate_id, candidate) for candidate in candidates)
