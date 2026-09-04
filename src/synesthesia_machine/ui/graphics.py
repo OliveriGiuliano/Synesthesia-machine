@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from functools import partial
 from typing import cast
 from uuid import UUID
@@ -383,13 +383,52 @@ class PortGraphicsItem(QGraphicsObject):
         event.accept()
 
 
+NODE_EDITOR_WIDTH = 150.0
+NODE_EDITOR_RIGHT_MARGIN = 10.0
+NODE_LABEL_LEFT = 13.0
+NODE_LABEL_EDITOR_GAP = 10.0
+
+
+def layout_node_size(
+    theme: Theme,
+    *,
+    title: str,
+    ordinary_input_count: int,
+    parameter_labels: Sequence[str],
+    output_count: int,
+    collapsed: bool = False,
+) -> tuple[float, float]:
+    """Deterministic node body size as (width, height).
+
+    Shared by the node item layout and the scene's drop-anchor clamping so a
+    freshly dropped node is always clamped against its real size: a tall or
+    label-heavy node dropped near the graph edge must not commit a
+    top-left position that leaves its body outside the graph area.
+    """
+
+    metrics = theme.metrics
+    if collapsed:
+        height = metrics.header_height
+    else:
+        rows = ordinary_input_count + len(parameter_labels) + output_count
+        height = metrics.header_height + max(rows, 1) * metrics.row_height + 8.0
+    required = QFontMetricsF(theme.title_font()).horizontalAdvance(title) + 50.0
+    if parameter_labels:
+        label_metrics = QFontMetricsF(theme.body_font())
+        longest_label = max(label_metrics.horizontalAdvance(label) for label in parameter_labels)
+        required = max(
+            required,
+            NODE_LABEL_LEFT
+            + longest_label
+            + NODE_LABEL_EDITOR_GAP
+            + NODE_EDITOR_WIDTH
+            + NODE_EDITOR_RIGHT_MARGIN,
+        )
+    return max(metrics.node_width, required), height
+
+
 class NodeGraphicsItem(QGraphicsObject):
     """Movable projection of a NodeViewModel; it never mutates GraphDocument."""
-
-    _EDITOR_WIDTH = 150.0
-    _EDITOR_RIGHT_MARGIN = 10.0
-    _LABEL_LEFT = 13.0
-    _LABEL_EDITOR_GAP = 10.0
 
     def __init__(
         self,
@@ -440,33 +479,28 @@ class NodeGraphicsItem(QGraphicsObject):
         self.update()
 
     def _layout_height(self) -> float:
-        if self.view_model.collapsed:
-            return self.theme.metrics.header_height
-        ordinary_inputs = sum(not port.is_parameter for port in self.view_model.inputs)
-        rows = ordinary_inputs + len(self.view_model.parameters) + len(self.view_model.outputs)
-        return self.theme.metrics.header_height + max(rows, 1) * self.theme.metrics.row_height + 8.0
+        return layout_node_size(
+            self.theme,
+            title=self.view_model.title,
+            ordinary_input_count=sum(not port.is_parameter for port in self.view_model.inputs),
+            parameter_labels=tuple(
+                parameter.spec.label for parameter in self.view_model.parameters
+            ),
+            output_count=len(self.view_model.outputs),
+            collapsed=self.view_model.collapsed,
+        )[1]
 
     def _layout_width(self) -> float:
-        metrics = self.theme.metrics
-        title_width = QFontMetricsF(self.theme.title_font()).horizontalAdvance(
-            self.view_model.title
-        )
-        required = title_width + 50.0
-        if self.view_model.parameters:
-            label_metrics = QFontMetricsF(self.theme.body_font())
-            longest_label = max(
-                label_metrics.horizontalAdvance(parameter.spec.label)
-                for parameter in self.view_model.parameters
-            )
-            required = max(
-                required,
-                self._LABEL_LEFT
-                + longest_label
-                + self._LABEL_EDITOR_GAP
-                + self._EDITOR_WIDTH
-                + self._EDITOR_RIGHT_MARGIN,
-            )
-        return max(metrics.node_width, required)
+        return layout_node_size(
+            self.theme,
+            title=self.view_model.title,
+            ordinary_input_count=sum(not port.is_parameter for port in self.view_model.inputs),
+            parameter_labels=tuple(
+                parameter.spec.label for parameter in self.view_model.parameters
+            ),
+            output_count=len(self.view_model.outputs),
+            collapsed=self.view_model.collapsed,
+        )[0]
 
     @property
     def node_width(self) -> float:
@@ -479,7 +513,7 @@ class NodeGraphicsItem(QGraphicsObject):
         return self.mapRectToScene(body)
 
     def _editor_left(self) -> float:
-        return self._width - self._EDITOR_WIDTH - self._EDITOR_RIGHT_MARGIN
+        return self._width - NODE_EDITOR_WIDTH - NODE_EDITOR_RIGHT_MARGIN
 
     def _issue_badge_rect(self) -> QRectF:
         center = QPointF(self._width - 17.0, self.theme.metrics.header_height / 2.0)
@@ -530,7 +564,7 @@ class NodeGraphicsItem(QGraphicsObject):
             compact=True,
             dynamic_choices=dynamic_choices,
         )
-        editor.setFixedWidth(round(self._EDITOR_WIDTH))
+        editor.setFixedWidth(round(NODE_EDITOR_WIDTH))
         proxy = QGraphicsProxyWidget(self)
         proxy.setWidget(editor)
         proxy.setPos(
@@ -658,7 +692,7 @@ class NodeGraphicsItem(QGraphicsObject):
             Qt.AlignmentFlag.AlignRight if right else Qt.AlignmentFlag.AlignLeft
         )
         label_width = (
-            self._editor_left() - self._LABEL_EDITOR_GAP - self._LABEL_LEFT
+            self._editor_left() - NODE_LABEL_EDITOR_GAP - NODE_LABEL_LEFT
             if has_editor
             else self._width * 0.42
         )
@@ -666,7 +700,7 @@ class NodeGraphicsItem(QGraphicsObject):
         if not right and detail:
             painter.setPen(self.theme.color("muted_text" if not disabled else "disabled"))
             detail_left = self._editor_left() if has_editor else self._width * 0.42
-            detail_width = self._EDITOR_WIDTH if has_editor else self._width * 0.52
+            detail_width = NODE_EDITOR_WIDTH if has_editor else self._width * 0.52
             painter.drawText(
                 QRectF(detail_left, y, detail_width, metrics.row_height),
                 Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
@@ -679,7 +713,7 @@ class NodeGraphicsItem(QGraphicsObject):
             return _issue_tooltip(self.view_model.issues)
         if position.y() < self.theme.metrics.header_height:
             return node_help
-        if position.x() > self._editor_left() - self._LABEL_EDITOR_GAP:
+        if position.x() > self._editor_left() - NODE_LABEL_EDITOR_GAP:
             return node_help
         y = self.theme.metrics.header_height
         y += sum(not port.is_parameter for port in self.view_model.inputs) * (

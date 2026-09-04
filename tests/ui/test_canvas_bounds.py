@@ -23,7 +23,7 @@ from synesthesia_machine.ui.canvas import (
     GraphScene,
 )
 from synesthesia_machine.ui.commands import MoveNodesCommand
-from synesthesia_machine.ui.graphics import GroupGraphicsItem, NodeGraphicsItem
+from synesthesia_machine.ui.graphics import GroupGraphicsItem, NodeGraphicsItem, layout_node_size
 from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.theme import DEFAULT_THEME
 
@@ -227,13 +227,63 @@ def test_group_moved_past_the_edge_is_kept_inside_the_graph_area(canvas: GraphSc
     assert group_model.position[1] == pytest.approx(-16.0)
 
 
+def _anchor_size(definition, theme=DEFAULT_THEME) -> tuple[float, float]:
+    return layout_node_size(
+        theme,
+        title=definition.display_name,
+        ordinary_input_count=len(definition.input_ports()),
+        parameter_labels=tuple(parameter.label for parameter in definition.parameters),
+        output_count=len(definition.outputs),
+    )
+
+
 def test_new_node_anchor_is_clamped_to_the_graph_area(canvas: GraphScene) -> None:
-    clamped = canvas.clamp_new_node_anchor(QPointF(10.0 * SCENE_EXTENT_X, -10.0 * SCENE_EXTENT_Y))
+    definition = canvas.session.registry.require("synmachine.utility.pass_through")
+    width, _ = _anchor_size(definition)
+    clamped = canvas.clamp_new_node_anchor(
+        definition, QPointF(10.0 * SCENE_EXTENT_X, -10.0 * SCENE_EXTENT_Y)
+    )
     rect = canvas.sceneRect()
     assert rect.left() <= clamped[0] <= rect.right()
     assert rect.top() <= clamped[1] <= rect.bottom()
-    assert clamped[0] == pytest.approx(rect.right() - DEFAULT_THEME.metrics.node_width)
+    assert clamped[0] == pytest.approx(rect.right() - width)
     assert clamped[1] == pytest.approx(rect.top())
+
+
+def test_tall_node_drop_anchor_clamps_against_real_size(canvas: GraphScene) -> None:
+    # Regression: the drop clamp must use the node's real layout size.
+    # The old fixed ~69 px estimate left multi-row nodes (one ~27 px row
+    # per input/parameter/output) half outside the graph area: the item
+    # was pulled back visually, but the out-of-bounds position was what
+    # got committed to the document and saved.
+    definition = canvas.session.registry.require("synmachine.utility.statistics")
+    _, height = _anchor_size(definition)
+    assert height > DEFAULT_THEME.metrics.header_height + DEFAULT_THEME.metrics.row_height + 8.0
+
+    clamped = canvas.clamp_new_node_anchor(definition, QPointF(0.0, 10.0 * SCENE_EXTENT_Y))
+    rect = canvas.sceneRect()
+    # The drop is far below the area: the anchor pins so the node's body
+    # bottom edge sits exactly on the bottom border, never beyond it.
+    assert clamped[1] + height == pytest.approx(rect.bottom())
+    assert clamped[1] + height <= rect.bottom() + 1e-6
+
+
+def test_layout_estimate_matches_node_item_size(canvas: GraphScene) -> None:
+    # The shared drop-clamp size helper must stay in lockstep with the
+    # item layout, or clamping drifts from the real node size again.
+    session = canvas.session
+    for type_id in (
+        "synmachine.utility.number",
+        "synmachine.utility.math",
+        "synmachine.utility.statistics",
+    ):
+        definition = session.registry.require(type_id)
+        node_id = session.add_node(type_id, (0.0, 0.0))
+        view_model = next(n for n in session.view_model.nodes if n.node_id == node_id)
+        item = NodeGraphicsItem(view_model, DEFAULT_THEME, session.set_parameter)
+        width, height = _anchor_size(definition)
+        assert item._width == pytest.approx(width)  # pyright: ignore[reportPrivateUsage]
+        assert item._height == pytest.approx(height)  # pyright: ignore[reportPrivateUsage]
 
 
 def test_deleting_a_node_mid_drag_commits_only_the_survivors(canvas: GraphScene) -> None:

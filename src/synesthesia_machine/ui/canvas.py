@@ -42,6 +42,7 @@ from synesthesia_machine.graph import (
     distribute_boxes,
     tidy_boxes,
 )
+from synesthesia_machine.nodes import NodeDefinition
 from synesthesia_machine.nodes.input.video import LOAD_VIDEO_TYPE_ID
 from synesthesia_machine.ui.commands import PREVIEW_VISIBLE_KEY
 from synesthesia_machine.ui.graphics import (
@@ -50,6 +51,7 @@ from synesthesia_machine.ui.graphics import (
     NodeGraphicsItem,
     PortGraphicsItem,
     TemporaryConnectionGraphicsItem,
+    layout_node_size,
 )
 from synesthesia_machine.ui.parameter_editors import FilePathParameterEditor
 from synesthesia_machine.ui.session import DocumentSession
@@ -215,14 +217,28 @@ class GraphScene(QGraphicsScene):
             return lower
         return min(max(value, lower), lower + span - size)
 
-    def clamp_new_node_anchor(self, position: QPointF) -> tuple[float, float]:
-        """Keep a dropped node's top-left inside the graph area (fresh nodes always fit)."""
+    def clamp_new_node_anchor(
+        self, definition: NodeDefinition, position: QPointF
+    ) -> tuple[float, float]:
+        """Keep a dropped node's top-left inside the graph area.
 
-        metrics = self.theme.metrics
-        minimum_height = metrics.header_height + metrics.row_height + 8.0
-        return self.clamp_position_to_scene(
-            position.x(), position.y(), float(metrics.node_width), minimum_height
+        Clamps against the node's real layout size (shared with the item
+        layout), so tall or label-heavy nodes dropped near an edge never
+        commit a position that leaves their body outside the graph area.
+        """
+
+        # Measure the translated title: French titles are wider for many
+        # nodes, and the item shows tr(display_name), so clamping against
+        # the English width would desync item and document near the right
+        # edge in French.
+        width, height = layout_node_size(
+            self.theme,
+            title=tr(definition.display_name),
+            ordinary_input_count=len(definition.input_ports()),
+            parameter_labels=tuple(parameter.label for parameter in definition.parameters),
+            output_count=len(definition.outputs),
         )
+        return self.clamp_position_to_scene(position.x(), position.y(), width, height)
 
     def _place_item_in_bounds(self, item: QGraphicsItem) -> None:
         """Bring a freshly synced item inside the graph area (documents may contain
@@ -821,8 +837,10 @@ class GraphView(QGraphicsView):
             payload = raw.tobytes() if isinstance(raw, memoryview) else raw
             type_id = payload.decode("utf-8")
             position = self.mapToScene(event.position().toPoint())
-            self.graph_scene.session.add_node(
-                type_id, self.graph_scene.clamp_new_node_anchor(position)
+            session = self.graph_scene.session
+            session.add_node(
+                type_id,
+                self.graph_scene.clamp_new_node_anchor(session.registry.require(type_id), position),
             )
             event.acceptProposedAction()
             return
@@ -837,9 +855,12 @@ class GraphView(QGraphicsView):
         if kind == "video":
             # A dropped video becomes a Load Video node whose path is already set,
             # as one undo step.
-            self.graph_scene.session.add_node(
+            session = self.graph_scene.session
+            session.add_node(
                 LOAD_VIDEO_TYPE_ID,
-                self.graph_scene.clamp_new_node_anchor(position),
+                self.graph_scene.clamp_new_node_anchor(
+                    session.registry.require(LOAD_VIDEO_TYPE_ID), position
+                ),
                 parameters={"file_path": path.as_posix()},
             )
         else:
