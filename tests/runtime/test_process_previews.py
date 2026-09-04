@@ -235,3 +235,33 @@ def test_spawned_engine_delivers_scalar_value_preview_for_synesthesia_param(
     assert preview.text == "0.5"
     assert preview.sequence > 0
     assert preview.tick_index > 0
+
+
+def test_rejected_activation_forgets_retained_previews(tmp_path: Path) -> None:
+    # After the engine auto-stops on a broken graph, the client must not
+    # re-serve the last shared-memory frame on the next poll: the parent
+    # closes its preview slots and forgets retained note/value previews.
+    video_path = generate_test_video(tmp_path / "auto-stop-preview.mp4", fps=60)
+    document, source_id, resize_id, _ = _video_preview_document(video_path)
+    client = ProcessEngineClient(close_timeout_s=0.5)
+    try:
+        # Previews are anchored on producing ports, not the display node.
+        activation = client.activate(document.snapshot())
+        assert activation.activated and activation.report.is_valid
+        client.play(source_id)
+        assert client.wait_until_idle(3.0)
+        preview = _wait_for_preview(client, resize_id)
+        assert preview.sequence > 0
+
+        broken = GraphDocument()
+        broken.add_node("synmachine.visualization.display_image_data", implementation_version=2)
+        activation = client.activate(broken.snapshot())
+        assert not activation.activated
+        assert not activation.report.is_valid
+
+        assert client.poll_image_previews() == ()
+        assert client.preview_shared_memory_names() == ()
+        assert client.poll_note_previews() == ()
+        assert client.poll_value_previews() == ()
+    finally:
+        client.close()

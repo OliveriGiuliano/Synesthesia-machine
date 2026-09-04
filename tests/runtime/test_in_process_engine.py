@@ -94,6 +94,51 @@ def test_client_activates_real_video_and_drives_graph_through_final_api(tmp_path
         client.close()
 
 
+def test_auto_stop_forgets_the_last_preview_frame(tmp_path: Path) -> None:
+    # When a broken graph auto-stops the engine, the preview broker is
+    # cleared; a subsequent poll must not re-serve the last preview frame
+    # (nor retained note/value previews) as if the engine were still live.
+    video = generate_test_video(tmp_path / "auto-stop.mp4", frame_count=DEFAULT_FRAME_COUNT, fps=60)
+    registry = create_application_registry()
+    document = GraphDocument()
+    source_id = document.add_node(
+        "synmachine.input.load_video",
+        parameters={"file_path": str(video)},
+    )
+    resize_id = document.add_node(
+        "synmachine.image.resize",
+        parameters={"width": 32, "height": 24, "preserve_aspect": False},
+    )
+    document.add_connection(source_id, "image", resize_id, "image")
+    document.add_connection(
+        source_id,
+        "image",
+        document.add_node("synmachine.visualization.display_image_data", implementation_version=2),
+        "image",
+    )
+    client = InProcessEngineClient(registry)
+    try:
+        activation = client.activate(document.snapshot())
+        assert activation.activated and activation.report.is_valid
+        client.play(source_id)
+        assert client.wait_until_idle(2.0)
+        previews = client.poll_image_previews()
+        assert previews and all(item.sequence > 0 for item in previews)
+
+        broken = GraphDocument()
+        broken.add_node("synmachine.visualization.display_image_data", implementation_version=2)
+        activation = client.activate(broken.snapshot())
+        assert not activation.activated
+        assert not activation.report.is_valid
+        assert client.metrics().state is EngineState.STOPPED
+
+        assert client.poll_image_previews() == ()
+        assert client.poll_note_previews() == ()
+        assert client.poll_value_previews() == ()
+    finally:
+        client.close()
+
+
 def test_invalid_source_path_reports_error_without_rejecting_valid_graph(tmp_path: Path) -> None:
     document = GraphDocument()
     source_id = document.add_node(

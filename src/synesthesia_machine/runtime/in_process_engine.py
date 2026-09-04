@@ -850,6 +850,12 @@ class InProcessEngineClient:
     ) -> tuple[ValuePreview, ...]:
         return self._preview_broker.poll_values(after_sequences)
 
+    def clear_previews(self) -> None:
+        # Bumping the broker generation drops in-flight publishes and makes
+        # the next poll start from a clean threshold, so a stopped engine
+        # cannot re-serve its last preview frame.
+        self._preview_broker.clear()
+
     def wait_until_idle(self, timeout_s: float = 5.0) -> bool:
         deadline = time.monotonic() + max(0.0, timeout_s)
         with self._lock:

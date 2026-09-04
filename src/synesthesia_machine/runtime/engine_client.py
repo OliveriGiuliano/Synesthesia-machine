@@ -394,6 +394,24 @@ class ProcessEngineClient:
             )
             return tuple(slot.name for _, slot in ordered_slots)
 
+    def clear_previews(self) -> None:
+        """Forget retained preview state after the engine stops.
+
+        Shared preview slots keep their last frame mapped and the
+        in-memory note/value previews remain in this client, so without
+        this the next poll after an auto-stop would re-show the stale
+        last frame as if it were new. Closing the parent's slots is safe
+        while the child keeps its own mapping (the same pattern close()
+        uses); the next activation reconfigures fresh slots.
+        """
+
+        with self._preview_lock:
+            for slot in self._image_slots.values():
+                slot.close()
+            self._image_slots.clear()
+            self._note_previews.clear()
+            self._value_previews.clear()
+
     def poll_note_previews(
         self, after_sequences: Mapping[UUID, int] | None = None
     ) -> tuple[NotePreview, ...]:
@@ -489,11 +507,17 @@ class ProcessEngineClient:
             timeout_s=self._activation_timeout_s,
         )
         activation = response.activation
+        # Forget retained preview state on every activation outcome: on a
+        # rejection the engine auto-stops, and without this the parent would
+        # keep the child's last shared-memory frames mapped (and retained
+        # note/value previews) so the next poll would re-serve the stale
+        # last frame as if the engine were still producing. On acceptance
+        # the clear is what the old activated-only branch already did.
+        with self._preview_lock:
+            self._note_previews.clear()
+            self._value_previews.clear()
+            self._close_image_slots_locked()
         if activation.activated:
-            with self._preview_lock:
-                self._note_previews.clear()
-                self._value_previews.clear()
-                self._close_image_slots_locked()
             with self._lifecycle_lock:
                 self._graph_revision = activation.graph_revision
                 self._latest_valid_snapshot = snapshot

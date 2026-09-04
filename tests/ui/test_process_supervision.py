@@ -101,6 +101,9 @@ class _SupervisionClient:
     def panic(self) -> None:
         return
 
+    def clear_previews(self) -> None:
+        return
+
     def source_status(self, source_node_id: UUID | None = None) -> tuple[SourceStatus, ...]:
         del source_node_id
         return ()

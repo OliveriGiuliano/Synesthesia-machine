@@ -1402,6 +1402,10 @@ class MainWindow(QMainWindow):
             return
         count = len(activation.report.errors)
         self._clear_runtime_previews()
+        # The engine kept running previews mapped/retained while it was
+        # active; forget them client-side so the next poll cannot re-show
+        # the last frame as if the engine were still producing.
+        self.engine_client.clear_previews()
         self.statusBar().showMessage(
             trf("Graph has {count} error(s); engine stopped", count=count),
             5000,

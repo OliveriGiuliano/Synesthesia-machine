@@ -108,6 +108,9 @@ class _RecordingEngineClient:
     def panic(self) -> None:
         self.calls.append(("panic", None))
 
+    def clear_previews(self) -> None:
+        self.calls.append(("clear_previews", None))
+
     def source_status(self, source_node_id: UUID | None = None) -> tuple[SourceStatus, ...]:
         if source_node_id is not None:
             status = self.statuses.get(source_node_id)
