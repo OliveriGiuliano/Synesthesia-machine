@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import threading
 import time
@@ -47,6 +48,8 @@ from synesthesia_machine.runtime.execution_plan import CompiledNode, ExecutionPl
 from synesthesia_machine.runtime.previews import PreviewBroker
 from synesthesia_machine.runtime.profiling import RuntimeProfiler
 from synesthesia_machine.runtime.scheduler import TickResult
+
+type TickObserver = Callable[[UUID, PresentedSourceFrame, TickResult, ExecutionPlan], None]
 
 
 class SourceController(Protocol):
@@ -229,11 +232,13 @@ class LatestFrameGraphWorker:
         preview_broker: PreviewBroker | None = None,
         monotonic_ns: Callable[[], int] = time.perf_counter_ns,
         execution_clock_ns: Callable[[], int] = time.perf_counter_ns,
+        tick_observer: TickObserver | None = None,
     ) -> None:
         self._facade = facade
         self._preview_worker = (
             _LatestPreviewWorker(preview_broker) if preview_broker is not None else None
         )
+        self._tick_observer = tick_observer
         self._monotonic_ns = monotonic_ns
         self._execution_clock_ns = execution_clock_ns
         self._condition = threading.Condition()
@@ -457,6 +462,18 @@ class LatestFrameGraphWorker:
                     )
                     if self._preview_worker is not None:
                         self._preview_worker.submit(result)
+                    if (
+                        self._tick_observer is not None
+                        and (plan := self._facade.active_plan) is not None
+                    ):
+                        # Observation is diagnostic: a broken observer must not
+                        # stop the tick loop that feeds the real outputs.
+                        try:
+                            self._tick_observer(command.source_node_id, frame, result, plan)
+                        except Exception:
+                            logging.getLogger(__name__).exception(
+                                "Tick observer failed for source %s", command.source_node_id
+                            )
                     completed_ns = self._monotonic_ns()
                     graph_duration_ns = max(0, self._execution_clock_ns() - graph_started_ns)
                     with self._condition:
@@ -575,9 +592,11 @@ class InProcessEngineClient:
         camera_source_factory: CameraSourceFactory | None = None,
         device_catalogue_service: DeviceCatalogueService | None = None,
         worker_clock: Callable[[], int] = time.perf_counter_ns,
+        tick_observer: TickObserver | None = None,
     ) -> None:
         self._lock = threading.RLock()
         self._profiler = RuntimeProfiler()
+        self._tick_observer = tick_observer
         self._facade = EngineFacade(registry)
         self._profiling_enabled = False
         self._video_source_factory = video_source_factory or VideoSourceService
@@ -627,6 +646,7 @@ class InProcessEngineClient:
                     self._facade,
                     preview_broker=self._preview_broker,
                     monotonic_ns=self._worker_clock,
+                    tick_observer=self._tick_observer,
                 )
             old_plan = self._facade.active_plan
             reusable_sources = self._reusable_source_ids(old_plan, plan, reset_reason)

@@ -18,6 +18,13 @@ if TYPE_CHECKING:
     from synesthesia_machine.runtime.in_process_engine import (
         InProcessEngineClient,
         LatestFrameGraphWorker,
+        TickObserver,
+    )
+    from synesthesia_machine.runtime.midi_export import (
+        MidiExportError,
+        MidiExportProgress,
+        MidiExportResult,
+        run_midi_export,
     )
     from synesthesia_machine.runtime.previews import PreviewBroker
     from synesthesia_machine.runtime.shared_previews import (
@@ -34,6 +41,9 @@ __all__ = [
     "InProcessEngineClient",
     "InputBinding",
     "LatestFrameGraphWorker",
+    "MidiExportError",
+    "MidiExportProgress",
+    "MidiExportResult",
     "OwnedPreviewSlot",
     "PortKey",
     "PreviewBroker",
@@ -41,7 +51,9 @@ __all__ = [
     "RuntimeProfiler",
     "ScalarConversion",
     "Scheduler",
+    "TickObserver",
     "TickResult",
+    "run_midi_export",
 ]
 
 
@@ -62,15 +74,31 @@ def __getattr__(name: str) -> object:
             "EngineProtocolError": EngineProtocolError,
             "ProcessEngineClient": ProcessEngineClient,
         }[name]
-    if name in {"InProcessEngineClient", "LatestFrameGraphWorker"}:
+    if name in {"InProcessEngineClient", "LatestFrameGraphWorker", "TickObserver"}:
         from synesthesia_machine.runtime.in_process_engine import (
             InProcessEngineClient,
             LatestFrameGraphWorker,
+            TickObserver,
         )
 
         return {
             "InProcessEngineClient": InProcessEngineClient,
             "LatestFrameGraphWorker": LatestFrameGraphWorker,
+            "TickObserver": TickObserver,
+        }[name]
+    if name in {"MidiExportError", "MidiExportProgress", "MidiExportResult", "run_midi_export"}:
+        from synesthesia_machine.runtime.midi_export import (
+            MidiExportError,
+            MidiExportProgress,
+            MidiExportResult,
+            run_midi_export,
+        )
+
+        return {
+            "MidiExportError": MidiExportError,
+            "MidiExportProgress": MidiExportProgress,
+            "MidiExportResult": MidiExportResult,
+            "run_midi_export": run_midi_export,
         }[name]
     if name == "PreviewBroker":
         from synesthesia_machine.runtime.previews import PreviewBroker

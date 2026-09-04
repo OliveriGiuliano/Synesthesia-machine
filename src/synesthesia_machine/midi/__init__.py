@@ -4,6 +4,7 @@ from synesthesia_machine.midi.debug_synth import (
     DebugSynth,
     DebugSynthFactory,
     DebugSynthService,
+    NullDebugSynth,
     SynthConfiguration,
     SynthWaveform,
     enumerate_audio_output_devices,
@@ -22,6 +23,7 @@ from synesthesia_machine.midi.output_service import (
     MidoRtMidiBackend,
     MockMidiOutputBackend,
     MockMidiOutputPort,
+    NullMidiOutputService,
     VelocityUpdatePolicy,
     enumerate_midi_output_devices,
 )
@@ -36,6 +38,10 @@ from synesthesia_machine.midi.scales import (
     resolve_musical_selector,
     select_midi_notes,
 )
+from synesthesia_machine.midi.smf import (
+    MidiExportEvent,
+    encode_standard_midi_file,
+)
 
 __all__ = [
     "BUILTIN_SCALE_REGISTRY",
@@ -44,6 +50,7 @@ __all__ = [
     "DebugSynth",
     "DebugSynthFactory",
     "DebugSynthService",
+    "MidiExportEvent",
     "MidiMessage",
     "MidiMessageType",
     "MidiOutputBackend",
@@ -58,11 +65,14 @@ __all__ = [
     "MockMidiOutputBackend",
     "MockMidiOutputPort",
     "MusicalSelector",
+    "NullDebugSynth",
+    "NullMidiOutputService",
     "ScaleDefinition",
     "ScaleRegistry",
     "SynthConfiguration",
     "SynthWaveform",
     "VelocityUpdatePolicy",
+    "encode_standard_midi_file",
     "enumerate_audio_output_devices",
     "enumerate_midi_output_devices",
     "parse_custom_pitch_class_mask",

@@ -1,7 +1,9 @@
 # Synesthesia Machine
 
 Synesthesia Machine is a desktop instrument for Windows and Linux that transforms video and
-camera data into live MIDI note states through a typed visual node graph.
+camera data into live MIDI note states through a typed visual node graph. A video-only graph can
+also be simulated offline from the first to the last frame (File > Export MIDI) to save a
+Standard MIDI File with true video timing, ready to load into a DAW such as Ableton Live.
 
 ## Requirements and setup
 

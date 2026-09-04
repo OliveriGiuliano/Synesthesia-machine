@@ -328,6 +328,46 @@ class MidiOutputServiceProtocol(Protocol):
     def close(self) -> None: ...
 
 
+class NullMidiOutputService:
+    """Hardware-free stand-in used by offline exports.
+
+    Publishes are accepted and discarded: no port is ever opened, no note is
+    ever sent, and no error is ever reported, so an exported graph can contain
+    Send-MIDI nodes without side effects.
+    """
+
+    def publish(self, frame: MidiStateFrame, configuration: MidiOutputConfiguration) -> None:
+        del frame, configuration
+
+    def request_panic(self) -> None:
+        pass
+
+    def panic(self, timeout_s: float = 2.0) -> None:
+        del timeout_s
+
+    def refresh_outputs(self) -> None:
+        pass
+
+    def status(self) -> MidiServiceStatus:
+        return MidiServiceStatus(
+            MidiOutputConnectionState.UNSELECTED,
+            "",
+            (),
+            0,
+            (),
+            0,
+            None,
+            None,
+        )
+
+    def wait_until_idle(self, timeout_s: float = 2.0) -> bool:
+        del timeout_s
+        return True
+
+    def close(self) -> None:
+        pass
+
+
 type MidiOutputServiceFactory = Callable[[], MidiOutputServiceProtocol]
 
 

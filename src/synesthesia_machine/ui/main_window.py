@@ -87,6 +87,12 @@ from synesthesia_machine.ui.application_settings import (
 from synesthesia_machine.ui.autosave_controller import AutosaveController
 from synesthesia_machine.ui.canvas import GraphScene, GraphView
 from synesthesia_machine.ui.commands import PREVIEW_VISIBLE_KEY
+from synesthesia_machine.ui.midi_export import (
+    MidiExportJob,
+    midi_export_eligibility,
+    midi_export_failure_text,
+    midi_export_tooltip,
+)
 from synesthesia_machine.ui.previews import (
     ImagePreviewPanel,
     NotePreviewPanel,
@@ -208,6 +214,7 @@ class MainWindow(QMainWindow):
         self._engine_tasks_inflight: set[str] = set()
         self._engine_known_stopped = False
         self._pending_activation: tuple[GraphSnapshot, tuple[UUID, ...]] | None = None
+        self._midi_export_job: MidiExportJob | None = None
         self._autosave_timer = QTimer(self)
         self._autosave_timer.setSingleShot(True)
         self._autosave_timer.setInterval(self.preferences.autosave_delay_seconds * 1000)
@@ -351,6 +358,14 @@ class MainWindow(QMainWindow):
                 QKeySequence.StandardKey.SaveAs,
             ),
             self.save_document_as,
+        )
+        create(
+            ActionSpec(
+                "export_midi",
+                "Export &MIDI…",
+                "Simulate the video-only graph end to end and save a Standard MIDI File",
+            ),
+            self.export_midi,
         )
         create(ActionSpec("exit", "E&xit", "Close Synesthesia Machine", "Ctrl+Q"), self.close)
         create(
@@ -587,6 +602,7 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(self.action_registry.require("save"))
         file_menu.addAction(self.action_registry.require("save_as"))
+        file_menu.addAction(self.action_registry.require("export_midi"))
         file_menu.addSeparator()
         file_menu.addAction(self.action_registry.require("exit"))
 
@@ -1280,6 +1296,19 @@ class MainWindow(QMainWindow):
                 if transport.target is not None
                 else tr(transport.message)
             )
+        snapshot = self.session.document.snapshot()
+        eligible, reason = midi_export_eligibility(
+            snapshot, self.registry, graph_valid=not self.session.report.errors
+        )
+        export_action = self.action_registry.require("export_midi")
+        export_action.setEnabled(eligible)
+        tooltip = (
+            midi_export_tooltip(reason)
+            if not eligible
+            else tr("Simulate the video-only graph end to end and save a Standard MIDI File")
+        )
+        export_action.setToolTip(tooltip)
+        export_action.setStatusTip(tooltip)
 
     @Slot(object)
     def _focus_validation_issue(self, issue: ValidationIssue) -> None:
@@ -2115,11 +2144,79 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, tr(title), detail)
         self.statusBar().showMessage(detail, 5000)
 
+    @Slot()
+    def export_midi(self) -> None:
+        """Simulate the video-only graph end to end and save a Standard MIDI File."""
+
+        if self._midi_export_job is not None:
+            return
+        snapshot = self.session.document.snapshot()
+        eligible, _ = midi_export_eligibility(
+            snapshot, self.registry, graph_valid=not self.session.report.errors
+        )
+        if not eligible:
+            return
+        stem = self.session.current_path.stem if self.session.current_path is not None else "export"
+        default_path = str(Path(stem).with_suffix("")) + ".mid"
+        default_path = str(
+            (
+                self.session.current_path.parent
+                if self.session.current_path is not None
+                else Path.home()
+            )
+            / default_path
+        )
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            tr("Export MIDI…"),
+            default_path,
+            tr("Standard MIDI File (*.mid)"),
+        )
+        if not file_path:
+            return
+        if not file_path.lower().endswith(".mid"):
+            file_path += ".mid"
+        job = MidiExportJob(self, snapshot, file_path)
+        self._midi_export_job = job
+        job.signals.progress.connect(self._on_midi_export_progress)
+        job.signals.completed.connect(self._on_midi_export_completed)
+        job.signals.failed.connect(self._on_midi_export_failed)
+        job.start(snapshot)
+
+    @Slot(int, int)
+    def _on_midi_export_progress(self, processed: int, total: int) -> None:
+        job = self._midi_export_job
+        if job is not None:
+            job.dialog.set_progress(processed, total)
+
+    @Slot(str)
+    def _on_midi_export_completed(self, file_path: str) -> None:
+        job = self._midi_export_job
+        self._midi_export_job = None
+        if job is not None:
+            job.close()
+        self.statusBar().showMessage(trf("MIDI exported: {path}", path=file_path), 8000)
+
+    @Slot(str, str)
+    def _on_midi_export_failed(self, code: str, detail: str) -> None:
+        job = self._midi_export_job
+        self._midi_export_job = None
+        if job is not None:
+            job.close()
+        self.statusBar().showMessage(midi_export_failure_text(code, detail), 8000)
+
     def closeEvent(self, event: QCloseEvent) -> None:
         decision = self._confirm_document_replacement()
         if decision is not _ReplacementDecision.CANCEL:
             if decision is _ReplacementDecision.DISCARD:
                 self._discard_recovery(self.session.document.document_id)
+            job = self._midi_export_job
+            if job is not None:
+                # Stop the export worker before the shell goes down; the join is
+                # bounded so a stuck export cannot block shutdown.
+                self._midi_export_job = None
+                job.cancel()
+                job.close()
             self._activation_timer.stop()
             self._autosave_timer.stop()
             self._preview_timer.stop()

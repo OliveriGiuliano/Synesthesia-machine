@@ -390,6 +390,22 @@ class DebugSynthService(Protocol):
     def close(self) -> None: ...
 
 
+class NullDebugSynth:
+    """Audio-free stand-in for offline exports: renders nothing, plays nothing."""
+
+    def __init__(self, configuration: SynthConfiguration) -> None:
+        del configuration
+
+    def update(self, state: MidiStateFrame) -> None:
+        del state
+
+    def panic(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+
 type DebugSynthFactory = Callable[[SynthConfiguration], DebugSynthService]
 
 
