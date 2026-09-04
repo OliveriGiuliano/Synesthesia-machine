@@ -994,7 +994,7 @@ Top-level structure:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 4,
   "application_version": "0.1.0",
   "document_id": "uuid",
   "nodes": [],

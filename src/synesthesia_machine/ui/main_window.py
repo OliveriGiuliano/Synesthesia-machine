@@ -666,7 +666,7 @@ class MainWindow(QMainWindow):
         self.view.requestSearch.connect(self._search_nodes)
         # Dropping a saved graph file opens it with the exact File > Open flow
         # (dirty-document confirmation, recovery handling, recent files, status).
-        self.view.openGraphFileRequested.connect(self.open_path)
+        self.view.openGraphFileRequested.connect(self._open_graph_file_from_drop)
         self.library.nodeActivated.connect(self._add_library_node)
         self._autosave_timer.timeout.connect(self._autosave)
         self._activation_timer.timeout.connect(self._activate_graph)
@@ -923,6 +923,13 @@ class MainWindow(QMainWindow):
         else:
             self.statusBar().showMessage(trf("Opened {name}", name=path.name), 4000)
         return True
+
+    @Slot(Path)
+    def _open_graph_file_from_drop(self, path: Path) -> None:
+        # Runs synchronously inside the view's drop event (direct signal
+        # connection); report the outcome so the OS drop is accepted only
+        # when the graph actually opened.
+        self.view.set_drop_open_result(self.open_path(path))
 
     @Slot()
     def locate_missing_media(self) -> None:

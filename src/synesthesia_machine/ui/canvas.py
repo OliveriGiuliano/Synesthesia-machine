@@ -688,6 +688,9 @@ class GraphView(QGraphicsView):
         self.theme = theme
         self._panning = False
         self._space_pressed = False
+        # Set by the open-path handler after a graph-file drop so the drop
+        # event is accepted only when the open flow actually committed.
+        self._drop_open_result = False
         self._space_pan_used = False
         self._last_pan = QPoint()
         self.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing)
@@ -863,9 +866,17 @@ class GraphView(QGraphicsView):
                 ),
                 parameters={"file_path": path.as_posix()},
             )
-        else:
-            self.openGraphFileRequested.emit(path)
-        event.acceptProposedAction()
+            event.acceptProposedAction()
+            return
+        self.openGraphFileRequested.emit(path)
+        # The open flow runs synchronously (direct signal connection); accept
+        # the OS drop only when it committed. A cancelled replacement or a
+        # failed load must not be reported to the drag session as a success.
+        if self._drop_open_result:
+            event.acceptProposedAction()
+
+    def set_drop_open_result(self, ok: bool) -> None:
+        self._drop_open_result = ok
 
     @staticmethod
     def _dropped_file_kind(mime_data: QMimeData) -> str | None:

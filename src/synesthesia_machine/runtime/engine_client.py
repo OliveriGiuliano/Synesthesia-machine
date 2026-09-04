@@ -370,7 +370,7 @@ class ProcessEngineClient:
         # The UI polls at display cadence, so the cheap seqlock-header peek runs
         # for every slot and the full frame copy only for slots that advanced
         # past the caller's threshold. Slots idle at their last frame cost a
-        # 28-byte header read per tick instead of a full preview memcpy.
+        # 48-byte header read per tick instead of a full preview memcpy.
         thresholds = after_sequences or {}
         previews: list[ImagePreview] = []
         with self._preview_lock:

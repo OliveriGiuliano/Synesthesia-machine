@@ -154,6 +154,37 @@ def test_non_video_file_drop_is_ignored(window: MainWindow, tmp_path: Path) -> N
     assert window.session.document.nodes == ()
 
 
+def test_graph_file_drop_not_accepted_when_the_open_is_cancelled(
+    window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The OS drag session must only be told the drop succeeded when the
+    # open flow committed; a cancelled replacement leaves the current
+    # document untouched and the drop unaccepted.
+    from synesthesia_machine.ui.main_window import _ReplacementDecision
+
+    document = GraphDocument()
+    document.add_node("synmachine.utility.number", position=(55.0, 65.0))
+    graph_path = tmp_path / "dropped-cancelled.synmachine.json"
+    save_graph(graph_path, document.snapshot(), retain_backup=False)
+
+    monkeypatch.setattr(
+        window, "_confirm_document_replacement", lambda: _ReplacementDecision.CANCEL
+    )
+    mime = _mime_with_file(graph_path)
+    event = QDropEvent(
+        QPointF(0.0, 0.0),
+        Qt.DropAction.CopyAction,
+        mime,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    window.view.dropEvent(event)
+    assert not event.isAccepted()
+    # The open was cancelled, so the window's document stays untouched
+    # (still the fresh empty document, not the dropped graph).
+    assert window.session.document.nodes == ()
+
+
 def test_graph_file_drop_opens_the_saved_graph(window: MainWindow, tmp_path: Path) -> None:
     document = GraphDocument()
     document.add_node("synmachine.utility.number", position=(55.0, 65.0))

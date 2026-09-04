@@ -224,6 +224,9 @@ class GroupGraphicsItem(QGraphicsObject):
         super().mousePressEvent(event)
         scene = cast("GraphSceneProtocol", self.scene())
         self._drag_origin = scene.selected_group_positions()
+        if event.button() is not Qt.MouseButton.LeftButton:
+            self._move_items = []
+            return
         if self.isSelected():
             self._move_items = scene.selected_group_items()
         else:
