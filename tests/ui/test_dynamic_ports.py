@@ -265,10 +265,13 @@ def test_variadic_compiler_requires_minimum_and_binds_numeric_order() -> None:
     incomplete.remove_connection(connection.id)
     missing = GraphCompiler(registry).compile(incomplete.snapshot())
     assert missing.plan is None
-    assert any(
-        issue.code == "required_input_missing" and issue.port_id == "item_2"
-        for issue in missing.report.errors
-    )
+    # The two-socket minimum is enforced at family level: freeing item_2
+    # leaves one of two required sockets, so the single issue is raised on
+    # the family prefix, not on the specific freed socket.
+    family_errors = [
+        issue for issue in missing.report.errors if issue.code == "required_input_missing"
+    ]
+    assert [issue.port_id for issue in family_errors] == ["item"]
 
     document = _variadic_document()
     result = GraphCompiler(registry).compile(document.snapshot())

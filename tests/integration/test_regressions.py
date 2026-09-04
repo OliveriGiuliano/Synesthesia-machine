@@ -473,6 +473,11 @@ def test_statistics_combines_multiple_direct_scalar_connections() -> None:
     mean = runtime.process({"values_1": 1.0, "values_2": 3.0}, parameters, context)["value"]
     assert mean == 2.0
 
+    # Family-level minimum: the scheduler binds only connected sockets, so a
+    # node whose only connection is values_2 passes the runtime a values_2-only
+    # mapping; the statistic is computed over exactly those samples.
+    assert runtime.process({"values_2": 3.0}, parameters, context)["value"] == 3.0
+
     min_parameters, _ = statistics.parameter_values({"statistic": "MINIMUM"})
     minimum = runtime.process(
         {"values_1": 5, "values_2": 2, "values_3": 9}, min_parameters, context

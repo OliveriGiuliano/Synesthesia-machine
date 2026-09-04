@@ -513,13 +513,31 @@ class GraphCompiler:
         parameters: Mapping[UUID, Mapping[str, ParameterValue]],
         issues: list[ValidationIssue],
     ) -> None:
-        connected = {
-            (connection.destination_node_id, connection.destination_port_id)
-            for connection in connections
-        }
+        connected: dict[UUID, set[str]] = defaultdict(set)
+        for connection in connections:
+            connected[connection.destination_node_id].add(connection.destination_port_id)
         for node_id, definition in definitions.items():
+            node_ports = connected.get(node_id, set())
             for port_id in sorted(definition.required_inputs(parameters.get(node_id, {}))):
-                if (node_id, port_id) not in connected:
+                family = definition.variadic_input
+                if family is not None and port_id == family.id_prefix:
+                    # Family-level requirement: any minimum_count of the
+                    # family's sockets satisfy it, so a freed lower-index
+                    # socket does not invalidate the node while the family
+                    # minimum is still met by higher-index sockets.
+                    count = sum(1 for pid in node_ports if family.index(pid) is not None)
+                    if count < family.minimum_count:
+                        issues.append(
+                            _error(
+                                "required_input_missing",
+                                f"Input family {family.id_prefix!r} has {count} connected "
+                                f"socket(s) but needs at least {family.minimum_count}",
+                                node_id,
+                                port_id=family.id_prefix,
+                            )
+                        )
+                    continue
+                if port_id not in node_ports:
                     issues.append(
                         _error(
                             "required_input_missing",

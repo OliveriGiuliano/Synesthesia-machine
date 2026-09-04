@@ -294,12 +294,11 @@ def test_compiler_rejects_missing_and_different_clock_variadic_merge_inputs() ->
     incomplete = GraphDocument()
     incomplete.add_node(MIDI_MERGE_TYPE_ID, node_id=UTILITY)
     result = GraphCompiler(registry).compile(incomplete.snapshot())
+    # The merge's two-socket minimum is enforced at family level: one issue
+    # on the family prefix, not one per socket.
     assert {
         issue.port_id for issue in result.report.errors if issue.code == "required_input_missing"
-    } == {
-        "midi_1",
-        "midi_2",
-    }
+    } == {"midi"}
 
     different_clocks = GraphDocument()
     different_clocks.add_node("synmachine.input.load_camera", node_id=SOURCE_A)

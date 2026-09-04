@@ -318,6 +318,32 @@ def test_statistics_combines_multiple_connected_scalars() -> None:
     assert sorted(node.input_bindings) == ["values_1", "values_2"]
 
 
+def test_statistics_family_minimum_is_met_by_any_connected_socket() -> None:
+    # The variadic minimum is enforced at family level (any minimum_count
+    # of the family's sockets), not on specific low-index sockets: a node
+    # whose only connection is values_2 is valid, so deleting the first
+    # connection while the rest remain does not invalidate the graph.
+    document = GraphDocument(document_id=DOCUMENT_ID)
+    second = document.add_node(
+        "synmachine.utility.number",
+        node_id=STATS_SOURCE_A,
+        parameters={"number_type": "FLOAT", "float_value": 3.0},
+    )
+    statistics = document.add_node(
+        "synmachine.utility.statistics",
+        node_id=STATS_NODE,
+        implementation_version=2,
+        parameters={"statistic": "MEAN"},
+    )
+    document.add_connection(second, "value", statistics, "values_2")
+
+    result = GraphCompiler(create_utility_registry()).compile(document.snapshot())
+    assert result.report.is_valid, [issue.message for issue in result.report.issues]
+    node = result.plan.node(STATS_NODE)
+    assert node is not None
+    assert sorted(node.input_bindings) == ["values_2"]
+
+
 def test_statistics_accepts_a_buffer_output() -> None:
     document = GraphDocument(document_id=DOCUMENT_ID)
     source = document.add_node(

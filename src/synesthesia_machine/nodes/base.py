@@ -512,10 +512,13 @@ class NodeDefinition:
         else:
             required = {port.id for port in self.inputs if port.required}
         if self.variadic_input is not None:
-            required.update(
-                self.variadic_input.port(index).id
-                for index in range(1, self.variadic_input.minimum_count + 1)
-            )
+            # The requirement is family-level: at least minimum_count of the
+            # family's sockets must be connected, any indices. The bare
+            # prefix is a synthetic marker (socket ids always carry an index
+            # suffix), translated by the compiler into a family count check
+            # so that freeing values_1 while values_2+ stay connected does
+            # not invalidate the node.
+            required.add(self.variadic_input.id_prefix)
         return frozenset(required)
 
 

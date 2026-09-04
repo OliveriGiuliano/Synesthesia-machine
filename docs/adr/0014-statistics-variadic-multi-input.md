@@ -40,10 +40,24 @@ new schema.
   output, or any mix of them, all sharing the same source clock (the existing clock rule).
 - Existing buffer -> Statistics graphs keep working after the v2 -> v3 migration; graphs that
   predate the schema still load because the migration is pure and sequential.
-- A Statistics node with no connection is invalid (`values_1` is required), matching the
-  variadic contract already used by MIDI Merge.
+- A Statistics node with no connection is invalid (at least one socket of the
+  `values_1`, `values_2`, ... family is required), matching the variadic contract already
+  used by MIDI Merge.
 - No engine protocol, scheduler, or process-placement change: the node stays stateless and the
   scheduler already delivers every bound socket into the runtime's input mapping.
+
+## Correction (2026-09-16)
+
+The original implementation enforced the variadic minimum socket-by-socket: sockets
+`1..minimum_count` were each individually required, so a Statistics node with only
+`values_2` connected (and `values_1` freed) was reported `required_input_missing` and
+auto-stopped the engine even though the family minimum of one connected socket was met.
+That contradicted this ADR's "at least one required" family-level contract. The compiler
+now enforces the minimum at family level (any `minimum_count` of the family's sockets)
+and emits a single family-level `required_input_missing` issue when the count is short;
+`NodeDefinition.required_inputs` reports the family prefix as a synthetic marker for
+variadic families. No schema, protocol, or serialization change: saved graphs are
+unaffected.
 
 ## References
 
