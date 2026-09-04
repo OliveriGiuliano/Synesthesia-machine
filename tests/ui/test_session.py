@@ -90,6 +90,29 @@ def test_compatible_definitions_offer_variadic_input_sockets() -> None:
     assert offered == {"values_1"}
 
 
+def test_compatible_definitions_skip_variadic_families_needing_more_than_one_socket() -> None:
+    # "Add Compatible Node" creates exactly one connection, so a variadic
+    # family whose minimum exceeds one socket (MIDI Merge: midi_1 + midi_2)
+    # is not offered: inserting it through the dialog would leave the node
+    # invalid until the user wires the second family socket anyway. Fixed
+    # MIDI inputs (Send MIDI) and single-socket variadic families remain
+    # offered.
+    from synesthesia_machine.nodes.utility.midi import MIDI_MERGE_TYPE_ID
+
+    registry = create_application_registry()
+    session = DocumentSession(registry)
+    source = session.add_node("synmachine.synesthesia.channel_to_pitch", (0.0, 0.0))
+
+    offered = {
+        definition.type_id for definition, _ in session.compatible_definitions(source, "midi", True)
+    }
+    assert MIDI_MERGE_TYPE_ID not in offered
+    # Fixed MIDI inputs (Send MIDI) are unaffected by the variadic skip...
+    assert "synmachine.output.send_midi" in offered
+    # ...and a scalar-family variadic node has no MIDI socket to offer.
+    assert "synmachine.utility.statistics" not in offered
+
+
 def test_adding_visualizers_replaces_only_the_matching_slot_and_is_exactly_undoable() -> None:
     session = DocumentSession(create_application_registry())
     source = session.add_node("synmachine.input.load_video", (0.0, 0.0))

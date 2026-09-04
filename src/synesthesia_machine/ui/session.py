@@ -560,6 +560,16 @@ class DocumentSession(QObject):
     ) -> tuple[tuple[NodeDefinition, str], ...]:
         results: list[tuple[NodeDefinition, str]] = []
         for definition in self.registry.definitions():
+            if (
+                definition.variadic_input is not None
+                and definition.variadic_input.minimum_count > 1
+            ):
+                # This dialog creates exactly one connection; a variadic
+                # family whose minimum exceeds one socket (MIDI Merge:
+                # midi_1 + midi_2) could never be satisfied by it, so such
+                # nodes are added from the palette instead. Single-socket
+                # families (Statistics: values_1) stay offered.
+                continue
             temporary = GraphDocument.from_snapshot(self.document.snapshot())
             candidate_id = temporary.add_node(
                 definition.type_id, implementation_version=definition.implementation_version
