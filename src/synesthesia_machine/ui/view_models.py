@@ -199,7 +199,10 @@ def project_graph(
                 node.id,
                 node.type_id,
                 node.user_label or tr(definition.display_name),
-                tr(definition.category),
+                # Keep the category untranslated: it is a stable palette key
+                # (node_category_color) as well as a display string; display
+                # sites translate it themselves.
+                definition.category,
                 tr(definition.description),
                 node.position,
                 (*inputs, *connectable),

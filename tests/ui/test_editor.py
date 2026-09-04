@@ -48,6 +48,7 @@ from synesthesia_machine.nodes import (
 from synesthesia_machine.nodes.utility import create_utility_registry
 from synesthesia_machine.persistence import save_graph
 from synesthesia_machine.runtime import InProcessEngineClient
+from synesthesia_machine.ui.application_settings import EditorPreferences
 from synesthesia_machine.ui.graphics import (
     ConnectionGraphicsItem,
     NodeGraphicsItem,
@@ -63,6 +64,7 @@ from synesthesia_machine.ui.parameter_editors import (
 )
 from synesthesia_machine.ui.theme import DEFAULT_THEME, node_category_color
 from synesthesia_machine.ui.tooltips import TOOLTIP_LINE_WIDTH, format_tooltip
+from synesthesia_machine.ui.translations import UiLanguage
 from synesthesia_machine.ui.view_models import ConnectionViewModel, ParameterViewModel
 from synesthesia_machine.ui.widgets import NodeLibrary, NodeSearchDialog, SearchCandidate
 
@@ -1203,3 +1205,20 @@ def test_preview_update_reaches_only_items_of_the_same_source_port(
     window.scene.set_connection_value_preview(first_id, "value", "7.5")
     qapp.processEvents()
     assert item_a._value_text == "3.5"  # pyright: ignore[reportPrivateUsage]
+
+
+def test_node_category_color_is_stable_when_the_ui_language_changes(window: MainWindow) -> None:
+    # The view model must keep the untranslated category: it is the key of the
+    # stable node colour palette, so switching the UI language must never change
+    # a node's colour (the translated category only appears in display widgets).
+    node_id = window.session.add_node("synmachine.utility.number", (0.0, 0.0))
+    item = window.scene.node_items[node_id]
+    assert item.view_model.category == "Utility"
+    english_color = node_category_color(item.view_model.category)
+
+    window.apply_preferences(EditorPreferences(language=UiLanguage.FRENCH))
+
+    french_item = window.scene.node_items[node_id]
+    assert french_item.view_model.category == "Utility"
+    assert french_item.view_model.title == "Nombre"
+    assert node_category_color(french_item.view_model.category) == english_color
