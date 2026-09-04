@@ -219,12 +219,17 @@ class ProcessEngineClient:
                     Path(f"{self._crash_log_path}.pending").unlink(missing_ok=True)
             try:
                 process.start()
-            except Exception:
+            except Exception as error:
                 parent_connection.close()
                 child_connection.close()
                 event_queue.close()
                 event_queue.join_thread()
                 process.close()
+                # A process that never started must not leave the client
+                # stuck in STARTING: mark it CRASHED so status handling and
+                # the restart action recover.
+                self._connection_state = EngineConnectionState.CRASHED
+                self._last_error = f"Engine process could not be started: {error}"
                 raise
             child_connection.close()
             self._connection = cast(DuplexConnection, parent_connection)
@@ -241,8 +246,13 @@ class ProcessEngineClient:
                 ),
                 HandshakeAcknowledged,
             )
-        except Exception:
-            self._stop_current_process(graceful=False)
+        except Exception as error:
+            self._stop_current_process(graceful=False, mark_crashed=True)
+            with self._lifecycle_lock:
+                # A failed handshake must not leave a zombie STARTING state:
+                # the child is gone, so report a crash whose last error
+                # identifies the startup failure.
+                self._last_error = f"Engine startup failed: {error}"
             raise
         with self._lifecycle_lock:
             self._child_process_id = response.child_process_id
@@ -469,7 +479,14 @@ class ProcessEngineClient:
             demand_roots = self._latest_demand_roots
             self._restart_count += 1
             self._connection_state = EngineConnectionState.RESTARTING
-        self._stop_current_process(graceful=True)
+        try:
+            self._stop_current_process(graceful=True)
+        except Exception as error:
+            with self._lifecycle_lock:
+                if not self._closed:
+                    self._connection_state = EngineConnectionState.CRASHED
+                    self._last_error = f"Engine shutdown failed: {error}"
+            raise
         self.start()
         if snapshot is None:
             return None

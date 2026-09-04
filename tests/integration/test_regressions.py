@@ -555,6 +555,7 @@ def test_statistics_all_int_output_widens_to_float_at_the_scheduler_boundary() -
 
     result = GraphCompiler(registry).compile(document.snapshot(), demand_roots={math_node})
     assert result.report.is_valid, [issue.message for issue in result.report.issues]
+    assert result.plan is not None
     plan_node = result.plan.node(statistics)
     assert plan_node is not None
     assert plan_node.output_types["value"] is PortType.FLOAT

@@ -238,6 +238,17 @@ def _source_status(node_id: UUID, state: SourceState = SourceState.READY) -> Sou
     return SourceStatus(node_id, state, f"{node_id}.mp4")
 
 
+def _wait_for_engine_tasks(window: MainWindow, timeout_s: float = 5.0) -> None:
+    # Transport/panic/restart commands run on the engine task pool and
+    # complete via queued Qt signals; spin the loop until the tasks
+    # drained so the assertions below observe the post-command state.
+    deadline = time.monotonic() + timeout_s
+    while window._engine_tasks_inflight:  # pyright: ignore[reportPrivateUsage]
+        if time.monotonic() > deadline:
+            pytest.fail(f"engine tasks still in flight: {sorted(window._engine_tasks_inflight)}")
+        QTest.qWait(10)
+
+
 def test_session_changes_debounce_graph_activation_through_client(
     runtime_window: tuple[MainWindow, _RecordingEngineClient],
 ) -> None:
@@ -288,10 +299,12 @@ def test_transport_auto_targets_sole_source_resumes_paused_and_never_fans_out(
     source_a = window.session.add_node("synmachine.input.load_video", (0.0, 0.0))
     client.statuses[source_a] = _source_status(source_a)
     window.play()
+    _wait_for_engine_tasks(window)
     assert client.calls[-1] == ("play", source_a)
 
     client.statuses[source_a] = _source_status(source_a, SourceState.PAUSED)
     window.play()
+    _wait_for_engine_tasks(window)
     assert client.calls[-1] == ("resume", source_a)
 
     source_b = window.session.add_node("synmachine.input.load_video", (300.0, 0.0))
@@ -303,6 +316,7 @@ def test_transport_auto_targets_sole_source_resumes_paused_and_never_fans_out(
 
     window.scene.select_node_ids({source_b})
     window.reload()
+    _wait_for_engine_tasks(window)
     assert client.calls[-1] == ("reload", source_b)
 
     window.scene.select_node_ids({source_a, source_b})
@@ -324,17 +338,20 @@ def test_transport_commands_invalidate_known_stopped_cache(
 
     window._engine_known_stopped = True
     window.play()
+    _wait_for_engine_tasks(window)
     assert client.calls[-1] == ("play", source_a)
     assert window._engine_known_stopped is False
 
     window._engine_known_stopped = True
     client.statuses[source_a] = _source_status(source_a, SourceState.PAUSED)
     window.play()
+    _wait_for_engine_tasks(window)
     assert client.calls[-1] == ("resume", source_a)
     assert window._engine_known_stopped is False
 
     window._engine_known_stopped = True
     window.stop()
+    _wait_for_engine_tasks(window)
     assert client.calls[-1] == ("stop", source_a)
     assert window._engine_known_stopped is False
 
@@ -352,6 +369,7 @@ def test_successful_restart_invalidate_known_stopped_cache(
 
     window._engine_known_stopped = True
     window.restart_engine()
+    _wait_for_engine_tasks(window)
     assert window._engine_known_stopped is False
 
 
@@ -876,6 +894,7 @@ def test_panic_and_accepted_close_are_owned_by_injected_client(
 ) -> None:
     window, client = runtime_window
     window.panic()
+    _wait_for_engine_tasks(window)
     assert client.calls[-1] == ("panic", None)
 
     window.close()

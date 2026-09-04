@@ -98,6 +98,11 @@ def test_protocol_mismatch_is_rejected_and_child_is_reaped() -> None:
     try:
         with pytest.raises(EngineProtocolError, match="protocol mismatch"):
             client.start()
+        # A failed handshake must not leave a zombie STARTING state: the
+        # client reports the startup failure as a crash so status handling
+        # and the restart action recover instead of being stuck.
+        assert client.status().connection_state is EngineConnectionState.CRASHED
+        assert "startup failed" in (client.status().last_error or "")
     finally:
         client.close()
 

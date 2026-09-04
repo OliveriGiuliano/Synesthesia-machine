@@ -320,6 +320,14 @@ def test_engine_crash_keeps_document_and_undo_history_then_restart_rebuilds(
 
         window.restart_engine()
 
+        # The restart runs on the engine task pool; wait for it to drain.
+        deadline = time.monotonic() + 10.0
+        while window._engine_tasks_inflight:  # pyright: ignore[reportPrivateUsage]
+            if time.monotonic() > deadline:
+                pytest.fail("restart task did not complete in time")
+            qapp.processEvents()
+            time.sleep(0.02)
+
         assert client.restart_count == 1
         assert window.session.document.snapshot() == snapshot
         assert window.session.undo_stack.count() == undo_count

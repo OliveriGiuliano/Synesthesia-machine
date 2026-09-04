@@ -124,6 +124,22 @@ class _EngineRefreshSnapshot:
     diagnostic: NodeMemoryDiagnostic | None
 
 
+@dataclass(frozen=True, slots=True)
+class _TransportTaskResult:
+    """Outcome of a transport command executed on the engine task pool."""
+
+    verb: str
+    target: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class _RestartTaskResult:
+    """Outcome of an engine restart executed on the engine task pool."""
+
+    outcome: str
+    detail: str
+
+
 class _EngineTaskSignals(QObject):
     completed = Signal(str, object)
     failed = Signal(str, object)
@@ -686,27 +702,21 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def play(self) -> None:
+        # The source-state lookup and the play/resume command are engine IPC:
+        # they run on the engine task pool so a slow or hung child cannot
+        # block the UI event thread.
         target = self._transport_target()
         if target is None:
             return
-        try:
-            status = self.engine_client.source_status(target)[0]
-            if status.state is SourceState.PAUSED:
-                self.engine_client.resume(target)
-                verb = "Resumed"
-            else:
-                self.engine_client.play(target)
-                verb = "Playing"
-        except (KeyError, RuntimeError, TimeoutError, IndexError) as error:
-            self.statusBar().showMessage(trf("Could not play source: {error}", error=error), 5000)
-            return
-        # A transport command changes engine run state outside of an
-        # activation; drop the "known stopped" cache so the periodic
-        # refresh resumes instead of showing a stale STOPPED status.
-        self._engine_known_stopped = False
-        self.statusBar().showMessage(
-            trf("{verb} source {source}", verb=tr(verb), source=str(target)[:8]), 3000
-        )
+        self._submit_engine_task("transport", partial(self._load_play, target))
+
+    def _load_play(self, target: UUID) -> _TransportTaskResult:
+        status = self.engine_client.source_status(target)[0]
+        if status.state is SourceState.PAUSED:
+            self.engine_client.resume(target)
+            return _TransportTaskResult("Resumed", target)
+        self.engine_client.play(target)
+        return _TransportTaskResult("Playing", target)
 
     @Slot()
     def pause(self) -> None:
@@ -722,76 +732,55 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def panic(self) -> None:
-        try:
-            self.engine_client.panic()
-        except (RuntimeError, TimeoutError) as error:
-            self.statusBar().showMessage(trf("Could not send panic: {error}", error=error), 5000)
-            return
-        self.statusBar().showMessage(tr("All outputs silenced"), 3000)
+        # Panic waits for the MIDI output services to confirm all-notes-off
+        # (up to their timeout): it must not block the UI event thread.
+        self._submit_engine_task("panic", self.engine_client.panic)
 
     @Slot()
     def restart_engine(self) -> None:
+        # A restart is the heaviest engine IPC (stop handshake, child
+        # spawn, start handshake, re-activation) and must run on the
+        # engine task pool; the UI thread only snapshots the document
+        # and updates the status bar.
         if self._engine_closed:
             return
+        if "restart" in self._engine_tasks_inflight:
+            return
+        snapshot = self.session.document.snapshot()
         self.action_registry.require("restart_engine").setEnabled(False)
         self.statusBar().showMessage(tr("Restarting engine…"))
-        QApplication.processEvents()
+        self._submit_engine_task("restart", partial(self._load_engine_restart, snapshot))
+
+    def _load_engine_restart(self, snapshot: GraphSnapshot) -> _RestartTaskResult:
         try:
             activation = self.engine_client.restart()
         except (RuntimeError, TimeoutError) as error:
-            self.statusBar().showMessage(trf("Engine restart failed: {error}", error=error), 8000)
-            self._refresh_engine_status()
-            return
-        self._clear_runtime_previews()
-        self._engine_failure_signature = None
-        # The restarted engine may immediately auto-activate the last valid
-        # graph; drop the "known stopped" cache (a pre-crash metrics refresh
-        # could still hold it True) so the final refresh below re-learns the
-        # real state instead of skipping it.
-        self._engine_known_stopped = False
-        if activation is None:
-            snapshot = self.session.document.snapshot()
-            if snapshot.nodes:
-                try:
-                    activation = self.engine_client.activate(snapshot)
-                except (RuntimeError, TimeoutError) as error:
-                    self.statusBar().showMessage(
-                        trf("Engine restarted but graph rebuild failed: {error}", error=error),
-                        8000,
-                    )
-                    self._refresh_engine_status()
-                    return
+            return _RestartTaskResult("restart_failed", str(error))
+        if activation is None and snapshot.nodes:
+            try:
+                activation = self.engine_client.activate(snapshot)
+            except (RuntimeError, TimeoutError) as error:
+                return _RestartTaskResult("rebuild_failed", str(error))
         if activation is not None and not activation.activated:
-            self.statusBar().showMessage(
-                tr("Engine restarted; current invalid graph was not activated"),
-                8000,
-            )
-        else:
-            self.statusBar().showMessage(tr("Engine restarted"), 5000)
-        self._refresh_engine_status()
+            return _RestartTaskResult("rejected", "")
+        return _RestartTaskResult("ok", "")
 
     def _invoke_transport(self, operation: Callable[[UUID | None], None], past_tense: str) -> None:
+        # Runs on the engine task pool (see play()); the UI thread only
+        # resolves the target. A command issued while another is in flight
+        # is dropped by the per-kind coalescing guard.
         target = self._transport_target()
         if target is None:
             return
-        try:
-            operation(target)
-        except (KeyError, RuntimeError, TimeoutError) as error:
-            self.statusBar().showMessage(
-                trf("Could not control source: {error}", error=error), 5000
-            )
-            return
-        # Same as in play(): invalidate the "known stopped" cache so
-        # the periodic refresh reflects the new run state immediately.
-        self._engine_known_stopped = False
-        self.statusBar().showMessage(
-            trf(
-                "{verb} source {source}",
-                verb=tr(past_tense),
-                source=str(target)[:8],
-            ),
-            3000,
+        self._submit_engine_task(
+            "transport", partial(self._load_transport, operation, past_tense, target)
         )
+
+    def _load_transport(
+        self, operation: Callable[[UUID | None], None], past_tense: str, target: UUID
+    ) -> _TransportTaskResult:
+        operation(target)
+        return _TransportTaskResult(past_tense, target)
 
     def _transport_target(self) -> UUID | None:
         sources = tuple(
@@ -1357,6 +1346,50 @@ class MainWindow(QMainWindow):
                 )
             elif result.pending_kinds:
                 self.statusBar().showMessage(tr("Detecting devices…"), 3000)
+        elif kind == "transport":
+            if not isinstance(result, _TransportTaskResult):
+                raise TypeError("Engine transport task returned an invalid result")
+            # A transport command changes engine run state outside of an
+            # activation; drop the "known stopped" cache so the periodic
+            # refresh resumes instead of showing a stale STOPPED status.
+            self._engine_known_stopped = False
+            self.statusBar().showMessage(
+                trf("{verb} source {source}", verb=tr(result.verb), source=str(result.target)[:8]),
+                3000,
+            )
+        elif kind == "panic":
+            self.statusBar().showMessage(tr("All outputs silenced"), 3000)
+        elif kind == "restart":
+            if not isinstance(result, _RestartTaskResult):
+                raise TypeError("Engine restart task returned an invalid result")
+            if result.outcome != "restart_failed":
+                # The child was replaced: forget its previews and the
+                # failure signature, and drop the "known stopped" cache
+                # (a pre-crash metrics refresh could still hold it True)
+                # so the final refresh below re-learns the real state
+                # instead of skipping it.
+                self._clear_runtime_previews()
+                self._engine_failure_signature = None
+                self._engine_known_stopped = False
+            if result.outcome == "restart_failed":
+                self.statusBar().showMessage(
+                    trf("Engine restart failed: {error}", error=result.detail), 8000
+                )
+            elif result.outcome == "rebuild_failed":
+                self.statusBar().showMessage(
+                    trf(
+                        "Engine restarted but graph rebuild failed: {error}",
+                        error=result.detail,
+                    ),
+                    8000,
+                )
+            elif result.outcome == "rejected":
+                self.statusBar().showMessage(
+                    tr("Engine restarted; current invalid graph was not activated"), 8000
+                )
+            else:
+                self.statusBar().showMessage(tr("Engine restarted"), 5000)
+            self._refresh_engine_status()
 
     @Slot(str, object)
     def _on_engine_task_failed(self, kind: str, error: object) -> None:
@@ -1375,6 +1408,15 @@ class MainWindow(QMainWindow):
                 trf("Could not refresh devices: {error}", error=detail),
                 8000,
             )
+        elif kind == "transport":
+            self.statusBar().showMessage(
+                trf("Could not control source: {error}", error=detail), 5000
+            )
+        elif kind == "panic":
+            self.statusBar().showMessage(trf("Could not send panic: {error}", error=detail), 5000)
+        elif kind == "restart":
+            self.statusBar().showMessage(trf("Engine restart failed: {error}", error=detail), 8000)
+            self._refresh_engine_status()
 
     @Slot()
     def refresh_devices(self) -> None:
