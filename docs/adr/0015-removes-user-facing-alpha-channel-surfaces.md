@@ -56,10 +56,18 @@ example graphs are re-serialized at the new schema.
   1 -> 2 -> 3 -> 4 migration chain (including v3 -> v4) and yields the 49 surviving
   definitions.
 
+## Correction (2026-09-16)
+
+The initial scope covered the adjustment package (`adjustments.py`). A second
+`_channel_parameter()` helper in the filter package (`filters.py`) still offered
+`CHANNEL_4` to **Add Noise** and **Posterize**. It is now excluded the same way,
+and both nodes moved from v1 to v2 with the shared CHANNEL_4 -> COLOUR node
+migration, completing the decision above.
+
 ## References
 
 - `docs/architecture/master.md` (sections 16.4 and 16.7)
 - `docs/reference/image-node-matrix.md`
-- `src/synesthesia_machine/nodes/image/channels.py`, `adjustments.py`, `utilities.py`
+- `src/synesthesia_machine/nodes/image/channels.py`, `adjustments.py`, `utilities.py`, `filters.py`
 - `src/synesthesia_machine/persistence/schemas.py` (v3 -> v4)
 - `src/synesthesia_machine/persistence/node_migrations.py` (v1 -> v2 family)

@@ -338,7 +338,13 @@ def _channel_parameter() -> ParameterSpec:
         "Channels",
         PortType.STRING,
         ChannelSelection.COLOUR.value,
-        choices=tuple(selection.value for selection in ChannelSelection),
+        # Sources never carry a fourth (alpha) channel, so CHANNEL_4 is not
+        # offered as a selectable target.
+        choices=tuple(
+            selection.value
+            for selection in ChannelSelection
+            if selection is not ChannelSelection.CHANNEL_4
+        ),
         applicable_input_types=(PortType.IMAGE,),
     )
 
@@ -485,10 +491,11 @@ def _definition(
     *,
     aliases: tuple[str, ...] = (),
     validator: Callable[[Mapping[str, ParameterValue]], Sequence[str]] | None = None,
+    implementation_version: int = 1,
 ) -> NodeDefinition:
     return NodeDefinition(
         type_id,
-        1,
+        implementation_version,
         display_name,
         "Image / Filter",
         description,
@@ -647,6 +654,7 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
             _add_noise,
             aliases=("grain", "random", "salt pepper"),
             validator=_validate_noise,
+            implementation_version=2,
         ),
         _definition(
             "synmachine.image.posterize",
@@ -655,6 +663,7 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
             posterize_parameters,
             _posterize,
             aliases=("quantize", "colour levels", "color levels"),
+            implementation_version=2,
         ),
         NodeDefinition(
             "synmachine.image.threshold",

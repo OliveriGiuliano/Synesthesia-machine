@@ -212,7 +212,7 @@ def _rewrite_channel_selection(data: JsonObject) -> None:
 
 
 def migrate_adjustment_channel_selection_v1_to_v2(data: JsonObject) -> JsonObject:
-    """Adjustment v2 dropped the unreachable CHANNEL_4 selection target."""
+    """Channel-selection v2 dropped the unreachable CHANNEL_4 target."""
 
     migrated = deepcopy(data)
     _rewrite_channel_selection(migrated)
@@ -236,6 +236,7 @@ def _implementation_version(data: JsonObject) -> int:
 
 BUILTIN_NODE_MIGRATIONS = NodeMigrationRegistry(
     {
+        ("synmachine.image.add_noise", 1): migrate_adjustment_channel_selection_v1_to_v2,
         ("synmachine.image.add_scalar", 1): migrate_adjustment_channel_selection_v1_to_v2,
         ("synmachine.image.brightness", 1): migrate_adjustment_channel_selection_v1_to_v2,
         ("synmachine.image.clamp", 1): migrate_clamp_v1_to_v2,
@@ -248,6 +249,7 @@ BUILTIN_NODE_MIGRATIONS = NodeMigrationRegistry(
         ("synmachine.image.hue", 1): migrate_hue_v1_to_v2,
         ("synmachine.image.invert_colour", 1): migrate_invert_colour_v1_to_v2,
         ("synmachine.image.multiply_scalar", 1): migrate_adjustment_channel_selection_v1_to_v2,
+        ("synmachine.image.posterize", 1): migrate_adjustment_channel_selection_v1_to_v2,
         ("synmachine.image.separate_channels", 1): migrate_separate_channels_v1_to_v2,
         ("synmachine.image.stretch_contrast", 1): migrate_adjustment_channel_selection_v1_to_v2,
         ("synmachine.input.load_video", 0): migrate_load_video_v0_to_v1,

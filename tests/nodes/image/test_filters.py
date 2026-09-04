@@ -517,10 +517,43 @@ def test_posterize_channel_selection_can_process_alpha(rgba_image: ImageFrame) -
     assert set(np.unique(all_channels.data[..., 3]).tolist()) <= {0.0, 1.0}
 
 
-def test_filter_channel_selection_errors_are_recoverable(rgb_image: ImageFrame) -> None:
+@pytest.mark.parametrize("type_id", ["synmachine.image.add_noise", "synmachine.image.posterize"])
+def test_filter_channel_selection_excludes_alpha(type_id: str) -> None:
+    # ADR-0015: sources never carry a fourth (alpha) channel, so the
+    # user-facing channel selection does not offer CHANNEL_4.
+    definition = _definition(type_id)
+    spec = next(p for p in definition.parameters if p.id == "channels")
+    assert "CHANNEL_4" not in spec.choices
+
+    values, errors = definition.parameter_values({"channels": "CHANNEL_4"})
+    assert len(errors) == 1
+    assert "expected one of" in errors[0]
+    assert values["channels"] == "COLOUR"
+
+
+def test_filter_channel_selection_runtime_backstop_still_rejects_alpha(
+    rgb_image: ImageFrame,
+) -> None:
+    # The definition no longer offers CHANNEL_4 (see
+    # test_filter_channel_selection_excludes_alpha); the media-layer runtime
+    # guard remains as a recoverable backstop for any forced value.
     for type_id in ("synmachine.image.add_noise", "synmachine.image.posterize"):
+        definition = _definition(type_id)
         with pytest.raises(ExpectedNodeError, match="CHANNEL_4 is unavailable"):
-            _process(type_id, rgb_image, {"channels": "CHANNEL_4"})
+            _runtime_process(
+                definition,
+                rgb_image,
+                {
+                    "noise_type": "GAUSSIAN",
+                    "amount": 0.1,
+                    "seed": 0,
+                    "monochrome": False,
+                    "animate_seed": False,
+                    "levels": 4,
+                    "clamp_input": True,
+                    "channels": "CHANNEL_4",
+                },
+            )
 
 
 @pytest.mark.parametrize(

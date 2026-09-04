@@ -558,6 +558,10 @@ def test_v4_node_migrations_are_pure_and_rewrite_alpha_surfaces(
         "synmachine.image.add_scalar",
         "synmachine.image.multiply_scalar",
         "synmachine.image.divide_scalar",
+        # Filter nodes with the same channel-selection surface (ADR-0015
+        # follow-up): Add Noise and Posterize.
+        "synmachine.image.add_noise",
+        "synmachine.image.posterize",
     ],
 )
 def test_v4_adjustment_selection_migration_is_pure_and_maps_channel_4(type_id: str) -> None:

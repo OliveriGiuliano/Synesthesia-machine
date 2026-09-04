@@ -8,7 +8,7 @@
     {
       "collapsed": false,
       "id": "65000000-0000-0000-0000-000000000001",
-      "implementation_version": 1,
+      "implementation_version": 2,
       "parameters": {
         "amount": 0.05,
         "animate_seed": false,
@@ -476,7 +476,7 @@
     {
       "collapsed": false,
       "id": "65000000-0000-0000-0000-000000000026",
-      "implementation_version": 1,
+      "implementation_version": 2,
       "parameters": {
         "channels": "COLOUR",
         "clamp_input": true,
