@@ -480,6 +480,18 @@ def test_statistics_combines_multiple_direct_scalar_connections() -> None:
     assert minimum == 2
     assert isinstance(minimum, int)
 
+    # A mixed INT+FLOAT set resolves to FLOAT in the compiler, so MINIMUM /
+    # MAXIMUM must emit a float even when the first sample is an int (the
+    # int coercion applies only when every sample is an int).
+    mixed_min = runtime.process({"values_1": 5, "values_2": 2.5}, min_parameters, context)["value"]
+    assert mixed_min == 2.5
+    assert isinstance(mixed_min, float)
+
+    max_parameters, _ = statistics.parameter_values({"statistic": "MAXIMUM"})
+    mixed_max = runtime.process({"values_1": 1, "values_2": 7.5}, max_parameters, context)["value"]
+    assert mixed_max == 7.5
+    assert isinstance(mixed_max, float)
+
 
 def test_statistics_combines_multiple_direct_image_connections() -> None:
     registry = create_application_registry()

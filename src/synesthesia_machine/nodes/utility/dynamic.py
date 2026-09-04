@@ -209,7 +209,16 @@ class StatisticsRuntime(_RuntimeBase):
             sample_array = np.asarray([_number(value) for value in samples], dtype=np.float64)
             result = _statistic(sample_array, statistic, percentile, axis=0)
             scalar: float | int = float(result)
-            if isinstance(first, int) and statistic in {"MINIMUM", "MAXIMUM"}:
+            # The compiler unifies the element types of every variadic
+            # input ({INT, FLOAT} -> FLOAT), so a mixed set declares a
+            # FLOAT output: stay an int only when every sample is an int
+            # (gating on the first sample alone would emit an int for a
+            # mixed set). A downstream concrete-FLOAT consumer can still
+            # force a FLOAT output for an all-int set; the runtime cannot
+            # see the declared type, so that case is tracked separately.
+            if statistic in {"MINIMUM", "MAXIMUM"} and all(
+                isinstance(value, int) and not isinstance(value, bool) for value in samples
+            ):
                 scalar = int(scalar)
             return {"value": scalar}
         raise ExpectedNodeError(

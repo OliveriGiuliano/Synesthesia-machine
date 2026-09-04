@@ -378,6 +378,40 @@ def test_statistics_mixes_direct_and_buffered_scalars() -> None:
     assert node.output_types["value"] is PortType.FLOAT
 
 
+def test_statistics_mixed_int_and_float_scalars_resolve_to_float() -> None:
+    # A lone INT element feeding a FLOAT-resolving array socket carries no
+    # conversion (unlike element -> element sockets): the runtime receives
+    # the raw int, so Statistics must emit the unified FLOAT output type.
+    document = GraphDocument(document_id=DOCUMENT_ID)
+    integer = document.add_node(
+        "synmachine.utility.number",
+        node_id=STATS_SOURCE_A,
+        parameters={"number_type": "INT", "int_value": 5},
+    )
+    fractional = document.add_node(
+        "synmachine.utility.number",
+        node_id=STATS_SOURCE_B,
+        parameters={"number_type": "FLOAT", "float_value": 2.5},
+    )
+    statistics = document.add_node(
+        "synmachine.utility.statistics",
+        node_id=STATS_NODE,
+        implementation_version=2,
+        parameters={"statistic": "MINIMUM"},
+    )
+    document.add_connection(integer, "value", statistics, "values_1")
+    document.add_connection(fractional, "value", statistics, "values_2")
+
+    result = GraphCompiler(create_utility_registry()).compile(document.snapshot())
+
+    assert result.report.is_valid, [issue.message for issue in result.report.issues]
+    node = result.plan.node(STATS_NODE)
+    assert node is not None
+    assert node.output_types["value"] is PortType.FLOAT
+    assert node.input_bindings["values_1"].conversion is None
+    assert node.input_bindings["values_2"].conversion is None
+
+
 def test_statistics_requires_at_least_one_input() -> None:
     document = GraphDocument(document_id=DOCUMENT_ID)
     document.add_node(
