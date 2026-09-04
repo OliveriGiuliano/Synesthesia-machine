@@ -504,8 +504,13 @@ class EngineServer:
                 command.descriptor.source_port_id,
                 command.descriptor.generation,
             )
-        self._engine.panic()
-        self._engine.close()
+        # Shutdown: a raising panic (slow MIDI device cannot confirm
+        # all-notes-off within its timeout) must not skip close(), or the
+        # child's runtimes would linger until the parent terminates it.
+        try:
+            self._engine.panic()
+        finally:
+            self._engine.close()
         return ShutdownAcknowledged(command.request_id, self._graph_revision)
 
     def _handle_transport(self, command: TransportCommand) -> None:

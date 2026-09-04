@@ -123,8 +123,14 @@ class EngineFacade:
         self._plan = None
         if scheduler is None:
             return
-        scheduler.panic()
-        scheduler.close(reason)
+        try:
+            scheduler.panic()
+        finally:
+            # Panic may raise (a slow MIDI device cannot confirm
+            # all-notes-off within its timeout); the scheduler must still
+            # be closed, or its open MIDI ports and sender threads leak
+            # on every auto-stop in the long-lived child engine.
+            scheduler.close(reason)
 
     def tick(
         self, context: FrameContext, *, source_values: Mapping[PortKey, RuntimeValue] | None = None

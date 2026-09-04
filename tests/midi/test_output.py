@@ -888,6 +888,34 @@ def test_source_reset_panics_midi_sink_in_that_clock_component() -> None:
     assert services[0].close_count == 1
 
 
+def test_facade_stop_closes_scheduler_even_when_midi_panic_times_out() -> None:
+    # A MIDI device that cannot confirm all-notes-off within the panic
+    # timeout makes service.panic() raise; EngineFacade.stop() must still
+    # close the scheduler, or its open MIDI ports and sender threads leak
+    # on every auto-stop in the long-lived child engine.
+    class _PanicTimeoutService(_RecordingService):
+        def panic(self, timeout_s: float = 2.0) -> None:
+            del timeout_s
+            self.panic_count += 1
+            raise TimeoutError("panic confirmation timed out")
+
+    service = _PanicTimeoutService()
+    midi_definition = create_midi_output_definitions(service_factory=lambda: service)[0]
+    facade = EngineFacade(NodeRegistry((_source_definition(), midi_definition)))
+    try:
+        assert facade.activate(_source_and_midi_document().snapshot()).plan is not None
+        with pytest.raises(TimeoutError):
+            facade.stop()
+    finally:
+        facade.close()
+    # Two panics: the direct one (which timed out) and the close-time
+    # reset, which Scheduler.close performs on every runtime.
+    assert service.panic_count == 2
+    # close() ran despite the panic timeout: the leaked-scheduler defect is
+    # that this would be 0 on the pre-fix ordering (detach before panic).
+    assert service.close_count == 1
+
+
 def test_output_port_recompile_retires_old_runtime_before_using_new_service() -> None:
     services: list[_RecordingService] = []
 
