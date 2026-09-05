@@ -408,3 +408,27 @@ def test_value_preview_sanitizes_non_finite_scalars() -> None:
     (finite_preview,) = broker.poll_values({(SCALAR_PRODUCER_ID, "value"): inf_preview.sequence})
     assert finite_preview.text != "\u2014"
     assert finite_preview.sequence > inf_preview.sequence
+
+
+class _SteppingClock:
+    """Advance one full pill interval per call so every publish is due."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        self.now += 0.2
+        return self.now
+
+
+def test_preview_dirty_notifier_fires_only_when_a_preview_advances() -> None:
+    signals: list[int] = []
+    plan, scalar_source = _value_preview_plan()
+    broker = PreviewBroker(monotonic=_SteppingClock(), dirty_notifier=lambda: signals.append(1))
+    broker.configure(plan)
+    broker.publish(_value_tick_result(scalar_source, scalar=1.5, tick_index=1))
+    assert signals == [1]
+    broker.publish(_value_tick_result(scalar_source, scalar=1.5, tick_index=2))
+    assert signals == [1]
+    broker.publish(_value_tick_result(scalar_source, scalar=2.5, tick_index=3))
+    assert signals == [1, 1]

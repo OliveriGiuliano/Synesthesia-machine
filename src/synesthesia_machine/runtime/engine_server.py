@@ -77,7 +77,12 @@ from synesthesia_machine.runtime.in_process_engine import InProcessEngineClient
 from synesthesia_machine.runtime.shared_previews import AttachedPreviewSlot
 
 HEARTBEAT_INTERVAL_S = 0.25
-PREVIEW_POLL_INTERVAL_S = 1.0 / 60.0
+# While an announced shared-preview slot has not yet received its first frame
+# (the parent/child configure handshake), the publisher keeps a slow safety
+# poll so the handshake converges even when no new previews are published
+# (e.g. a short video that ends mid-handshake). Once every announced slot
+# has written at least one frame, publishing is purely event-driven.
+SLOT_HANDSHAKE_POLL_INTERVAL_S = 0.05
 MAX_OPENCV_THREADS = 16
 
 
@@ -150,9 +155,14 @@ class _EventPublisher:
         *,
         started_monotonic_ns: int,
         heartbeat_interval_s: float,
+        preview_wake: threading.Event,
     ) -> None:
         self._engine = engine
         self._event_queue = event_queue
+        # Set by the preview broker whenever a preview actually advanced;
+        # it is the source of truth for "publish now" and the event wait is
+        # only a sleep bounded by the next heartbeat/preview deadline.
+        self._preview_wake = preview_wake
         self._started_monotonic_ns = started_monotonic_ns
         self._heartbeat_interval_s = heartbeat_interval_s
         self._lock = threading.RLock()
@@ -165,6 +175,9 @@ class _EventPublisher:
         self._format_generations: dict[tuple[UUID, str], int] = {}
         self._announced_formats: dict[tuple[UUID, str], tuple[int, int, int, int]] = {}
         self._slots: dict[tuple[UUID, str], AttachedPreviewSlot] = {}
+        # Announced slots that have not yet written a first frame; drives the
+        # safety-poll phase of the parent/child preview handshake.
+        self._slot_ready: dict[tuple[UUID, str], bool] = {}
         self._thread = threading.Thread(
             target=self._run,
             name="engine-event-publisher",
@@ -181,6 +194,7 @@ class _EventPublisher:
             self._note_sequences.clear()
             self._value_sequences.clear()
             self._announced_formats.clear()
+            self._slot_ready.clear()
             self._close_slots_locked()
 
     def configure_slot(self, descriptor: PreviewSlotDescriptor, graph_revision: int) -> None:
@@ -217,23 +231,47 @@ class _EventPublisher:
 
     def _run(self) -> None:
         next_heartbeat = 0.0
-        while not self._stop.wait(PREVIEW_POLL_INTERVAL_S):
+        next_handshake_poll = 0.0
+        while True:
             now = time.monotonic()
             if now >= next_heartbeat:
                 self._publish_heartbeat()
                 next_heartbeat = now + self._heartbeat_interval_s
-            try:
-                self._publish_previews()
-            except Exception as error:
-                with self._lock:
-                    graph_revision = self._graph_revision
-                self._put_event(
-                    EngineErrorPublished(
-                        graph_revision,
-                        f"Preview publisher failed: {type(error).__name__}: {error}",
-                        traceback.format_exc(),
+            handshake_pending = any(not ready for ready in self._slot_ready.values())
+            if self._preview_wake.is_set() or (handshake_pending and now >= next_handshake_poll):
+                # The wake event is the source of truth for new previews: the
+                # broker sets it the moment anything advanced, and Event.wait
+                # below returns early when it is set, so live preview latency
+                # is bounded by the wake, not by a polling cadence. The
+                # handshake-pending poll additionally drives the
+                # announce/configure/write handshake for slots that announced
+                # before their first frame arrived (e.g. a short video that
+                # ends mid-handshake).
+                self._preview_wake.clear()
+                if handshake_pending:
+                    next_handshake_poll = time.monotonic() + SLOT_HANDSHAKE_POLL_INTERVAL_S
+                try:
+                    self._publish_previews()
+                except Exception as error:
+                    with self._lock:
+                        graph_revision = self._graph_revision
+                    self._put_event(
+                        EngineErrorPublished(
+                            graph_revision,
+                            f"Preview publisher failed: {type(error).__name__}: {error}",
+                            traceback.format_exc(),
+                        )
                     )
-                )
+            if self._stop.is_set():
+                break
+            # Wait for a dirty signal; the heartbeat deadline (and the
+            # handshake deadline while slots are pending) bounds the sleep so
+            # stop/shutdown and heartbeats stay responsive.
+            if handshake_pending:
+                timeout_s = min(next_heartbeat, next_handshake_poll) - time.monotonic()
+            else:
+                timeout_s = next_heartbeat - time.monotonic()
+            self._preview_wake.wait(max(0.0, timeout_s))
 
     def _publish_heartbeat(self) -> None:
         with self._lock:
@@ -276,6 +314,8 @@ class _EventPublisher:
                     self._announce_format_locked(graph_revision, preview)
                     continue
                 self._image_sequences[slot_key] = preview.sequence
+                if self._slot_ready.get(slot_key) is False:
+                    self._slot_ready[slot_key] = True
         note_previews = self._engine.poll_note_previews(note_sequences)
         if note_previews and self._put_event(NotePreviewsPublished(graph_revision, note_previews)):
             with self._lock:
@@ -305,6 +345,7 @@ class _EventPublisher:
             previous = self._slots.pop(slot_key, None)
             if previous is not None:
                 previous.close()
+            self._slot_ready[slot_key] = False
         else:
             generation = current[0]
         self._put_event(
@@ -348,13 +389,18 @@ class EngineServer:
         self._heartbeat_interval_s = heartbeat_interval_s
         self._started_monotonic_ns = time.monotonic_ns()
         self._graph_revision: int | None = None
-        self._engine = InProcessEngineClient(create_builtin_registry())
+        self._preview_wake = threading.Event()
+        self._engine = InProcessEngineClient(
+            create_builtin_registry(),
+            preview_dirty_notifier=self._preview_wake.set,
+        )
         self._process = psutil.Process()
         self._events = _EventPublisher(
             self._engine,
             event_queue,
             started_monotonic_ns=self._started_monotonic_ns,
             heartbeat_interval_s=heartbeat_interval_s,
+            preview_wake=self._preview_wake,
         )
 
     def run(self) -> None:

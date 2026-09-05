@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import UUID
 
 import numpy as np
+import pytest
 from tests.support.graph_factories import frame_context
 
 from synesthesia_machine.contracts import (
@@ -14,6 +15,7 @@ from synesthesia_machine.contracts import (
     FrameContext,
     FrameProvenance,
     ImageFrame,
+    NoData,
 )
 from synesthesia_machine.graph import GraphCompiler, GraphDocument
 from synesthesia_machine.nodes.utility import create_utility_registry
@@ -87,3 +89,30 @@ def test_process_profiler_query_and_reset_round_trip(tmp_path: Path) -> None:
         client.set_profiling_enabled(False)
     finally:
         client.close()
+
+
+def test_profiler_summaries_match_reference_formatting() -> None:
+    # Output summaries are now deferred from cheap facts to read time; pin the
+    # exact rendering for every scalar kind so a rewrite cannot drift the UI
+    # text (frames and MIDI are pinned by the neighboring tests).
+    profiler = RuntimeProfiler()
+    profiler.record(
+        NODE_ID,
+        1_000_000,
+        {
+            "a": NoData,
+            "b": 3.5,
+            "c": "hi",
+            "d": True,
+            "e": 7,
+            "long": "x" * 60,
+        },
+        failed=False,
+    )
+    (profile,) = profiler.profiles()
+    assert profile.output_summary == (
+        "a=NoData, b=FLOAT 3.5, c=STRING 'hi', d=BOOL True, e=INT 7, "
+        "long=STRING 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\u2026'"
+    )
+    assert profile.output_bytes == 8 + 2 + 1 + 8 + 60
+    assert profiler.global_p95_ms() == pytest.approx(1.0)

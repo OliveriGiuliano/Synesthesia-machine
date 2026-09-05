@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from uuid import UUID
 
@@ -248,5 +249,34 @@ def test_broken_graph_stops_the_runtime_and_a_valid_graph_restarts_it(
         )
         assert client.activate(restarted.snapshot()).activated
         assert client.source_status(restarted_source_id)[0].state is SourceState.READY
+    finally:
+        client.close()
+
+
+def test_preview_disabled_engine_spins_no_preview_worker(tmp_path: Path) -> None:
+    # Offline workloads (MIDI export, UI tests) pay for no preview worker and
+    # no broker when previews are disabled; the graph still runs to the end.
+    video = generate_test_video(
+        tmp_path / "no-previews.mp4", frame_count=DEFAULT_FRAME_COUNT, fps=60
+    )
+    registry = create_application_registry()
+    document = GraphDocument()
+    source_id = document.add_node(
+        "synmachine.input.load_video",
+        parameters={"file_path": str(video)},
+    )
+    client = InProcessEngineClient(registry, use_previews=False)
+    try:
+        activation = client.activate(document.snapshot())
+        assert activation.activated and activation.report.is_valid
+        client.play(source_id)
+        assert client.wait_until_idle(3.0)
+        thread_names = {thread.name for thread in threading.enumerate()}
+        assert "in-process-preview-worker" not in thread_names
+        assert client.poll_image_previews() == ()
+        assert client.poll_note_previews() == ()
+        assert client.poll_value_previews() == ()
+        metrics = client.metrics()
+        assert metrics.processed_ticks == DEFAULT_FRAME_COUNT
     finally:
         client.close()

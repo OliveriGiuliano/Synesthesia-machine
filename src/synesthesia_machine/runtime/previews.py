@@ -88,8 +88,13 @@ class PreviewBroker:
         monotonic: MonotonicClock = time.monotonic,
         image_converter: ImagePreviewConverter | None = None,
         channel_converter: ChannelPreviewConverter | None = None,
+        dirty_notifier: Callable[[], None] | None = None,
     ) -> None:
         self._monotonic = monotonic
+        # Optional wake-up hook for out-of-thread pollers (e.g. the engine
+        # event publisher): called on the publish thread, outside the broker
+        # lock, only when at least one preview actually advanced.
+        self._dirty_notifier = dirty_notifier
         self._image_converter = image_converter or _preview_image_data
         self._channel_converter = channel_converter or _preview_channel_data
         self._lock = threading.Lock()
@@ -272,6 +277,7 @@ class PreviewBroker:
         with self._lock:
             if generation != self._generation:
                 return
+            advanced = False
             for target, value, data in image_publications:
                 key = (target.node_id, target.source.port_id)
                 if not _is_due(self._image_last_published.get(key), now, target.interval_s):
@@ -291,6 +297,7 @@ class PreviewBroker:
                 self._image_sequences[key] = sequence
                 self._image_last_published[key] = now
                 self._image_publication_times.append(now)
+                advanced = True
             self._trim_image_publication_times_locked(now)
             for target, value, notes in note_publications:
                 if not _is_due(
@@ -312,6 +319,7 @@ class PreviewBroker:
                 self._note_sequences[target.node_id] = sequence
                 self._note_last_published[target.node_id] = now
                 self._note_last_notes[target.node_id] = notes
+                advanced = True
             # Value capture keys off the source tick index: a scalar pill only
             # refreshes when a source (frame) tick supplies a tick index. This is
             # an intentional, tested invariant, not an accident of the current
@@ -342,6 +350,9 @@ class PreviewBroker:
                     self._value_sequences[key] = sequence
                     self._value_last_published[key] = now
                     self._value_last_text[key] = text
+                    advanced = True
+        if advanced and self._dirty_notifier is not None:
+            self._dirty_notifier()
 
     def poll_images(
         self, after_sequences: Mapping[tuple[UUID, str], int] | None = None

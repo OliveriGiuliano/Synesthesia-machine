@@ -45,7 +45,10 @@ from synesthesia_machine.runtime.device_catalogue import (
 )
 from synesthesia_machine.runtime.engine_facade import EngineFacade
 from synesthesia_machine.runtime.execution_plan import CompiledNode, ExecutionPlan, PortKey
-from synesthesia_machine.runtime.previews import PreviewBroker
+from synesthesia_machine.runtime.previews import (
+    PreviewBroker,
+    _PreviewConfiguration,  # type: ignore[reportPrivateUsage]  # null broker returns the real type
+)
 from synesthesia_machine.runtime.profiling import RuntimeProfiler
 from synesthesia_machine.runtime.scheduler import TickResult
 
@@ -220,6 +223,49 @@ class _LatestPreviewWorker:
                 with self._condition:
                     self._busy = False
                     self._condition.notify_all()
+
+
+class _NoPreviewBroker:
+    """Null preview broker for preview-disabled engines (export, tests).
+
+    Polls stay empty and publication is a no-op so a preview-free workload
+    never spins the preview worker thread or scans preview targets.
+    """
+
+    @staticmethod
+    def prepare(plan: ExecutionPlan) -> _PreviewConfiguration:
+        return _PreviewConfiguration((), (), ())
+
+    def apply(self, configuration: _PreviewConfiguration) -> None:
+        return None
+
+    def clear(self) -> None:
+        return None
+
+    @property
+    def generation(self) -> int:
+        return 0
+
+    def publish(self, result: TickResult, *, expected_generation: int | None = None) -> None:
+        return None
+
+    def poll_images(
+        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
+    ) -> tuple[ImagePreview, ...]:
+        return ()
+
+    def poll_notes(
+        self, after_sequences: Mapping[UUID, int] | None = None
+    ) -> tuple[NotePreview, ...]:
+        return ()
+
+    def poll_values(
+        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
+    ) -> tuple[ValuePreview, ...]:
+        return ()
+
+    def preview_fps(self) -> float:
+        return 0.0
 
 
 class LatestFrameGraphWorker:
@@ -593,6 +639,8 @@ class InProcessEngineClient:
         device_catalogue_service: DeviceCatalogueService | None = None,
         worker_clock: Callable[[], int] = time.perf_counter_ns,
         tick_observer: TickObserver | None = None,
+        use_previews: bool = True,
+        preview_dirty_notifier: Callable[[], None] | None = None,
     ) -> None:
         self._lock = threading.RLock()
         self._profiler = RuntimeProfiler()
@@ -603,7 +651,12 @@ class InProcessEngineClient:
         self._camera_source_factory = camera_source_factory or CameraSourceService
         self._device_catalogue_service = device_catalogue_service or SystemDeviceCatalogueService()
         self._worker_clock = worker_clock
-        self._preview_broker = PreviewBroker()
+        self._use_previews = use_previews
+        self._preview_broker: PreviewBroker | _NoPreviewBroker = (
+            PreviewBroker(dirty_notifier=preview_dirty_notifier)
+            if use_previews
+            else _NoPreviewBroker()
+        )
         self._worker: LatestFrameGraphWorker | None = None
         self._sources: dict[UUID, SourceController] = {}
         self._state = EngineState.STOPPED
@@ -642,9 +695,14 @@ class InProcessEngineClient:
             worker = self._worker
             worker_created = worker is None
             if worker is None:
+                worker_broker: PreviewBroker | None = (
+                    self._preview_broker
+                    if isinstance(self._preview_broker, PreviewBroker)
+                    else None
+                )
                 worker = LatestFrameGraphWorker(
                     self._facade,
-                    preview_broker=self._preview_broker,
+                    preview_broker=worker_broker,
                     monotonic_ns=self._worker_clock,
                     tick_observer=self._tick_observer,
                 )

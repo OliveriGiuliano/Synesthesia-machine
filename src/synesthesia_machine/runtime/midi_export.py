@@ -301,6 +301,9 @@ def run_midi_export(
         video_source_factory=_ExportVideoSourceFactory(),
         device_catalogue_service=_NullDeviceCatalogueService(),
         tick_observer=_observe,
+        # The export consumes no previews: skip the preview worker and broker
+        # so every tick stays on the pure graph path.
+        use_previews=False,
     )
     started = time.monotonic()
     try:

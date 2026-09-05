@@ -24,13 +24,82 @@ DEFAULT_PROFILE_WINDOW = 240
 DEFAULT_EMA_ALPHA = 0.2
 
 
+@dataclass(frozen=True, slots=True)
+class _ImageFact:
+    height: int
+    width: int
+    channels: int
+    dtype: object
+
+
+@dataclass(frozen=True, slots=True)
+class _ChannelFact:
+    height: int
+    width: int
+    dtype: object
+
+
+@dataclass(frozen=True, slots=True)
+class _MidiFact:
+    note_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class _ColorFact:
+    r: float
+    g: float
+    b: float
+    a: float
+
+
+@dataclass(frozen=True, slots=True)
+class _BoolFact:
+    value: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _IntFact:
+    value: int
+
+
+@dataclass(frozen=True, slots=True)
+class _FloatFact:
+    value: float
+
+
+@dataclass(frozen=True, slots=True)
+class _StrFact:
+    value: str
+
+
+@dataclass(frozen=True, slots=True)
+class _ArrayFact:
+    item_type: str
+    item_count: int
+
+
+type _OutputFact = (
+    _ImageFact
+    | _ChannelFact
+    | _MidiFact
+    | _ColorFact
+    | _BoolFact
+    | _IntFact
+    | _FloatFact
+    | _StrFact
+    | _ArrayFact
+    | None
+)
+type _OutputFacts = tuple[tuple[str, _OutputFact, int], ...]
+
+
 @dataclass(slots=True)
 class _NodeAccumulator:
     durations_ns: deque[int]
     invocation_count: int = 0
     error_count: int = 0
     ema_ns: float = 0.0
-    output_summary: str = "no outputs"
+    output_facts: _OutputFacts = ()
     output_bytes: int = 0
 
 
@@ -62,7 +131,10 @@ class RuntimeProfiler:
     ) -> None:
         if duration_ns < 0:
             raise ValueError("Profile duration cannot be negative")
-        summary, output_bytes = summarize_outputs(outputs)
+        # Collect only cheap facts on the tick path: summary strings are
+        # formatted from these facts when profiles() is read (UI cadence),
+        # so an enabled profiler does no per-tick string building.
+        output_facts, output_bytes = collect_output_facts(outputs)
         with self._lock:
             accumulator = self._nodes.get(node_id)
             if accumulator is None:
@@ -76,7 +148,7 @@ class RuntimeProfiler:
                 if accumulator.invocation_count == 1
                 else self.ema_alpha * duration_ns + (1.0 - self.ema_alpha) * accumulator.ema_ns
             )
-            accumulator.output_summary = summary
+            accumulator.output_facts = output_facts
             accumulator.output_bytes = output_bytes
             self._all_durations_ns.append(duration_ns)
 
@@ -88,14 +160,15 @@ class RuntimeProfiler:
                     accumulator.invocation_count,
                     accumulator.error_count,
                     accumulator.ema_ns,
-                    accumulator.output_summary,
+                    accumulator.output_facts,
                     accumulator.output_bytes,
                 )
                 for node_id, accumulator in self._nodes.items()
             }
         profiles: list[NodeProfile] = []
         for node_id, snapshot in snapshots.items():
-            durations, invocation_count, error_count, ema_ns, summary, output_bytes = snapshot
+            durations, invocation_count, error_count, ema_ns, output_facts, output_bytes = snapshot
+            summary, _ = format_output_facts(output_facts)
             ordered = tuple(sorted(durations))
             profiles.append(
                 NodeProfile(
@@ -115,9 +188,15 @@ class RuntimeProfiler:
         return tuple(sorted(profiles, key=lambda item: str(item.node_id)))
 
     def global_p95_ms(self) -> float:
+        # Copy under the lock, sort outside it: the UI polls this while the
+        # tick thread records, and holding the lock across a full-deque sort
+        # could stall a tick mid-execution on a small machine.
         with self._lock:
-            ordered = tuple(sorted(self._all_durations_ns))
-        return _percentile(ordered, 95.0) / 1_000_000.0 if ordered else 0.0
+            durations = tuple(self._all_durations_ns)
+        if not durations:
+            return 0.0
+        ordered = tuple(sorted(durations))
+        return _percentile(ordered, 95.0) / 1_000_000.0
 
     def reset(self) -> None:
         with self._lock:
@@ -126,41 +205,90 @@ class RuntimeProfiler:
 
 
 def summarize_outputs(outputs: Mapping[str, RuntimeValue]) -> tuple[str, int]:
-    summaries: list[str] = []
+    """Compatibility helper: collect facts and format the display summary."""
+
+    facts, total_bytes = collect_output_facts(outputs)
+    return format_output_facts(facts, total_bytes)
+
+
+def collect_output_facts(
+    outputs: Mapping[str, RuntimeValue],
+) -> tuple[_OutputFacts, int]:
+    """Collect cheap per-output facts (no string building, no per-item format).
+
+    Runs on the tick path while profiling is enabled, so it only performs the
+    isinstance ladder and shape/dtype reads; summary text is built later by
+    :func:`format_output_facts` at UI cadence.
+    """
+
+    facts: list[tuple[str, _OutputFact, int]] = []
     total_bytes = 0
     for port_id, value in sorted(outputs.items()):
-        summary, value_bytes = _summarize_value(value)
-        summaries.append(f"{port_id}={summary}")
+        fact, value_bytes = _collect_value_facts(value)
+        facts.append((port_id, fact, value_bytes))
         total_bytes += value_bytes
-    return (", ".join(summaries) if summaries else "no outputs", total_bytes)
+    return (tuple(facts), total_bytes)
 
 
-def _summarize_value(value: RuntimeValue) -> tuple[str, int]:
+def format_output_facts(facts: _OutputFacts, total_bytes: int | None = None) -> tuple[str, int]:
+    """Build the display summary from collected facts (off the tick path)."""
+
+    if total_bytes is None:
+        total_bytes = sum(bytes for _, _, bytes in facts)
+    if not facts:
+        return "no outputs", total_bytes
+    summaries = [f"{port_id}={_format_fact(fact)}" for port_id, fact, _ in facts]
+    return (", ".join(summaries), total_bytes)
+
+
+def _collect_value_facts(value: RuntimeValue) -> tuple[_OutputFact, int]:
     if value is NoData:
-        return "NoData", 0
+        return (None, 0)
     if isinstance(value, ImageFrame):
         height, width, channels = value.data.shape
-        return f"IMAGE {width}x{height}x{channels} {value.data.dtype}", value.data.nbytes
+        return (_ImageFact(height, width, channels, value.data.dtype), value.data.nbytes)
     if isinstance(value, ChannelFrame):
         height, width = value.data.shape
-        return f"CHANNEL {width}x{height} {value.data.dtype}", value.data.nbytes
+        return (_ChannelFact(height, width, value.data.dtype), value.data.nbytes)
     if isinstance(value, MidiStateFrame):
-        return f"MIDI_STATE {len(value.notes)} note(s)", len(value.notes) * 3
+        return (_MidiFact(len(value.notes)), len(value.notes) * 3)
     if isinstance(value, ColorValue):
-        return f"COLOR ({value.r:.3g}, {value.g:.3g}, {value.b:.3g}, {value.a:.3g})", 32
+        return (_ColorFact(value.r, value.g, value.b, value.a), 32)
     if isinstance(value, bool):
-        return f"BOOL {value}", 1
+        return (_BoolFact(value), 1)
     if isinstance(value, int):
-        return f"INT {value}", 8
+        return (_IntFact(value), 8)
     if isinstance(value, float):
-        return f"FLOAT {value:.8g}", 8
+        return (_FloatFact(value), 8)
     if isinstance(value, str):
-        shown = value if len(value) <= 48 else value[:45] + "…"
-        return f"STRING {shown!r}", len(value.encode("utf-8"))
+        return (_StrFact(value), len(value.encode("utf-8")))
     if isinstance(value, ValueArray):
-        byte_count = sum(_summarize_value(item)[1] for item in value.values)
-        return f"{value.item_type.value}_ARRAY {len(value.values)} item(s)", byte_count
+        byte_count = sum(_collect_value_facts(item)[1] for item in value.values)
+        return (_ArrayFact(value.item_type.value, len(value.values)), byte_count)
     raise TypeError(f"unsupported runtime value: {type(value).__name__}")
+
+
+def _format_fact(fact: _OutputFact) -> str:
+    if fact is None:
+        return "NoData"
+    if isinstance(fact, _ImageFact):
+        return f"IMAGE {fact.width}x{fact.height}x{fact.channels} {fact.dtype}"
+    if isinstance(fact, _ChannelFact):
+        return f"CHANNEL {fact.width}x{fact.height} {fact.dtype}"
+    if isinstance(fact, _MidiFact):
+        return f"MIDI_STATE {fact.note_count} note(s)"
+    if isinstance(fact, _ColorFact):
+        return f"COLOR ({fact.r:.3g}, {fact.g:.3g}, {fact.b:.3g}, {fact.a:.3g})"
+    if isinstance(fact, _BoolFact):
+        return f"BOOL {fact.value}"
+    if isinstance(fact, _IntFact):
+        return f"INT {fact.value}"
+    if isinstance(fact, _FloatFact):
+        return f"FLOAT {fact.value:.8g}"
+    if isinstance(fact, _StrFact):
+        shown = fact.value if len(fact.value) <= 48 else fact.value[:45] + chr(8230)
+        return f"STRING {shown!r}"
+    return f"{fact.item_type}_ARRAY {fact.item_count} item(s)"
 
 
 def _percentile(ordered: tuple[int, ...], percentile: float) -> float:
