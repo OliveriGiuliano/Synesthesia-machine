@@ -8,6 +8,7 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Protocol, cast
 
 import numpy as np
@@ -45,16 +46,15 @@ class SynthConfiguration:
             raise ValueError("sample_rate and block_size must be positive")
 
 
-@dataclass(frozen=True, slots=True)
-class _DesiredNote:
-    key: int
-    note: int
-    velocity: int
+_EMPTY_VELOCITIES: Mapping[int, int] = MappingProxyType({})
 
 
 @dataclass(frozen=True, slots=True)
 class _DesiredSnapshot:
-    notes: tuple[_DesiredNote, ...] = ()
+    # (key, note, velocity) triples ordered by key, plus the same mapping as
+    # a hash lookup so the callback reconciles voices without per-voice scans.
+    notes: tuple[tuple[int, int, int], ...] = ()
+    velocity_by_key: Mapping[int, int] = _EMPTY_VELOCITIES
     panic_generation: int = 0
 
 
@@ -166,6 +166,11 @@ class DebugSynth:
         self._wave_buffer = np.empty(block_size, dtype=np.float32)
         self._envelope_buffer = np.empty(block_size, dtype=np.float32)
         self._mono_buffer = np.empty(block_size, dtype=np.float32)
+        # Whole-block envelope ramps are derived in float64 (matching the
+        # precision of the stage-level state) and stored into the float32
+        # buffer; one scalar stage state advances per stage change.
+        self._ramp_steps = np.arange(1, block_size + 1, dtype=np.float64)
+        self._ramp_buffer = np.empty(block_size, dtype=np.float64)
         self._publisher_lock = threading.Lock()
         self._desired = _DesiredSnapshot()
         self._seen_panic_generation = 0
@@ -200,15 +205,40 @@ class DebugSynth:
         with self._publisher_lock:
             if self._closed:
                 return
-            ranked = sorted(
-                (
-                    _DesiredNote(key.channel * 128 + key.note, key.note, velocity)
-                    for key, velocity in state.notes.items()
-                ),
-                key=lambda item: (-item.velocity, item.key),
-            )[: self.configuration.max_voices]
+            notes = state.notes
+            if not notes:
+                if self._desired.notes:
+                    self._desired = _DesiredSnapshot(
+                        panic_generation=self._desired.panic_generation
+                    )
+                return
+            flat: list[int] = []
+            append = flat.append
+            for key, velocity in notes.items():
+                append(key.channel * 128 + key.note)
+                append(velocity)
+            keys = np.asarray(flat[0::2], dtype=np.int32)
+            velocities = np.asarray(flat[1::2], dtype=np.int32)
+            max_voices = self.configuration.max_voices
+            if keys.size > max_voices:
+                # Keep the loudest voices; velocity ties resolve to lower keys.
+                ranked = np.lexsort((keys, -velocities))[:max_voices]
+                keys = keys[ranked]
+                velocities = velocities[ranked]
+            key_order = np.argsort(keys)
+            keys = keys[key_order]
+            velocities = velocities[key_order]
+            ordered: list[tuple[int, int, int]] = []
+            by_key: dict[int, int] = {}
+            append_note = ordered.append
+            for key, velocity in zip(keys, velocities, strict=True):
+                key = int(key)
+                velocity = int(velocity)
+                append_note((key, key % 128, velocity))
+                by_key[key] = velocity
             self._desired = _DesiredSnapshot(
-                tuple(sorted(ranked, key=lambda item: item.key)),
+                tuple(ordered),
+                by_key,
                 self._desired.panic_generation,
             )
 
@@ -253,26 +283,25 @@ class DebugSynth:
         self._reconcile(desired)
         mono = self._mono_buffer
         mono.fill(0.0)
-        active_voices = 0
-        for voice in range(len(self._keys)):
-            if self._stages[voice] != self._INACTIVE:
-                active_voices += 1
-        normalization = self.configuration.volume / math.sqrt(max(1, active_voices))
+        normalization = self.configuration.volume / math.sqrt(
+            max(1, int(np.count_nonzero(self._stages)))
+        )
         for voice in range(len(self._keys)):
             if self._stages[voice] == self._INACTIVE:
                 continue
             self._render_voice(voice, normalization, mono)
         np.clip(mono, -0.95, 0.95, out=mono)
-        for sample in range(frames):
-            value = mono[sample]
-            outdata[sample, 0] = value
-            outdata[sample, 1] = value
+        # Two vectorized strided stores replace the per-sample Python copy of
+        # the mono mixdown into both channels.
+        outdata[:, 0] = mono
+        outdata[:, 1] = mono
 
     def _reconcile(self, desired: _DesiredSnapshot) -> None:
+        by_key = desired.velocity_by_key
         for voice in range(len(self._keys)):
             if self._stages[voice] == self._INACTIVE:
                 continue
-            velocity = _desired_velocity(desired, int(self._keys[voice]))
+            velocity = by_key.get(int(self._keys[voice]), 0)
             if velocity == 0:
                 self._stages[voice] = self._RELEASE
             else:
@@ -280,14 +309,14 @@ class DebugSynth:
                 if self._stages[voice] == self._RELEASE:
                     self._stages[voice] = self._ATTACK
 
-        for note in desired.notes:
-            if self._find_voice(note.key) is not None:
+        for key, note, velocity in desired.notes:
+            if self._find_voice(key) is not None:
                 continue
             voice = self._select_voice(desired)
             self._age_counter += 1
-            self._keys[voice] = note.key
-            self._notes[voice] = note.note
-            self._velocities[voice] = note.velocity / 127.0
+            self._keys[voice] = key
+            self._notes[voice] = note
+            self._velocities[voice] = velocity / 127.0
             self._phases[voice] = 0.0
             self._envelopes[voice] = 0.0
             self._stages[voice] = self._ATTACK
@@ -300,11 +329,12 @@ class DebugSynth:
         return None
 
     def _select_voice(self, desired: _DesiredSnapshot) -> int:
+        by_key = desired.velocity_by_key
         selected: int | None = None
         for voice in range(len(self._keys)):
             if self._stages[voice] == self._INACTIVE:
                 return voice
-            if _desired_velocity(desired, int(self._keys[voice])) != 0:
+            if by_key.get(int(self._keys[voice]), 0) != 0:
                 continue
             if selected is None:
                 selected = voice
@@ -344,18 +374,30 @@ class DebugSynth:
         release_samples = max(
             1.0, self.configuration.release_ms * self.configuration.sample_rate / 1000
         )
-        for sample in range(self.configuration.block_size):
-            if stage == self._ATTACK:
-                level = min(1.0, level + 1.0 / attack_samples)
-                if level >= 1.0:
-                    stage = self._SUSTAIN
-            elif stage == self._RELEASE:
-                level = max(0.0, level - 1.0 / release_samples)
-                if level <= 0.0:
-                    stage = self._INACTIVE
-            envelope[sample] = level
-            if stage == self._INACTIVE:
-                break
+        # The envelope ramp is linear within a stage, so the whole block is
+        # derived from the carried level plus a per-sample slope in one
+        # vectorized pass (step applied before the first sample, clamped);
+        # only the scalar stage state advances, per stage change.
+        ramp = self._ramp_buffer
+        if stage == self._ATTACK:
+            np.multiply(self._ramp_steps, 1.0 / attack_samples, out=ramp)
+            np.add(ramp, level, out=ramp)
+            np.minimum(ramp, 1.0, out=ramp)
+            envelope[...] = ramp
+            level = float(ramp[-1])
+            if level >= 1.0:
+                stage = self._SUSTAIN
+        elif stage == self._RELEASE:
+            np.multiply(self._ramp_steps, 1.0 / release_samples, out=ramp)
+            np.subtract(level, ramp, out=ramp)
+            np.maximum(ramp, 0.0, out=ramp)
+            envelope[...] = ramp
+            level = float(ramp[-1])
+            if level <= 0.0:
+                stage = self._INACTIVE
+        else:
+            # Sustain holds the voice level for the entire block.
+            envelope.fill(level)
         self._envelopes[voice] = level
         self._stages[voice] = stage
         if stage == self._INACTIVE:
@@ -373,13 +415,6 @@ class DebugSynth:
         self._phases.fill(0.0)
         self._envelopes.fill(0.0)
         self._stages.fill(self._INACTIVE)
-
-
-def _desired_velocity(snapshot: _DesiredSnapshot, key: int) -> int:
-    for note in snapshot.notes:
-        if note.key == key:
-            return note.velocity
-    return 0
 
 
 class DebugSynthService(Protocol):
