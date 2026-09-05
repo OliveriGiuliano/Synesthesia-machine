@@ -157,13 +157,10 @@ def image_to_luminance(image: ImageFrame) -> ChannelFrame:
             finite, _ = cv2.checkRange(image.data[..., index], quiet=True)
             if not finite:
                 raise ValueError("Image to Luminance requires finite colour-channel values")
-    rgb, _ = _to_srgb(image.data, image.color_space)
-    linear = _srgb_to_linear(rgb)
-    luminance = (
-        linear[..., 0] * np.float32(0.2126)
-        + linear[..., 1] * np.float32(0.7152)
-        + linear[..., 2] * np.float32(0.0722)
-    )
+    linear = _to_linear(image.data, image.color_space)
+    luminance = linear[..., 0] * np.float32(0.2126)
+    luminance += linear[..., 1] * np.float32(0.7152)
+    luminance += linear[..., 2] * np.float32(0.0722)
     data = np.ascontiguousarray(luminance, dtype=np.float32)
     data.flags.writeable = False
     return ChannelFrame(data, ChannelSemantic.LUMINANCE, 0.0, 1.0, False, image.context)
@@ -259,6 +256,22 @@ def _to_srgb(
     return np.asarray(rgb, dtype=np.float32), alpha
 
 
+def _to_linear(data: NDArray[np.float32], color_space: ColorSpace) -> NDArray[np.float32]:
+    """Convert display-normalised channel data to linear light.
+
+    Spaces that are already linear-light (LINEAR_RGB) skip the round trip
+    through the sRGB transfer function, which previously re-encoded and
+    re-decoded the data for no reason.
+    """
+
+    if color_space is ColorSpace.SRGB:
+        return _srgb_to_linear(data)
+    if color_space is ColorSpace.LINEAR_RGB:
+        return data
+    rgb, _ = _to_srgb(data, color_space)
+    return _srgb_to_linear(rgb)
+
+
 def _from_srgb(
     rgb: NDArray[np.float32], alpha: NDArray[np.float32] | None, target: ColorSpace
 ) -> NDArray[np.float32]:
@@ -288,17 +301,24 @@ def _from_srgb(
 
 
 def _srgb_to_linear(data: NDArray[np.float32]) -> NDArray[np.float32]:
-    return np.where(
-        data <= np.float32(0.04045),
-        data / np.float32(12.92),
-        ((data + np.float32(0.055)) / np.float32(1.055)) ** np.float32(2.4),
-    ).astype(np.float32, copy=False)
+    # In-place rewrite of the np.where double-branch chain: same operations in
+    # the same order (bit-identical results), but two temporaries instead of
+    # five full-frame allocations on every call.
+    out = data / np.float32(12.92)
+    big = data + np.float32(0.055)
+    big /= np.float32(1.055)
+    np.power(big, np.float32(2.4), out=big)
+    np.copyto(out, big, where=data > np.float32(0.04045))
+    return out
 
 
 def _linear_to_srgb(data: NDArray[np.float32]) -> NDArray[np.float32]:
     positive = np.maximum(data, np.float32(0.0))
-    return np.where(
-        positive <= np.float32(0.0031308),
-        positive * np.float32(12.92),
-        np.float32(1.055) * positive ** np.float32(1.0 / 2.4) - np.float32(0.055),
-    ).astype(np.float32, copy=False)
+    # In-place rewrite of the np.where double-branch chain (bit-identical
+    # results, two temporaries instead of five).
+    out = positive * np.float32(12.92)
+    big = np.power(positive, np.float32(1.0 / 2.4))
+    np.multiply(big, np.float32(1.055), out=big)
+    np.subtract(big, np.float32(0.055), out=big)
+    np.copyto(out, big, where=positive > np.float32(0.0031308))
+    return out

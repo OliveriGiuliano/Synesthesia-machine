@@ -155,8 +155,50 @@ def measure_image_regions(
     if metric not in REGION_METRICS:
         raise ValueError(f"Unknown Region Grid metric: {metric!r}")
 
-    luminance = image_to_luminance(image).data
+    luminance = image_to_luminance(image).data if metric in (BRIGHTNESS, CONTRAST) else None
     values, use_rms_contrast = _metric_values(image, metric, luminance)
+    result = _cell_measurements(
+        values,
+        height,
+        width,
+        grid_rows,
+        grid_columns,
+        use_rms_contrast,
+    )
+    return tuple(result)
+
+
+def _cell_measurements(
+    values: NDArray[np.float32],
+    height: int,
+    width: int,
+    grid_rows: int,
+    grid_columns: int,
+    use_rms_contrast: bool,
+) -> list[RegionMeasurement]:
+    """Normalized per-cell statistics in row-major order.
+
+    When the grid divides the image exactly, the block statistics are computed
+    with one vectorized reduction over the inner axes instead of a Python
+    loop per cell (the default 4x4 and common grids pay O(rows*cols) Python
+    either way; large grids like 64x64 do not).
+    """
+
+    exact = height % grid_rows == 0 and width % grid_columns == 0
+    if exact:
+        block = values.reshape(grid_rows, height // grid_rows, grid_columns, width // grid_columns)
+        if use_rms_contrast:
+            # In normalized imagery the maximum black/white RMS contrast is 0.5.
+            measured = 2.0 * block.std(axis=(1, 3), dtype=np.float64)
+        else:
+            measured = block.mean(axis=(1, 3), dtype=np.float64)
+        measured = np.clip(measured, 0.0, 1.0)
+        return [
+            RegionMeasurement(row, column, float(measured[row, column]))
+            for row in range(grid_rows)
+            for column in range(grid_columns)
+        ]
+
     y_bounds = np.linspace(0, height, grid_rows + 1, dtype=np.int64)
     x_bounds = np.linspace(0, width, grid_columns + 1, dtype=np.int64)
     result: list[RegionMeasurement] = []
@@ -171,7 +213,7 @@ def measure_image_regions(
             else:
                 measured = float(np.mean(cell, dtype=np.float64))
             result.append(RegionMeasurement(row, column, min(1.0, max(0.0, measured))))
-    return tuple(result)
+    return result
 
 
 def create_region_grid_definitions() -> tuple[NodeDefinition, ...]:
@@ -254,12 +296,12 @@ def create_region_grid_definitions() -> tuple[NodeDefinition, ...]:
 def _metric_values(
     image: ImageFrame,
     metric: str,
-    luminance: NDArray[np.float32],
+    luminance: NDArray[np.float32] | None,
 ) -> tuple[NDArray[np.float32], bool]:
-    if metric == BRIGHTNESS:
-        return np.asarray(np.clip(luminance, 0.0, 1.0), dtype=np.float32), False
-    if metric == CONTRAST:
-        return np.asarray(np.clip(luminance, 0.0, 1.0), dtype=np.float32), True
+    if metric in (BRIGHTNESS, CONTRAST):
+        assert luminance is not None
+        values = np.asarray(np.clip(luminance, 0.0, 1.0), dtype=np.float32)
+        return values, metric == CONTRAST
     if metric in (SATURATION, VALUE):
         hsv = convert_image(image, ColorSpace.HSV).data
         index = 1 if metric == SATURATION else 2

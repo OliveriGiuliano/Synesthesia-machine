@@ -8,6 +8,7 @@ import json
 import os
 import statistics
 import subprocess
+import sys
 import tempfile
 import time
 from collections.abc import Callable
@@ -528,6 +529,8 @@ def _git_commit() -> str | None:
 
 
 def _windows_power_scheme() -> str | None:
+    if sys.platform != "win32":
+        return None
     result = subprocess.run(
         ["powercfg", "/getactivescheme"], check=False, capture_output=True, text=True
     )

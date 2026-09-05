@@ -398,5 +398,13 @@ def test_value_preview_sanitizes_non_finite_scalars() -> None:
 
     now[0] = 1.0 / 30.0
     broker.publish(_value_tick_result(scalar_source, scalar=float("nan"), tick_index=4))
-    (nan_preview,) = broker.poll_values({(SCALAR_PRODUCER_ID, "value"): inf_preview.sequence})
-    assert nan_preview.text == "\u2014"
+    # nan renders to the same placeholder text as inf, so the pill is
+    # unchanged and the broker suppresses the (redundant) re-publication;
+    # only a change in displayed text advances the preview sequence.
+    assert broker.poll_values({(SCALAR_PRODUCER_ID, "value"): inf_preview.sequence}) == ()
+
+    now[0] = 2.0 / 30.0
+    broker.publish(_value_tick_result(scalar_source, scalar=2.5, tick_index=5))
+    (finite_preview,) = broker.poll_values({(SCALAR_PRODUCER_ID, "value"): inf_preview.sequence})
+    assert finite_preview.text != "\u2014"
+    assert finite_preview.sequence > inf_preview.sequence

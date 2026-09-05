@@ -26,6 +26,7 @@ from synesthesia_machine.contracts import (
     ValuePreview,
 )
 from synesthesia_machine.media import image_to_display_uint8
+from synesthesia_machine.media.image_common import frame_like
 from synesthesia_machine.nodes.visualization import (
     CHANNEL_DISPLAY_TYPE_ID,
     DISPLAY_IMAGE_DATA_TYPE_ID,
@@ -100,6 +101,8 @@ class PreviewBroker:
         self._note_sequences: dict[UUID, int] = {}
         self._image_last_published: dict[tuple[UUID, str], float] = {}
         self._note_last_published: dict[UUID, float] = {}
+        self._note_last_notes: dict[UUID, tuple[NoteActivity, ...]] = {}
+        self._value_last_text: dict[tuple[UUID, str], str] = {}
         self._value_targets: tuple[_ValueTarget, ...] = ()
         self._value_previews: dict[tuple[UUID, str], ValuePreview] = {}
         self._value_sequences: dict[tuple[UUID, str], int] = {}
@@ -252,7 +255,19 @@ class PreviewBroker:
                 )
                 note_publications.append((target, value, notes))
 
+        # Scalar pills are only worth shipping when their displayed text
+        # actually changed: at a 60 fps source every tick was "due", but a
+        # static pill re-publishing 60 times per second is pure cross-process
+        # traffic. Text is computed here (off the broker lock) so the
+        # unchanged-content skip below is a plain string comparison.
+        value_publications: list[tuple[_ValueTarget, str]] = []
         value_tick_index = _result_tick_index(result) if value_targets else None
+        if value_tick_index is not None:
+            for target in value_targets:
+                value = result.values.get(target.source)
+                if not _is_scalar(value):
+                    continue
+                value_publications.append((target, _format_scalar(value)))
 
         with self._lock:
             if generation != self._generation:
@@ -282,6 +297,11 @@ class PreviewBroker:
                     self._note_last_published.get(target.node_id), now, target.interval_s
                 ):
                     continue
+                if self._note_last_notes.get(target.node_id) == notes:
+                    # Unchanged visualizer state: keep the cached preview
+                    # instead of bumping the sequence and shipping an event
+                    # the UI would discard.
+                    continue
                 sequence = self._note_sequences.get(target.node_id, 0) + 1
                 self._note_previews[target.node_id] = NotePreview(
                     target.node_id,
@@ -291,12 +311,13 @@ class PreviewBroker:
                 )
                 self._note_sequences[target.node_id] = sequence
                 self._note_last_published[target.node_id] = now
+                self._note_last_notes[target.node_id] = notes
             # Value capture keys off the source tick index: a scalar pill only
             # refreshes when a source (frame) tick supplies a tick index. This is
             # an intentional, tested invariant, not an accident of the current
             # media sources (which all emit frames).
             if value_tick_index is not None:
-                for target in value_targets:
+                for target, text in value_publications:
                     key = (target.owner_id, target.source.port_id)
                     if not _is_due(
                         self._value_last_published.get(key),
@@ -304,8 +325,10 @@ class PreviewBroker:
                         target.interval_s,
                     ):
                         continue
-                    value = result.values.get(target.source)
-                    if not _is_scalar(value):
+                    if self._value_last_text.get(key) == text:
+                        # Unchanged pill text: skip the publish (and the
+                        # cross-process event) instead of re-shipping the same
+                        # value 60 times per second.
                         continue
                     sequence = self._value_sequences.get(key, 0) + 1
                     self._value_previews[key] = ValuePreview(
@@ -314,10 +337,11 @@ class PreviewBroker:
                         sequence=sequence,
                         tick_index=value_tick_index,
                         port_type=target.port_type,
-                        text=_format_scalar(value),
+                        text=text,
                     )
                     self._value_sequences[key] = sequence
                     self._value_last_published[key] = now
+                    self._value_last_text[key] = text
 
     def poll_images(
         self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
@@ -387,29 +411,53 @@ class PreviewBroker:
         self._value_sequences.clear()
         self._image_last_published.clear()
         self._note_last_published.clear()
+        self._note_last_notes.clear()
+        self._value_last_text.clear()
         self._value_last_published.clear()
         self._image_publication_times.clear()
 
 
 def _preview_image_data(image: ImageFrame, max_dimension: int) -> NDArray[np.uint8]:
+    # Downscale the float32 image before the sanitize/quantize pass: those
+    # passes are memory-bandwidth bound, so doing them at preview resolution
+    # is several times cheaper at 1080p sources. Non-finite pixels are
+    # sanitized before interpolation so NaN/Inf cannot poison neighbouring
+    # pixels (the display-sansitize invariant still holds at preview size).
+    data = image.data
+    height, width = data.shape[:2]
+    if max(height, width) > max_dimension:
+        finite, _ = cv2.checkRange(data, quiet=True)
+        if not finite:
+            data = np.nan_to_num(data, nan=0.0, posinf=1.0, neginf=0.0, copy=True)
+        resized = _resize_float32(data, max_dimension)
+        image = frame_like(image, resized)
     display = image_to_display_uint8(image)
     return _bounded_preview(display, max_dimension)
 
 
 def _preview_channel_data(channel: ChannelFrame, max_dimension: int) -> NDArray[np.uint8]:
+    # Normalize and quantize at preview resolution (see _preview_image_data);
+    # the nominal-range check runs on the small array instead of the source.
+    data = channel.data
+    height, width = data.shape
+    if max(height, width) > max_dimension:
+        finite, _ = cv2.checkRange(data, quiet=True)
+        if not finite:
+            data = np.nan_to_num(data, nan=0.0, posinf=1.0, neginf=0.0, copy=True)
+        data = _resize_float32(data, max_dimension)
     minimum = np.float32(channel.nominal_min)
     denominator = np.float32(channel.nominal_max - channel.nominal_min)
     in_range, _ = cv2.checkRange(
-        channel.data,
+        data,
         quiet=True,
         minVal=float(channel.nominal_min),
         maxVal=math.nextafter(float(channel.nominal_max), math.inf),
     )
     if in_range:
         scale = 255.0 / float(denominator)
-        gray = cv2.convertScaleAbs(channel.data, alpha=scale, beta=-float(minimum) * scale)
+        gray = cv2.convertScaleAbs(data, alpha=scale, beta=-float(minimum) * scale)
     else:
-        normalized = np.array(channel.data, dtype=np.float32, order="C", copy=True)
+        normalized = np.array(data, dtype=np.float32, order="C", copy=True)
         np.subtract(normalized, minimum, out=normalized)
         np.divide(normalized, denominator, out=normalized)
         np.nan_to_num(normalized, nan=0.0, posinf=1.0, neginf=0.0, copy=False)
@@ -417,6 +465,17 @@ def _preview_channel_data(channel: ChannelFrame, max_dimension: int) -> NDArray[
         gray = cv2.convertScaleAbs(normalized, alpha=255.0)
     display = np.asarray(cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB), dtype=np.uint8)
     return _bounded_preview(display, max_dimension)
+
+
+def _resize_float32(data: NDArray[np.float32], max_dimension: int) -> NDArray[np.float32]:
+    height, width = data.shape[:2]
+    scale = max_dimension / float(max(height, width))
+    resized = cv2.resize(
+        data,
+        (max(1, round(width * scale)), max(1, round(height * scale))),
+        interpolation=cv2.INTER_AREA,
+    )
+    return np.ascontiguousarray(resized, dtype=np.float32)
 
 
 def _bounded_preview(display: NDArray[np.uint8], max_dimension: int) -> NDArray[np.uint8]:

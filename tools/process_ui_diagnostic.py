@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import time
 from contextlib import suppress
@@ -166,6 +167,8 @@ def _git_commit() -> str | None:
 
 
 def _windows_power_mode() -> str | None:
+    if sys.platform != "win32":
+        return None
     result = subprocess.run(
         ["powercfg", "/getactivescheme"],
         check=False,
