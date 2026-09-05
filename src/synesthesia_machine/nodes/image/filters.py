@@ -92,12 +92,19 @@ class FilterRuntime(StatelessImageRuntime):
             source = inputs["image"]
             if not isinstance(source, (ImageFrame, ChannelFrame)):
                 raise TypeError(f"Expected image or channel, got {type(source).__name__}")
-            effective_parameters = dict(parameters)
-            if isinstance(source, ChannelFrame) and "channels" in effective_parameters:
+            # The COLOUR override is only meaningful for a single-channel source;
+            # build the throwaway parameter copy lazily so the common ImageFrame
+            # path passes the compiled parameter mapping through untouched.
+            if isinstance(source, ChannelFrame) and "channels" in parameters:
+                effective_parameters = dict(parameters)
                 effective_parameters["channels"] = ChannelSelection.COLOUR.value
-            result = self._processor(
-                _as_image(source, self.node_id), inputs, effective_parameters, context
-            )
+                result = self._processor(
+                    _as_image(source, self.node_id), inputs, effective_parameters, context
+                )
+            else:
+                result = self._processor(
+                    _as_image(source, self.node_id), inputs, parameters, context
+                )
         except (TypeError, ValueError) as error:
             raise ExpectedNodeError(self._error_code, str(error)) from error
         return {"image": _restore_type(source, result)}

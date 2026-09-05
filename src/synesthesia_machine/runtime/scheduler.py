@@ -81,6 +81,11 @@ class Scheduler:
         self._runtimes: dict[UUID, NodeRuntime] = {}
         self._borrowed_runtime_ids: set[UUID] = set()
         self._static_cache: dict[PortKey, RuntimeValue] = {}
+        # Built once per plan so the tick loop dispatches through precompiled
+        # per-node validators instead of rebuilding sets and isinstance ladders.
+        self._output_validators: list[_OutputValidator] = [
+            _OutputValidator(node) for node in plan.nodes
+        ]
         try:
             for node in plan.nodes:
                 runtime = reusable.get(node.node_id)
@@ -141,24 +146,23 @@ class Scheduler:
     def execute_tick(
         self, context: FrameContext, *, source_values: Mapping[PortKey, RuntimeValue] | None = None
     ) -> TickResult:
-        values = dict(self._static_cache)
+        values = dict(self._static_cache) if self._static_cache else {}
         values.update(source_values or {})
         errors: list[NodeExecutionError] = []
         invocations: dict[UUID, int] = {}
-        for node in self.plan.nodes:
+        for node, validator in zip(self.plan.nodes, self._output_validators, strict=True):
             outputs_are_cached = bool(node.output_types)
-            for port_id in node.output_types:
-                if PortKey(node.node_id, port_id) not in values:
+            for output_key in node.output_port_keys:
+                if output_key not in values:
                     outputs_are_cached = False
                     break
             if not node.is_demanded or outputs_are_cached:
                 continue
             inputs: dict[str, RuntimeValue] = {}
-            for port_id in node.input_bindings:
-                binding = node.input_bindings[port_id]
-                value = values.get(binding.source, NoData)
+            for port_id, source, conversion in node.input_binding_items:
+                value = values.get(source, NoData)
                 if (
-                    binding.conversion is ScalarConversion.INT_TO_FLOAT
+                    conversion is ScalarConversion.INT_TO_FLOAT
                     and isinstance(value, int)
                     and not isinstance(value, bool)
                 ):
@@ -194,15 +198,11 @@ class Scheduler:
                     # boundary, mirroring how converted inputs are
                     # materialised above, so the emitted int is not rejected
                     # as a contract violation.
-                    for output_port_id, expected_type in node.output_types.items():
+                    for output_port_id in node.float_output_ports:
                         output_value = outputs.get(output_port_id)
-                        if (
-                            expected_type is PortType.FLOAT
-                            and isinstance(output_value, int)
-                            and not isinstance(output_value, bool)
-                        ):
+                        if isinstance(output_value, int) and not isinstance(output_value, bool):
                             outputs[output_port_id] = float(output_value)
-                    _validate_outputs(node, outputs)
+                    validator.validate(outputs)
                 except ExpectedNodeError as error:
                     failed = True
                     errors.append(
@@ -253,12 +253,11 @@ class Scheduler:
                             self._timing_hook(node.node_id, duration_ns)
                         if self._profiling_hook is not None:
                             self._profiling_hook(node.node_id, duration_ns, outputs, failed)
-            for port_id in node.output_types:
-                values[PortKey(node.node_id, port_id)] = outputs.get(port_id, NoData)
+            for port_id, output_key in node.output_port_items:
+                values[output_key] = outputs.get(port_id, NoData)
             if node.is_static:
-                for port_id in node.output_types:
-                    key = PortKey(node.node_id, port_id)
-                    self._static_cache[key] = values[key]
+                for _, output_key in node.output_port_items:
+                    self._static_cache[output_key] = values[output_key]
         return TickResult(values, tuple(errors), invocations)
 
     def reset_source(self, clock_id: UUID, reason: ResetReason) -> None:
@@ -342,83 +341,136 @@ class Scheduler:
 
 def _effective_parameters(
     node: CompiledNode, inputs: dict[str, RuntimeValue]
-) -> dict[str, ParameterValue]:
-    """Overlay connected parameter values without mutating the compiled literal defaults."""
+) -> Mapping[str, ParameterValue]:
+    """Overlay connected parameter values without mutating the compiled literal defaults.
 
-    values = dict(node.parameters)
-    overridden = False
+    The connectable parameter specs are precomputed on the compiled node, so the
+    tick loop never re-scans definition metadata. The parameter mapping is only
+    copied once a connected override actually exists; otherwise the compiled
+    read-only mapping is handed through without copying.
+    """
+
     try:
-        for parameter in node.definition.parameters:
-            if not parameter.connectable or parameter.id not in inputs:
+        values: dict[str, ParameterValue] | None = None
+        for parameter in node.connectable_parameter_specs:
+            if parameter.id not in inputs:
                 continue
-            overridden = True
+            if values is None:
+                values = dict(node.parameters)
             connected = parameter.connected_value(inputs[parameter.id])
             values[parameter.id] = connected
             # Legacy runtimes that explicitly consult the parameter input receive the same coerced
             # value as runtimes that read only the effective parameter mapping.
             inputs[parameter.id] = connected
-        if overridden and node.definition.parameter_validator is not None:
+        if values is None:
+            return node.parameters
+        if node.definition.parameter_validator is not None:
             errors = node.definition.parameter_validator(values)
             if errors:
                 raise ValueError("; ".join(errors))
+        return values
     except (TypeError, ValueError) as error:
         raise ExpectedNodeError(
             "invalid_dynamic_parameter",
             f"Invalid live parameter value: {error}",
         ) from error
-    return values
 
 
-def _validate_outputs(node: CompiledNode, outputs: Mapping[str, RuntimeValue]) -> None:
-    unknown = tuple(sorted(set(outputs) - set(node.output_types)))
-    if unknown:
-        raise _InvalidNodeOutput(f"Runtime returned unknown output port(s): {', '.join(unknown)}")
-    for port_id, value in outputs.items():
-        if value is NoData:
-            continue
-        expected = node.output_types[port_id]
-        if not _runtime_value_matches(value, expected):
-            raise _InvalidNodeOutput(
-                f"Output {port_id!r} expected {expected.value}, got {type(value).__name__}"
-            )
-        output_clock = clock_id_of(value)
-        if node.clock_id is not None and output_clock is not None and output_clock != node.clock_id:
-            raise _InvalidNodeOutput(
-                f"Output {port_id!r} uses clock {output_clock}, expected {node.clock_id}"
-            )
-        if isinstance(value, ValueArray):
-            clocks = {
-                item_clock for item in value.values if (item_clock := clock_id_of(item)) is not None
-            }
-            if len(clocks) > 1:
-                raise _InvalidNodeOutput(
-                    f"Output {port_id!r} contains values from multiple source clocks"
-                )
+_ARRAY_ITEM_TYPES: Mapping[PortType, frozenset[PortType]] = {
+    PortType.SCALAR_ARRAY: frozenset({PortType.FLOAT, PortType.INT}),
+    PortType.IMAGE_ARRAY: frozenset({PortType.IMAGE}),
+    PortType.CHANNEL_ARRAY: frozenset({PortType.CHANNEL}),
+}
 
 
-def _runtime_value_matches(value: RuntimeValue, expected: PortType) -> bool:
+def _output_type_check(expected: PortType) -> Callable[[RuntimeValue], bool]:
+    """Compile the expected-type ladder for one port into a single predicate."""
+
     if expected is PortType.IMAGE:
-        return isinstance(value, ImageFrame)
+        return lambda value: isinstance(value, ImageFrame)
     if expected is PortType.CHANNEL:
-        return isinstance(value, ChannelFrame)
+        return lambda value: isinstance(value, ChannelFrame)
     if expected is PortType.FLOAT:
-        return isinstance(value, float)
+        return lambda value: isinstance(value, float)
     if expected is PortType.INT:
-        return isinstance(value, int) and not isinstance(value, bool)
+        return lambda value: isinstance(value, int) and not isinstance(value, bool)
     if expected is PortType.BOOL:
-        return isinstance(value, bool)
+        return lambda value: isinstance(value, bool)
     if expected is PortType.COLOR:
-        return isinstance(value, ColorValue)
+        return lambda value: isinstance(value, ColorValue)
     if expected is PortType.MIDI_STATE:
-        return isinstance(value, MidiStateFrame)
+        return lambda value: isinstance(value, MidiStateFrame)
     if expected is PortType.STRING:
-        return isinstance(value, str)
-    if not isinstance(value, ValueArray):
-        return False
-    if expected is PortType.SCALAR_ARRAY:
-        return value.item_type in {PortType.FLOAT, PortType.INT}
-    if expected is PortType.IMAGE_ARRAY:
-        return value.item_type is PortType.IMAGE
-    if expected is PortType.CHANNEL_ARRAY:
-        return value.item_type is PortType.CHANNEL
-    return False
+        return lambda value: isinstance(value, str)
+    item_types = _ARRAY_ITEM_TYPES.get(expected)
+    if item_types is not None:
+        return lambda value, item_types=item_types: (
+            isinstance(value, ValueArray) and value.item_type in item_types
+        )
+    return lambda value: False
+
+
+class _OutputValidator:
+    """Per-node output contract check precompiled once at plan-prepare time.
+
+    Replaces the per-tick ``set(outputs) - set(output_types)`` difference, the
+    expected-type isinstance ladder, and the repeated ``clock_id_of`` passes:
+    the tick loop runs one membership test, one compiled type predicate per
+    port, and a single clock pass per output (``clock_id_of`` runs at most
+    once per output value; a ValueArray is walked exactly once).
+    """
+
+    __slots__ = ("clock_id", "port_checks", "port_types")
+
+    def __init__(self, node: CompiledNode) -> None:
+        self.clock_id = node.clock_id
+        port_checks: dict[str, Callable[[RuntimeValue], bool]] = {}
+        port_types: dict[str, PortType] = {}
+        for port_id, expected_type in node.output_types.items():
+            port_types[port_id] = expected_type
+            port_checks[port_id] = _output_type_check(expected_type)
+        self.port_checks = port_checks
+        self.port_types = port_types
+
+    def validate(self, outputs: Mapping[str, RuntimeValue]) -> None:
+        unknown = tuple(sorted(port_id for port_id in outputs if port_id not in self.port_checks))
+        if unknown:
+            raise _InvalidNodeOutput(
+                f"Runtime returned unknown output port(s): {', '.join(unknown)}"
+            )
+        expected_clock = self.clock_id
+        for port_id, value in outputs.items():
+            if value is NoData:
+                continue
+            if not self.port_checks[port_id](value):
+                raise _InvalidNodeOutput(
+                    f"Output {port_id!r} expected {self.port_types[port_id].value}, "
+                    f"got {type(value).__name__}"
+                )
+            if isinstance(value, ValueArray):
+                clocks: set[UUID] = set()
+                for item in value.values:
+                    item_clock = clock_id_of(item)
+                    if item_clock is not None:
+                        clocks.add(item_clock)
+                if len(clocks) == 1:
+                    (output_clock,) = clocks
+                    if expected_clock is not None and output_clock != expected_clock:
+                        raise _InvalidNodeOutput(
+                            f"Output {port_id!r} uses clock {output_clock}, "
+                            f"expected {expected_clock}"
+                        )
+                if len(clocks) > 1:
+                    raise _InvalidNodeOutput(
+                        f"Output {port_id!r} contains values from multiple source clocks"
+                    )
+                continue
+            output_clock = clock_id_of(value)
+            if (
+                expected_clock is not None
+                and output_clock is not None
+                and output_clock != expected_clock
+            ):
+                raise _InvalidNodeOutput(
+                    f"Output {port_id!r} uses clock {output_clock}, expected {expected_clock}"
+                )

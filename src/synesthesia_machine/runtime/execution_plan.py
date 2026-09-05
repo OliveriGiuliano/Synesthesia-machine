@@ -7,7 +7,7 @@ from types import MappingProxyType
 from uuid import UUID
 
 from synesthesia_machine.contracts.runtime_values import ParameterValue, PortType
-from synesthesia_machine.nodes.base import NodeDefinition, ParameterUpdateMode
+from synesthesia_machine.nodes.base import NodeDefinition, ParameterSpec, ParameterUpdateMode
 
 
 class ScalarConversion(StrEnum):
@@ -49,12 +49,53 @@ class CompiledNode:
     clock_id: UUID | None = None
     is_static: bool = True
     is_demanded: bool = True
+    # Per-plan precomputations derived from the fields above (and the node
+    # definition) so the per-tick execution loop never re-instantiates PortKeys,
+    # re-iterates definition metadata, or rebuilds lookup structures.
+    # compare=False keeps CompiledNode equality and hashing exactly as before.
+    output_port_keys: tuple[PortKey, ...] = field(init=False, compare=False)
+    output_port_items: tuple[tuple[str, PortKey], ...] = field(init=False, compare=False)
+    input_binding_items: tuple[tuple[str, PortKey, ScalarConversion | None], ...] = field(
+        init=False, compare=False
+    )
+    float_output_ports: tuple[str, ...] = field(init=False, compare=False)
+    connectable_parameter_specs: tuple[ParameterSpec, ...] = field(init=False, compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "parameters", MappingProxyType(dict(self.parameters)))
         object.__setattr__(self, "input_bindings", MappingProxyType(dict(self.input_bindings)))
         object.__setattr__(self, "input_types", MappingProxyType(dict(self.input_types)))
         object.__setattr__(self, "output_types", MappingProxyType(dict(self.output_types)))
+        output_port_keys: list[PortKey] = []
+        output_port_items: list[tuple[str, PortKey]] = []
+        for port_id in self.output_types:
+            port_key = PortKey(self.node_id, port_id)
+            output_port_keys.append(port_key)
+            output_port_items.append((port_id, port_key))
+        object.__setattr__(self, "output_port_keys", tuple(output_port_keys))
+        object.__setattr__(self, "output_port_items", tuple(output_port_items))
+        object.__setattr__(
+            self,
+            "input_binding_items",
+            tuple(
+                (port_id, binding.source, binding.conversion)
+                for port_id, binding in self.input_bindings.items()
+            ),
+        )
+        object.__setattr__(
+            self,
+            "float_output_ports",
+            tuple(
+                port_id
+                for port_id, expected in self.output_types.items()
+                if expected is PortType.FLOAT
+            ),
+        )
+        object.__setattr__(
+            self,
+            "connectable_parameter_specs",
+            tuple(parameter for parameter in self.definition.parameters if parameter.connectable),
+        )
 
     @property
     def state_retention_key(self) -> tuple[object, ...]:

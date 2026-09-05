@@ -165,8 +165,20 @@ def _validate_read_only_float32(data: NDArray[np.float32], *, dimensions: int) -
 
 
 def read_only_float32(data: NDArray[np.float32]) -> NDArray[np.float32]:
-    """Return a C-contiguous float32 copy marked read-only for a runtime boundary."""
+    """Return a C-contiguous read-only float32 array for a runtime boundary.
 
+    An input that already satisfies the runtime array contract (C-contiguous,
+    float32, not writeable) is returned unchanged so passthrough boundaries pay
+    no copy; any other input gets the exact copy-and-freeze it always did.
+    """
+
+    if (
+        isinstance(data, np.ndarray)  # type: ignore[reportUnnecessaryIsinstance]  # runtime guard: callers may pass array-likes
+        and data.dtype == np.float32
+        and data.flags.c_contiguous
+        and not data.flags.writeable
+    ):
+        return data
     result = np.array(data, dtype=np.float32, order="C", copy=True)
     result.flags.writeable = False
     return result
