@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -522,6 +523,91 @@ def test_debug_synth_uses_equal_tempered_a4_at_440_hz() -> None:
     sample_indexes = np.arange(configuration.block_size, dtype=np.float64)
     expected = np.sin(sample_indexes * (2.0 * np.pi * 440.0 / configuration.sample_rate)) * 0.4
     assert np.allclose(rendered[:, 0], expected, atol=1e-6)
+    synth.close()
+
+
+def test_debug_synth_envelope_ramps_hit_exact_stage_boundaries() -> None:
+    stream_factory = StreamFactory()
+    configuration = SynthConfiguration(
+        waveform=SynthWaveform.SINE,
+        volume=0.5,
+        attack_ms=12.5,
+        release_ms=12.5,
+        max_voices=1,
+        sample_rate=8000,
+        block_size=64,
+    )
+    synth = DebugSynth(configuration, stream_factory=stream_factory)
+    stream = stream_factory.streams[0]
+    # A4 (note 69) is exactly 440 Hz under equal temperament, so the expected
+    # phase is drift-free.
+    synth.update(_midi_state({(0, 69): 127}))
+
+    # 12.5 ms at 8 kHz is 100 envelope samples, so every stage advances by
+    # (k + 1) / 100 per sample (the first sample already carries one step),
+    # with the carried level quantized to float32 at each block boundary.
+    phase_step = 2.0 * math.pi * 440.0 / configuration.sample_rate
+    step = 1.0 / 100.0
+    carry = 0.0
+    for block in range(4):
+        rendered = stream.render(configuration.block_size)
+        offsets = np.arange(configuration.block_size)
+        levels = np.minimum(1.0, carry + (offsets + 1) * step)
+        expected = np.sin((block * 64 + offsets) * phase_step) * levels * 0.5
+        assert np.allclose(rendered[:, 0], expected, atol=1e-6)
+        assert np.array_equal(rendered[:, 0], rendered[:, 1])
+        carry = float(np.float32(levels[-1]))
+
+    # The attack crossed full level inside the second block, so later
+    # blocks sustain: the SUSTAIN stage holds the level for the entire block.
+    assert int(synth._stages[0]) == int(synth._SUSTAIN)
+    rendered = stream.render(configuration.block_size)
+    expected = np.sin((4 * 64 + np.arange(64)) * phase_step) * 0.5
+    assert np.allclose(rendered[:, 0], expected, atol=1e-6)
+    assert np.array_equal(rendered[:, 0], rendered[:, 1])
+
+    synth.update(_midi_state({}, tick_index=2))
+    rendered = stream.render(configuration.block_size)
+    assert synth.active_voice_count == 1
+    levels = np.maximum(0.0, 1.0 - (np.arange(64) + 1) * step)
+    expected = np.sin((5 * 64 + np.arange(64)) * phase_step) * levels * 0.5
+    assert np.allclose(rendered[:, 0], expected, atol=1e-6)
+    assert float(levels[-1]) == pytest.approx(0.36, abs=1e-9)
+
+    # The release reaches exactly zero mid-block (the float32-carry level
+    # 0.36 clears one more 1/100 step than exact math suggests): from that
+    # sample on the voice is inactive and renders exactly zero, neither
+    # early nor late.
+    rendered = stream.render(configuration.block_size)
+    levels = np.maximum(0.0, float(np.float32(0.36)) - (np.arange(64) + 1) * step)
+    expected = np.sin((6 * 64 + np.arange(64)) * phase_step) * levels * 0.5
+    assert np.allclose(rendered[:, 0], expected, atol=1e-6)
+    assert float(levels[35]) > 0.0
+    assert float(levels[36]) == 0.0
+    assert np.all(rendered[36:, 0] == 0.0)
+    assert synth.active_voice_count == 0
+    assert np.count_nonzero(stream.render(configuration.block_size)) == 0
+    synth.close()
+
+
+def test_debug_synth_update_caps_by_loudness_and_orders_by_key() -> None:
+    stream_factory = StreamFactory()
+    configuration = SynthConfiguration(
+        waveform=SynthWaveform.SINE,
+        volume=0.5,
+        attack_ms=0.0,
+        release_ms=80.0,
+        max_voices=2,
+        sample_rate=8000,
+        block_size=64,
+    )
+    synth = DebugSynth(configuration, stream_factory=stream_factory)
+    # Published out of key order with a velocity tie: the voice cap keeps
+    # note 60 (loudest) and note 61 (ties break to the lower key), and both
+    # new voices allocate in key order regardless of publication order.
+    synth.update(_midi_state({(0, 62): 100, (0, 60): 127, (0, 61): 100}))
+    stream_factory.streams[0].render(configuration.block_size)
+    assert synth.active_keys == (60, 61)
     synth.close()
 
 

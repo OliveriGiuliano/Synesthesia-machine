@@ -176,11 +176,15 @@ def test_persistent_exact_port_diffs_off_before_on_on_sender_thread() -> None:
         _wait(service)
         port = backend.opened_ports[0]
         assert backend.opened_names == [TARGET]
+        # All-notes-off messages keep deterministic channel order, but the
+        # note-ons follow the published state's key order: the sender must
+        # not re-sort keys (restoring the old per-tick sort would send
+        # (0, 60) before (1, 64) here and fail this assertion).
         assert port.sent == [
             MidiMessage.all_notes_off(0),
             MidiMessage.all_notes_off(1),
-            MidiMessage.note_on(MidiNoteKey(0, 60), 100),
             MidiMessage.note_on(MidiNoteKey(1, 64), 90),
+            MidiMessage.note_on(MidiNoteKey(0, 60), 100),
         ]
 
         service.publish(_frame({(1, 64): 90, (0, 60): 100}, 2), _configuration())
@@ -205,6 +209,65 @@ def test_persistent_exact_port_diffs_off_before_on_on_sender_thread() -> None:
     finally:
         service.close()
     assert set(backend.opened_ports[0].close_thread_ids) == {sender_thread}
+
+
+def test_retrigger_offs_precede_ons_without_global_resort() -> None:
+    backend = MockMidiOutputBackend((TARGET,))
+    service = MidiOutputService(backend, refresh_interval_s=3600.0)
+    try:
+        _wait(service)
+        configuration = _configuration(policy=VelocityUpdatePolicy.RETRIGGER)
+        # Publish out of key order on purpose: the sender thread must keep
+        # this order instead of re-sorting by key.
+        service.publish(
+            _frame({(0, 72): 100, (0, 60): 100, (0, 64): 100}),
+            configuration,
+        )
+        _wait(service)
+        port = backend.opened_ports[0]
+        initial_count = len(port.sent)
+
+        # Retrigger 72 and 64 (both above the threshold), hold 60. The
+        # contractual guarantee is that every note-off is sent before the
+        # matching note-on for the same key, delivered in published order.
+        service.publish(
+            _frame({(0, 72): 80, (0, 60): 100, (0, 64): 120}, 2),
+            configuration,
+        )
+        _wait(service)
+        tail = port.sent[initial_count:]
+        assert tail == [
+            MidiMessage.note_off(MidiNoteKey(0, 72)),
+            MidiMessage.note_off(MidiNoteKey(0, 64)),
+            MidiMessage.note_on(MidiNoteKey(0, 72), 80),
+            MidiMessage.note_on(MidiNoteKey(0, 64), 120),
+        ]
+        off_indexes = [
+            index
+            for index, message in enumerate(tail)
+            if message.message_type is MidiMessageType.NOTE_OFF
+        ]
+        on_indexes = [
+            index
+            for index, message in enumerate(tail)
+            if message.message_type is MidiMessageType.NOTE_ON
+        ]
+        assert off_indexes and on_indexes
+        assert max(off_indexes) < min(on_indexes)
+
+        # The untouched note never churns and status keeps its own sorted
+        # channel view regardless of the sender's working order.
+        service.publish(
+            _frame({(0, 72): 80, (0, 60): 100, (0, 64): 120}, 3),
+            configuration,
+        )
+        _wait(service)
+        assert len(port.sent) == initial_count + len(tail)
+        status = service.status()
+        assert status.active_note_count == 3
+        assert status.active_channels == (0,)
+    finally:
+        service.close()
 
 
 @pytest.mark.parametrize(

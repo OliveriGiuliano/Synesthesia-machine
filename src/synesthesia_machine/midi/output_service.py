@@ -302,14 +302,20 @@ class MidiServiceStatus:
 
 @dataclass(frozen=True, slots=True)
 class _DesiredState:
-    notes: tuple[tuple[MidiNoteKey, int], ...]
+    notes: dict[MidiNoteKey, int]
     configuration: MidiOutputConfiguration
 
     @classmethod
     def from_frame(
         cls, frame: MidiStateFrame, configuration: MidiOutputConfiguration
     ) -> _DesiredState:
-        return cls(tuple(sorted(frame.notes.items())), configuration)
+        # One insertion-order copy on the scheduler thread; the sender thread
+        # reads this dict as-is and never re-sorts it. Order across distinct
+        # keys is not part of the MIDI contract: the separate note-off and
+        # note-on lists in _reconcile guarantee off-before-on for retrigged
+        # keys, and status()/panic() re-sort independently where a
+        # deterministic message order is required.
+        return cls(dict(frame.notes), configuration)
 
 
 class MidiOutputServiceProtocol(Protocol):
@@ -601,7 +607,7 @@ class MidiOutputService:
                 return
             if not self._open_exact_port(selected_port, desired):
                 return
-        self._reconcile(dict(desired.notes), configuration)
+        self._reconcile(desired.notes, configuration)
 
     def _open_exact_port(self, selected_port: str, desired: _DesiredState) -> bool:
         with self._status_lock:
@@ -615,7 +621,7 @@ class MidiOutputService:
             return False
         self._port = port
         self._port_name = selected_port
-        for channel in sorted({key.channel for key, _ in desired.notes}):
+        for channel in sorted({key.channel for key in desired.notes}):
             try:
                 port.send(MidiMessage.all_notes_off(channel))
             except Exception as error:
@@ -634,9 +640,13 @@ class MidiOutputService:
         with self._status_lock:
             sent = dict(self._sent)
 
+        # Dict iteration order is stable and message order across distinct
+        # keys is not part of the MIDI contract, so no re-sort happens here;
+        # the off/on list split still keeps note-off before note-on for every
+        # retrigged key.
         note_offs: list[MidiNoteKey] = []
         note_ons: list[tuple[MidiNoteKey, int]] = []
-        for key, old_velocity in sorted(sent.items()):
+        for key, old_velocity in sent.items():
             new_velocity = desired.get(key)
             if new_velocity is None:
                 note_offs.append(key)
@@ -650,7 +660,7 @@ class MidiOutputService:
                 note_ons.append((key, new_velocity))
             elif configuration.velocity_policy is VelocityUpdatePolicy.REPEAT_NOTE_ON:
                 note_ons.append((key, new_velocity))
-        for key, velocity in sorted(desired.items()):
+        for key, velocity in desired.items():
             if key not in sent:
                 note_ons.append((key, velocity))
 
