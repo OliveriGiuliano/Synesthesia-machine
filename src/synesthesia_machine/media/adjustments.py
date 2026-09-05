@@ -45,7 +45,12 @@ class NearZeroPolicy(StrEnum):
 
 def brightness_image(image: ImageFrame, offset: float, selection: ChannelSelection) -> ImageFrame:
     _require_finite(offset, "brightness offset")
-    return _apply_selected(image, selection, lambda values: values + np.float32(offset))
+
+    def transform(values: NDArray[np.float32]) -> NDArray[np.float32]:
+        values += np.float32(offset)
+        return values
+
+    return _apply_selected(image, selection, transform)
 
 
 def contrast_image(
@@ -58,11 +63,16 @@ def contrast_image(
     _require_finite(pivot, "contrast pivot")
     factor32 = np.float32(factor)
     pivot32 = np.float32(pivot)
-    return _apply_selected(
-        image,
-        selection,
-        lambda values: (values - pivot32) * factor32 + pivot32,
-    )
+
+    def transform(values: NDArray[np.float32]) -> NDArray[np.float32]:
+        # The in-place chain rounds after each step, exactly like the old
+        # out-of-place (values - pivot) * factor + pivot expression.
+        values -= pivot32
+        values *= factor32
+        values += pivot32
+        return values
+
+    return _apply_selected(image, selection, transform)
 
 
 def clamp_image(
@@ -80,7 +90,7 @@ def clamp_image(
     return _apply_selected(
         image,
         selection,
-        lambda values: np.clip(values, minimum, maximum),
+        lambda values: np.clip(values, minimum, maximum, out=values),
         include_alpha=include_alpha,
     )
 
@@ -108,15 +118,21 @@ def colour_levels_image(
     if gamma <= 0.0:
         raise ValueError("colour levels gamma must be positive")
 
+    scale = np.float32(input_white - input_black)
+    output_span = np.float32(output_white - output_black)
+    output_offset = np.float32(output_black)
+
     def transform(values: NDArray[np.float32]) -> NDArray[np.float32]:
-        normalized = np.clip(
-            (values - np.float32(input_black)) / np.float32(input_white - input_black),
-            np.float32(0.0),
-            np.float32(1.0),
-        )
+        # Each step mirrors the old expression's rounding order (subtract,
+        # divide, clip, power, scale, offset), applied in place.
+        values -= np.float32(input_black)
+        values /= scale
+        np.clip(values, np.float32(0.0), np.float32(1.0), out=values)
         with np.errstate(invalid="ignore", over="ignore"):
-            corrected = np.power(normalized, np.float32(1.0 / gamma))
-        return corrected * np.float32(output_white - output_black) + np.float32(output_black)
+            np.power(values, np.float32(1.0 / gamma), out=values)
+        values *= output_span
+        values += output_offset
+        return values
 
     return _apply_selected(image, selection, transform)
 
@@ -126,11 +142,15 @@ def hue_image(image: ImageFrame, turns: float) -> ImageFrame:
     _require_finite_colour(image, "Hue")
     if image.color_space in (ColorSpace.HSV, ColorSpace.HSL):
         result = np.array(image.data, dtype=np.float32, order="C", copy=True)
-        result[..., 0] = np.mod(result[..., 0] + np.float32(turns), np.float32(1.0))
+        hue = result[..., 0]
+        hue += np.float32(turns)
+        np.mod(hue, np.float32(1.0), out=hue)
         return frame_like(image, result)
     hsv, alpha = _image_as_hsv(image)
     adjusted = np.array(hsv.data, dtype=np.float32, order="C", copy=True)
-    adjusted[..., 0] = np.mod(adjusted[..., 0] + np.float32(turns), np.float32(1.0))
+    hue = adjusted[..., 0]
+    hue += np.float32(turns)
+    np.mod(hue, np.float32(1.0), out=hue)
     return _hsv_to_original(image, frame_like(hsv, adjusted), alpha)
 
 
@@ -160,7 +180,7 @@ def invert_colour_image(image: ImageFrame, *, invert_alpha: bool) -> ImageFrame:
     return _apply_selected(
         image,
         ChannelSelection.COLOUR,
-        lambda values: np.float32(1.0) - values,
+        lambda values: np.subtract(np.float32(1.0), values, out=values),
         include_alpha=invert_alpha,
     )
 
@@ -210,22 +230,34 @@ def gamma_image(image: ImageFrame, gamma: float, selection: ChannelSelection) ->
         raise ValueError("gamma must be positive")
 
     def transform(values: NDArray[np.float32]) -> NDArray[np.float32]:
+        np.maximum(values, np.float32(0.0), out=values)
         with np.errstate(invalid="ignore", over="ignore"):
-            return np.power(np.maximum(values, np.float32(0.0)), np.float32(gamma))
+            np.power(values, np.float32(gamma), out=values)
+        return values
 
     return _apply_selected(image, selection, transform)
 
 
 def add_scalar_image(image: ImageFrame, value: float, selection: ChannelSelection) -> ImageFrame:
     _require_finite(value, "add scalar value")
-    return _apply_selected(image, selection, lambda values: values + np.float32(value))
+
+    def transform(values: NDArray[np.float32]) -> NDArray[np.float32]:
+        values += np.float32(value)
+        return values
+
+    return _apply_selected(image, selection, transform)
 
 
 def multiply_scalar_image(
     image: ImageFrame, value: float, selection: ChannelSelection
 ) -> ImageFrame:
     _require_finite(value, "multiply scalar value")
-    return _apply_selected(image, selection, lambda values: values * np.float32(value))
+
+    def transform(values: NDArray[np.float32]) -> NDArray[np.float32]:
+        values *= np.float32(value)
+        return values
+
+    return _apply_selected(image, selection, transform)
 
 
 def divide_scalar_image(
@@ -245,13 +277,19 @@ def divide_scalar_image(
         if near_zero_policy is NearZeroPolicy.ERROR:
             raise ValueError("divide scalar divisor is within epsilon of zero")
         if near_zero_policy is NearZeroPolicy.REPLACE_WITH_ZERO:
-            return _apply_selected(
-                image,
-                selection,
-                lambda values: np.zeros_like(values, dtype=np.float32),
-            )
+
+            def zero_transform(values: NDArray[np.float32]) -> NDArray[np.float32]:
+                values[...] = 0.0
+                return values
+
+            return _apply_selected(image, selection, zero_transform)
         divisor = math.copysign(epsilon, divisor) if divisor != 0.0 else epsilon
-    return _apply_selected(image, selection, lambda values: values / np.float32(divisor))
+
+    def transform(values: NDArray[np.float32]) -> NDArray[np.float32]:
+        values /= np.float32(divisor)
+        return values
+
+    return _apply_selected(image, selection, transform)
 
 
 def _apply_selected(
@@ -261,9 +299,17 @@ def _apply_selected(
     *,
     include_alpha: bool = False,
 ) -> ImageFrame:
+    # The copy is the one write buffer the immutable contract requires.
+    # Single-channel selections index a true view, so in-place transforms
+    # land directly in the result; multi-channel tuple indexing returns a
+    # copy in NumPy, which is scattered back (still avoiding the extra
+    # transform temporary the old code allocated).
     indices = selected_channel_indices(image.color_space, selection, include_alpha=include_alpha)
     result = np.array(image.data, dtype=np.float32, order="C", copy=True)
-    result[..., indices] = np.asarray(transform(result[..., indices]), dtype=np.float32)
+    target = result[..., indices]
+    transformed = transform(target)
+    if not (transformed is target and target.base is result):
+        result[..., indices] = np.asarray(transformed, dtype=np.float32)
     return frame_like(image, result)
 
 

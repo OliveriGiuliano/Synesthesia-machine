@@ -67,7 +67,14 @@ def blend_images(
     blended = _blend_values(a_colour, b_colour, blend_mode)
     amount_3d = amount[..., None]
 
-    if alpha_policy is AlphaPolicy.COMPOSITE:
+    if alpha_policy is AlphaPolicy.COMPOSITE and a_alpha is None and b_alpha is None:
+        # Unit coverage on both inputs: the middle (b under a) term vanishes,
+        # the output alpha is exactly 1 (stays NONE), and un-premultiplying
+        # divides by 1. Only two full-size operations are needed.
+        colour = a_colour * (np.float32(1.0) - amount_3d)
+        colour += amount_3d * blended
+        output_alpha_or_none = None
+    elif alpha_policy is AlphaPolicy.COMPOSITE:
         a_coverage = np.ones(a.data.shape[:2], dtype=np.float32) if a_alpha is None else a_alpha
         b_coverage = np.ones(b.data.shape[:2], dtype=np.float32) if b_alpha is None else b_alpha
         source_coverage = b_coverage * amount
@@ -88,7 +95,12 @@ def blend_images(
             np.asarray(output_alpha, dtype=np.float32) if a_alpha is not None else None
         )
     else:
-        colour = a_colour + (blended - a_colour) * amount_3d
+        # One scratch buffer holds (blended - a), then the amount and base
+        # folds happen in place: the same three operations and rounding order
+        # as the old out-of-place expression, with two fewer full-size temporaries.
+        colour = blended - a_colour
+        colour *= amount_3d
+        colour += a_colour
         output_alpha_or_none = a_alpha if alpha_policy is AlphaPolicy.PRESERVE_A else b_alpha
 
     return frame_like(

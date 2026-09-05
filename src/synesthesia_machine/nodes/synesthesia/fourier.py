@@ -244,7 +244,10 @@ def fourier_band_amplitudes(
     )
     if subtract_mean:
         samples = samples - float(np.mean(samples, dtype=np.float64))
-    samples *= _window_2d(samples.shape, window)
+    if window != NONE:
+        # Multiplying by the unit window is an exact no-op, so the NONE case
+        # skips the full-frame multiply entirely.
+        samples *= _window_2d(samples.shape, window)
     log_magnitude = np.log1p(np.abs(np.fft.fft2(samples)))
 
     amplitudes = np.zeros(note_count, dtype=np.float64)
@@ -444,13 +447,34 @@ def create_fourier_definitions() -> tuple[NodeDefinition, ...]:
     )
 
 
+# Window arrays are pure functions of (shape, window) and cost 16.6 MB at
+# 1080p, so a small process-wide cache reuses them across ticks and across
+# runtimes (the values are frozen and only ever multiplied by, never written).
+_WINDOW_CACHE: dict[tuple[int, int, str], NDArray[np.float64]] = {}
+_WINDOW_CACHE_ORDER: list[tuple[int, int, str]] = []
+_WINDOW_CACHE_LIMIT = 16
+
+
 def _window_2d(shape: tuple[int, int], window: str) -> NDArray[np.float64]:
     height, width = shape
     if window == NONE:
-        return np.ones(shape, dtype=np.float64)
+        array = np.ones((height, width), dtype=np.float64)
+        array.setflags(write=False)
+        return array
+    key = (height, width, window)
+    cached = _WINDOW_CACHE.get(key)
+    if cached is not None:
+        return cached
     vertical = np.hanning(height) if window == HANN else np.hamming(height)
     horizontal = np.hanning(width) if window == HANN else np.hamming(width)
-    return np.multiply.outer(vertical, horizontal)
+    array = np.ascontiguousarray(np.multiply.outer(vertical, horizontal))
+    array.setflags(write=False)
+    _WINDOW_CACHE[key] = array
+    _WINDOW_CACHE_ORDER.append(key)
+    while len(_WINDOW_CACHE_ORDER) > _WINDOW_CACHE_LIMIT:
+        stale = _WINDOW_CACHE_ORDER.pop(0)
+        _WINDOW_CACHE.pop(stale, None)
+    return array
 
 
 def _amplitude_strength(

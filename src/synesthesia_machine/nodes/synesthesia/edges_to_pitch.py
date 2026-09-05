@@ -184,22 +184,48 @@ def extract_contour_features(
         np.clip(np.nan_to_num(normalized, nan=0.0, posinf=1.0, neginf=0.0), 0.0, 1.0),
         dtype=np.float32,
     )
-    mask = np.asarray(normalized > 0.0, dtype=np.uint8) * np.uint8(255)
+    # One fused binary threshold replaces the boolean-compare + multiply
+    # temporaries; the float32 result is cast to the 8U layout findContours
+    # requires (exact for the 0/255 values, and > 0.0 semantics preserved).
+    mask = np.asarray(cv2.threshold(normalized, 0.0, 255.0, cv2.THRESH_BINARY)[1], dtype=np.uint8)
     mode = cv2.RETR_EXTERNAL if retrieval_mode == EXTERNAL else cv2.RETR_TREE
     try:
         raw_contours, _ = cv2.findContours(mask, mode, cv2.CHAIN_APPROX_NONE)
     except cv2.error as error:
         raise ValueError(f"Contour extraction failed: {error}") from error
     contours = [cast(NDArray[np.int32], contour) for contour in raw_contours]
-    contours.sort(key=_contour_sort_key)
 
     height, width = normalized.shape
     result: list[ContourFeatures] = []
-    for contour in contours[:contour_limit]:
-        perimeter = float(cv2.arcLength(contour, True))
-        area = float(abs(cv2.contourArea(contour)))
-        if area < minimum_contour_area or perimeter < minimum_contour_perimeter:
-            continue
+    # The area/perimeter filter is two per-contour C calls, while the spatial
+    # sort key needs a bounding rectangle per contour. Filtering first keeps a
+    # frame full of tiny noise contours from paying the sort-key cost for
+    # every one of them; the contour_limit cap is applied exactly as before,
+    # after the (now much smaller) spatial sort. With both thresholds disabled
+    # the historical behaviour (sort everything, cap, no filter) is kept.
+    if minimum_contour_area > 0.0 or minimum_contour_perimeter > 0.0:
+        survivors: list[tuple[NDArray[np.int32], float, float]] = []
+        for contour in contours:
+            perimeter = float(cv2.arcLength(contour, True))
+            area = float(abs(cv2.contourArea(contour)))
+            if area < minimum_contour_area or perimeter < minimum_contour_perimeter:
+                continue
+            survivors.append((contour, perimeter, area))
+        survivors.sort(key=lambda item: _contour_sort_key(item[0]))
+        capped: list[tuple[NDArray[np.int32], float, float]] = [
+            (contour, perimeter, area) for contour, perimeter, area in survivors[:contour_limit]
+        ]
+    else:
+        contours.sort(key=_contour_sort_key)
+        capped = [
+            (
+                contour,
+                float(cv2.arcLength(contour, True)),
+                float(abs(cv2.contourArea(contour))),
+            )
+            for contour in contours[:contour_limit]
+        ]
+    for contour, perimeter, area in capped:
         moments = cv2.moments(contour)
         mass = float(moments["m00"])
         if not math.isfinite(mass) or abs(mass) <= np.finfo(np.float64).eps or perimeter <= 0.0:

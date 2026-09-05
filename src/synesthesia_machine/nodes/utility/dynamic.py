@@ -596,11 +596,26 @@ def _normalize_array(
     output_minimum: float = 0.0,
     output_maximum: float = 1.0,
 ) -> NDArray[np.float32]:
-    finite = data[np.isfinite(data)]
+    # NaN-safe bounds avoid the full-frame finite gather the old code paid on
+    # every call: a couple of C-level reduction passes replace the mask +
+    # gather + reduce sequence, and min/max of the same value set are
+    # bit-identical. Data containing infinities falls back to the strict
+    # finite-only bounds so the documented behavior is preserved.
+    has_finite = bool(data.size and np.isfinite(data).any())
     if data_minimum is None:
-        data_minimum = float(np.min(finite)) if finite.size else 0.0
+        if has_finite:
+            data_minimum = float(np.nanmin(data))
+            if not math.isfinite(data_minimum):
+                data_minimum = float(np.min(data[np.isfinite(data)]))
+        else:
+            data_minimum = 0.0
     if data_maximum is None:
-        data_maximum = float(np.max(finite)) if finite.size else 0.0
+        if has_finite:
+            data_maximum = float(np.nanmax(data))
+            if not math.isfinite(data_maximum):
+                data_maximum = float(np.max(data[np.isfinite(data)]))
+        else:
+            data_maximum = 0.0
     if data_maximum == data_minimum:
         return np.full_like(data, output_minimum, dtype=np.float32)
     with np.errstate(invalid="ignore", over="ignore"):

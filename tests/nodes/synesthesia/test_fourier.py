@@ -370,3 +370,64 @@ def test_definition_registry_nonfinite_and_range_validation_contracts() -> None:
     ):
         _, errors = definition.parameter_values(overrides)
         assert any(expected in error for error in errors)
+
+
+def test_band_amplitudes_match_per_band_gather_reference() -> None:
+    # The vectorized group-sort rewrite must stay bit-identical to the
+    # historical per-band boolean gather for every aggregation mode, window,
+    # and the DC-excluded (map value -1) cells.
+    rng = np.random.default_rng(7)
+    data = read_only_float32(rng.uniform(-1.0, 1.0, size=(17, 23)).astype(np.float32))
+    channel = _channel(data)
+    band_indexes = build_fourier_band_map(
+        FourierBandMapKey((17, 23), 6, HORIZONTAL, 0.05, 0.95, 0.02)
+    )
+    for window in (NONE, HANN, HAMMING):
+        for aggregation in (BAND_MEAN, BAND_PERCENTILE):
+            for subtract_mean in (False, True):
+                got = fourier_band_amplitudes(
+                    channel,
+                    band_indexes=band_indexes,
+                    note_count=6,
+                    window=window,
+                    subtract_mean=subtract_mean,
+                    band_aggregation=aggregation,
+                    percentile=40.0,
+                )
+                normalized = (data - channel.nominal_min) / (
+                    channel.nominal_max - channel.nominal_min
+                )
+                samples = np.asarray(
+                    np.clip(np.nan_to_num(normalized, nan=0.0, posinf=1.0, neginf=0.0), 0.0, 1.0),
+                    dtype=np.float64,
+                )
+                if subtract_mean:
+                    samples = samples - float(np.mean(samples, dtype=np.float64))
+                from synesthesia_machine.nodes.synesthesia.fourier import _window_2d
+
+                samples = samples * _window_2d(samples.shape, window)
+                log_magnitude = np.log1p(np.abs(np.fft.fft2(samples)))
+                reference = np.zeros(6, dtype=np.float64)
+                for band in range(6):
+                    selected = log_magnitude[band_indexes == band]
+                    if selected.size == 0:
+                        continue
+                    reference[band] = (
+                        float(np.mean(selected, dtype=np.float64))
+                        if aggregation == BAND_MEAN
+                        else float(np.percentile(selected, 40.0))
+                    )
+                assert np.array_equal(got, reference), (window, aggregation, subtract_mean)
+
+
+def test_window_arrays_are_cached_and_frozen() -> None:
+    from synesthesia_machine.nodes.synesthesia.fourier import _window_2d
+
+    first = _window_2d((13, 29), HANN)
+    second = _window_2d((13, 29), HANN)
+    assert first is second
+    assert not first.flags.writeable
+    assert not second.flags.writeable
+    unit = _window_2d((13, 29), NONE)
+    assert unit.shape == (13, 29)
+    assert not unit.flags.writeable

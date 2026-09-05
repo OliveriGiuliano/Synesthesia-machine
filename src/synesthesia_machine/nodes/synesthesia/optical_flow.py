@@ -536,23 +536,29 @@ def _histogram_candidates(
             (magnitudes - magnitude_minimum) / (magnitude_maximum - magnitude_minimum), 0.0, 1.0
         )
     indexes = np.floor(np.clip(pitches, 0.0, 1.0) * (len(allowed) - 1) + 0.5).astype(np.int64)
+    # Gather every moving pixel exactly once, then aggregate per note on the
+    # (usually far smaller) 1-D arrays. The gathered arrays preserve raster
+    # order, so per-note means and maxima are bit-identical to the old full
+    # per-note masked passes.
+    flat_indexes = indexes[moving].astype(np.intp)
+    flat_magnitudes = magnitudes[moving]
+    counts = np.bincount(flat_indexes, minlength=len(allowed))
+    maximums = np.zeros(len(allowed), dtype=np.float32)
+    np.maximum.at(maximums, flat_indexes, flat_magnitudes)
     candidates: list[tuple[int, float]] = []
     for index, note in enumerate(allowed):
-        selected = moving & (indexes == index)
-        count = int(np.count_nonzero(selected))
+        count = int(counts[index])
         if count == 0:
             continue
-        selected_magnitudes = magnitudes[selected]
+        selected = flat_indexes == index
         if velocity_feature == MEAN_MAGNITUDE:
             strength = _normalize(
-                float(np.mean(selected_magnitudes, dtype=np.float64)),
+                float(np.mean(flat_magnitudes[selected], dtype=np.float64)),
                 magnitude_minimum,
                 magnitude_maximum,
             )
         elif velocity_feature == MAXIMUM_MAGNITUDE:
-            strength = _normalize(
-                float(np.max(selected_magnitudes)), magnitude_minimum, magnitude_maximum
-            )
+            strength = _normalize(float(maximums[index]), magnitude_minimum, magnitude_maximum)
         else:
             strength = count / magnitudes.size
         candidates.append((note, strength))

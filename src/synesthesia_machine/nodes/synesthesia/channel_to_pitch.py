@@ -132,8 +132,15 @@ def channel_histogram_to_midi_state(
             valid_pixel_count = int(np.count_nonzero(finite))
             normalized = np.asarray(value.data[finite], dtype=np.float32)
     else:
-        finite = np.ones(value.data.shape, dtype=np.bool_)
-        for channel in channels:
+        # The base channel's finite mask seeds the combined mask, so the
+        # parameter channels only contribute their own isfinite passes instead
+        # of starting from a fresh full-size ones buffer.
+        finite = np.isfinite(value.data)
+        if not ignore_non_finite and not bool(np.all(finite)):
+            raise ValueError("Connected channels contain non-finite values")
+        for channel in (parameter_a, parameter_b):
+            if channel is None:
+                continue
             channel_finite = np.isfinite(channel.data)
             if not ignore_non_finite and not bool(np.all(channel_finite)):
                 raise ValueError("Connected channels contain non-finite values")
