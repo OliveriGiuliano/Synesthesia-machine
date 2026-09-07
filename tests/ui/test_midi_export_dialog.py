@@ -62,6 +62,7 @@ def _wire_valid_graph(window: MainWindow, video: str) -> None:
     document.add_connection(source, "image", luminance, "image")
     document.add_connection(luminance, "channel", pitch, "value")
     document.add_connection(pitch, "midi", send, "midi")
+    window.session._refresh()
 
 
 def test_export_action_is_disabled_without_any_source(video_window: MainWindow) -> None:
@@ -82,6 +83,7 @@ def test_export_action_enables_for_a_valid_video_to_midi_graph(
 def test_export_action_reports_the_most_actionable_reason(video_window: MainWindow) -> None:
     document = video_window.session.document
     document.add_node("synmachine.output.send_midi")
+    video_window.session._refresh()
     video_window._refresh_action_states()
     assert not _export_action(video_window).isEnabled()
     assert "load video" in _export_action(video_window).toolTip().lower()
@@ -92,6 +94,7 @@ def test_export_action_reports_the_most_actionable_reason(video_window: MainWind
         "synmachine.input.load_video",
         parameters={"file_path": "/nonexistent/export-midi-test.mp4"},
     )
+    video_window.session._refresh()
     video_window._refresh_action_states()
     assert not _export_action(video_window).isEnabled()
     assert "video file" in _export_action(video_window).toolTip().lower()
@@ -101,6 +104,7 @@ def test_camera_source_disables_the_action(video_window: MainWindow, tmp_path: P
     _wire_valid_graph(video_window, str(tmp_path / "hue.mp4"))
     document = video_window.session.document
     document.add_node("synmachine.input.load_camera")
+    video_window.session._refresh()
     video_window._refresh_action_states()
     assert not _export_action(video_window).isEnabled()
     assert "camera" in _export_action(video_window).toolTip().lower()
@@ -161,6 +165,7 @@ def test_looping_video_source_blocks_export(video_window: MainWindow, tmp_path: 
     )
     send = document.add_node("synmachine.output.send_midi")
     document.add_connection(source, "image", send, "midi")
+    video_window.session._refresh()
     video_window._refresh_action_states()
     action = _export_action(video_window)
     assert not action.isEnabled()

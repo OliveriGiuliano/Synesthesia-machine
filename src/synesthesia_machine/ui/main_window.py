@@ -213,6 +213,10 @@ class MainWindow(QMainWindow):
         self._engine_task_signals = _EngineTaskSignals(self)
         self._engine_tasks_inflight: set[str] = set()
         self._engine_known_stopped = False
+        self._midi_eligibility: tuple[bool, str] | None = None
+        self._midi_eligibility_key: object | None = None
+        self._source_node_ids: tuple[UUID, ...] = ()
+        self._source_node_ids_key: object | None = None
         self._pending_activation: tuple[GraphSnapshot, tuple[UUID, ...]] | None = None
         self._midi_export_job: MidiExportJob | None = None
         self._autosave_timer = QTimer(self)
@@ -1241,7 +1245,8 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _refresh_action_states(self) -> None:
-        has_nodes = bool(self.scene.selected_node_ids())
+        selected_nodes = self.scene.selected_node_ids()
+        has_nodes = bool(selected_nodes)
         has_selection = (
             has_nodes
             or bool(self.scene.selected_connection_ids())
@@ -1255,7 +1260,7 @@ class MainWindow(QMainWindow):
             mime_data is not None and mime_data.hasFormat(CLIPBOARD_MIME_TYPE)
         )
         self.action_registry.require("frame_selection").setEnabled(has_selection)
-        selected_node_count = len(self.scene.selected_node_ids())
+        selected_node_count = len(selected_nodes)
         for key in (
             "align_left",
             "align_hcenter",
@@ -1271,14 +1276,35 @@ class MainWindow(QMainWindow):
         self.action_registry.require("organize_graph").setEnabled(
             len(self.session.document.nodes) >= 2
         )
-        sources = tuple(
-            node.id
-            for node in self.session.document.nodes
-            if (definition := self.registry.get(node.type_id)) is not None
-            and definition.execution_kind is ExecutionKind.SOURCE
-        )
-        transport = resolve_transport_target(sources, self.scene.selected_node_ids())
-        selected = self.scene.selected_node_ids()
+        # The source list and the MIDI export eligibility depend only on the
+        # document and its validation report, both of which change atomically
+        # in session._refresh. The report object is replaced on every full
+        # refresh (and kept for presentation-only refreshes, which leave the
+        # document untouched), so its identity is a sound cache key: selection
+        # and clipboard events no longer pay the O(N) scan or the per-video
+        # file-system stats.
+        # A monotonic revision (bumped by every session refresh, full or
+        # presentation-only) is the cache key; object identity would be
+        # unsafe because CPython reuses addresses of freed report objects.
+        cache_key = self.session.revision
+        if self._source_node_ids_key is not cache_key:
+            self._source_node_ids = tuple(
+                node.id
+                for node in self.session.document.nodes
+                if (definition := self.registry.get(node.type_id)) is not None
+                and definition.execution_kind is ExecutionKind.SOURCE
+            )
+            eligible, reason = midi_export_eligibility(
+                self.session.document.snapshot(),
+                self.registry,
+                graph_valid=not self.session.report.errors,
+            )
+            self._midi_eligibility = (eligible, reason)
+            self._midi_eligibility_key = cache_key
+            self._source_node_ids_key = cache_key
+        assert self._midi_eligibility is not None
+        eligible, reason = self._midi_eligibility
+        transport = resolve_transport_target(self._source_node_ids, selected_nodes)
         for key, verb in (
             ("play", "Play or resume"),
             ("pause", "Pause"),
@@ -1291,15 +1317,11 @@ class MainWindow(QMainWindow):
                 trf(
                     "{verb} the {target} source",
                     verb=tr(verb),
-                    target=tr("selected" if transport.target in selected else "only"),
+                    target=tr("selected" if transport.target in selected_nodes else "only"),
                 )
                 if transport.target is not None
                 else tr(transport.message)
             )
-        snapshot = self.session.document.snapshot()
-        eligible, reason = midi_export_eligibility(
-            snapshot, self.registry, graph_valid=not self.session.report.errors
-        )
         export_action = self.action_registry.require("export_midi")
         export_action.setEnabled(eligible)
         tooltip = (
@@ -1596,11 +1618,14 @@ class MainWindow(QMainWindow):
         for preview in image_previews:
             key = (preview.owner_id, preview.source_port_id)
             self._image_sequences[key] = preview.sequence
+            # Convert the preview bytes once and share the QImage between the
+            # canvas link pill and the dock instead of wrapping+copying twice.
+            qimage = image_preview_to_qimage(preview)
             self.scene.set_connection_image_preview(
-                preview.owner_id, preview.source_port_id, image_preview_to_qimage(preview)
+                preview.owner_id, preview.source_port_id, qimage
             )
             if image_visible and key in self._image_dock_preview_sources:
-                self.image_preview_panel.show_preview(preview)
+                self.image_preview_panel.show_image(qimage, preview)
         for preview in value_previews:
             self._canvas_value_sequences[(preview.owner_id, preview.source_port_id)] = (
                 preview.sequence
@@ -1760,7 +1785,11 @@ class MainWindow(QMainWindow):
                 " · {count} dropped",
                 count=metrics.dropped_before_processing,
             )
-        self._engine_status.setText(summary)
+        # The status line is rebuilt every 100 ms while the engine runs;
+        # skip the setText re-layout when nothing changed so an idle engine
+        # costs only the string comparison.
+        if self._engine_status.text() != summary:
+            self._engine_status.setText(summary)
         self._engine_known_stopped = metrics.state is EngineState.STOPPED
 
     @Slot(bool)
@@ -2115,6 +2144,9 @@ class MainWindow(QMainWindow):
             if isinstance(button, QToolButton):
                 button.setAccessibleName(action.text().replace("&", ""))
         self.library.retranslate()
+        # Titles and descriptions live in the projected view model; rebuild
+        # it before the scene sync so the cached projection is not stale.
+        self.session.rebuild_view_model()
         self.scene.sync_from_session()
         self.inspector.retranslate()
         self.issues_panel.set_report(self.session.report)

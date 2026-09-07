@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage, QPainter, QPaintEvent, QPen, QPixmap
+from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPaintEvent, QPen, QPixmap
 from PySide6.QtWidgets import QLabel, QTabWidget, QVBoxLayout, QWidget
 
 from synesthesia_machine.contracts import ImagePreview, NotePreview
@@ -36,6 +36,7 @@ class ImagePreviewWidget(QWidget):
         super().__init__(parent)
         self.latest_preview: ImagePreview | None = None
         self._pixmap = QPixmap()
+        self._checker_pixmap = _checkerboard_pixmap()
         self.setObjectName("image_preview_widget")
         self.setAccessibleName(tr("Image data preview"))
         self.setMinimumSize(260, 180)
@@ -44,8 +45,13 @@ class ImagePreviewWidget(QWidget):
         return QSize(560, 300)
 
     def set_preview(self, preview: ImagePreview) -> None:
+        self.set_image(image_preview_to_qimage(preview), preview)
+
+    def set_image(self, image: QImage, preview: ImagePreview) -> None:
+        # The caller converts the immutable preview bytes once and may share
+        # the resulting QImage between the canvas pill and this widget.
         self.latest_preview = preview
-        self._pixmap = QPixmap.fromImage(image_preview_to_qimage(preview))
+        self._pixmap = QPixmap.fromImage(image)
         self.update()
 
     def clear_preview(self) -> None:
@@ -70,16 +76,33 @@ class ImagePreviewWidget(QWidget):
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         painter.drawPixmap(target, self._pixmap, QRectF(self._pixmap.rect()))
 
-    @staticmethod
-    def _paint_checkerboard(painter: QPainter, target: QRectF) -> None:
-        tile = 12
+    def _paint_checkerboard(self, painter: QPainter, target: QRectF) -> None:
+        # One pattern-brush fill replaces the per-tile Python fillRect loop.
+        # Translating the painter to the target corner anchors the tile grid
+        # there, keeping the square phase identical to the old loop, which
+        # started its rows and columns at that corner.
+        origin_x = int(target.left())
+        origin_y = int(target.top())
         painter.save()
         painter.setClipRect(target)
-        for row, y in enumerate(range(int(target.top()), int(target.bottom()) + tile, tile)):
-            for column, x in enumerate(range(int(target.left()), int(target.right()) + tile, tile)):
-                colour = QColor("#7f8794") if (row + column) % 2 else QColor("#b3bac4")
-                painter.fillRect(x, y, tile, tile, colour)
+        painter.translate(origin_x, origin_y)
+        local_target = target.adjusted(-origin_x, -origin_y, -origin_x, -origin_y)
+        painter.fillRect(local_target, QBrush(self._checker_pixmap))
         painter.restore()
+
+
+def _checkerboard_pixmap() -> QPixmap:
+    """One 24x24 tile of the alpha checkerboard pattern, built once per widget."""
+
+    tile = 12
+    pixmap = QPixmap(tile * 2, tile * 2)
+    painter = QPainter(pixmap)
+    painter.fillRect(0, 0, tile, tile, QColor("#b3bac4"))
+    painter.fillRect(tile, 0, tile, tile, QColor("#7f8794"))
+    painter.fillRect(0, tile, tile, tile, QColor("#7f8794"))
+    painter.fillRect(tile, tile, tile, tile, QColor("#b3bac4"))
+    painter.end()
+    return pixmap
 
 
 class NotePreviewWidget(QWidget):
@@ -259,6 +282,15 @@ class ImagePreviewPanel(QWidget):
 
     def show_preview(self, preview: ImagePreview) -> None:
         self.image_widget.set_preview(preview)
+        self._set_image_caption(preview)
+
+    def show_image(self, image: QImage, preview: ImagePreview) -> None:
+        # Dock variant of show_preview that reuses a QImage already built for
+        # the canvas pill, avoiding a second wrap+copy of the preview bytes.
+        self.image_widget.set_image(image, preview)
+        self._set_image_caption(preview)
+
+    def _set_image_caption(self, preview: ImagePreview) -> None:
         self.image_caption.setText(
             trf(
                 "Node {node} · tick {tick} · {width}x{height} · sequence {sequence}",

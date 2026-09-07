@@ -11,6 +11,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
+    QFont,
     QFontMetricsF,
     QImage,
     QPainter,
@@ -752,7 +753,9 @@ class NodeGraphicsItem(QGraphicsObject):
                     # must keep the node inside the graph area.
                     return QPointF(clamped[0], clamped[1])
         if change is QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged and scene is not None:
-            cast("GraphSceneProtocol", scene).update_connections()
+            cast("GraphSceneProtocol", scene).update_connections_for_nodes(
+                (self.view_model.node_id,)
+            )
         return super().itemChange(change, value)
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
@@ -855,6 +858,8 @@ class ConnectionGraphicsItem(QGraphicsObject):
         self._preview_visible = True
         self._value_text: str | None = None
         self._image: QImage | None = None
+        self._pill_metrics: QFontMetricsF | None = None
+        self._pill_metrics_font: QFont | None = None
         self.setZValue(-1.0)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         self.setToolTip(
@@ -950,7 +955,15 @@ class ConnectionGraphicsItem(QGraphicsObject):
         if self._pill_family() == "" or self._midpoint is None:
             return None
         if self._pill_family() == "scalar":
-            metrics = QFontMetricsF(self.theme.body_font())
+            # The metrics object is expensive to allocate; pills are sized on
+            # every geometry pass, so keep one per item and only rebuild it
+            # when the theme's font actually changes (e.g. retranslation).
+            font = self.theme.body_font()
+            metrics = self._pill_metrics
+            if metrics is None or self._pill_metrics_font != font:
+                metrics = QFontMetricsF(font)
+                self._pill_metrics = metrics
+                self._pill_metrics_font = font
             content = metrics.horizontalAdvance(self._pill_text())
             # Size the badge from the font line height so the number is never
             # clipped, regardless of DPI or font substitution.
@@ -1171,6 +1184,7 @@ class GraphSceneProtocol:
     def update_connection_drag(self, position: QPointF) -> None: ...
     def end_connection_drag(self, position: QPointF) -> None: ...
     def update_connections(self) -> None: ...
+    def update_connections_for_nodes(self, node_ids: object) -> None: ...
     def sceneRect(self) -> QRectF: ...
     def clamp_position_to_scene(
         self, x: float, y: float, width: float, height: float

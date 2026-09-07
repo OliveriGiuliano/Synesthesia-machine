@@ -90,7 +90,11 @@ class DocumentSession(QObject):
 
         def refresh_presentation() -> None:
             if (session := session_reference()) is not None:
-                session._refresh(runtime_changed=False)
+                # Presentation-only edits (group move/resize) leave topology
+                # and types untouched, so the previous compilation is still
+                # valid; only the projection needs rebuilding for the new
+                # positions.
+                session._refresh(runtime_changed=False, recompile=False)
 
         self._command_change_callback = refresh_session
         self._presentation_change_callback = refresh_presentation
@@ -98,6 +102,8 @@ class DocumentSession(QObject):
         self.report = ValidationReport()
         self._device_catalogue = DeviceCatalogue()
         self._compilation: CompilationResult
+        self._view_model: GraphViewModel
+        self._revision = 0
         self.undo_stack.cleanChanged.connect(self._on_clean_changed)
         self.undo_stack.setClean()
         self._refresh()
@@ -107,13 +113,18 @@ class DocumentSession(QObject):
         return not self.undo_stack.isClean()
 
     @property
+    def revision(self) -> int:
+        """Monotonic counter bumped by every _refresh, for UI-side caches."""
+
+        return self._revision
+
+    @property
     def view_model(self) -> GraphViewModel:
-        return project_graph(
-            self.document.snapshot(),
-            self.registry,
-            self.report,
-            compilation=self._compilation,
-        )
+        # One shared projection per document change: the scene, inspector,
+        # and main window all read this object instead of each paying a
+        # full project_graph pass. It is rebuilt in _refresh from the same
+        # state the compile used, so it is always in sync with _compilation.
+        return self._view_model
 
     def push(self, command: QUndoCommand) -> None:
         self.undo_stack.push(command)
@@ -618,10 +629,33 @@ class DocumentSession(QObject):
             self.undo_stack.endMacro()
         return node_id
 
-    def _refresh(self, *, runtime_changed: bool = True) -> None:
-        self._compilation = self.compiler.compile(self.document.snapshot())
-        self.report = self._compilation.report
-        self.validationChanged.emit(self.report)
+    def rebuild_view_model(self) -> None:
+        """Re-project the view model after state outside the document changed.
+
+        A language switch re-projects titles and descriptions through the new
+        translation table without touching the graph or its compilation.
+        """
+        self._view_model = project_graph(
+            self.document.snapshot(),
+            self.registry,
+            self.report,
+            compilation=self._compilation,
+        )
+
+    def _refresh(self, *, runtime_changed: bool = True, recompile: bool = True) -> None:
+        # Compile and project from the current document state; every command
+        # ends with a refresh, so nothing mutates the document in between.
+        self._revision += 1
+        if recompile:
+            self._compilation = self.compiler.compile(self.document.snapshot())
+            self.report = self._compilation.report
+            self.validationChanged.emit(self.report)
+        self._view_model = project_graph(
+            self.document.snapshot(),
+            self.registry,
+            self.report,
+            compilation=self._compilation,
+        )
         self.changed.emit()
         if runtime_changed:
             self.runtimeChanged.emit()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Iterable
 from pathlib import Path
 from uuid import UUID
 
@@ -93,6 +94,9 @@ class GraphScene(QGraphicsScene):
         self.node_items: dict[UUID, NodeGraphicsItem] = {}
         self.connection_items: dict[UUID, ConnectionGraphicsItem] = {}
         self._connection_preview_index: dict[tuple[UUID, str], list[ConnectionGraphicsItem]] = {}
+        # Cables indexed by endpoint node so a node move recomputes only the
+        # cables actually touching it (see update_connections_for_nodes).
+        self._cables_by_node: dict[UUID, list[ConnectionGraphicsItem]] = {}
         self.group_items: dict[UUID, GroupGraphicsItem] = {}
         self._drag_port: PortGraphicsItem | None = None
         self._temporary: TemporaryConnectionGraphicsItem | None = None
@@ -170,6 +174,7 @@ class GraphScene(QGraphicsScene):
         # items so set_connection_*_preview is an O(matching items) lookup
         # instead of a scan over every connection in a large graph.
         self._rebuild_connection_preview_index()
+        self._rebuild_cable_node_index()
         self.update_connections()
         self._sync_connection_preview_visibility()
         selection_changed = (
@@ -332,16 +337,42 @@ class GraphScene(QGraphicsScene):
             if item is not None:
                 item.setSelected(True)
 
-    def update_connections(self) -> None:
+    def _rebuild_cable_node_index(self) -> None:
+        index: dict[UUID, list[ConnectionGraphicsItem]] = {}
         for item in self.connection_items.values():
             model = item.view_model
-            source = self.port_item(model.source_node_id, model.source_port_id, True)
-            destination = self.port_item(
-                model.destination_node_id, model.destination_port_id, False
-            )
-            if source is not None and destination is not None:
-                item.set_endpoints(source.scenePos(), destination.scenePos())
+            for node_id in (model.source_node_id, model.destination_node_id):
+                index.setdefault(node_id, []).append(item)
+        self._cables_by_node = index
+
+    def update_connections(self) -> None:
+        for item in self.connection_items.values():
+            self._set_connection_endpoints(item)
         self.update_selection_outline()
+
+    def update_connections_for_nodes(self, node_ids: Iterable[UUID]) -> None:
+        # Incremental variant used by per-node position changes: only cables
+        # incident to the moved nodes rebuild their geometry, so a multi-node
+        # drag costs O(incident cables) instead of O(all cables) per event.
+        touched: set[ConnectionGraphicsItem] = set()
+        for node_id in node_ids:
+            touched.update(self._cables_by_node.get(node_id, ()))
+        for item in touched:
+            self._set_connection_endpoints(item)
+        if any(
+            (node_item := self.node_items.get(node_id)) is not None and node_item.isSelected()
+            for node_id in node_ids
+        ):
+            self.update_selection_outline()
+
+    def _set_connection_endpoints(self, item: ConnectionGraphicsItem) -> None:
+        model = item.view_model
+        source = self.port_item(model.source_node_id, model.source_port_id, True)
+        destination = self.port_item(
+            model.destination_node_id, model.destination_port_id, False
+        )
+        if source is not None and destination is not None:
+            item.set_endpoints(source.scenePos(), destination.scenePos())
 
     @property
     def selection_outline_rect(self) -> QRectF:

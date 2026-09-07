@@ -64,6 +64,8 @@ class ProfilerPanel(QWidget):
         super().__init__(parent)
         self._profiles: tuple[NodeProfile, ...] = ()
         self._names: dict[UUID, str] = {}
+        self._row_by_node: dict[UUID, int] = {}
+        self._last_row_values: dict[UUID, tuple[object, ...]] = {}
 
         self.summary = QLabel(
             trf(
@@ -123,7 +125,13 @@ class ProfilerPanel(QWidget):
         profiles: tuple[NodeProfile, ...],
         names: Mapping[UUID, str] | None = None,
     ) -> bool:
-        """Replace displayed data unless frozen; return whether the view changed."""
+        """Update displayed data in place unless frozen; return whether changed.
+
+        Rows are keyed by node id: existing rows only rewrite the cells whose
+        values moved, new nodes append rows, and nodes that disappeared drop
+        theirs. This keeps a 250 ms profiler tick from tearing the table down
+        and re-measuring every cell while the canvas is being painted.
+        """
 
         if self.frozen:
             return False
@@ -131,45 +139,84 @@ class ProfilerPanel(QWidget):
         self._names = dict(names or {})
         sort_column = self.table.horizontalHeader().sortIndicatorSection()
         sort_order = self.table.horizontalHeader().sortIndicatorOrder()
-        self.table.setSortingEnabled(False)
-        self.table.setRowCount(len(profiles))
         warning_ms = FRAME_BUDGET_MS * WARNING_FRACTION
-        for row, profile in enumerate(profiles):
-            name = self._names.get(profile.node_id, str(profile.node_id)[:8])
-            name_item = QTableWidgetItem(name)
-            name_item.setToolTip(str(profile.node_id))
-            self.table.setItem(row, 0, name_item)
-            timings = (
-                profile.last_duration_ms,
-                profile.ema_duration_ms,
-                profile.p50_duration_ms,
-                profile.p95_duration_ms,
-                profile.max_duration_ms,
-            )
-            for column, value in enumerate(timings, start=1):
-                item = _NumericItem(value, f"{value:.3f}")
-                if column == 4 and value > warning_ms:
-                    item.setForeground(QColor("#f0b44c"))
-                    item.setToolTip(
-                        tr("This node uses more than half of a 60 FPS frame budget at p95.")
-                    )
-                self.table.setItem(row, column, item)
-            self.table.setItem(
-                row, 6, _NumericItem(profile.invocation_count, f"{profile.invocation_count:,}")
-            )
-            error_item = _NumericItem(profile.error_count, f"{profile.error_count:,}")
-            if profile.error_count:
-                error_item.setForeground(QColor("#ef6b73"))
-            self.table.setItem(row, 7, error_item)
-            output_item = QTableWidgetItem(profile.output_summary)
-            output_item.setToolTip(profile.output_summary)
-            self.table.setItem(row, 8, output_item)
-            self.table.setItem(
-                row, 9, _NumericItem(profile.output_bytes, _format_bytes(profile.output_bytes))
-            )
+        self.table.setSortingEnabled(False)
+
+        present = {profile.node_id for profile in profiles}
+        for node_id in [
+            node_id for node_id in self._row_by_node if node_id not in present
+        ]:
+            row = self._row_by_node.pop(node_id)
+            self._last_row_values.pop(node_id, None)
+            self.table.removeRow(row)
+        # removeRow shifts the rows below it up; rebuild the row map from the
+        # table's current state before touching any remaining row.
+        self._row_by_node = {}
+
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item is None:
+                continue
+            node_id = _row_node_id(item)
+            if node_id is not None and node_id in present:
+                self._row_by_node[node_id] = row
+
+        for profile in profiles:
+            row = self._row_by_node.get(profile.node_id)
+            if row is None:
+                row = self.table.rowCount()
+                self.table.insertRow(row)
+                self._row_by_node[profile.node_id] = row
+            self._update_row(profile, row, warning_ms)
         self.table.setSortingEnabled(True)
         self.table.sortItems(sort_column, sort_order)
         return True
+
+    def _update_row(self, profile: NodeProfile, row: int, warning_ms: float) -> None:
+        name = self._names.get(profile.node_id, str(profile.node_id)[:8])
+        timings = (
+            profile.last_duration_ms,
+            profile.ema_duration_ms,
+            profile.p50_duration_ms,
+            profile.p95_duration_ms,
+            profile.max_duration_ms,
+        )
+        signature = (
+            name,
+            *timings,
+            profile.invocation_count,
+            profile.error_count,
+            profile.output_summary,
+            profile.output_bytes,
+        )
+        if self._last_row_values.get(profile.node_id) == signature:
+            return
+        self._last_row_values[profile.node_id] = signature
+        name_item = QTableWidgetItem(name)
+        name_item.setToolTip(str(profile.node_id))
+        name_item.setData(Qt.ItemDataRole.UserRole, str(profile.node_id))
+        self.table.setItem(row, 0, name_item)
+        for column, value in enumerate(timings, start=1):
+            item = _NumericItem(value, f"{value:.3f}")
+            if column == 4 and value > warning_ms:
+                item.setForeground(QColor("#f0b44c"))
+                item.setToolTip(
+                    tr("This node uses more than half of a 60 FPS frame budget at p95.")
+                )
+            self.table.setItem(row, column, item)
+        self.table.setItem(
+            row, 6, _NumericItem(profile.invocation_count, f"{profile.invocation_count:,}")
+        )
+        error_item = _NumericItem(profile.error_count, f"{profile.error_count:,}")
+        if profile.error_count:
+            error_item.setForeground(QColor("#ef6b73"))
+        self.table.setItem(row, 7, error_item)
+        output_item = QTableWidgetItem(profile.output_summary)
+        output_item.setToolTip(profile.output_summary)
+        self.table.setItem(row, 8, output_item)
+        self.table.setItem(
+            row, 9, _NumericItem(profile.output_bytes, _format_bytes(profile.output_bytes))
+        )
 
     @Slot()
     def copy_report(self) -> None:
@@ -220,13 +267,32 @@ class ProfilerPanel(QWidget):
         self.resetRequested.emit()
 
 
-def profile_heat_levels(profiles: tuple[NodeProfile, ...]) -> dict[UUID, float]:
-    """Map p95 timings to a stable 60 FPS frame-budget heat scale."""
+HEAT_BUCKET = 0.02
 
-    return {
-        profile.node_id: min(1.0, max(0.0, profile.p95_duration_ms / FRAME_BUDGET_MS))
-        for profile in profiles
-    }
+
+def _row_node_id(item: QTableWidgetItem) -> UUID | None:
+    raw = item.data(Qt.ItemDataRole.UserRole)
+    if isinstance(raw, str) and raw:
+        try:
+            return UUID(raw)
+        except ValueError:
+            return None
+    return None
+
+
+def profile_heat_levels(profiles: tuple[NodeProfile, ...]) -> dict[UUID, float]:
+    """Map p95 timings to a stable 60 FPS frame-budget heat scale.
+
+    Levels are quantized to 2% steps: the canvas heatmap guard then skips
+    every node whose level did not cross a bucket boundary, so a profiler
+    tick no longer invalidates the whole canvas.
+    """
+
+    levels: dict[UUID, float] = {}
+    for profile in profiles:
+        value = min(1.0, max(0.0, profile.p95_duration_ms / FRAME_BUDGET_MS))
+        levels[profile.node_id] = round(value / HEAT_BUCKET) * HEAT_BUCKET
+    return levels
 
 
 def _format_bytes(value: int) -> str:

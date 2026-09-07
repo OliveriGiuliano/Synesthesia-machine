@@ -50,26 +50,45 @@ class ThemeMetrics:
     max_zoom: float = 3.0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class Theme:
+    # No slots: the instance dict carries the QColor/QFont caches below.
     colors: ThemeColors = ThemeColors()
     metrics: ThemeMetrics = ThemeMetrics()
     body_points: float = 9.0
     title_points: float = 10.0
 
+    def __post_init__(self) -> None:
+        # Frozen dataclasses only allow attribute writes via object.__setattr__.
+        object.__setattr__(self, "_qcolor_cache", {})
+        object.__setattr__(self, "_body_font", None)
+        object.__setattr__(self, "_title_font", None)
+
     def color(self, name: str) -> QColor:
-        return QColor(getattr(self.colors, name))
+        # QColor construction parses the hex string; paint paths call this
+        # several times per node per paint, so share one object per token.
+        cache: dict[str, QColor] = self.__dict__["_qcolor_cache"]
+        try:
+            return cache[name]
+        except KeyError:
+            colour = QColor(getattr(self.colors, name))
+            cache[name] = colour
+            return colour
 
     def body_font(self) -> QFont:
-        font = QFont()
-        font.setPointSizeF(self.body_points)
-        return font
+        if self.__dict__["_body_font"] is None:
+            font = QFont()
+            font.setPointSizeF(self.body_points)
+            self.__dict__["_body_font"] = font
+        return self.__dict__["_body_font"]
 
     def title_font(self) -> QFont:
-        font = self.body_font()
-        font.setPointSizeF(self.title_points)
-        font.setBold(True)
-        return font
+        if self.__dict__["_title_font"] is None:
+            font = self.body_font()
+            font.setPointSizeF(self.title_points)
+            font.setBold(True)
+            self.__dict__["_title_font"] = font
+        return self.__dict__["_title_font"]
 
     def style_sheet(self) -> str:
         colors = self.colors
@@ -195,16 +214,26 @@ _NODE_CATEGORY_COLORS = {
 }
 
 
+_CATEGORY_COLOR_CACHE: dict[str, QColor] = {}
+
+
 def node_category_color(category: str) -> QColor:
     """Return a calm, readable and stable color for one node-library group."""
 
+    cached = _CATEGORY_COLOR_CACHE.get(category)
+    if cached is not None:
+        return cached
     known = _NODE_CATEGORY_COLORS.get(category)
     if known is not None:
-        return QColor(known)
-    # Plugins can introduce categories without coordinating with the built-in palette.
-    # A stable character sum keeps those colors repeatable between processes.
-    hue = sum((index + 1) * ord(character) for index, character in enumerate(category)) % 360
-    return QColor.fromHsv(hue, 105, 225)
+        colour = QColor(known)
+    else:
+        # Plugins can introduce categories without coordinating with the
+        # built-in palette. A stable character sum keeps those colors
+        # repeatable between processes.
+        hue = sum((index + 1) * ord(character) for index, character in enumerate(category)) % 360
+        colour = QColor.fromHsv(hue, 105, 225)
+    _CATEGORY_COLOR_CACHE[category] = colour
+    return colour
 
 
 def port_color_name(type_name: str) -> str:

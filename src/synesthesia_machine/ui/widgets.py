@@ -365,6 +365,7 @@ class InspectorPanel(QWidget):
         self._node_ids: set[UUID] = set()
         self._connection_ids: set[UUID] = set()
         self._memory_diagnostic: NodeMemoryDiagnostic | None = None
+        self._diagnostic_labels: tuple[QLabel, QLabel, QLabel] | None = None
         self.title = QLabel(tr("Nothing selected"), self)
         title_font = self.title.font()
         title_font.setBold(True)
@@ -415,6 +416,28 @@ class InspectorPanel(QWidget):
         if diagnostic == self._memory_diagnostic:
             return
         self._memory_diagnostic = diagnostic
+        labels = self._diagnostic_labels
+        if (
+            labels is not None
+            and diagnostic is not None
+            and self._node_ids == {diagnostic.node_id}
+            and not self._connection_ids
+        ):
+            # The engine reports this every metrics tick while a node is
+            # selected: update only the value labels instead of tearing down
+            # and rebuilding the whole parameter form (and re-projecting the
+            # graph) at 10 Hz.
+            labels[0].setText(_format_bytes(diagnostic.estimated_retained_bytes))
+            labels[1].setText(
+                trf(
+                    "{used} ({retained}/{capacity} frames)",
+                    used=_format_bytes(diagnostic.retained_bytes),
+                    retained=diagnostic.retained_frame_count,
+                    capacity=diagnostic.capacity_frame_count,
+                )
+            )
+            labels[2].setText(_format_bytes(diagnostic.memory_limit_bytes))
+            return
         self.refresh()
 
     @Slot()
@@ -484,26 +507,29 @@ class InspectorPanel(QWidget):
                 self.form.addRow("", help_label)
         diagnostic = self._memory_diagnostic
         if diagnostic is not None and diagnostic.node_id == node.node_id:
-            self.form.addRow(
-                tr("Estimated retained memory"),
-                QLabel(_format_bytes(diagnostic.estimated_retained_bytes), self.form_container),
+            # Keep references to the value labels so set_memory_diagnostic can
+            # update them in place on every metrics tick without rebuilding.
+            estimated_label = QLabel(
+                _format_bytes(diagnostic.estimated_retained_bytes), self.form_container
             )
-            self.form.addRow(
-                tr("Current retained memory"),
-                QLabel(
-                    trf(
-                        "{used} ({retained}/{capacity} frames)",
-                        used=_format_bytes(diagnostic.retained_bytes),
-                        retained=diagnostic.retained_frame_count,
-                        capacity=diagnostic.capacity_frame_count,
-                    ),
-                    self.form_container,
+            current_label = QLabel(
+                trf(
+                    "{used} ({retained}/{capacity} frames)",
+                    used=_format_bytes(diagnostic.retained_bytes),
+                    retained=diagnostic.retained_frame_count,
+                    capacity=diagnostic.capacity_frame_count,
                 ),
+                self.form_container,
             )
-            self.form.addRow(
-                tr("Memory limit"),
-                QLabel(_format_bytes(diagnostic.memory_limit_bytes), self.form_container),
+            limit_label = QLabel(
+                _format_bytes(diagnostic.memory_limit_bytes), self.form_container
             )
+            self.form.addRow(tr("Estimated retained memory"), estimated_label)
+            self.form.addRow(tr("Current retained memory"), current_label)
+            self.form.addRow(tr("Memory limit"), limit_label)
+            self._diagnostic_labels = (estimated_label, current_label, limit_label)
+        else:
+            self._diagnostic_labels = None
         self._show_issues(node.issues)
 
     def _show_connection(self, connection: ConnectionViewModel) -> None:
@@ -539,6 +565,7 @@ class InspectorPanel(QWidget):
         self.session.set_parameter(node_id, parameter_id, value)
 
     def _clear_form(self) -> None:
+        self._diagnostic_labels = None
         while self.form.rowCount():
             self.form.removeRow(0)
 
