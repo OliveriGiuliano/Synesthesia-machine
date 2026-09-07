@@ -127,3 +127,32 @@ def test_display_transform_sanitizes_non_finite_values() -> None:
     assert preview.dtype == np.uint8 and not preview.flags.writeable
     assert preview[0, 0].tolist() == [0, 255, 0]
     assert preview[0, 1].tolist() == [128, 64, 255]
+
+
+def test_srgb_to_linear_matches_exact_formula_on_8bit_grid_and_off_grid() -> None:
+    from synesthesia_machine.media.colour import _srgb_to_linear, _srgb_to_linear_exact
+
+    # On the k/255 video grid the LUT path must return bit-identical values
+    # to the exact piecewise formula.
+    grid_values = np.arange(256, dtype=np.float32) / np.float32(255.0)
+    grid_frame = np.repeat(grid_values[:, None], 3, axis=1).astype(np.float32)
+    assert np.array_equal(_srgb_to_linear(grid_frame), _srgb_to_linear_exact(grid_frame))
+
+    # Mixed 8-bit values including the piecewise branch boundary.
+    rng = np.random.default_rng(42)
+    video_like = (rng.integers(0, 256, size=(64, 96, 3)) / np.float32(255.0)).astype(np.float32)
+    assert np.array_equal(_srgb_to_linear(video_like), _srgb_to_linear_exact(video_like))
+
+    # Off-grid procedural values (and out-of-range values) must fall back to
+    # the exact formula unchanged.
+    procedural = rng.random((64, 96, 3), dtype=np.float32)
+    procedural[0, 0, 0] = np.float32(-0.2)
+    procedural[0, 0, 1] = np.float32(1.7)
+    assert np.array_equal(_srgb_to_linear(procedural), _srgb_to_linear_exact(procedural))
+
+    # The cached LUTs are frozen.
+    from synesthesia_machine.media.colour import _eotf_8bit_luts
+
+    grid_lut, eotf_lut = _eotf_8bit_luts()
+    assert not grid_lut.flags.writeable and not eotf_lut.flags.writeable
+    assert _eotf_8bit_luts() == (grid_lut, eotf_lut)

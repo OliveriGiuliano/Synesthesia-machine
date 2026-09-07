@@ -300,7 +300,38 @@ def _from_srgb(
     raise ValueError(f"Unsupported colour space: {target}")  # pragma: no cover
 
 
+_eotf_lut_cache: tuple[NDArray[np.float32], NDArray[np.float32]] | None = None
+
+
+def _eotf_8bit_luts() -> tuple[NDArray[np.float32], NDArray[np.float32]]:
+    global _eotf_lut_cache
+    if _eotf_lut_cache is None:
+        grid = np.arange(256, dtype=np.float32) / np.float32(255.0)
+        eotf = _srgb_to_linear_exact(grid)
+        grid.flags.writeable = False
+        eotf.flags.writeable = False
+        _eotf_lut_cache = (grid, eotf)
+    return _eotf_lut_cache
+
+
 def _srgb_to_linear(data: NDArray[np.float32]) -> NDArray[np.float32]:
+    # Decoded video sits exactly on the k/255 float32 grid, where the
+    # piecewise EOTF is a 256-entry lookup. Probe a sparse subsample first
+    # (cheap for procedural content, which fails instantly) and only then pay
+    # the full-frame round-trip check; the check is strict, so the LUT is used
+    # only when it returns bit-identical results for every element.
+    flat = data.reshape(-1)
+    stride = max(1, flat.size // 4096)
+    grid, lut = _eotf_8bit_luts()
+    probe = flat[::stride]
+    if np.array_equal(grid[(probe * np.float32(255.0) + np.float32(0.5)).astype(np.uint8)], probe):
+        quantized = (data * np.float32(255.0) + np.float32(0.5)).astype(np.uint8)
+        if np.array_equal(grid[quantized], data):
+            return lut[quantized]
+    return _srgb_to_linear_exact(data)
+
+
+def _srgb_to_linear_exact(data: NDArray[np.float32]) -> NDArray[np.float32]:
     # In-place rewrite of the np.where double-branch chain: same operations in
     # the same order (bit-identical results), but two temporaries instead of
     # five full-frame allocations on every call.
