@@ -414,3 +414,132 @@ def test_definition_presets_registry_and_range_validation_contracts() -> None:
     ):
         _, errors = definition.parameter_values(overrides)
         assert any(expected in error for error in errors)
+
+
+def test_analysis_max_dimension_zero_keeps_full_resolution_flow() -> None:
+    current, reference = _translation(4, 0)
+    full = calculate_dense_flow(current, reference, flow_preset=FAST)
+    zero = calculate_dense_flow(current, reference, flow_preset=FAST, analysis_max_dimension=0)
+    assert np.array_equal(zero, full)
+    # A cap at or above the longest side also analyses at full resolution.
+    uncapped = calculate_dense_flow(
+        current, reference, flow_preset=FAST, analysis_max_dimension=1024
+    )
+    assert np.array_equal(uncapped, full)
+    assert uncapped.shape == full.shape
+
+
+def test_analysis_max_dimension_matches_pre_reduced_full_resolution_reference() -> None:
+    from synesthesia_machine.contracts import (
+        ImageFrame,
+        read_only_float32,
+    )
+    from synesthesia_machine.nodes.synesthesia.optical_flow import (
+        FARNEBACK_PRESETS,
+        _luminance_uint8,
+    )
+
+    current, reference = _translation(4, 0)
+    reduced = calculate_dense_flow(
+        current, reference, flow_preset=FAST, analysis_max_dimension=48
+    )
+    # 96 -> 48 is exactly half: the node must equal the historical
+    # full-resolution pipeline run on colour frames that were bilinearly
+    # pre-reduced first (luminance then computed at analysis resolution),
+    # with the displacements rescaled back to the original frame's scale.
+    reduced_current = ImageFrame(
+        read_only_float32(
+            np.asarray(
+                cv2.resize(
+                    np.asarray(current.data, dtype=np.float32),
+                    (48, 48),
+                    interpolation=cv2.INTER_LINEAR,
+                ),
+                dtype=np.float32,
+            )
+        ),
+        current.color_space,
+        current.channel_names,
+        current.alpha_mode,
+        current.context,
+        current.provenance,
+    )
+    reduced_reference = ImageFrame(
+        read_only_float32(
+            np.asarray(
+                cv2.resize(
+                    np.asarray(reference.data, dtype=np.float32),
+                    (48, 48),
+                    interpolation=cv2.INTER_LINEAR,
+                ),
+                dtype=np.float32,
+            )
+        ),
+        reference.color_space,
+        reference.channel_names,
+        reference.alpha_mode,
+        reference.context,
+        reference.provenance,
+    )
+    current_luminance = _luminance_uint8(reduced_current)
+    reference_luminance = _luminance_uint8(reduced_reference)
+    preset = FARNEBACK_PRESETS[FAST]
+    expected = np.empty((48, 48, 2), dtype=np.float32)
+    cv2.calcOpticalFlowFarneback(
+        reference_luminance,
+        current_luminance,
+        expected,
+        preset.pyramid_scale,
+        preset.levels,
+        preset.window_size,
+        preset.iterations,
+        preset.polynomial_neighbourhood,
+        preset.polynomial_sigma,
+        preset.flags,
+    )
+    expected[..., 0] *= np.float32(2.0)
+    expected[..., 1] *= np.float32(2.0)
+    assert reduced.shape == (48, 48, 2)
+    assert np.array_equal(reduced, expected)
+
+
+def test_reduced_analysis_recovers_original_scale_translation() -> None:
+    current, reference = _translation(4, 0)
+    reduced = calculate_dense_flow(current, reference, flow_preset=FAST, analysis_max_dimension=48)
+    core = reduced[8:-8, 8:-8]
+    mean = np.mean(core, axis=(0, 1), dtype=np.float64)
+    assert mean == pytest.approx((4.0, 0.0), abs=0.15)
+
+
+def test_analysis_max_dimension_rejects_negative_values_and_caps_midi_mapping() -> None:
+    _, errors = create_optical_flow_definitions()[0].parameter_values(
+        {"analysis_max_dimension": -1}
+    )
+    assert errors and "analysis_max_dimension" in " ".join(errors)
+
+    current, reference = _translation(4, 0)
+    with pytest.raises(ValueError, match="Analysis max dimension"):
+        calculate_dense_flow(
+            current, reference, flow_preset=FAST, analysis_max_dimension=-8
+        )
+    # A positive cap still produces a normal midi state through the node path.
+    from synesthesia_machine.nodes.synesthesia import optical_flow_to_midi_state
+
+    state = optical_flow_to_midi_state(
+        current,
+        reference,
+        flow_preset=FAST,
+        minimum_motion_magnitude=0.5,
+        pitch_feature=MAGNITUDE,
+        velocity_feature=MEAN_MAGNITUDE,
+        grid_rows=2,
+        grid_columns=2,
+        aggregation=GLOBAL_HISTOGRAM,
+        magnitude_minimum=0.0,
+        magnitude_maximum=4.0,
+        analysis_max_dimension=48,
+        settings=_settings(),
+        node_id=NODE,
+        context=_context(),
+    )
+    assert isinstance(state, MidiStateFrame)

@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
+import cv2
 import numpy as np
 from numpy.typing import NDArray
 
@@ -17,6 +18,7 @@ from synesthesia_machine.contracts import (
     ParameterValue,
     PortType,
     RuntimeValue,
+    read_only_float32,
 )
 from synesthesia_machine.nodes import (
     ExecutionKind,
@@ -131,6 +133,7 @@ class FourierRuntime:
                 band_aggregation=_text(parameters["band_aggregation"]),
                 percentile=_number(parameters["percentile"]),
                 activation_threshold=_number(parameters["activation_threshold"]),
+                analysis_max_dimension=_integer(parameters["analysis_max_dimension"]),
                 settings=resolve_common_musical_settings(parameters),
                 node_id=self.node_id,
                 context=context,
@@ -166,8 +169,16 @@ def fourier_to_midi_state(
     node_id: UUID,
     context: FrameContext,
     cache: FourierShapeCache | None = None,
+    analysis_max_dimension: int = 0,
 ) -> MidiStateFrame:
-    """Map fixed spatial-frequency bands to ordered allowed notes and strengths."""
+    """Map fixed spatial-frequency bands to ordered allowed notes and strengths.
+
+    With a positive ``analysis_max_dimension`` the channel is proportionally
+    reduced to that longest side before the transform, trading fine
+    spatial-frequency detail for speed (the FFT cost is roughly quadratic in
+    the pixel count). The band maps are resolution-relative, so the
+    band-to-note arrangement is unchanged.
+    """
 
     if value.context.clock_id != context.clock_id:
         raise ValueError("Fourier channel clock does not match the execution clock")
@@ -182,7 +193,32 @@ def fourier_to_midi_state(
         band_aggregation=band_aggregation,
         percentile=percentile,
         activation_threshold=activation_threshold,
+        analysis_max_dimension=analysis_max_dimension,
     )
+    if analysis_max_dimension > 0:
+        height, width = value.data.shape
+        longest = max(height, width)
+        if longest > analysis_max_dimension:
+            scale = analysis_max_dimension / longest
+            target_width = max(1, round(width * scale))
+            target_height = max(1, round(height * scale))
+            if (target_width, target_height) != (width, height):
+                reduced = np.asarray(
+                    cv2.resize(
+                        np.asarray(value.data, dtype=np.float32),
+                        (target_width, target_height),
+                        interpolation=cv2.INTER_LINEAR,
+                    ),
+                    dtype=np.float32,
+                )
+                value = ChannelFrame(
+                    read_only_float32(reduced),
+                    value.semantic,
+                    value.nominal_min,
+                    value.nominal_max,
+                    value.cyclic,
+                    value.context,
+                )
 
     note_count = len(settings.selector.allowed_notes)
     key = FourierBandMapKey(
@@ -437,6 +473,23 @@ def create_fourier_definitions() -> tuple[NodeDefinition, ...]:
                     maximum=1.0,
                     editor_hint=ParameterEditorHint.SLIDER,
                 ),
+                ParameterSpec(
+                    "analysis_max_dimension",
+                    "Analysis max dimension",
+                    PortType.INT,
+                    0,
+                    help_text=(
+                        "Caps the longest side of the frame used for the Fourier analysis, in "
+                        "pixels. Zero analyses the full-resolution frame; smaller values trade "
+                        "fine spatial-frequency detail for speed on slower machines. Absolute "
+                        "band levels are not scale invariant, so re-tune the amplitude floor and "
+                        "ceiling if you change this."
+                    ),
+                    minimum=0,
+                    maximum=4096,
+                    connectable=True,
+                    connected_port_type=PortType.FLOAT,
+                ),
             ),
             ExecutionKind.STATEFUL,
             FourierRuntime,
@@ -503,8 +556,11 @@ def _validate_algorithm_parameters(
     band_aggregation: str,
     percentile: float,
     activation_threshold: float,
+    analysis_max_dimension: int = 0,
 ) -> None:
     _validate_window(window)
+    if analysis_max_dimension < 0:
+        raise ValueError("Fourier analysis max dimension must be non-negative")
     _validate_frequency_parameters(
         frequency_mapping, frequency_minimum, frequency_maximum, dc_exclusion_radius
     )
@@ -563,6 +619,7 @@ def _validate_parameters(parameters: Mapping[str, ParameterValue]) -> Sequence[s
             band_aggregation=_text(parameters["band_aggregation"]),
             percentile=_number(parameters["percentile"]),
             activation_threshold=_number(parameters["activation_threshold"]),
+            analysis_max_dimension=_integer(parameters["analysis_max_dimension"]),
         )
     except (KeyError, TypeError, ValueError) as error:
         errors.append(str(error))
@@ -579,6 +636,12 @@ def _number(value: object) -> float:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return float(value)
     raise TypeError(f"Expected numeric value, got {type(value).__name__}")
+
+
+def _integer(value: object) -> int:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    raise TypeError(f"Expected integer value, got {type(value).__name__}")
 
 
 def _boolean(value: object) -> bool:

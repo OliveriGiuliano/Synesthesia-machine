@@ -548,6 +548,7 @@ _FRENCH: dict[str, str] = {
     "Parameter A": "Paramètre A",
     "Parameter B": "Paramètre B",
     "Edges": "Contours",
+    "Analysis max dimension": "Dimension max d’analyse",
     "Current": "Actuelle",
     "Reference": "Référence",
     "Condition": "Condition",
@@ -767,6 +768,8 @@ _FRENCH: dict[str, str] = {
     "Dynamic inputs originate from different source clocks": "Les entrées dynamiques proviennent d’horloges source différentes",
     # Node descriptions and authored parameter help
     "Adds random grain to the image.": "Ajoute du grain aléatoire à l’image.",
+    "Caps the longest side of the frame used for motion analysis, in pixels. Zero analyses the full-resolution frame; smaller values trade fine motion detail for speed on slower machines. Measured displacements are rescaled to the original frame, so the magnitude ranges keep their meaning.": "Limite le plus grand côté du cadre utilisé pour l’analyse de mouvement, en pixels. Zéro analyse le cadre en résolution complète ; des valeurs plus petites échangent du détail fin de mouvement contre de la vitesse sur les machines lentes. Les déplacements mesurés sont remis à l’échelle du cadre d’origine, donc les plages d’amplitude gardent leur sens.",
+    "Caps the longest side of the frame used for the Fourier analysis, in pixels. Zero analyses the full-resolution frame; smaller values trade fine spatial-frequency detail for speed on slower machines. Absolute band levels are not scale invariant, so re-tune the amplitude floor and ceiling if you change this.": "Limite le plus grand côté du cadre utilisé pour l’analyse de Fourier, en pixels. Zéro analyse le cadre en résolution complète ; des valeurs plus petites échangent du détail fin de fréquences spatiales contre de la vitesse sur les machines lentes. Les niveaux absolus des bandes ne sont pas invariants à l’échelle : si vous changez ce paramètre, réglez à nouveau le plancher et le plafond d’amplitude.",
     "Adds a fixed amount to the chosen channels. Positive values brighten the image, negative values darken it.": "Ajoute une valeur fixe aux canaux choisis. Les valeurs positives éclaircissent l’image, les négatives l’assombrissent.",
     "Mixes two images together. You choose how much of the top image shows and how the colours combine.": "Mélange deux images. Vous choisissez combien de l’image du dessus est visible et comment les couleurs se combinent.",
     "Makes the image brighter or darker. A positive offset lightens it, a negative one darkens it.": "Rend l’image plus claire ou plus sombre. Un offset positif l’éclaircit, un offset négatif l’assombrit.",

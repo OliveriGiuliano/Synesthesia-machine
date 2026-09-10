@@ -35,6 +35,7 @@ from synesthesia_machine.nodes.synesthesia import (
     VERTICAL,
     FourierBandMapKey,
     FourierRuntime,
+    FourierShapeCache,
     build_fourier_band_map,
     create_fourier_definitions,
     fourier_band_amplitudes,
@@ -431,3 +432,148 @@ def test_window_arrays_are_cached_and_frozen() -> None:
     unit = _window_2d((13, 29), NONE)
     assert unit.shape == (13, 29)
     assert not unit.flags.writeable
+
+
+def test_analysis_max_dimension_zero_keeps_full_resolution_amplitudes() -> None:
+    import cv2  # noqa: F401  (reference tests below use cv2.resize)
+
+    channel = _sinusoid(horizontal_cycles=1)
+    full = fourier_band_amplitudes(
+        channel,
+        band_indexes=build_fourier_band_map(
+            FourierBandMapKey(
+                channel.data.shape,
+                4,
+                HORIZONTAL,
+                0.0,
+                1.0,
+                0.0,
+            )
+        ),
+        note_count=4,
+        window=NONE,
+        subtract_mean=False,
+        band_aggregation=BAND_MEAN,
+        percentile=100.0,
+    )
+    zero = fourier_band_amplitudes(
+        channel,
+        band_indexes=build_fourier_band_map(
+            FourierBandMapKey(
+                channel.data.shape,
+                4,
+                HORIZONTAL,
+                0.0,
+                1.0,
+                0.0,
+            )
+        ),
+        note_count=4,
+        window=NONE,
+        subtract_mean=False,
+        band_aggregation=BAND_MEAN,
+        percentile=100.0,
+    )
+    assert np.array_equal(zero, full)
+
+
+def test_analysis_max_dimension_matches_pre_reduced_full_resolution_reference() -> None:
+    import cv2
+
+    from synesthesia_machine.contracts import read_only_float32
+    from synesthesia_machine.nodes.synesthesia.fourier import fourier_to_midi_state
+
+    channel = _sinusoid(horizontal_cycles=1, vertical_cycles=1)
+    # 32x32 reduced to a 16x16 analysis frame (longest side 32 > 16, exact half).
+    reduced_state = fourier_to_midi_state(
+        channel,
+        window=NONE,
+        subtract_mean=False,
+        frequency_mapping=HORIZONTAL,
+        frequency_minimum=0.0,
+        frequency_maximum=1.0,
+        amplitude_floor=0.0,
+        amplitude_ceiling=6.0,
+        dc_exclusion_radius=0.0,
+        band_aggregation=BAND_PERCENTILE,
+        percentile=100.0,
+        activation_threshold=0.0,
+        settings=_settings(),
+        node_id=NODE,
+        context=channel.context,
+        cache=FourierShapeCache(),
+        analysis_max_dimension=16,
+    )
+    reduced_data = read_only_float32(
+        np.asarray(
+            cv2.resize(
+                np.asarray(channel.data, dtype=np.float32),
+                (16, 16),
+                interpolation=cv2.INTER_LINEAR,
+            ),
+            dtype=np.float32,
+        )
+    )
+    pre_reduced = ChannelFrame(
+        reduced_data,
+        channel.semantic,
+        channel.nominal_min,
+        channel.nominal_max,
+        channel.cyclic,
+        channel.context,
+    )
+    reference = fourier_to_midi_state(
+        pre_reduced,
+        window=NONE,
+        subtract_mean=False,
+        frequency_mapping=HORIZONTAL,
+        frequency_minimum=0.0,
+        frequency_maximum=1.0,
+        amplitude_floor=0.0,
+        amplitude_ceiling=6.0,
+        dc_exclusion_radius=0.0,
+        band_aggregation=BAND_PERCENTILE,
+        percentile=100.0,
+        activation_threshold=0.0,
+        settings=_settings(),
+        node_id=NODE,
+        context=channel.context,
+        cache=FourierShapeCache(),
+    )
+    assert reduced_state.notes == reference.notes
+
+
+def test_analysis_max_dimension_covers_caps_and_rejects_negative_values() -> None:
+    from synesthesia_machine.nodes.synesthesia.fourier import fourier_to_midi_state
+
+    channel = _sinusoid(horizontal_cycles=1)
+
+    def run(cap: int):
+        return fourier_to_midi_state(
+            channel,
+            window=NONE,
+            subtract_mean=False,
+            frequency_mapping=HORIZONTAL,
+            frequency_minimum=0.0,
+            frequency_maximum=1.0,
+            amplitude_floor=0.0,
+            amplitude_ceiling=6.0,
+            dc_exclusion_radius=0.0,
+            band_aggregation=BAND_PERCENTILE,
+            percentile=100.0,
+            activation_threshold=0.0,
+            settings=_settings(),
+            node_id=NODE,
+            context=channel.context,
+            cache=FourierShapeCache(),
+            analysis_max_dimension=cap,
+        )
+
+    # Cap at or above the frame keeps the full-resolution result bit-identical.
+    assert run(0).notes == run(1024).notes
+    with pytest.raises(ValueError, match="non-negative"):
+        run(-1)
+    _, errors = create_fourier_definitions()[0].parameter_values(
+        {"analysis_max_dimension": -1}
+    )
+    assert "analysis_max_dimension" in " ".join(errors)

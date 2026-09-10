@@ -20,6 +20,7 @@ from synesthesia_machine.contracts import (
     ParameterValue,
     PortType,
     RuntimeValue,
+    read_only_float32,
 )
 from synesthesia_machine.media import image_to_luminance
 from synesthesia_machine.nodes import (
@@ -147,6 +148,7 @@ class OpticalFlowRuntime:
                 aggregation=_text(parameters["aggregation"]),
                 magnitude_minimum=_number(parameters["magnitude_minimum"]),
                 magnitude_maximum=_number(parameters["magnitude_maximum"]),
+                analysis_max_dimension=_integer(parameters["analysis_max_dimension"]),
                 settings=resolve_common_musical_settings(parameters),
                 node_id=self.node_id,
                 context=context,
@@ -175,6 +177,7 @@ def optical_flow_to_midi_state(
     aggregation: str,
     magnitude_minimum: float,
     magnitude_maximum: float,
+    analysis_max_dimension: int = 0,
     settings: CommonMusicalSettings,
     node_id: UUID,
     context: FrameContext,
@@ -185,7 +188,12 @@ def optical_flow_to_midi_state(
         raise ValueError("Optical Flow inputs must use the same clock")
     if current.context.clock_id != context.clock_id:
         raise ValueError("Optical Flow image clock does not match the execution clock")
-    flow = calculate_dense_flow(current, reference, flow_preset=flow_preset)
+    flow = calculate_dense_flow(
+        current,
+        reference,
+        flow_preset=flow_preset,
+        analysis_max_dimension=analysis_max_dimension,
+    )
     return flow_to_midi_state(
         flow,
         minimum_motion_magnitude=minimum_motion_magnitude,
@@ -207,20 +215,47 @@ def calculate_dense_flow(
     reference: ImageFrame,
     *,
     flow_preset: str,
+    analysis_max_dimension: int = 0,
 ) -> NDArray[np.float32]:
-    """Return a read-only `(height, width, dx/dy)` Farnebäck flow field."""
+    """Return a read-only `(height, width, dx/dy)` Farnebäck flow field.
+
+    With a positive ``analysis_max_dimension`` the frames are proportionally
+    reduced to that longest side (colour first, then the luminance
+    conversion) before the pixel-count-bound Farnebäck pass, and the
+    resulting displacements are rescaled back to the original frame's pixel
+    scale so magnitudes stay comparable to a full-resolution analysis.
+    """
 
     if current.data.shape[:2] != reference.data.shape[:2]:
         raise ValueError("Optical Flow inputs must have equal dimensions")
     if current.context.clock_id != reference.context.clock_id:
         raise ValueError("Optical Flow inputs must use the same clock")
+    _require_non_negative(analysis_max_dimension, "Analysis max dimension")
     try:
         preset = FARNEBACK_PRESETS[flow_preset]
     except KeyError as error:
         raise ValueError(f"Unknown optical-flow preset: {flow_preset!r}") from error
+    rescale_x = np.float32(1.0)
+    rescale_y = np.float32(1.0)
+    if analysis_max_dimension > 0:
+        height, width = current.data.shape[:2]
+        longest = max(height, width)
+        if longest > analysis_max_dimension:
+            scale = analysis_max_dimension / longest
+            target_width = max(1, round(width * scale))
+            target_height = max(1, round(height * scale))
+            if (target_width, target_height) != (width, height):
+                # Reduce the colour frame first: the bilinear resize is far
+                # cheaper on a few full channels than the per-pixel luminance
+                # conversion, so both the resize and the conversion run at
+                # analysis resolution.
+                current = _reduced_image_frame(current, target_width, target_height)
+                reference = _reduced_image_frame(reference, target_width, target_height)
+                rescale_x = np.float32(width / target_width)
+                rescale_y = np.float32(height / target_height)
     current_luminance = _luminance_uint8(current)
     reference_luminance = _luminance_uint8(reference)
-    output_buffer = np.empty((*current.data.shape[:2], 2), dtype=np.float32)
+    output_buffer = np.empty((*current_luminance.shape, 2), dtype=np.float32)
     try:
         raw = cast(
             NDArray[np.float32],
@@ -240,8 +275,11 @@ def calculate_dense_flow(
     except cv2.error as error:
         raise ValueError(f"Dense optical-flow calculation failed: {error}") from error
     flow = np.ascontiguousarray(raw, dtype=np.float32)
-    if flow.shape != (*current.data.shape[:2], 2) or not np.isfinite(flow).all():
+    if flow.shape != (*current_luminance.shape, 2) or not np.isfinite(flow).all():
         raise ValueError("Dense optical-flow calculation produced an invalid vector field")
+    if rescale_x != np.float32(1.0) or rescale_y != np.float32(1.0):
+        flow[..., 0] *= rescale_x
+        flow[..., 1] *= rescale_y
     flow.setflags(write=False)
     return flow
 
@@ -467,6 +505,23 @@ def create_optical_flow_definitions() -> tuple[NodeDefinition, ...]:
                     help_text=("Highest flow magnitude mapped to the maximum velocity."),
                     minimum=0.0,
                 ),
+                ParameterSpec(
+                    "analysis_max_dimension",
+                    "Analysis max dimension",
+                    PortType.INT,
+                    0,
+                    help_text=(
+                        "Caps the longest side of the frame used for motion analysis, in pixels. "
+                        "Zero analyses the full-resolution frame; smaller values trade fine "
+                        "motion detail for speed on slower machines. Measured displacements are "
+                        "rescaled to the original frame, so the magnitude ranges keep their "
+                        "meaning."
+                    ),
+                    minimum=0,
+                    maximum=4096,
+                    connectable=True,
+                    connected_port_type=PortType.FLOAT,
+                ),
             ),
             ExecutionKind.STATELESS,
             OpticalFlowRuntime,
@@ -565,6 +620,31 @@ def _histogram_candidates(
     return candidates
 
 
+def _reduced_image_frame(
+    image: ImageFrame,
+    target_width: int,
+    target_height: int,
+) -> ImageFrame:
+    """Bilinearly resize the colour frame, keeping all frame metadata."""
+
+    reduced = np.asarray(
+        cv2.resize(
+            np.asarray(image.data, dtype=np.float32),
+            (target_width, target_height),
+            interpolation=cv2.INTER_LINEAR,
+        ),
+        dtype=np.float32,
+    )
+    return ImageFrame(
+        read_only_float32(reduced),
+        image.color_space,
+        image.channel_names,
+        image.alpha_mode,
+        image.context,
+        image.provenance,
+    )
+
+
 def _luminance_uint8(image: ImageFrame) -> NDArray[np.uint8]:
     luminance = image_to_luminance(image).data
     return np.ascontiguousarray(np.rint(np.clip(luminance, 0.0, 1.0) * 255.0), dtype=np.uint8)
@@ -599,8 +679,10 @@ def _validate_algorithm_parameters(
     aggregation: str,
     magnitude_minimum: float,
     magnitude_maximum: float,
+    analysis_max_dimension: int = 0,
 ) -> None:
     _require_non_negative(minimum_motion_magnitude, "Minimum motion magnitude")
+    _require_non_negative(analysis_max_dimension, "Analysis max dimension")
     if pitch_feature not in PITCH_FEATURES:
         raise ValueError(f"Unknown optical-flow pitch feature: {pitch_feature!r}")
     if velocity_feature not in VELOCITY_FEATURES:
@@ -630,6 +712,7 @@ def _validate_parameters(parameters: Mapping[str, ParameterValue]) -> Sequence[s
             aggregation=_text(parameters["aggregation"]),
             magnitude_minimum=_number(parameters["magnitude_minimum"]),
             magnitude_maximum=_number(parameters["magnitude_maximum"]),
+            analysis_max_dimension=_integer(parameters["analysis_max_dimension"]),
         )
         if _text(parameters["flow_preset"]) not in FLOW_PRESETS:
             raise ValueError(f"Unknown optical-flow preset: {parameters['flow_preset']!r}")
