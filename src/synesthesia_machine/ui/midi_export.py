@@ -1,6 +1,6 @@
 """File > Export MIDI: run the graph offline and save a Standard MIDI File.
 
-The UI thread only owns the dimmed overlay dialog and the progress
+The UI thread only owns the dimmed in-window overlay and the progress
 projection; the simulation itself runs in a worker thread on a transient
 in-process engine (see :mod:`synesthesia_machine.runtime.midi_export` and
 ADR-0016). The export registry is hardware-free, so no MIDI port, note, or
@@ -14,9 +14,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QEvent, QObject, Qt, Signal
-from PySide6.QtGui import QKeyEvent, QShowEvent
+from PySide6.QtGui import QColor, QKeyEvent, QPainter, QPaintEvent
 from PySide6.QtWidgets import (
-    QDialog,
     QLabel,
     QProgressBar,
     QPushButton,
@@ -128,16 +127,30 @@ class MidiExportSignals(QObject):
     failed = Signal(str, str)  # stable code, raw detail for logging
 
 
-class MidiExportDialog(QDialog):
-    """Dimmed, locked overlay with a small centred progress bar."""
+class MidiExportOverlay(QWidget):
+    """Dimmed, locked in-window overlay with a small centred progress bar.
+
+    The overlay is an ordinary child widget of the main window, not a
+    frameless window-modal top-level dialog. A separate frameless modal
+    surface is fragile on Wayland: it can fail to receive input, so the
+    Cancel button stops responding, and its surface presentation has been
+    observed to stall the UI event thread. In that state the export worker
+    finishes and writes the .mid file, but the UI never acknowledges the
+    completion and the bar appears frozen at 100%. Keeping the overlay
+    inside the window routes input, painting, and completion reporting
+    through the normal in-window event path.
+    """
+
+    # Dimming is painted in paintEvent (see below) rather than via a
+    # stylesheet background: a plain QWidget's styled background is not
+    # reliably composited over the window's existing content on all
+    # platform styles, which would leave the window locked but undimmed.
+    _DIM = QColor(0, 0, 0, 130)
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self.setObjectName("midi_export_overlay")
-        self.setWindowModality(Qt.WindowModality.WindowModal)
-        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
-        self.setStyleSheet("background-color: rgba(0, 0, 0, 130);")
-        self.setWindowTitle(tr("Export MIDI"))
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self.status_label = QLabel(tr("Exporting MIDI…"), self)
         self.status_label.setObjectName("midi_export_status")
@@ -148,8 +161,11 @@ class MidiExportDialog(QDialog):
         self.progress_bar.setValue(0)
         self.progress_bar.setFixedWidth(260)
         self.progress_bar.setFixedHeight(14)
+        # The button must not take keyboard focus: focus stays on the
+        # overlay so its keyPressEvent swallows Escape wherever it lands.
         self.cancel_button = QPushButton(tr("Cancel"), self)
         self.cancel_button.setObjectName("midi_export_cancel")
+        self.cancel_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         layout = QVBoxLayout(self)
         layout.addStretch(1)
@@ -157,34 +173,40 @@ class MidiExportDialog(QDialog):
         layout.addWidget(self.progress_bar, alignment=Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(self.cancel_button, alignment=Qt.AlignmentFlag.AlignHCenter)
         layout.addStretch(1)
-
         parent.installEventFilter(self)
         self._track_parent()
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        # Explicit alpha fill: a plain QWidget's stylesheet background is not
+        # reliably composited over the window's existing content on all
+        # platform styles, which leaves the window locked but undimmed. A
+        # regular fillRect uses the same paint path as every custom-painted
+        # widget in the app and behaves identically on every platform.
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), self._DIM)
+        painter.end()
+        super().paintEvent(event)
 
     def _track_parent(self) -> None:
         parent = self.parentWidget()
         if parent is not None:
-            self.setGeometry(parent.rect().translated(parent.frameGeometry().topLeft()))
+            self.setGeometry(parent.rect())
+
+    def show(self) -> None:
+        self._track_parent()
+        super().show()
+        self.raise_()
+        self.setFocus()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        # Escape must not dismiss the overlay: the export keeps running and the
-        # Cancel button is the only way back.
+        # Escape must not dismiss the overlay: the export keeps running and
+        # the Cancel button is the only way back.
         if event.key() == Qt.Key.Key_Escape:
             return
         super().keyPressEvent(event)
 
-    def reject(self) -> None:
-        pass
-
-    def showEvent(self, event: QShowEvent) -> None:
-        super().showEvent(event)
-        self._track_parent()
-
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        if watched is self.parentWidget() and event.type() in (
-            QEvent.Type.Resize,
-            QEvent.Type.Move,
-        ):
+        if watched is self.parentWidget() and event.type() is QEvent.Type.Resize:
             self._track_parent()
         return super().eventFilter(watched, event)
 
@@ -205,7 +227,7 @@ class MidiExportDialog(QDialog):
 
 
 class MidiExportJob:
-    """Owns the worker thread, the stop flag, and the dialog for one export."""
+    """Owns the worker thread, the stop flag, and the overlay for one export."""
 
     def __init__(self, window: MainWindow, snapshot: GraphSnapshot, file_path: str) -> None:
         self.window = window
@@ -213,9 +235,10 @@ class MidiExportJob:
         self.signals = MidiExportSignals()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
-        self.dialog = MidiExportDialog(window)
-        self.dialog.cancel_button.clicked.connect(self.cancel)
-        self.dialog.show()
+        self._last_progress: tuple[int, int] | None = None
+        self.overlay = MidiExportOverlay(window)
+        self.overlay.cancel_button.clicked.connect(self.cancel)
+        self.overlay.show()
 
     def _worker(self, snapshot: GraphSnapshot, file_path: str) -> None:
         registry = create_application_registry(
@@ -226,7 +249,7 @@ class MidiExportJob:
             result = run_midi_export(
                 snapshot,
                 registry=registry,
-                progress=lambda p: self.signals.progress.emit(
+                progress=lambda p: self._report_progress(
                     p.processed, 0 if p.total is None else p.total
                 ),
                 stop_event=self._stop_event,
@@ -244,6 +267,15 @@ class MidiExportJob:
             return
         self.signals.completed.emit(file_path)
 
+    def _report_progress(self, processed: int, total: int) -> None:
+        # The polling loop reports at 50 Hz; emit only on change so a stalled
+        # UI thread does not accumulate a queue of identical progress events.
+        state = (processed, total)
+        if state == self._last_progress:
+            return
+        self._last_progress = state
+        self.signals.progress.emit(processed, total)
+
     def start(self, snapshot: GraphSnapshot) -> None:
         self._thread = threading.Thread(
             target=self._worker, args=(snapshot, self.file_path), name="midi-export", daemon=True
@@ -252,16 +284,21 @@ class MidiExportJob:
 
     def cancel(self) -> None:
         self._stop_event.set()
+        # Visible feedback that the request registered: the worker honours
+        # the stop flag within its next bounded phase (a few seconds at
+        # most) and then reports the cancellation through the signals.
+        self.overlay.status_label.setText(tr("Cancelling…"))
+        self.overlay.cancel_button.setEnabled(False)
 
     def close(self) -> None:
         if self._thread is not None:
             self._thread.join(timeout=5.0)
-        self.dialog.close()
+        self.overlay.hide()
 
 
 __all__ = [
-    "MidiExportDialog",
     "MidiExportJob",
+    "MidiExportOverlay",
     "MidiExportSignals",
     "midi_export_eligibility",
     "midi_export_failure_text",

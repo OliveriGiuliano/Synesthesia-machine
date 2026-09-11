@@ -1056,6 +1056,7 @@ _FRENCH: dict[str, str] = {
     "Simulate the video-only graph end to end and save a Standard MIDI File": "Simule le graphe vidéo de bout en bout et enregistre un fichier MIDI standard",
     "Standard MIDI File (*.mid)": "Fichier MIDI standard (*.mid)",
     "Exporting MIDI…": "Export MIDI en cours…",
+    "Cancelling…": "Annulation…",
     "Exporting MIDI… {processed} of {total} frames": "Export MIDI en cours… {processed} sur {total} images",
     "MIDI exported: {path}": "MIDI exporté : {path}",
     "MIDI export failed: {detail}": "Échec de l’export MIDI : {detail}",

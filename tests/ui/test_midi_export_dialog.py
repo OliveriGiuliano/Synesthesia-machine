@@ -1,4 +1,4 @@
-"""File > Export MIDI: action gating, overlay dialog, worker wiring."""
+"""File > Export MIDI: action gating, in-window overlay, worker wiring."""
 
 from __future__ import annotations
 
@@ -41,6 +41,8 @@ def video_window(qapp: QApplication, tmp_path: Path) -> Iterator[MainWindow]:
         settings=_settings(tmp_path),
         offer_recovery=False,
     )
+    window.show()
+    qapp.processEvents()
     yield window
     if window._midi_export_job is not None:
         window._midi_export_job.cancel()
@@ -117,7 +119,7 @@ def test_export_completion_closes_the_overlay_and_reports_the_file(
     out_path = str(tmp_path / "out.mid")
 
     job = MidiExportJob(video_window, video_window.session.document.snapshot(), out_path)
-    assert job.dialog.isVisible()
+    assert job.overlay.isVisible()
 
     job._worker = lambda snapshot, file_path: (
         job.signals.progress.emit(3, 10),
@@ -187,10 +189,134 @@ def test_escape_does_not_dismiss_the_export_overlay(
     job = MidiExportJob(
         video_window, video_window.session.document.snapshot(), str(tmp_path / "out.mid")
     )
-    assert job.dialog.isVisible()
-    QTest.keyClick(job.dialog, Qt.Key.Key_Escape)
+    assert job.overlay.isVisible()
+    QTest.keyClick(job.overlay, Qt.Key.Key_Escape)
     # Escape must not dismiss the overlay: the export keeps running and the
     # Cancel button is the only way back.
-    assert job.dialog.isVisible()
+    assert job.overlay.isVisible()
     job.cancel()
     job.close()
+
+
+def test_export_overlay_is_an_in_window_surface_not_a_separate_top_level_window(
+    video_window: MainWindow,
+) -> None:
+    # Regression: the pre-fix implementation was a frameless window-modal
+    # top-level dialog. On Wayland that separate surface can lose input
+    # routing (Cancel does nothing) and its presentation stalled the UI
+    # event thread: the worker finished and wrote the .mid file, but the
+    # overlay stayed frozen at 100% with no completion and no way out. The
+    # overlay must therefore be a child of the main window.
+    job = MidiExportJob(
+        video_window, video_window.session.document.snapshot(), "/tmp/never-written.mid"
+    )
+    assert job.overlay.window() is video_window
+    job.overlay.hide()
+
+
+def test_cancel_shows_cancelling_feedback(video_window: MainWindow, tmp_path: Path) -> None:
+    from synesthesia_machine.ui.translations import tr
+
+    job = MidiExportJob(
+        video_window, video_window.session.document.snapshot(), str(tmp_path / "out.mid")
+    )
+    job.cancel()
+    # Clicking Cancel must have a visible effect immediately, even though
+    # the worker honours the stop flag a few seconds later.
+    assert job.overlay.status_label.text() == tr("Cancelling…")
+    assert not job.overlay.cancel_button.isEnabled()
+    job.close()
+
+
+def test_stale_export_signal_ignores_a_superseded_job(
+    video_window: MainWindow, qapp: QApplication, tmp_path: Path
+) -> None:
+    # A worker outlives close() when the bounded shutdown phases exceed the
+    # 5-second join timeout; its late signal must not tear down a newer
+    # export that started in the meantime.
+    stale = MidiExportJob(
+        video_window, video_window.session.document.snapshot(), str(tmp_path / "stale.mid")
+    )
+    video_window._midi_export_job = stale
+    stale.signals.progress.connect(video_window._on_midi_export_progress)
+    stale.signals.completed.connect(video_window._on_midi_export_completed)
+    stale.signals.failed.connect(video_window._on_midi_export_failed)
+
+    fresh = MidiExportJob(
+        video_window, video_window.session.document.snapshot(), str(tmp_path / "fresh.mid")
+    )
+    video_window._midi_export_job = fresh
+    fresh.signals.progress.connect(video_window._on_midi_export_progress)
+    fresh.signals.completed.connect(video_window._on_midi_export_completed)
+    fresh.signals.failed.connect(video_window._on_midi_export_failed)
+
+    message_before = video_window.statusBar().currentMessage()
+    stale.signals.failed.emit("cancelled", "late")
+    qapp.processEvents()
+
+    assert video_window._midi_export_job is fresh
+    assert fresh.overlay.isVisible()
+    assert video_window.statusBar().currentMessage() == message_before
+
+
+def _point_luma(window: MainWindow, x: int, y: int) -> int:
+    color = window.grab().toImage().pixelColor(x, y)
+    return color.red() + color.green() + color.blue()
+
+
+def test_export_overlay_dims_the_whole_window(
+    video_window: MainWindow, qapp: QApplication, tmp_path: Path
+) -> None:
+    # Regression: the overlay's dimming used to be a stylesheet rgba
+    # background on a plain QWidget, which was not reliably composited over
+    # the application's content, leaving the window locked but undimmed. The
+    # dimming is now painted in the overlay's paintEvent and must darken the
+    # whole window, not just the band around the progress bar.
+    video_window.resize(1280, 800)
+    qapp.processEvents()
+
+    points = [(640, 8), (640, 792), (320, 400), (1232, 400)]
+    before = [_point_luma(video_window, x, y) for x, y in points]
+    job = MidiExportJob(
+        video_window, video_window.session.document.snapshot(), str(tmp_path / "out.mid")
+    )
+    for _ in range(10):
+        qapp.processEvents()
+    for pre, (x, y) in zip(before, points, strict=True):
+        post = _point_luma(video_window, x, y)
+        assert post < pre - 8, f"point ({x}, {y}) not dimmed: {pre} -> {post}"
+    job.close()
+
+
+def test_disabled_menu_items_render_visually_greyed(
+    video_window: MainWindow, qapp: QApplication
+) -> None:
+    # The theme stylesheet sets a color on QMenu, which suppresses Qt's
+    # default disabled dimming. Without an explicit QMenu::item:disabled rule
+    # the disabled "Export MIDI" item looks identical to an enabled item, so
+    from PySide6.QtWidgets import QMenu
+
+    menus = video_window.menuBar().findChildren(QMenu)
+    file_menu = next(menu for menu in menus if menu.title().replace("&", "").startswith("File"))
+    export_action = _export_action(video_window)
+    assert not export_action.isEnabled()
+
+    file_menu.show()
+    for _ in range(10):
+        qapp.processEvents()
+
+    def item_peak_luma(menu, action) -> int:
+        image = menu.grab().toImage()
+        rect = menu.actionGeometry(action)
+        peak = 0
+        for y in range(max(0, rect.y() + 3), min(image.height(), rect.y() + rect.height() - 3)):
+            for x in range(12, min(image.width(), rect.x() + rect.width() - 30)):
+                color = image.pixelColor(x, y)
+                peak = max(peak, color.red() + color.green() + color.blue())
+        return peak
+
+    disabled_peak = item_peak_luma(file_menu, export_action)
+    enabled_peak = item_peak_luma(file_menu, video_window.action_registry.require("exit"))
+    file_menu.close()
+    # Themed text (#e7ebf0 ≈ 706 luma) vs disabled grey (#59616c ≈ 294).
+    assert disabled_peak < enabled_peak - 200

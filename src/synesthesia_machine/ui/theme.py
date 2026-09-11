@@ -166,6 +166,9 @@ class Theme:
             QDoubleSpinBox[parameterValueInput="true"] {{ color: {colors.text};
                 background: {colors.canvas}; padding: 2px 4px; }}
             QMenu::item {{ padding: 5px 24px 5px 9px; background: transparent; }}
+            /* A stylesheet color on QMenu overrides Qt's default disabled
+               dimming, so disabled items must be greyed explicitly. */
+            QMenu::item:disabled {{ color: {colors.disabled}; }}
             QMenu::item:selected {{ background: {colors.accent}; color: {colors.canvas}; }}
             QPushButton {{ background: {colors.node_header}; border: 1px solid {colors.border};
                 border-radius: 3px; padding: 5px 9px; }}

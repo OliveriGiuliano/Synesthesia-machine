@@ -2219,22 +2219,28 @@ class MainWindow(QMainWindow):
     def _on_midi_export_progress(self, processed: int, total: int) -> None:
         job = self._midi_export_job
         if job is not None:
-            job.dialog.set_progress(processed, total)
+            job.overlay.set_progress(processed, total)
 
     @Slot(str)
     def _on_midi_export_completed(self, file_path: str) -> None:
         job = self._midi_export_job
+        # Ignore results from a superseded export: its worker can outlive
+        # close() because the engine shutdown phases are bounded but longer
+        # than the 5-second join timeout, and a late signal must not tear
+        # down a newer export's overlay.
+        if job is None or self.sender() is not job.signals:
+            return
         self._midi_export_job = None
-        if job is not None:
-            job.close()
+        job.close()
         self.statusBar().showMessage(trf("MIDI exported: {path}", path=file_path), 8000)
 
     @Slot(str, str)
     def _on_midi_export_failed(self, code: str, detail: str) -> None:
         job = self._midi_export_job
+        if job is None or self.sender() is not job.signals:
+            return
         self._midi_export_job = None
-        if job is not None:
-            job.close()
+        job.close()
         self.statusBar().showMessage(midi_export_failure_text(code, detail), 8000)
 
     def closeEvent(self, event: QCloseEvent) -> None:
