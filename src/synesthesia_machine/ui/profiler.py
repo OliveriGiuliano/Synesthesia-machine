@@ -143,9 +143,7 @@ class ProfilerPanel(QWidget):
         self.table.setSortingEnabled(False)
 
         present = {profile.node_id for profile in profiles}
-        for node_id in [
-            node_id for node_id in self._row_by_node if node_id not in present
-        ]:
+        for node_id in [node_id for node_id in self._row_by_node if node_id not in present]:
             row = self._row_by_node.pop(node_id)
             self._last_row_values.pop(node_id, None)
             self.table.removeRow(row)

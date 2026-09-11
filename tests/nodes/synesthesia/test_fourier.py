@@ -573,7 +573,5 @@ def test_analysis_max_dimension_covers_caps_and_rejects_negative_values() -> Non
     assert run(0).notes == run(1024).notes
     with pytest.raises(ValueError, match="non-negative"):
         run(-1)
-    _, errors = create_fourier_definitions()[0].parameter_values(
-        {"analysis_max_dimension": -1}
-    )
+    _, errors = create_fourier_definitions()[0].parameter_values({"analysis_max_dimension": -1})
     assert "analysis_max_dimension" in " ".join(errors)

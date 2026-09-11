@@ -368,9 +368,7 @@ class GraphScene(QGraphicsScene):
     def _set_connection_endpoints(self, item: ConnectionGraphicsItem) -> None:
         model = item.view_model
         source = self.port_item(model.source_node_id, model.source_port_id, True)
-        destination = self.port_item(
-            model.destination_node_id, model.destination_port_id, False
-        )
+        destination = self.port_item(model.destination_node_id, model.destination_port_id, False)
         if source is not None and destination is not None:
             item.set_endpoints(source.scenePos(), destination.scenePos())
 

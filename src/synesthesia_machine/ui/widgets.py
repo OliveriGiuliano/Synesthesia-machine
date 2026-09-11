@@ -521,9 +521,7 @@ class InspectorPanel(QWidget):
                 ),
                 self.form_container,
             )
-            limit_label = QLabel(
-                _format_bytes(diagnostic.memory_limit_bytes), self.form_container
-            )
+            limit_label = QLabel(_format_bytes(diagnostic.memory_limit_bytes), self.form_container)
             self.form.addRow(tr("Estimated retained memory"), estimated_label)
             self.form.addRow(tr("Current retained memory"), current_label)
             self.form.addRow(tr("Memory limit"), limit_label)

@@ -440,9 +440,7 @@ def test_analysis_max_dimension_matches_pre_reduced_full_resolution_reference() 
     )
 
     current, reference = _translation(4, 0)
-    reduced = calculate_dense_flow(
-        current, reference, flow_preset=FAST, analysis_max_dimension=48
-    )
+    reduced = calculate_dense_flow(current, reference, flow_preset=FAST, analysis_max_dimension=48)
     # 96 -> 48 is exactly half: the node must equal the historical
     # full-resolution pipeline run on colour frames that were bilinearly
     # pre-reduced first (luminance then computed at analysis resolution),
@@ -519,9 +517,7 @@ def test_analysis_max_dimension_rejects_negative_values_and_caps_midi_mapping() 
 
     current, reference = _translation(4, 0)
     with pytest.raises(ValueError, match="Analysis max dimension"):
-        calculate_dense_flow(
-            current, reference, flow_preset=FAST, analysis_max_dimension=-8
-        )
+        calculate_dense_flow(current, reference, flow_preset=FAST, analysis_max_dimension=-8)
     # A positive cap still produces a normal midi state through the node path.
     from synesthesia_machine.nodes.synesthesia import optical_flow_to_midi_state
 
