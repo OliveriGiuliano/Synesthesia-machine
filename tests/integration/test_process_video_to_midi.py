@@ -7,7 +7,6 @@ import shutil
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import TypeVar
 from uuid import UUID
 
 import numpy as np
@@ -27,8 +26,6 @@ NOTE_VISUALIZER_ID = UUID("30000000-0000-0000-0000-000000000007")
 AUDIO_ID = UUID("30000000-0000-0000-0000-000000000008")
 EXPECTED_FINAL_NOTE = NoteActivity(0, 71, 100)
 
-T = TypeVar("T")
-
 
 def _materialize_example(root: Path) -> Path:
     graph_path = root / EXAMPLE_PATH.name
@@ -44,7 +41,7 @@ def _materialize_example(root: Path) -> Path:
     return graph_path
 
 
-def _wait_for(
+def _wait_for[T](
     poll: Callable[[], tuple[T, ...]],
     matches: Callable[[T], bool],
     *,

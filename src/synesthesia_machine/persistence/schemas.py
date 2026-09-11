@@ -10,7 +10,7 @@ from synesthesia_machine.version import __version__
 
 GRAPH_SCHEMA_VERSION = 4
 
-type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
+type JsonValue = bool | int | float | str | list[JsonValue] | dict[str, JsonValue] | None
 type JsonObject = dict[str, JsonValue]
 type GraphMigration = Callable[[JsonObject], JsonObject]
 

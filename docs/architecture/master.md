@@ -108,7 +108,7 @@ The in-process engine may be used behind the same interface for tests and diagno
 
 ### AD-004 — CPU-first native image processing
 
-Use **NumPy** and **OpenCV 4.13.x** for image processing. Use **PyAV 18.x**, which wraps FFmpeg, for file decoding and precise presentation timestamps. PyAV provides Windows wheels linked against FFmpeg. OpenCV provides optimized native image-processing operations and Windows video-I/O backends. [R4][R5][R6]
+Use **NumPy** and **OpenCV 5.x** for image processing. Use **PyAV 18.x**, which wraps FFmpeg, for file decoding and precise presentation timestamps. PyAV provides Windows wheels linked against FFmpeg. OpenCV provides optimized native image-processing operations and Windows video-I/O backends. [R4][R5][R6]
 
 Version 1 is CPU-first. Do not make CUDA, OpenCL, DirectML, or a vendor-specific GPU API a requirement. The ordinary OpenCV Python wheels are not a dependable CUDA distribution, and moving many 500 × 500 buffers between CPU and GPU can cost more than it saves. A compute-backend abstraction is retained for later profiling-driven acceleration.
 
@@ -327,9 +327,9 @@ Every dynamic execution tick carries a context object:
 @dataclass(frozen=True, slots=True)
 class FrameContext:
     clock_id: UUID
-    tick_index: int                  # starts at 1 for each source run
-    source_frame_index: int | None   # decoder/camera sequence when known
-    source_time_s: float             # PTS or capture-relative time
+    tick_index: int  # starts at 1 for each source run
+    source_frame_index: int | None  # decoder/camera sequence when known
+    source_time_s: float  # PTS or capture-relative time
     received_monotonic_ns: int
     deadline_monotonic_ns: int | None
     is_realtime: bool
@@ -368,7 +368,7 @@ The decision to use normalized float32 values avoids repeated 8-bit clipping, ma
 ```python
 @dataclass(frozen=True, slots=True)
 class ChannelFrame:
-    data: NDArray[np.float32]        # shape H x W
+    data: NDArray[np.float32]  # shape H x W
     semantic: ChannelSemantic
     nominal_min: float
     nominal_max: float
@@ -387,8 +387,9 @@ Most image-derived channels use `[0, 1]`. The nominal range is metadata used by 
 ```python
 @dataclass(frozen=True, slots=True)
 class MidiNoteKey:
-    channel: int   # 0..15 internally, shown as 1..16 in UI
-    note: int      # 0..127
+    channel: int  # 0..15 internally, shown as 1..16 in UI
+    note: int  # 0..127
+
 
 @dataclass(frozen=True, slots=True)
 class MidiStateFrame:
@@ -2230,7 +2231,7 @@ The architecture was checked against current official documentation on 29 July 2
 - **[R3]** Qt `QGraphicsScene` / `QGraphicsView` documentation. The framework manages and visualizes custom 2D items. https://doc.qt.io/qt-6/qgraphicsscene.html and https://doc.qt.io/qt-6/qgraphicsview.html
 - **[R4]** PyAV documentation. PyAV provides direct access to FFmpeg containers, streams, codecs, frames, and timestamps. https://pyav.basswood-io.com/docs/stable/
 - **[R5]** PyAV installation documentation. Binary wheels are provided for Windows and linked against FFmpeg. https://pyav.basswood-io.com/docs/stable/overview/installation.html
-- **[R6]** OpenCV Video I/O and module documentation. `VideoCapture` provides a common layer over capture backends; image-processing and acceleration modules are available. https://docs.opencv.org/4.13.0/d0/da7/videoio_overview.html and https://docs.opencv.org/4.13.0/
+- **[R6]** OpenCV Video I/O and module documentation. `VideoCapture` provides a common layer over capture backends; image-processing and acceleration modules are available. https://docs.opencv.org/doc/doxygen/html/d0/da7/videoio_overview.html and https://docs.opencv.org/5.x/
 - **[R7]** Mido documentation. Mido provides MIDI 1.0 messages and port APIs. https://mido.readthedocs.io/en/stable/
 - **[R8]** python-rtmidi project documentation/PyPI. The binding wraps RtMidi and supports the Windows Multimedia MIDI API. https://pypi.org/project/python-rtmidi/
 - **[R9]** uv project documentation. Project execution can keep the environment synchronized with a committed lockfile; Windows x86-64 is Tier 1. https://docs.astral.sh/uv/guides/projects/ and https://docs.astral.sh/uv/reference/policies/platforms/
