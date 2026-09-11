@@ -148,3 +148,38 @@ def test_batch_connection_query_compiles_shared_baseline_once() -> None:
 
     assert all(results[candidate].accepted for candidate in candidates)
     assert compiler.compile_count == 3
+
+
+def test_connection_query_offers_first_edge_into_undersized_midi_family() -> None:
+    compiler = GraphCompiler(create_utility_registry())
+    document = GraphDocument()
+    first = document.add_node("synmachine.utility.transpose", node_id=NODE_A)
+    second = document.add_node("synmachine.utility.transpose", node_id=NODE_B)
+    merge = document.add_node("synmachine.utility.midi_merge", node_id=NODE_C)
+
+    # MIDI Merge needs at least two family sockets, so this first edge still
+    # leaves the family undersized. That incompleteness pre-exists the edge
+    # (its diagnostic only changes the reported count), so both sockets must
+    # stay offerable and the node must be wireable from an empty start.
+    assert compiler.connection_compatibility(
+        document.snapshot(), first, "midi", merge, "midi_1"
+    ).accepted
+    document.add_connection(first, "midi", merge, "midi_1")
+    assert compiler.connection_compatibility(
+        document.snapshot(), second, "midi", merge, "midi_2"
+    ).accepted
+    document.add_connection(second, "midi", merge, "midi_2")
+    issues = compiler.compile(document.snapshot()).report.errors
+    # The merge family is now satisfied; the only remaining errors are the
+    # intentionally unconnected MIDI inputs of the transpose stand-ins.
+    assert {issue.code for issue in issues} == {"required_input_missing"}
+    assert {issue.node_id for issue in issues} == {NODE_A, NODE_B}
+
+    # Genuine edge incompatibility is still rejected: a MIDI state cannot feed
+    # the conditional's concrete boolean input.
+    boolean = document.add_node("synmachine.utility.conditional")
+    rejected = compiler.connection_compatibility(
+        document.snapshot(), first, "midi", boolean, "condition"
+    )
+    assert rejected.accepted is False
+    assert "incompatible_port_types" in {issue.code for issue in rejected.issues}

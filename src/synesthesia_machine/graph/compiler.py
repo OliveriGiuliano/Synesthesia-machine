@@ -50,6 +50,19 @@ class ConnectionCompatibility:
     issues: tuple[ValidationIssue, ...] = ()
 
 
+def _issue_identity(issue: ValidationIssue) -> tuple[object, ...]:
+    """Stable identity of a diagnostic, excluding its presentation message.
+
+    Diagnostic text embeds variable details: a variadic family reports how
+    many sockets are connected, so the same pre-existing issue reworded by a
+    count change would compare unequal on its message and make a prospective
+    edge that merely improves an undersized family look incompatible.
+    Location-based identity keeps "new errors caused by this edge" semantics
+    while tolerating that text drift.
+    """
+    return (issue.severity, issue.code, issue.node_id, issue.port_id, issue.connection_id)
+
+
 class _TypeGroups:
     def __init__(self) -> None:
         self._parent: dict[tuple[UUID, str], tuple[UUID, str]] = {}
@@ -192,10 +205,17 @@ class GraphCompiler:
         snapshot: GraphSnapshot,
         candidates: Iterable[tuple[UUID, str, UUID, str]],
     ) -> dict[tuple[UUID, str, UUID, str], ConnectionCompatibility]:
-        """Validate several prospective edges while sharing identical baselines."""
+        """Validate several prospective edges while sharing identical baselines.
+
+        A prospective edge is rejected only for diagnostics absent from the
+        baseline. Diagnostics are compared by location, not message, because
+        message text can reword the same pre-existing issue (a variadic
+        family below its minimum reports the connected socket count), and an
+        edge that merely improves an undersized family must stay offerable.
+        """
 
         results: dict[tuple[UUID, str, UUID, str], ConnectionCompatibility] = {}
-        baseline_cache: dict[tuple[ConnectionModel, ...], set[ValidationIssue]] = {}
+        baseline_cache: dict[tuple[ConnectionModel, ...], set[tuple[object, ...]]] = {}
         for endpoint in candidates:
             source_node_id, source_port_id, destination_node_id, destination_port_id = endpoint
             retained = tuple(
@@ -206,11 +226,13 @@ class GraphCompiler:
                     and connection.destination_port_id == destination_port_id
                 )
             )
-            baseline_issues = baseline_cache.get(retained)
-            if baseline_issues is None:
+            baseline_identities = baseline_cache.get(retained)
+            if baseline_identities is None:
                 base = replace(snapshot, connections=retained)
-                baseline_issues = set(self.compile(base).report.issues)
-                baseline_cache[retained] = baseline_issues
+                baseline_identities = {
+                    _issue_identity(issue) for issue in self.compile(base).report.issues
+                }
+                baseline_cache[retained] = baseline_identities
             candidate = ConnectionModel(
                 id=uuid5(
                     snapshot.document_id,
@@ -226,7 +248,7 @@ class GraphCompiler:
             new_errors = tuple(
                 issue
                 for issue in self.compile(prospective).report.errors
-                if issue not in baseline_issues
+                if _issue_identity(issue) not in baseline_identities
             )
             results[endpoint] = ConnectionCompatibility(
                 accepted=not new_errors,
