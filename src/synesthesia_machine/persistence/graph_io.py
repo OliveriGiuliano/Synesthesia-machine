@@ -196,7 +196,14 @@ def save_graph(
 
 
 def write_text_atomically(destination: Path, content: str, *, retain_backup: bool) -> None:
-    """Durably replace one text file, optionally retaining its previous generation."""
+    """Durably replace one text file, optionally retaining its previous generation.
+
+    On POSIX the file contents, both renames, and the directory entries they
+    create are fsynced, so a power loss cannot silently revert a save to an
+    older generation. On Windows the best available durability
+    (FlushFileBuffers on the temporary files) is used, since it offers no
+    directory-fsync API.
+    """
 
     temporary_path: Path | None = None
     backup_temporary_path: Path | None = None
@@ -230,14 +237,40 @@ def write_text_atomically(destination: Path, content: str, *, retain_backup: boo
                 os.fsync(backup_temporary.fileno())
                 backup_temporary_path = Path(backup_temporary.name)
             os.replace(backup_temporary_path, _backup_path(destination))
+            _fsync_directory(destination.parent)
             backup_temporary_path = None
         os.replace(temporary_path, destination)
+        _fsync_directory(destination.parent)
         temporary_path = None
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
         if backup_temporary_path is not None:
             backup_temporary_path.unlink(missing_ok=True)
+
+
+def _fsync_directory(directory: Path) -> None:
+    """Persist renamed directory entries on POSIX so a lost save leaves a trace.
+
+    Windows has no directory-fsync API, and a directory-fsync failure must
+    not turn a successful save into a failure, so errors are swallowed.
+    """
+
+    if os.name != "posix":
+        return
+    try:
+        flags = os.O_RDONLY
+        if hasattr(os, "O_DIRECTORY"):
+            flags |= os.O_DIRECTORY
+        descriptor = os.open(str(directory), flags)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
 
 
 def load_graph(path: str | Path, registry: NodeRegistry) -> GraphSnapshot:

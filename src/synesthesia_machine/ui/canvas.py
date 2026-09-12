@@ -76,6 +76,9 @@ VIDEO_FILE_SUFFIXES = frozenset(
     for extension in re.findall(r"\*\.([A-Za-z0-9]+)", FilePathParameterEditor.VIDEO_FILTER)
 )
 GRAPH_FILE_SUFFIXES = frozenset({".json"})
+# Scene offset applied between the anchors of Load Video nodes created by a
+# multi-file drop, so the nodes cascade instead of stacking exactly.
+DROP_CASCADE_OFFSET = 32.0
 
 
 class GraphScene(QGraphicsScene):
@@ -744,7 +747,10 @@ class GraphView(QGraphicsView):
         if self.theme.metrics.min_zoom <= target <= self.theme.metrics.max_zoom:
             self.scale(factor, factor)
             self.graph_scene.set_detail_level(self.transform().m11())
-        event.accept()
+            event.accept()
+        # No accept() at a zoom limit: an unhandled wheel event falls
+        # through to the view's default scroll behavior instead of being
+        # swallowed while doing nothing.
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape and self.graph_scene.connection_drag_active:
@@ -879,44 +885,62 @@ class GraphView(QGraphicsView):
         kind = self._dropped_file_kind(mime_data)
         if kind is None:
             return
-        urls = mime_data.urls()
-        if not urls or not urls[0].isLocalFile():
+        paths = self._dropped_file_paths(mime_data)
+        if not paths:
             return
-        path = Path(urls[0].toLocalFile())
+        if kind == "graph":
+            # A saved graph anywhere in the set takes over the drop: the
+            # first graph file opens through the regular File > Open flow
+            # and no video nodes are created.
+            graph_path = next(path for path in paths if path.suffix.lower() in GRAPH_FILE_SUFFIXES)
+            self.openGraphFileRequested.emit(graph_path)
+            # The open flow runs synchronously (direct signal connection);
+            # accept the OS drop only when it committed. A cancelled
+            # replacement or a failed load must not be reported to the drag
+            # session as a success.
+            if self._drop_open_result:
+                event.acceptProposedAction()
+            return
+        # Every dropped video becomes its own Load Video node whose path is
+        # already set, as one undo step each.
         position = self.mapToScene(event.position().toPoint())
-        if kind == "video":
-            # A dropped video becomes a Load Video node whose path is already set,
-            # as one undo step.
-            session = self.graph_scene.session
+        session = self.graph_scene.session
+        for index, path in enumerate(
+            path for path in paths if path.suffix.lower() in VIDEO_FILE_SUFFIXES
+        ):
             session.add_node(
                 LOAD_VIDEO_TYPE_ID,
                 self.graph_scene.clamp_new_node_anchor(
-                    session.registry.require(LOAD_VIDEO_TYPE_ID), position
+                    session.registry.require(LOAD_VIDEO_TYPE_ID),
+                    QPointF(
+                        position.x() + index * DROP_CASCADE_OFFSET,
+                        position.y() + index * DROP_CASCADE_OFFSET,
+                    ),
                 ),
                 parameters={"file_path": path.as_posix()},
             )
-            event.acceptProposedAction()
-            return
-        self.openGraphFileRequested.emit(path)
-        # The open flow runs synchronously (direct signal connection); accept
-        # the OS drop only when it committed. A cancelled replacement or a
-        # failed load must not be reported to the drag session as a success.
-        if self._drop_open_result:
-            event.acceptProposedAction()
+        event.acceptProposedAction()
 
     def set_drop_open_result(self, ok: bool) -> None:
         self._drop_open_result = ok
 
     @staticmethod
-    def _dropped_file_kind(mime_data: QMimeData) -> str | None:
-        """Classify the first dropped local file as a video or a saved graph."""
+    def _dropped_file_paths(mime_data: QMimeData) -> list[Path]:
+        return [Path(url.toLocalFile()) for url in mime_data.urls() if url.isLocalFile()]
 
-        urls = mime_data.urls()
-        if not urls or not urls[0].isLocalFile():
-            return None
-        suffix = Path(urls[0].toLocalFile()).suffix.lower()
-        if suffix in VIDEO_FILE_SUFFIXES:
-            return "video"
-        if suffix in GRAPH_FILE_SUFFIXES:
+    @classmethod
+    def _dropped_file_kind(cls, mime_data: QMimeData) -> str | None:
+        """Classify the dropped set of local files as a graph or video drop.
+
+        A saved graph anywhere in the set wins (the first graph file is
+        opened); otherwise a single acceptable video is enough, so a
+        multi-file drop is not rejected just because one of its files has
+        an unknown suffix.
+        """
+
+        paths = cls._dropped_file_paths(mime_data)
+        if any(path.suffix.lower() in GRAPH_FILE_SUFFIXES for path in paths):
             return "graph"
+        if any(path.suffix.lower() in VIDEO_FILE_SUFFIXES for path in paths):
+            return "video"
         return None

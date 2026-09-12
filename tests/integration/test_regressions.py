@@ -16,6 +16,7 @@ from synesthesia_machine.contracts import (
     ColorSpace,
     FrameProvenance,
     ImageFrame,
+    NoData,
     PortType,
     ValueArray,
     read_only_float32,
@@ -568,6 +569,65 @@ def test_statistics_all_int_output_widens_to_float_at_the_scheduler_boundary() -
     assert widened == 3.0
     assert isinstance(widened, float)
     assert tick.values[PortKey(math_node, "value")] == 4.5
+
+
+def test_statistics_non_whole_mean_of_ints_is_a_stable_expected_error() -> None:
+    # An all-int set declares an INT output; MINIMUM/MAXIMUM stay lossless on
+    # ints, but every other statistic can produce a fraction. A whole-number
+    # result may still be an int; anything else must fail with the stable,
+    # user-facing error instead of an invalid float on the INT-declared port.
+    registry = create_application_registry()
+    context = frame_context(clock_id=NODE_ID)
+    statistics = registry.require("synmachine.utility.statistics")
+    parameters, errors = statistics.parameter_values({"statistic": "MEAN"})
+    assert not errors
+    runtime = statistics.runtime_factory(NODE_ID)
+
+    with pytest.raises(ExpectedNodeError, match="not a whole number"):
+        runtime.process({"values_1": 1, "values_2": 2}, parameters, context)
+
+    whole = runtime.process({"values_1": 1, "values_2": 3}, parameters, context)["value"]
+    assert whole == 2
+    assert isinstance(whole, int)
+
+
+def test_statistics_non_whole_mean_of_ints_fails_as_expected_error_in_scheduler() -> None:
+    # End to end: the graph compiles (all-int input declares an INT output),
+    # the tick fails with the recoverable statistics_non_integer error, and
+    # both the statistics node and its consumer publish NoData instead of an
+    # unexpected invalid_node_output on every tick.
+    registry = create_application_registry()
+    document = GraphDocument()
+    first = document.add_node(
+        "synmachine.utility.number",
+        parameters={"number_type": "INT", "int_value": 1},
+    )
+    second = document.add_node(
+        "synmachine.utility.number",
+        parameters={"number_type": "INT", "int_value": 2},
+    )
+    statistics = document.add_node(
+        "synmachine.utility.statistics",
+        implementation_version=2,
+        parameters={"statistic": "MEAN"},
+    )
+    consumer = document.add_node("synmachine.utility.pass_through")
+    document.add_connection(first, "value", statistics, "values_1")
+    document.add_connection(second, "value", statistics, "values_2")
+    document.add_connection(statistics, "value", consumer, "value")
+
+    result = GraphCompiler(registry).compile(document.snapshot(), demand_roots={consumer})
+    assert result.report.is_valid, [issue.message for issue in result.report.issues]
+    assert result.plan is not None
+    plan_node = result.plan.node(statistics)
+    assert plan_node is not None
+    assert plan_node.output_types["value"] is PortType.INT
+
+    tick = Scheduler(result.plan).execute_tick(frame_context(clock_id=NODE_ID))
+    assert [error.code for error in tick.errors] == ["statistics_non_integer"]
+    assert tick.errors[0].recoverable is True
+    assert tick.values[PortKey(statistics, "value")] is NoData
+    assert tick.values[PortKey(consumer, "value")] is NoData
 
 
 def test_statistics_combines_multiple_direct_image_connections() -> None:

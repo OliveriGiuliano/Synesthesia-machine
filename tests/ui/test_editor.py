@@ -207,6 +207,54 @@ def test_horizontal_wheel_input_does_not_zoom_canvas(window: MainWindow) -> None
     assert window.view.transform().m11() == initial_scale
 
 
+def _canvas_wheel_event(delta_y: int) -> QWheelEvent:
+    # A plain mouse-wheel event (no smooth-scroll phase): the phase only
+    # adds platform-side dispatch handling and would blur the assertion
+    # that the zoom handler itself accepted or ignored the event.
+    return QWheelEvent(
+        QPointF(10.0, 10.0),
+        QPointF(10.0, 10.0),
+        QPoint(),
+        QPoint(0, delta_y),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.NoScrollPhase,
+        False,
+    )
+
+
+def test_wheel_at_zoom_limits_is_not_swallowed(window: MainWindow) -> None:
+    view = window.view
+    metrics = view.theme.metrics
+
+    view.resetTransform()
+    view.scale(metrics.max_zoom, metrics.max_zoom)
+    at_max = _canvas_wheel_event(120)
+    # A delivered wheel event starts out unaccepted; the constructor in
+    # this PySide6 build pre-accepts it, so reset the flag first.
+    at_max.ignore()
+    view.wheelEvent(at_max)
+    assert not at_max.isAccepted()
+    assert view.transform().m11() == metrics.max_zoom
+
+    view.resetTransform()
+    view.scale(metrics.min_zoom, metrics.min_zoom)
+    at_min = _canvas_wheel_event(-120)
+    at_min.ignore()
+    view.wheelEvent(at_min)
+    assert not at_min.isAccepted()
+    assert view.transform().m11() == metrics.min_zoom
+
+    # Mid zoom still zooms and accepts the event.
+    view.resetTransform()
+    before = view.transform().m11()
+    mid = _canvas_wheel_event(120)
+    mid.ignore()
+    view.wheelEvent(mid)
+    assert mid.isAccepted()
+    assert view.transform().m11() == pytest.approx(before * 1.15)
+
+
 def test_selection_uses_one_scene_level_outline_and_tracks_node_bounds(
     window: MainWindow,
 ) -> None:

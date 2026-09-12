@@ -74,6 +74,26 @@ def test_recent_files_are_resolved_deduplicated_pruned_and_limited(tmp_path: Pat
     assert store.load_recent_files(2) == []
 
 
+def test_recent_files_display_limit_does_not_destroy_the_persisted_list(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path / "recent.ini")
+    store = ApplicationSettingsStore(settings)
+    files = [tmp_path / f"graph_{index}.synmachine.json" for index in range(6)]
+    for path in files:
+        path.write_text("{}", encoding="utf-8")
+    settings.setValue("recentFiles", [str(path) for path in files])
+
+    # A small display limit caps the returned view only.
+    visible = store.load_recent_files(2)
+    assert visible == [files[0].resolve(), files[1].resolve()]
+
+    # A fresh view of the INI still holds the full list: the display
+    # limit must never have truncated what is persisted.
+    reloaded = ApplicationSettingsStore(_settings(tmp_path / "recent.ini")).load_recent_files(20)
+    assert reloaded == [path.resolve() for path in files]
+
+
 def test_grid_snap_commits_as_one_exact_undoable_move(qapp: QApplication) -> None:
     del qapp
     session = DocumentSession(create_utility_registry())

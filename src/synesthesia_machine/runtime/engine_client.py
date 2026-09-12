@@ -183,6 +183,11 @@ class ProcessEngineClient:
         self._value_previews: dict[tuple[UUID, str], ValuePreview] = {}
         self._image_slots: dict[tuple[UUID, str], OwnedPreviewSlot] = {}
         self._closed = False
+        # True while the event thread is inside a slow synchronous request
+        # (preview slot configuration). Heartbeats queue up unconsumed
+        # during that window, so liveness must not read the backlog as a
+        # dead child.
+        self._event_thread_slow = False
         if auto_start:
             self.start()
 
@@ -720,6 +725,11 @@ class ProcessEngineClient:
             height=event.height,
             channels=event.channels,
         )
+        # The slot-configuration round trip blocks this event thread, so
+        # heartbeats queue up unconsumed; mark the window so liveness
+        # checks cannot read that backlog as an unresponsive child.
+        with self._lifecycle_lock:
+            self._event_thread_slow = True
         try:
             self._request(
                 ConfigurePreviewSlot(
@@ -737,6 +747,9 @@ class ProcessEngineClient:
                     f"{type(error).__name__}: {error}"
                 )
             return
+        finally:
+            with self._lifecycle_lock:
+                self._event_thread_slow = False
         with self._lifecycle_lock:
             stale = self._closed or event.graph_revision != self._graph_revision
         if stale:
@@ -880,8 +893,14 @@ class ProcessEngineClient:
         ):
             self._connection_state = EngineConnectionState.CRASHED
             self._record_crash_exit_locked(process.exitcode)
+        # While the event thread is blocked in a synchronous request,
+        # heartbeats pile up unconsumed in the queue; their age reflects
+        # our own backlog, not the child's health, so defer the verdict
+        # (bounded by the request timeout) until the thread catches up.
+        # A dead child still crashes via the process check above.
         if (
-            self._connection_state is EngineConnectionState.CONNECTED
+            not self._event_thread_slow
+            and self._connection_state is EngineConnectionState.CONNECTED
             and self._last_heartbeat_monotonic_ns is not None
             and self._heartbeat_age_s() > self._heartbeat_timeout_s
         ):

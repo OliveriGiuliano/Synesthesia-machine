@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from uuid import UUID
 from zipfile import ZipFile
 
-from synesthesia_machine.contracts import EngineMetrics, EngineState
+from synesthesia_machine.contracts import EngineMetrics, EngineState, NodeExecutionError
 from synesthesia_machine.diagnostics import (
     NvidiaSnapshot,
     collect_hardware_snapshot,
@@ -131,3 +132,67 @@ def test_bundle_can_include_paths_only_when_explicitly_requested(tmp_path: Path)
     assert not result.redacted
     assert str(media_path).replace("\\", "\\\\") in graph
     assert Path(hardware["python_executable"]).is_absolute()
+
+
+def test_metrics_and_log_paths_are_redacted_only_in_redacted_mode(tmp_path: Path) -> None:
+    posix_clip = "/home/user/Videos/clip.mp4"
+    unc_clip = r"\\server\share\clip.mp4"
+    error = NodeExecutionError(
+        node_id=UUID("70000000-0000-0000-0000-000000000042"),
+        code="io_error",
+        message=f"Video file does not exist: {posix_clip}",
+        details=(
+            "Traceback (most recent call last):\n"
+            f'  File "{posix_clip}", line 1, in <module>\n'
+            f"IOError: {posix_clip}\n"
+            f"UNC fallback failed: {unc_clip}"
+        ),
+        recoverable=False,
+        tick_index=0,
+    )
+    metrics = EngineMetrics(state=EngineState.RUNNING, processed_ticks=42, runtime_errors=(error,))
+    document = GraphDocument()
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "engine-0.log").write_text(
+        f"failed to open {posix_clip}\nthen tried {unc_clip}\nsecond line without a path\n",
+        encoding="utf-8",
+    )
+    redacted_zip = tmp_path / "diagnostics-redacted.zip"
+    result = create_diagnostic_bundle(
+        redacted_zip,
+        document.snapshot(),
+        logs_directory=logs,
+        engine_metrics=metrics,
+    )
+    assert result.redacted
+    with ZipFile(redacted_zip) as archive:
+        redacted_metrics = json.loads(archive.read("engine_metrics.json"))
+        redacted_log = archive.read("logs/01-engine-0.log").decode("utf-8")
+    entry = redacted_metrics["runtime_errors"][0]
+    assert posix_clip not in entry["message"]
+    assert posix_clip not in entry["details"]
+    assert unc_clip not in entry["details"]
+    assert "<redacted>" in entry["message"]
+    assert "<redacted>" in entry["details"]
+    assert posix_clip not in redacted_log
+    assert unc_clip not in redacted_log
+    assert "<redacted>" in redacted_log
+
+    kept_zip = tmp_path / "diagnostics-kept.zip"
+    create_diagnostic_bundle(
+        kept_zip,
+        document.snapshot(),
+        logs_directory=logs,
+        engine_metrics=metrics,
+        include_paths=True,
+    )
+    with ZipFile(kept_zip) as archive:
+        kept_metrics = json.loads(archive.read("engine_metrics.json"))
+        kept_log = archive.read("logs/01-engine-0.log").decode("utf-8")
+    entry = kept_metrics["runtime_errors"][0]
+    assert entry["message"] == f"Video file does not exist: {posix_clip}"
+    assert posix_clip in entry["details"]
+    assert unc_clip in entry["details"]
+    assert posix_clip in kept_log
+    assert unc_clip in kept_log

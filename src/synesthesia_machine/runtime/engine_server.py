@@ -237,7 +237,11 @@ class _EventPublisher:
             if now >= next_heartbeat:
                 self._publish_heartbeat()
                 next_heartbeat = now + self._heartbeat_interval_s
-            handshake_pending = any(not ready for ready in self._slot_ready.values())
+            # Iterating without the lock races graph_activated's clear():
+            # a RuntimeError there kills this thread and heartbeats stop
+            # forever, pinning the parent's state at UNRESPONSIVE.
+            with self._lock:
+                handshake_pending = any(not ready for ready in self._slot_ready.values())
             if self._preview_wake.is_set() or (handshake_pending and now >= next_handshake_poll):
                 # The wake event is the source of truth for new previews: the
                 # broker sets it the moment anything advanced, and Event.wait

@@ -105,8 +105,15 @@ def migrate_hue_v1_to_v2(data: JsonObject) -> JsonObject:
     migrated = deepcopy(data)
     parameters = _parameters(migrated)
     turns = parameters.get("turns")
-    if isinstance(turns, float) and math.isfinite(turns) and not 0.0 <= turns <= 1.0:
-        parameters["turns"] = turns % 1.0
+    if not isinstance(turns, bool) and isinstance(turns, (int, float)):
+        # Legacy turns may be an int literal, but the v2 turns parameter is a
+        # strict float; normalise to float so it passes validation, and wrap
+        # finite out-of-range values into the single-turn range so the user's
+        # hue is not silently lost or rejected.
+        turns_value = float(turns)
+        if math.isfinite(turns_value) and not 0.0 <= turns_value <= 1.0:
+            turns_value = turns_value % 1.0
+        parameters["turns"] = turns_value
     migrated["implementation_version"] = 2
     return migrated
 

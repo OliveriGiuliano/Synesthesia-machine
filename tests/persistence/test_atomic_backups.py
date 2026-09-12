@@ -75,3 +75,37 @@ def test_backup_can_be_disabled_for_recovery_style_writes(tmp_path: Path) -> Non
     assert path.is_file()
     assert not path.with_name(f"{path.name}.bak").exists()
     assert not tuple(tmp_path.glob(".*.tmp"))
+
+
+@pytest.mark.skipif(os.name != "posix", reason="directory fsync is POSIX-only")
+def test_save_fsyncs_containing_directory_for_durable_renames(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "graph.synmachine.json"
+    parent = str(tmp_path)
+    opened: dict[int, str] = {}
+    fsynced: list[int] = []
+    real_open = os.open
+    real_fsync = os.fsync
+
+    def recording_open(file: str | bytes | Path, flags: int, mode: int = 0o777) -> int:
+        descriptor = real_open(file, flags, mode)
+        opened[descriptor] = os.fsdecode(file)
+        return descriptor
+
+    def recording_fsync(descriptor: int) -> None:
+        fsynced.append(descriptor)
+        real_fsync(descriptor)
+
+    monkeypatch.setattr("synesthesia_machine.persistence.graph_io.os.open", recording_open)
+    monkeypatch.setattr("synesthesia_machine.persistence.graph_io.os.fsync", recording_fsync)
+
+    # Two saves so both the backup replace and the final replace run.
+    save_graph(path, _document(1.0).snapshot())
+    save_graph(path, _document(2.0).snapshot())
+
+    directory_fds = [descriptor for descriptor, name in opened.items() if name == parent]
+    assert directory_fds, "expected the containing directory to be opened for a durability fsync"
+    for descriptor in directory_fds:
+        assert descriptor in fsynced, "each renamed directory entry must be fsynced"

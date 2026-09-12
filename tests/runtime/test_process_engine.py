@@ -385,3 +385,31 @@ def test_server_rejects_stale_graph_command_before_runtime_mutation() -> None:
     assert isinstance(failure, CommandFailed)
     assert failure.error_type == "StaleGraphRevisionError"
     assert "active revision is 7" in failure.message
+
+
+def test_stale_heartbeat_is_deferred_while_the_event_thread_is_blocked() -> None:
+    client = ProcessEngineClient(
+        auto_start=False,
+        heartbeat_timeout_s=1.0,
+        request_timeout_s=1.0,
+        close_timeout_s=0.5,
+    )
+    try:
+        with client._lifecycle_lock:
+            client._connection_state = EngineConnectionState.CONNECTED
+            client._last_heartbeat_monotonic_ns = 0
+        assert client.status().connection_state is EngineConnectionState.UNRESPONSIVE
+
+        # A stale heartbeat accumulated while the event thread is blocked in
+        # a synchronous slot-configuration request is the client's own
+        # backlog, not evidence of a dead child: the liveness verdict must be
+        # deferred until the thread returns to draining heartbeats.
+        client._event_thread_slow = True
+        with client._lifecycle_lock:
+            client._connection_state = EngineConnectionState.CONNECTED
+        assert client.status().connection_state is EngineConnectionState.CONNECTED
+
+        client._event_thread_slow = False
+        assert client.status().connection_state is EngineConnectionState.UNRESPONSIVE
+    finally:
+        client.close()

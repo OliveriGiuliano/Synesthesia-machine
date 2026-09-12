@@ -181,7 +181,7 @@ class MainWindow(QMainWindow):
         set_language(self.preferences.language)
         self.session = DocumentSession(registry, self)
         self.autosave_store = AutosaveStore(paths.recovery)
-        self.autosave_controller = AutosaveController(self.autosave_store, self)
+        self.autosave_controller = AutosaveController(self.autosave_store, self, self.session)
         self.action_registry = ActionRegistry(self)
         self.scene = GraphScene(self.session, theme, self)
         self.scene.configure_grid_snap(

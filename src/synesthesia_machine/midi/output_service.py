@@ -555,6 +555,14 @@ class MidiOutputService:
                             panic_error,
                         )
                     with self._condition:
+                        # State published while the panic was in flight was
+                        # produced before the panic. Drop the mailbox when
+                        # the panic completes so it is neither applied
+                        # afterwards nor re-applied by the periodic
+                        # refresh, which would sound the pre-panic notes
+                        # again after a Stop/Panic.
+                        self._pending = None
+                        self._latest = None
                         self._panic_completed = max(self._panic_completed, panic_generation)
                 elif action == "state":
                     assert desired is not None

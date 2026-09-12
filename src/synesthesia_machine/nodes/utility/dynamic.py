@@ -223,17 +223,30 @@ class StatisticsRuntime(_RuntimeBase):
             sample_array = np.asarray([_number(value) for value in samples], dtype=np.float64)
             result = _statistic(sample_array, statistic, percentile, axis=0)
             scalar: float | int = float(result)
-            # The compiler unifies the element types of every variadic
-            # input ({INT, FLOAT} -> FLOAT), so a mixed set declares a
-            # FLOAT output: stay an int only when every sample is an int
-            # (gating on the first sample alone would emit an int for a
-            # mixed set). A downstream concrete-FLOAT consumer can still
-            # force a FLOAT declaration for an all-int set; the scheduler
-            # applies the implicit INT -> FLOAT conversion at the output
-            # boundary, so the emitted int is widened there.
-            if statistic in {"MINIMUM", "MAXIMUM"} and all(
+            all_int = all(
                 isinstance(value, int) and not isinstance(value, bool) for value in samples
-            ):
+            )
+            # The compiler unifies the element types of every variadic
+            # input ({INT, FLOAT} -> FLOAT), so only an all-int set can
+            # declare an INT output. MINIMUM and MAXIMUM preserve that type
+            # losslessly; every other statistic can turn integers into a
+            # fraction (the mean of 1 and 2 is 1.5), so on an INT-declared
+            # port those statistics are exact only while the result is a
+            # whole number. Anything else must fail as a stable, user-facing
+            # error rather than emit an invalid float. A downstream concrete
+            # FLOAT consumer can still force a FLOAT declaration for an
+            # all-int set; the scheduler applies the implicit INT -> FLOAT
+            # conversion at the output boundary, so the emitted int is
+            # widened there.
+            if all_int:
+                if statistic not in {"MINIMUM", "MAXIMUM"} and (
+                    not math.isfinite(scalar) or not scalar.is_integer()
+                ):
+                    raise ExpectedNodeError(
+                        "statistics_non_integer",
+                        "This statistic of integer values is not a whole number; use "
+                        "MINIMUM or MAXIMUM to keep integer results, or provide FLOAT values",
+                    )
                 scalar = int(scalar)
             return {"value": scalar}
         raise ExpectedNodeError(

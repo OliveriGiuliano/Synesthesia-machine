@@ -177,6 +177,50 @@ class _ManualVideoFactory:
         return source
 
 
+class _ResettableManualSource(_ManualVideoSource):
+    def __init__(
+        self,
+        node_id: UUID,
+        file_path: str | Path,
+        publish: Callable[[PresentedVideoFrame], None],
+        on_reset: Callable[[ResetReason], None],
+    ) -> None:
+        super().__init__(node_id, file_path, publish)
+        self._on_reset = on_reset
+
+    def restart(self, reason: ResetReason) -> None:
+        self._on_reset(reason)
+
+
+class _ResettableVideoFactory:
+    def __init__(self) -> None:
+        self.source: _ResettableManualSource | None = None
+
+    def __call__(
+        self,
+        node_id: UUID,
+        file_path: str | Path,
+        *,
+        process_every_nth_frame: int,
+        playback_speed: float,
+        loop: bool,
+        stream_index: int,
+        on_frame: object,
+        on_reset: object,
+    ) -> _ResettableManualSource:
+        del process_every_nth_frame, playback_speed, loop, stream_index
+        assert callable(on_frame)
+        assert callable(on_reset)
+        source = _ResettableManualSource(
+            node_id,
+            file_path,
+            cast(Callable[[PresentedVideoFrame], None], on_frame),
+            cast(Callable[[ResetReason], None], on_reset),
+        )
+        self.source = source
+        return source
+
+
 def _slow_sink_definition(factory: _BlockingSinkFactory) -> NodeDefinition:
     return NodeDefinition(
         "test.runtime.slow_image_sink",
@@ -288,6 +332,53 @@ def test_slow_graph_drops_stale_frames_with_bounded_latency_and_visible_metrics(
         assert metrics.p95_graph_execution_ms >= metrics.p50_graph_execution_ms
         assert metrics.p99_graph_execution_ms >= metrics.p95_graph_execution_ms
         assert metrics.max_graph_execution_ms >= metrics.p99_graph_execution_ms
+    finally:
+        if sink_factory.runtime is not None:
+            for event in sink_factory.runtime.release:
+                event.set()
+        client.close()
+
+
+def test_tick_published_while_source_reset_is_queued_runs_after_the_reset() -> None:
+    clock = _LogicalClock()
+    sink_factory = _BlockingSinkFactory()
+    source_factory = _ResettableVideoFactory()
+    registry = NodeRegistry((create_input_definitions()[0], _slow_sink_definition(sink_factory)))
+    document = GraphDocument(document_id=DOCUMENT_ID)
+    document.add_node(
+        "synmachine.input.load_video",
+        node_id=SOURCE_ID,
+        parameters={"file_path": "simulated.mp4"},
+    )
+    document.add_node("test.runtime.slow_image_sink", node_id=SLOW_SINK_ID)
+    document.add_connection(SOURCE_ID, "image", SLOW_SINK_ID, "image")
+    client = InProcessEngineClient(
+        registry,
+        video_source_factory=source_factory,
+        worker_clock=clock,
+    )
+    try:
+        assert client.activate(document.snapshot()).activated
+        source = source_factory.source
+        runtime = sink_factory.runtime
+        assert source is not None and runtime is not None
+        client.play(SOURCE_ID)
+
+        # While the worker is busy processing tick 1 (the sink is blocked),
+        # a loop restart queues a source reset; the first tick of the new
+        # loop arrives while that reset is still queued. Sources serialize
+        # reset-then-frame, so the new tick must run after the reset
+        # instead of being dropped before processing.
+        source.emit(_packet(1, 0))
+        assert runtime.started[0].wait(1.0)
+        clock.set_ms(10)
+        source.restart(ResetReason.SOURCE_RESTARTED)
+        source.emit(_packet(2, 10))
+        runtime.release[0].set()
+        assert runtime.started[1].wait(1.0)
+        runtime.release[1].set()
+        assert client.wait_until_idle(1.0)
+        assert runtime.tick_indices == [1, 2]
     finally:
         if sink_factory.runtime is not None:
             for event in sink_factory.runtime.release:

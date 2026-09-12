@@ -356,7 +356,13 @@ class LatestFrameGraphWorker:
             for index in range(len(self._commands) - 1, -1, -1):
                 pending = self._commands[index]
                 if isinstance(pending, _ResetCommand) and pending.source_node_id == source_node_id:
-                    break
+                    # Sources serialize reset-then-frame: a tick published
+                    # while a reset for this source is still queued is newer
+                    # than that reset, so it must run after it instead of
+                    # being dropped (losing the first frame of a new run).
+                    self._commands.insert(index + 1, command)
+                    self._condition.notify()
+                    return
                 if isinstance(pending, _TickCommand) and pending.source_node_id == source_node_id:
                     self._commands[index] = command
                     self._dropped_by_source[source_node_id] = (

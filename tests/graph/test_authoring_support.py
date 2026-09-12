@@ -3,6 +3,8 @@
 from collections.abc import Iterable
 from uuid import UUID
 
+import pytest
+
 from synesthesia_machine.graph import (
     CompilationResult,
     ConnectionModel,
@@ -183,3 +185,88 @@ def test_connection_query_offers_first_edge_into_undersized_midi_family() -> Non
     )
     assert rejected.accepted is False
     assert "incompatible_port_types" in {issue.code for issue in rejected.issues}
+
+
+def test_clear_parameter_restores_the_definition_default() -> None:
+    document = GraphDocument()
+    node_id = document.add_node(
+        "synmachine.utility.number",
+        node_id=NODE_A,
+        parameters={"number_type": "INT", "int_value": 7},
+    )
+    document.set_parameter(node_id, "int_value", 9)
+    assert document.node(node_id).parameters == {"number_type": "INT", "int_value": 9}  # type: ignore[union-attr]
+
+    document.clear_parameter(node_id, "int_value")
+    assert document.node(node_id).parameters == {"number_type": "INT"}  # type: ignore[union-attr]
+
+    # Clearing a parameter that was never stored is a no-op: no new revision,
+    # no node rewrite, so undo state is untouched.
+    revision = document.revision
+    document.clear_parameter(node_id, "never_stored")
+    assert document.revision == revision
+    assert document.node(node_id).parameters == {"number_type": "INT"}  # type: ignore[union-attr]
+
+
+def test_restore_connection_repoints_same_id_like_add_connection() -> None:
+    document = GraphDocument()
+    source_a = document.add_node("synmachine.utility.number", node_id=NODE_A)
+    source_b = document.add_node("synmachine.utility.number", node_id=NODE_B)
+    destination = document.add_node("synmachine.utility.math", node_id=NODE_C)
+    document.add_connection(source_a, "value", destination, "a", connection_id=CONNECTION)
+    repointed = ConnectionModel(CONNECTION, source_b, "value", destination, "a")
+
+    # The undo adapter may restore a repointed connection whose ID is still
+    # held by the pre-repoint value: same destination, same rules as
+    # add_connection, so redo cannot die on a collision the authoring path
+    # allows.
+    document.restore_connection(repointed, replace_existing_input=True)
+
+    assert document.connection(CONNECTION) == repointed
+    assert document.incoming_connection(destination, "a") == repointed
+
+
+def test_restore_connection_rejects_same_id_collision_when_destination_differs() -> None:
+    document = GraphDocument()
+    source_a = document.add_node("synmachine.utility.number", node_id=NODE_A)
+    source_b = document.add_node("synmachine.utility.number", node_id=NODE_B)
+    destination = document.add_node("synmachine.utility.math", node_id=NODE_C)
+    document.add_connection(source_a, "value", destination, "a", connection_id=CONNECTION)
+    conflicting = ConnectionModel(CONNECTION, source_b, "value", destination, "b")
+    before = document.snapshot()
+
+    with pytest.raises(ValueError, match="Connection already exists"):
+        document.restore_connection(conflicting, replace_existing_input=True)
+    with pytest.raises(ValueError, match="Connection already exists"):
+        document.restore_connection(conflicting)
+
+    assert document.snapshot() == before
+
+
+def test_from_snapshot_rejects_duplicate_identifiers() -> None:
+    node_a = NodeModel(NODE_A, "synmachine.utility.number", 1)
+    node_b = NodeModel(NODE_B, "synmachine.utility.math", 1)
+    connection = ConnectionModel(CONNECTION, NODE_A, "value", NODE_B, "a")
+
+    def snapshot(
+        nodes: tuple[NodeModel, ...] = (node_a, node_b),
+        connections: tuple[ConnectionModel, ...] = (connection,),
+    ) -> GraphSnapshot:
+        return GraphSnapshot(
+            document_id=UUID("00000000-0000-0000-0000-00000000000d"),
+            revision=1,
+            nodes=nodes,
+            connections=connections,
+            document_settings={},
+            groups=(),
+        )
+
+    with pytest.raises(ValueError, match="duplicate node id"):
+        GraphDocument.from_snapshot(snapshot(nodes=(node_a, node_a)))
+    with pytest.raises(ValueError, match="duplicate connection id"):
+        GraphDocument.from_snapshot(snapshot(connections=(connection, connection)))
+
+    # A well-formed snapshot still restores exactly.
+    document = GraphDocument.from_snapshot(snapshot())
+    assert document.node(NODE_A) == node_a
+    assert document.connection(CONNECTION) == connection

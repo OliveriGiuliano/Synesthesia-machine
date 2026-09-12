@@ -55,20 +55,40 @@ def test_legacy_load_video_parameter_is_migrated() -> None:
     assert "path" not in snapshot.nodes[0].parameters
 
 
-def test_legacy_hue_turns_are_normalized_purely_into_one_turn() -> None:
-    source = {
+@pytest.mark.parametrize(
+    ("turns", "expected"),
+    [
+        pytest.param(-1.25, 0.75, id="float-out-of-range-wraps"),
+        pytest.param(0.75, 0.75, id="float-in-range-preserved"),
+        pytest.param(2, 0.0, id="int-out-of-range-wraps-to-float"),
+        pytest.param(0, 0.0, id="int-in-range-becomes-float"),
+        pytest.param(-3, 0.0, id="int-negative-wraps-to-float"),
+        pytest.param(1, 1.0, id="int-boundary-stays-float"),
+    ],
+)
+def test_legacy_hue_turns_are_normalized_purely_into_one_turn(
+    turns: int | float,
+    expected: float,
+) -> None:
+    # The v2 turns parameter is a strict float, so the migration must
+    # normalise any legacy numeric literal (int or float) into the
+    # single-turn range without losing the user's hue.
+    source: JsonObject = {
         "id": "70000000-0000-0000-0000-000000000018",
         "type_id": "synmachine.image.hue",
         "implementation_version": 1,
-        "parameters": {"turns": -1.25},
+        "parameters": {"turns": turns},
     }
     original = deepcopy(source)
 
-    migrated = migrate_hue_v1_to_v2(source)  # type: ignore[arg-type]
+    migrated = migrate_hue_v1_to_v2(source)
 
     assert source == original
     assert migrated["implementation_version"] == 2
-    assert migrated["parameters"] == {"turns": 0.75}
+    parameters = cast("dict[str, JsonValue]", migrated["parameters"])
+    turns_value = parameters["turns"]
+    assert isinstance(turns_value, float)
+    assert turns_value == expected
 
 
 @pytest.mark.parametrize(

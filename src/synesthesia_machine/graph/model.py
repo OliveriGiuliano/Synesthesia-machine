@@ -138,9 +138,30 @@ class GraphDocument:
     def from_snapshot(cls, snapshot: GraphSnapshot) -> GraphDocument:
         document = cls(document_id=snapshot.document_id)
         document.revision = snapshot.revision
-        document._nodes = {node.id: node for node in snapshot.nodes}
-        document._connections = {connection.id: connection for connection in snapshot.connections}
-        document._groups = {group.id: group for group in snapshot.groups}
+        # Dict compression would silently drop later duplicates, silently
+        # corrupting a restored document; reject malformed snapshots the
+        # same way the incremental API rejects duplicate identifiers.
+        nodes: dict[UUID, NodeModel] = {}
+        for node in snapshot.nodes:
+            if node.id in nodes:
+                msg = f"Snapshot contains duplicate node id: {node.id}"
+                raise ValueError(msg)
+            nodes[node.id] = node
+        document._nodes = nodes
+        connections: dict[UUID, ConnectionModel] = {}
+        for connection in snapshot.connections:
+            if connection.id in connections:
+                msg = f"Snapshot contains duplicate connection id: {connection.id}"
+                raise ValueError(msg)
+            connections[connection.id] = connection
+        document._connections = connections
+        groups: dict[UUID, GroupModel] = {}
+        for group in snapshot.groups:
+            if group.id in groups:
+                msg = f"Snapshot contains duplicate group id: {group.id}"
+                raise ValueError(msg)
+            groups[group.id] = group
+        document._groups = groups
         document._document_settings = dict(snapshot.document_settings)
         return document
 
@@ -279,6 +300,16 @@ class GraphDocument:
         self._nodes[node_id] = replace(node, parameters=parameters)
         self._touch()
 
+    def clear_parameter(self, node_id: UUID, parameter_id: str) -> None:
+        """Remove one stored parameter, restoring the definition default."""
+
+        node = self._require_node(node_id)
+        if parameter_id not in node.parameters:
+            return
+        parameters = {key: value for key, value in node.parameters.items() if key != parameter_id}
+        self._nodes[node_id] = replace(node, parameters=parameters)
+        self._touch()
+
     def set_position(self, node_id: UUID, position: tuple[float, float]) -> None:
         node = self._require_node(node_id)
         if node.position == position:
@@ -342,7 +373,19 @@ class GraphDocument:
         self._require_node(connection.source_node_id)
         self._require_node(connection.destination_node_id)
         existing = self._connections.get(connection.id)
-        if existing is not None and existing != connection:
+        # Mirror add_connection: a same-ID collision may repoint the
+        # connection in place when the caller owns the destination
+        # input, keeping undo/persistence-restore semantics consistent
+        # with the live authoring path.
+        if (
+            existing is not None
+            and existing != connection
+            and not (
+                replace_existing_input
+                and existing.destination_node_id == connection.destination_node_id
+                and existing.destination_port_id == connection.destination_port_id
+            )
+        ):
             msg = f"Connection already exists: {connection.id}"
             raise ValueError(msg)
         if existing == connection:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from typing import cast
 from uuid import UUID
 
 import mido
@@ -560,6 +561,96 @@ def test_send_failure_tracks_success_only_panics_closes_and_does_not_rearm() -> 
         service.refresh_outputs()
         _wait(service)
         assert backend.opened_names == [TARGET]
+    finally:
+        service.close()
+
+
+class _PanicBlockingPort(MockMidiOutputPort):
+    """Mock port that holds the panic's all-sound-off message until released."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+        self.block_all_sound_off = threading.Event()
+        self.reached_all_sound_off = threading.Event()
+        self.release_all_sound_off = threading.Event()
+
+    def send(self, message: MidiMessage) -> None:
+        if (
+            message.message_type is MidiMessageType.CONTROL_CHANGE
+            and message.control == 123
+            and self.block_all_sound_off.is_set()
+        ):
+            self.reached_all_sound_off.set()
+            if not self.release_all_sound_off.wait(2.0):
+                raise TimeoutError("test did not release the blocked panic message")
+        self.sent.append(message)
+
+
+class _PanicBlockingBackend(MockMidiOutputBackend):
+    def open_output(self, name: str) -> _PanicBlockingPort:
+        self.open_thread_ids.append(threading.get_ident())
+        if name not in self.ports:
+            raise RuntimeError(f"Unknown mock MIDI output: {name}")
+        port = _PanicBlockingPort(name)
+        self.opened_names.append(name)
+        self.opened_ports.append(port)
+        return port
+
+
+def test_state_published_during_panic_is_neither_applied_nor_reapplied_by_refresh() -> None:
+    backend = _PanicBlockingBackend((TARGET,))
+    service = MidiOutputService(backend, refresh_interval_s=3600.0)
+    try:
+        _wait(service)
+        service.publish(_frame({(0, 60): 100}), _configuration())
+        _wait(service)
+        port = cast(_PanicBlockingPort, backend.opened_ports[0])
+        assert port.sent[-1] == MidiMessage.note_on(MidiNoteKey(0, 60), 100)
+
+        # Hold the sender inside the panic action (its per-channel
+        # all-sound-off) so a state tick can land in the mailbox after the
+        # caller's panic() cleared it and before the panic completes.
+        port.block_all_sound_off.set()
+        late_tick_published = threading.Event()
+
+        def simulate_late_tick() -> None:
+            assert port.reached_all_sound_off.wait(2.0)
+            service.publish(_frame({(0, 60): 100}, 2), _configuration())
+            port.release_all_sound_off.set()
+            late_tick_published.set()
+
+        thread = threading.Thread(target=simulate_late_tick)
+        thread.start()
+        try:
+            service.panic(timeout_s=5.0)
+        finally:
+            port.release_all_sound_off.set()
+            thread.join(timeout=2.0)
+        assert late_tick_published.is_set()
+
+        # A refresh (as scheduled by a running engine after the panic) must
+        # not re-apply the late tick's state: the panic dropped it.
+        service.refresh_outputs()
+        _wait(service)
+
+        # The port also sent an all-sound-off when it opened, so anchor on
+        # the panic's own all-sound-off: the last one sent.
+        sent = port.sent
+        panic_index = len(sent) - 1 - sent[::-1].index(MidiMessage.all_notes_off(0))
+        after_panic = sent[panic_index + 1 :]
+        assert not any(
+            message.message_type is MidiMessageType.NOTE_ON and message.note == 60
+            for message in after_panic
+        )
+        status = service.status()
+        assert status.active_note_count == 0
+        assert status.active_channels == ()
+
+        # A legitimate tick after the panic completes is still applied:
+        # dropping the in-flight mailbox must not suppress live output.
+        service.publish(_frame({(0, 62): 110}, 3), _configuration())
+        _wait(service)
+        assert port.sent[-1] == MidiMessage.note_on(MidiNoteKey(0, 62), 110)
     finally:
         service.close()
 

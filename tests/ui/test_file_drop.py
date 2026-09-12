@@ -21,7 +21,7 @@ from synesthesia_machine.graph import GraphDocument
 from synesthesia_machine.nodes.input.video import LOAD_VIDEO_TYPE_ID
 from synesthesia_machine.persistence import save_graph
 from synesthesia_machine.runtime import InProcessEngineClient
-from synesthesia_machine.ui.canvas import SCENE_EXTENT_X, SCENE_EXTENT_Y
+from synesthesia_machine.ui.canvas import DROP_CASCADE_OFFSET, SCENE_EXTENT_X, SCENE_EXTENT_Y
 from synesthesia_machine.ui.main_window import MainWindow
 
 SAMPLE_VIDEO = (
@@ -33,6 +33,24 @@ def _mime_with_file(path: Path) -> QMimeData:
     mime = QMimeData()
     mime.setUrls([QUrl.fromLocalFile(str(path))])
     return mime
+
+
+def _mime_with_files(paths: list[Path]) -> QMimeData:
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(path)) for path in paths])
+    return mime
+
+
+def _drop_mime_on_view(view, mime: QMimeData, position: QPointF) -> QDropEvent:
+    event = QDropEvent(
+        position,
+        Qt.DropAction.CopyAction,
+        mime,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    view.dropEvent(event)
+    return event
 
 
 def _drop_on_view(view, file_path: Path | None, position: QPointF | QPoint) -> None:
@@ -197,3 +215,83 @@ def test_graph_file_drop_opens_the_saved_graph(window: MainWindow, tmp_path: Pat
     assert loaded is not document
     assert [node.type_id for node in loaded.nodes] == ["synmachine.utility.number"]
     assert loaded.nodes[0].position == (55.0, 65.0)
+
+
+def test_multiple_video_files_drop_creates_one_node_each(
+    window: MainWindow, tmp_path: Path
+) -> None:
+    first = tmp_path / "first.mp4"
+    second = tmp_path / "second.mp4"
+    for path in (first, second):
+        shutil.copyfile(SAMPLE_VIDEO, path)
+
+    event = _drop_mime_on_view(window.view, _mime_with_files([first, second]), QPointF(120.0, 80.0))
+    assert event.isAccepted()
+
+    nodes = window.session.document.nodes
+    assert len(nodes) == 2
+    dropped = {Path(node.parameters["file_path"]): node for node in nodes}  # type: ignore[index]
+    assert set(dropped) == {first, second}
+    # The first file keeps the exact drop position (single-file behavior);
+    # the rest cascade so the nodes do not stack on top of each other.
+    assert dropped[first].position == (120.0, 80.0)  # type: ignore[union-attr]
+    assert dropped[second].position == (  # type: ignore[union-attr]
+        120.0 + DROP_CASCADE_OFFSET,
+        80.0 + DROP_CASCADE_OFFSET,
+    )
+
+
+def test_mixed_video_and_graph_drop_opens_the_graph(window: MainWindow, tmp_path: Path) -> None:
+    video = tmp_path / "clip.mp4"
+    shutil.copyfile(SAMPLE_VIDEO, video)
+    document = GraphDocument()
+    document.add_node("synmachine.utility.number", position=(55.0, 65.0))
+    graph_path = tmp_path / "mixed.synmachine.json"
+    save_graph(graph_path, document.snapshot(), retain_backup=False)
+
+    # The video comes first in the dropped set; a saved graph anywhere in
+    # the set must still take over the drop.
+    event = _drop_mime_on_view(
+        window.view, _mime_with_files([video, graph_path]), QPointF(0.0, 0.0)
+    )
+    assert event.isAccepted()
+
+    loaded = window.session.document
+    assert loaded is not document
+    assert [node.type_id for node in loaded.nodes] == ["synmachine.utility.number"]
+    assert loaded.nodes[0].position == (55.0, 65.0)
+
+
+def test_multi_file_drop_with_only_unknown_suffixes_is_ignored(
+    window: MainWindow, tmp_path: Path
+) -> None:
+    notes = tmp_path / "notes.txt"
+    notes.write_text("not media", encoding="utf-8")
+    picture = tmp_path / "picture.png"
+    picture.write_bytes(b"\x89PNG")
+
+    event = _drop_mime_on_view(window.view, _mime_with_files([notes, picture]), QPointF(0.0, 0.0))
+    assert not event.isAccepted()
+    assert window.session.document.nodes == ()
+
+
+def test_dragging_a_set_with_an_unknown_first_file_is_accepted_when_it_holds_video(
+    window: MainWindow, tmp_path: Path
+) -> None:
+    video = tmp_path / "clip.mp4"
+    shutil.copyfile(SAMPLE_VIDEO, video)
+    notes = tmp_path / "notes.txt"
+    notes.write_text("not media", encoding="utf-8")
+
+    # Kept alive until after the event is consumed: the drag event holds a
+    # raw pointer to the mime data.
+    mime = _mime_with_files([notes, video])
+    enter = QDragEnterEvent(
+        QPoint(0, 0),
+        Qt.DropAction.CopyAction,
+        mime,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    window.view.dragEnterEvent(enter)
+    assert enter.isAccepted()

@@ -34,6 +34,21 @@ MAX_LOG_FILES = 5
 MAX_LOG_BYTES = 1024 * 1024
 REDACTED = "<redacted>"
 
+# Path shapes that must never leak into a redacted bundle. They are matched
+# as substrings so paths embedded in tracebacks and messages are covered,
+# not only string values that are entirely a path.
+_PATH_TOKEN_PATTERN = re.compile(
+    r"(?:"
+    r"[A-Za-z]:\\[^\s\"',:;|?*)\]]+"
+    r"|"
+    r"\\\\[^\s\"',;|?*)\]]+"
+    r"|"
+    r"/[^\s\"',;|?*)\]]+"
+    r"|"
+    r"~/[^\s\"',;|?*)\]]+"
+    r")"
+)
+
 
 @dataclass(frozen=True, slots=True)
 class DiagnosticBundleResult:
@@ -72,18 +87,16 @@ def create_diagnostic_bundle(
             if not include_paths:
                 graph_data = redact_sensitive_paths(graph_data)
             _write_json(archive, "graph.json", graph_data, included)
-            _write_json(
-                archive,
-                "engine_metrics.json",
-                {} if engine_metrics is None else asdict(engine_metrics),
-                included,
-            )
-            _write_json(
-                archive,
-                "node_profiles.json",
-                [asdict(profile) for profile in node_profiles],
-                included,
-            )
+            metrics_data: object = {} if engine_metrics is None else asdict(engine_metrics)
+            profiles_data: object = [asdict(profile) for profile in node_profiles]
+            if not include_paths:
+                # Live metrics carry raw tracebacks and profiles may embed path
+                # text, so redact path tokens inside every string value; only
+                # an explicit keep-paths export writes these members raw.
+                metrics_data = _redact_path_tokens(metrics_data)
+                profiles_data = _redact_path_tokens(profiles_data)
+            _write_json(archive, "engine_metrics.json", metrics_data, included)
+            _write_json(archive, "node_profiles.json", profiles_data, included)
             for name, content in _bounded_logs(logs_directory, include_paths=include_paths):
                 archive.writestr(name, content)
                 included.append(name)
@@ -164,9 +177,25 @@ def _is_log_file(path: Path) -> bool:
 
 
 def _redact_log_lines(text: str) -> str:
-    # Redact from an absolute-path marker to end-of-line. Over-redacting trailing
-    # diagnostic text is preferable to leaking an unquoted path containing spaces.
-    return re.sub(r"(?i)(?:[A-Z]:\\|/)[^\r\n]*", REDACTED, text)
+    # Redact from an absolute-path marker to end-of-line. The markers cover
+    # drive-letter paths, UNC shares, and POSIX absolute paths so network
+    # shares are covered too. Over-redacting trailing diagnostic text is
+    # preferable to leaking an unquoted path containing spaces.
+    return re.sub(r"(?i)(?:[A-Z]:\\|\\\\[A-Za-z0-9]|/)[^\r\n]*", REDACTED, text)
+
+
+def _redact_path_tokens(value: object) -> object:
+    """Return a JSON-shaped copy with path-like substrings replaced by REDACTED."""
+
+    if isinstance(value, str):
+        return _PATH_TOKEN_PATTERN.sub(REDACTED, value)
+    if isinstance(value, Mapping):
+        items = cast("Mapping[object, object]", value)
+        return {str(key): _redact_path_tokens(item) for key, item in items.items()}
+    if isinstance(value, (list, tuple)):
+        items = cast("Sequence[object]", value)
+        return [_redact_path_tokens(item) for item in items]
+    return value
 
 
 def _write_json(archive: ZipFile, name: str, value: object, included: list[str]) -> None:

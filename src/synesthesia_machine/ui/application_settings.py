@@ -92,15 +92,32 @@ class ApplicationSettingsStore:
             path = Path(value).expanduser().resolve()
             if path.is_file() and path not in result:
                 result.append(path)
-            if len(result) == limit:
-                break
+        # Persist the complete pruned list: capping it here (the display
+        # limit) would destroy the entries the caller only hides.
         if [str(path) for path in result] != raw:
             self.settings.setValue("recentFiles", [str(path) for path in result])
-        return result
+        return result[:limit]
 
     def remember_recent(self, path: Path, current: list[Path], limit: int) -> list[Path]:
+        # The persisted list is the source of truth: callers may pass a
+        # display-capped view of it, and trusting that would destroy the
+        # entries the cap hides the next time the list is written.
+        stored: list[Path] = []
+        raw: object = self.settings.value("recentFiles", [])
+        if isinstance(raw, list):
+            for value in cast(list[object], raw):
+                if not isinstance(value, str):
+                    continue
+                candidate = Path(value).expanduser().resolve()
+                if candidate.is_file() and candidate not in stored:
+                    stored.append(candidate)
         resolved = path.expanduser().resolve()
-        result = [resolved, *(item for item in current if item != resolved)][:limit]
+        extras = [item for item in current if item not in stored and item != resolved]
+        result = [
+            resolved,
+            *[item for item in stored if item != resolved],
+            *extras,
+        ][:limit]
         self.settings.setValue("recentFiles", [str(item) for item in result])
         self.settings.sync()
         return result
