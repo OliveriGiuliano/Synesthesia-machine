@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import threading
+import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
@@ -174,6 +175,9 @@ class DebugSynth:
         self._publisher_lock = threading.Lock()
         self._desired = _DesiredSnapshot()
         self._seen_panic_generation = 0
+        # Monotonic instant of the last panic; state frames received before
+        # it are stale and must not re-arm the voices the panic silenced.
+        self._panic_monotonic_ns = 0
         self._closed = False
         self._stream = stream_factory(configuration, self.callback)
         try:
@@ -204,6 +208,12 @@ class DebugSynth:
 
         with self._publisher_lock:
             if self._closed:
+                return
+            # A state frame generated before the last panic (measured on the
+            # shared monotonic clock) is stale: a tick that lost the race
+            # against a panic would otherwise re-arm the notes the panic
+            # just silenced.
+            if state.context.received_monotonic_ns < self._panic_monotonic_ns:
                 return
             notes = state.notes
             if not notes:
@@ -242,10 +252,16 @@ class DebugSynth:
                 self._desired.panic_generation,
             )
 
-    def panic(self) -> None:
+    def panic(self, *, at_monotonic_ns: int | None = None) -> None:
         with self._publisher_lock:
             snapshot = self._desired
             self._desired = _DesiredSnapshot(panic_generation=snapshot.panic_generation + 1)
+            if at_monotonic_ns is None:
+                # The default wall-clock instant lets update() reject state
+                # frames produced before this panic (a tick that lost the
+                # race against it).
+                at_monotonic_ns = time.monotonic_ns()
+            self._panic_monotonic_ns = max(self._panic_monotonic_ns, at_monotonic_ns)
 
     def close(self) -> None:
         with self._publisher_lock:

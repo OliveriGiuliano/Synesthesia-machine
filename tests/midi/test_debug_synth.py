@@ -624,13 +624,65 @@ def test_debug_synth_panic_silences_next_callback_and_allows_future_state() -> N
     synth.update(_midi_state({(0, 69): 127}))
     assert np.any(stream.render(configuration.block_size) != 0.0)
 
-    synth.panic()
+    synth.panic(at_monotonic_ns=1)
     panicked = stream.render(configuration.block_size)
     assert np.count_nonzero(panicked) == 0
     assert synth.active_voice_count == 0
     assert np.count_nonzero(stream.render(configuration.block_size)) == 0
 
     synth.update(_midi_state({(0, 72): 100}, tick_index=2))
+    assert np.any(stream.render(configuration.block_size) != 0.0)
+    assert synth.active_keys == (72,)
+    synth.close()
+
+
+def _state_at(notes: Mapping[tuple[int, int], int], *, received_ns: int) -> MidiStateFrame:
+    context = FrameContext(
+        clock_id=CLOCK_ID,
+        tick_index=1,
+        source_frame_index=0,
+        source_time_s=0.0,
+        received_monotonic_ns=received_ns,
+        deadline_monotonic_ns=None,
+        is_realtime=False,
+    )
+    return MidiStateFrame(
+        {MidiNoteKey(channel, note): velocity for (channel, note), velocity in notes.items()},
+        context,
+        MIDI_SOURCE_ID,
+    )
+
+
+def test_debug_synth_panic_drops_stale_state_and_allows_fresh_state() -> None:
+    # A state frame from a tick that lost the race against a panic (generated
+    # before the panic, published after it) must not re-arm the voices the
+    # panic silenced; a frame generated after the panic must sound.
+    stream_factory = StreamFactory()
+    configuration = SynthConfiguration(
+        attack_ms=0.0,
+        max_voices=2,
+        sample_rate=8000,
+        block_size=32,
+    )
+    synth = DebugSynth(configuration, stream_factory=stream_factory)
+    stream = stream_factory.streams[0]
+
+    stale = _state_at({(0, 69): 127}, received_ns=10)
+    synth.update(stale)
+    assert np.any(stream.render(configuration.block_size) != 0.0)
+
+    # The panic happens at wall-clock instant 20; the frame above was
+    # generated at instant 10, i.e. before it.
+    synth.panic(at_monotonic_ns=20)
+    assert np.count_nonzero(stream.render(configuration.block_size)) == 0
+
+    # A late publish of the pre-panic frame is stale and must not re-arm.
+    synth.update(stale)
+    assert synth.active_voice_count == 0
+    assert np.count_nonzero(stream.render(configuration.block_size)) == 0
+
+    # A frame generated after the panic is fresh and sounds.
+    synth.update(_state_at({(0, 72): 100}, received_ns=30))
     assert np.any(stream.render(configuration.block_size) != 0.0)
     assert synth.active_keys == (72,)
     synth.close()
