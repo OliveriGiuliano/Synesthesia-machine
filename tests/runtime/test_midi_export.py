@@ -25,9 +25,12 @@ def export_env(tmp_path: Path):
     return video, registry
 
 
-def _video_pitch_midi_document(video: Path) -> GraphDocument:
+def _video_pitch_midi_document(video: Path, *, loop: bool = False) -> GraphDocument:
     document = GraphDocument()
-    source = document.add_node("synmachine.input.load_video", parameters={"file_path": str(video)})
+    parameters: dict[str, object] = {"file_path": str(video)}
+    if loop:
+        parameters["loop"] = True
+    source = document.add_node("synmachine.input.load_video", parameters=parameters)
     luminance = document.add_node("synmachine.image.to_luminance")
     pitch = document.add_node("synmachine.synesthesia.channel_to_pitch")
     send = document.add_node("synmachine.output.send_midi")
@@ -83,7 +86,7 @@ def test_export_rejects_camera_sources(export_env) -> None:
     assert excinfo.value.code == "camera_source"
 
 
-def test_export_requires_a_send_midi_node(export_env) -> None:
+def test_export_requires_a_midi_output_node(export_env) -> None:
     video, registry = export_env
     document = GraphDocument()
     document.add_node("synmachine.input.load_video", parameters={"file_path": str(video)})
@@ -141,19 +144,39 @@ def test_export_honours_a_pre_cancelled_stop_event(export_env) -> None:
     assert excinfo.value.code == "cancelled"
 
 
-def test_export_rejects_looping_video_sources(export_env) -> None:
+def test_export_of_looping_video_sources_simulates_a_single_pass(export_env) -> None:
+    video, registry = export_env
+    document = _video_pitch_midi_document(video, loop=True)
+    result = run_midi_export(document.snapshot(), registry=registry)
+    # A looping source is exported as one pass from the start of the video to
+    # its end: the same events as a non-looping source, ending at the video
+    # length (a second pass would roughly double the duration).
+    assert len(result.events) == HUE_FRAME_COUNT * 2
+    assert result.events[0].time_s == 0.0
+    assert result.events[-1].kind == "note_off"
+    assert result.duration_s == pytest.approx(HUE_FRAME_COUNT / 12.0, abs=0.05)
+
+
+def test_export_collects_notes_from_generate_audio_outputs(export_env) -> None:
     video, registry = export_env
     document = GraphDocument()
-    source = document.add_node(
-        "synmachine.input.load_video",
-        parameters={"file_path": str(video), "loop": True},
-    )
-    send = document.add_node("synmachine.output.send_midi")
-    document.add_connection(source, "image", send, "midi")
-
-    with pytest.raises(MidiExportError) as exc:
-        run_midi_export(document.snapshot(), registry=registry)
-    assert exc.value.code == "looping_source"
+    source = document.add_node("synmachine.input.load_video", parameters={"file_path": str(video)})
+    luminance = document.add_node("synmachine.image.to_luminance")
+    pitch = document.add_node("synmachine.synesthesia.channel_to_pitch")
+    audio = document.add_node("synmachine.output.generate_audio", parameters={"enabled": True})
+    document.add_connection(source, "image", luminance, "image")
+    document.add_connection(luminance, "channel", pitch, "value")
+    document.add_connection(pitch, "midi", audio, "midi")
+    result = run_midi_export(document.snapshot(), registry=registry)
+    assert len(result.events) == HUE_FRAME_COUNT * 2
+    assert result.events[0].kind == "note_on"
+    open_notes: set[tuple[int, int]] = set()
+    for event in result.events:
+        if event.kind == "note_on":
+            open_notes.add((event.channel, event.note))
+        else:
+            open_notes.discard((event.channel, event.note))
+    assert open_notes == set()
 
 
 def test_export_drains_the_worker_mailbox_before_collecting(

@@ -157,7 +157,9 @@ def test_export_failure_shows_the_translated_failure_text(
     assert "cancelled" in video_window.statusBar().currentMessage().lower()
 
 
-def test_looping_video_source_blocks_export(video_window: MainWindow, tmp_path: Path) -> None:
+def test_looping_video_source_stays_eligible_for_export(
+    video_window: MainWindow, tmp_path: Path
+) -> None:
     from synesthesia_machine.ui.midi_export import midi_export_eligibility
 
     document = video_window.session.document
@@ -165,17 +167,20 @@ def test_looping_video_source_blocks_export(video_window: MainWindow, tmp_path: 
         "synmachine.input.load_video",
         parameters={"file_path": str(tmp_path / "hue.mp4"), "loop": True},
     )
+    luminance = document.add_node("synmachine.image.to_luminance")
+    pitch = document.add_node("synmachine.synesthesia.channel_to_pitch")
     send = document.add_node("synmachine.output.send_midi")
-    document.add_connection(source, "image", send, "midi")
+    document.add_connection(source, "image", luminance, "image")
+    document.add_connection(luminance, "channel", pitch, "value")
+    document.add_connection(pitch, "midi", send, "midi")
     video_window.session._refresh()
     video_window._refresh_action_states()
     action = _export_action(video_window)
-    assert not action.isEnabled()
-    assert "loop" in action.toolTip().lower()
+    assert action.isEnabled()
     snapshot = document.snapshot()
     assert midi_export_eligibility(snapshot, video_window.registry, graph_valid=True) == (
-        False,
-        "looping_source",
+        True,
+        "",
     )
 
 

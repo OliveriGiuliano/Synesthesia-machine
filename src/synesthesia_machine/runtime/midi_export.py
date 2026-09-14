@@ -4,8 +4,9 @@ The exporter drives a transient in-process engine (ADR-0016) whose video
 sources run on a fast-forward playback clock: virtual time jumps to each
 frame's presentation deadline, so the whole video is simulated at full speed
 while every frame keeps its real PTS timestamp. A per-tick observer records
-the desired MIDI state reaching each Send-MIDI node; consecutive states are
-diffed into note-on/note-off events on the absolute video-time axis.
+the desired MIDI state reaching each MIDI output node (Send MIDI, Generate
+Audio); consecutive states are diffed into note-on/note-off events on the
+absolute video-time axis.
 
 Callers must pass a registry whose output nodes are hardware-free (for
 example ``create_builtin_registry(midi_output_service_factory=
@@ -43,7 +44,7 @@ from synesthesia_machine.media.video_source import (
 from synesthesia_machine.midi.smf import MidiExportEvent
 from synesthesia_machine.nodes.base import ExecutionKind
 from synesthesia_machine.nodes.input import LOAD_CAMERA_TYPE_ID, LOAD_VIDEO_TYPE_ID
-from synesthesia_machine.nodes.output import SEND_MIDI_TYPE_ID
+from synesthesia_machine.nodes.output import GENERATE_AUDIO_TYPE_ID, SEND_MIDI_TYPE_ID
 from synesthesia_machine.nodes.registry import NodeRegistry
 from synesthesia_machine.runtime.execution_plan import ExecutionPlan, PortKey
 from synesthesia_machine.runtime.in_process_engine import (
@@ -52,9 +53,9 @@ from synesthesia_machine.runtime.in_process_engine import (
 from synesthesia_machine.runtime.scheduler import TickResult
 
 _LOGGER = logging.getLogger(__name__)
-
 _POLL_INTERVAL_S = 0.02
 _EXPORT_TIMEOUT_S = 30 * 60.0
+_MIDI_OUTPUT_TYPE_IDS = frozenset({SEND_MIDI_TYPE_ID, GENERATE_AUDIO_TYPE_ID})
 
 
 class MidiExportError(Exception):
@@ -142,7 +143,10 @@ class _ExportVideoSourceFactory:
             file_path,
             process_every_nth_frame=process_every_nth_frame,
             playback_speed=playback_speed,
-            loop=loop,
+            # Export always simulates a single pass: the saved source's loop
+            # setting is ignored so virtual time reaches the end of the video
+            # and the source reports ENDED, ending the simulation.
+            loop=False,
             stream_index=stream_index,
             on_frame=cast(FrameCallback, on_frame),
             on_reset=cast(ResetCallback | None, on_reset),
@@ -195,17 +199,17 @@ def _int_parameter(node: NodeModel, parameter_id: str, default: int) -> int:
 def _validate_export_inputs(
     snapshot: GraphSnapshot, *, registry: NodeRegistry
 ) -> tuple[list[_SourceFrameCount], list[UUID]]:
-    """Return (video sources, send-MIDI node IDs) or raise a stable-coded error."""
+    """Return (video sources, MIDI output node IDs) or raise a stable-coded error."""
 
     sources: list[_SourceFrameCount] = []
-    send_ids: list[UUID] = []
+    midi_output_ids: list[UUID] = []
     saw_source = False
     for node in snapshot.nodes:
         definition = registry.get(node.type_id)
         if definition is None:
             continue
-        if definition.type_id == SEND_MIDI_TYPE_ID:
-            send_ids.append(node.id)
+        if definition.type_id in _MIDI_OUTPUT_TYPE_IDS:
+            midi_output_ids.append(node.id)
             continue
         if definition.execution_kind is not ExecutionKind.SOURCE:
             continue
@@ -226,13 +230,6 @@ def _validate_export_inputs(
                 "missing_media",
                 f"Load Video {definition.display_name} points to a file that cannot be read.",
             )
-        if bool(node.parameters.get("loop", False)):
-            # A looping source never reaches end-of-video, so there is no finite
-            # "start to end of the video" to export.
-            raise MidiExportError(
-                "looping_source",
-                "Exporting needs a finite timeline: a looping video source would repeat forever.",
-            )
         sources.append(
             _SourceFrameCount(
                 node.id,
@@ -243,11 +240,12 @@ def _validate_export_inputs(
         )
     if not saw_source:
         raise MidiExportError("no_source", "The graph has no source node to simulate.")
-    if not send_ids:
+    if not midi_output_ids:
         raise MidiExportError(
-            "no_midi_output", "The graph has no Send MIDI node, so there is nothing to export."
+            "no_midi_output",
+            "The graph has no MIDI output node (Send MIDI or Generate Audio) to export.",
         )
-    return sources, send_ids
+    return sources, midi_output_ids
 
 
 def run_midi_export(
@@ -263,8 +261,10 @@ def run_midi_export(
     Raises :class:`MidiExportError` with a stable ``code`` on failure.
     """
 
-    sources, send_ids = _validate_export_inputs(snapshot, registry=registry)
-    samples: dict[UUID, list[tuple[float, MidiStateFrame]]] = {node_id: [] for node_id in send_ids}
+    sources, midi_output_ids = _validate_export_inputs(snapshot, registry=registry)
+    samples: dict[UUID, list[tuple[float, MidiStateFrame]]] = {
+        node_id: [] for node_id in midi_output_ids
+    }
     sample_lock = threading.Lock()
     producer_keys: dict[UUID, PortKey | None] = {}
     resolved = False
@@ -279,22 +279,24 @@ def run_midi_export(
         del source_node_id
         if not resolved:
             for node in plan.nodes:
-                if node.definition.type_id != SEND_MIDI_TYPE_ID:
+                if node.definition.type_id not in _MIDI_OUTPUT_TYPE_IDS:
                     continue
                 binding = node.input_bindings.get("midi")
                 producer_keys[node.node_id] = binding.source if binding is not None else None
             resolved = True
         time_s = frame.context.source_time_s
         with sample_lock:
-            for send_id, key in producer_keys.items():
+            for output_id, key in producer_keys.items():
                 value = result.values.get(key) if key is not None else NoData
                 if isinstance(value, MidiStateFrame):
                     state = value
                 else:
                     # NoData (or an absent producer) means the output panicked:
                     # record an empty desired state so the diff closes notes.
-                    state = MidiStateFrame(notes={}, context=frame.context, source_node_id=send_id)
-                samples[send_id].append((time_s, state))
+                    state = MidiStateFrame(
+                        notes={}, context=frame.context, source_node_id=output_id
+                    )
+                samples[output_id].append((time_s, state))
 
     client = InProcessEngineClient(
         registry,
