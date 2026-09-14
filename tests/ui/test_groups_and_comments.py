@@ -10,7 +10,7 @@ import pytest
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QUndoStack
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QInputDialog, QWidget
 
 from synesthesia_machine.graph import GraphDocument, GroupKind, GroupModel
 from synesthesia_machine.nodes.utility import create_utility_registry
@@ -205,4 +205,53 @@ def test_group_border_drag_resizes_and_is_undoable(qapp: QApplication) -> None:
     restored = session.document.group(group_id)
     assert restored is not None
     assert restored.size == (300.0, 120.0)
+    view.close()
+
+
+def test_group_rename_dialogs_parent_the_active_window_and_esc_renames_nothing(
+    qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A parentless rename dialog can leave the editor de-activated after ESC on
+    # Wayland sessions (no input reaches an unfocused surface); the dialogs must
+    # be parented to the active top-level window like every other dialog.
+    session = DocumentSession(create_utility_registry())
+    scene = GraphScene(session, DEFAULT_THEME)
+    group_id = session.add_group(
+        GroupKind.GROUP,
+        (0.0, 0.0),
+        title="Rename me",
+        size=(300.0, 120.0),
+    )
+    view = GraphView(scene, DEFAULT_THEME)
+    view.resize(800, 500)
+    view.show()
+    view.activateWindow()
+    view.centerOn(scene.group_items[group_id])
+    qapp.processEvents()
+
+    dialog_parents: list[QWidget | None] = []
+
+    def fake_get_text(
+        parent: QWidget | None, title: str, label: str, **kwargs: object
+    ) -> tuple[str, bool]:
+        dialog_parents.append(parent)
+        return "", False  # ESC: the user cancels the rename
+
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(fake_get_text))
+
+    center = view.mapFromScene(QPointF(150.0, 60.0))
+    QTest.mouseDClick(view.viewport(), Qt.MouseButton.LeftButton, pos=center)
+    qapp.processEvents()
+
+    assert len(dialog_parents) == 1
+    assert dialog_parents[0] is not None
+    assert dialog_parents[0].window() is view
+
+    # ESC cancelled the rename: the group is untouched and the second dialog
+    # (comment text) never opened.
+    group = session.document.group(group_id)
+    assert group is not None
+    assert group.title == "Rename me"
+    assert group.text == ""
+    assert group.position == (0.0, 0.0)
     view.close()

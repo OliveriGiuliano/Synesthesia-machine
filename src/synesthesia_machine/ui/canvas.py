@@ -33,7 +33,13 @@ from PySide6.QtGui import (
     QPen,
     QWheelEvent,
 )
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsScene, QGraphicsView, QInputDialog
+from PySide6.QtWidgets import (
+    QApplication,
+    QGraphicsItem,
+    QGraphicsScene,
+    QGraphicsView,
+    QInputDialog,
+)
 
 from synesthesia_machine.graph import (
     AlignMode,
@@ -504,13 +510,17 @@ class GraphScene(QGraphicsScene):
         group = self.session.document.group(group_id)
         if group is None:
             return
+        # Parent the dialogs to the active top-level window: a parentless modal
+        # dialog can leave the editor de-activated after ESC on Wayland
+        # sessions, where an unfocused surface receives no input at all.
+        parent = QApplication.activeWindow()
         title, accepted = QInputDialog.getText(
-            None, tr("Edit canvas item"), tr("Title"), text=group.title
+            parent, tr("Edit canvas item"), tr("Title"), text=group.title
         )
         if not accepted:
             return
         text, accepted = QInputDialog.getMultiLineText(
-            None,
+            parent,
             tr("Edit canvas item"),
             tr("Comment text"),
             text=group.text,
