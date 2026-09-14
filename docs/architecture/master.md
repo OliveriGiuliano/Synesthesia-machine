@@ -1349,7 +1349,7 @@ The node outputs read-only 2D views when possible. The UI labels sockets R/G/B/A
 
 Inputs: up to three `CHANNEL` ports. Parameter: target colour space (RGBA is not offered; the sources never carry an alpha channel). Required input count comes from the target descriptor. All channels must share dimensions and clock. Output is `IMAGE`, preserving channel values and declaring the chosen colour space.
 
-This is “colour-space agnostic” in the sense that the same implementation uses descriptors rather than RGB-specific code; it does not infer arbitrary semantics from unlabeled channels.
+This is “colour-space agnostic” in the sense that the same implementation uses descriptors rather than RGB-specific code. The node never guesses a connected channel’s meaning: each channel is used as-is in the slot the user wires it to, and the output image declares the chosen colour space.
 
 ### 16.8 General Utility nodes
 

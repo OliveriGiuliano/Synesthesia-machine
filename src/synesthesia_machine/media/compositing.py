@@ -126,15 +126,10 @@ def combine_channels(
             f"{descriptor.display_name} requires exactly {len(descriptor.channels)} channels"
         )
     first = channels[0]
-    for index, (channel, expected) in enumerate(
-        zip(channels, descriptor.channels, strict=True),
-        start=1,
-    ):
-        if channel.semantic is not expected.semantic:
-            raise ValueError(
-                f"channel_{index} must have {expected.semantic.value} semantics, "
-                f"got {channel.semantic.value}"
-            )
+    for channel in channels[1:]:
+        # Source semantics are advisory: a channel is used in exactly the slot
+        # the user wires it to, so any ChannelSemantic may fill any descriptor
+        # slot and the output declares the target colour space.
         if channel.data.shape != first.data.shape:
             raise ValueError("combined channels must have equal dimensions")
         if channel.context.clock_id != first.context.clock_id:

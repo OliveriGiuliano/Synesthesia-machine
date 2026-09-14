@@ -485,21 +485,48 @@ def test_combine_preserves_non_finite_channel_values(
     assert np.isneginf(combined.data[0, 0, 2])
 
 
-def test_combine_never_infers_generic_or_misordered_semantics(
+def test_combine_uses_wired_channels_as_is_regardless_of_source_semantics(
     rgb_image: ImageFrame,
 ) -> None:
-    data = np.zeros((2, 2), dtype=np.float32)
-    generic = tuple(_channel(data, ChannelSemantic.GENERIC, rgb_image.context) for _ in range(3))
-    with pytest.raises(ExpectedNodeError, match="must have RED semantics"):
-        _combine(generic, ColorSpace.SRGB)
-
-    misordered = (
-        _channel(data, ChannelSemantic.GREEN, rgb_image.context),
-        _channel(data, ChannelSemantic.RED, rgb_image.context),
-        _channel(data, ChannelSemantic.BLUE, rgb_image.context),
+    # Unlabelled (GENERIC) channels may fill any slot: the user's wiring is
+    # authoritative and the output declares the target colour space.
+    generic = tuple(
+        _channel(
+            np.full((2, 2), float(index), dtype=np.float32),
+            ChannelSemantic.GENERIC,
+            rgb_image.context,
+        )
+        for index in range(3)
     )
-    with pytest.raises(ExpectedNodeError, match="channel_1 must have RED semantics"):
-        _combine(misordered, ColorSpace.SRGB)
+    combined = _combine(generic, ColorSpace.SRGB)
+    assert isinstance(combined, ImageFrame)
+    assert combined.color_space is ColorSpace.SRGB
+    assert combined.channel_names == ("R", "G", "B")
+    assert np.array_equal(combined.data, np.stack([channel.data for channel in generic], axis=2))
+
+    # Slot order follows the wiring, not the source semantic labels.
+    misordered = (
+        _channel(np.ones((2, 2), dtype=np.float32), ChannelSemantic.GREEN, rgb_image.context),
+        _channel(np.zeros((2, 2), dtype=np.float32), ChannelSemantic.RED, rgb_image.context),
+        _channel(np.full((2, 2), 0.5, dtype=np.float32), ChannelSemantic.BLUE, rgb_image.context),
+    )
+    combined = _combine(misordered, ColorSpace.SRGB)
+    assert isinstance(combined, ImageFrame)
+    assert combined.data[0, 0, 0] == 1.0
+    assert combined.data[0, 0, 1] == 0.0
+    assert combined.data[0, 0, 2] == 0.5
+
+    # A single channel wired into every slot (e.g. a Canny mask) becomes an
+    # image in which every slot carries the same values.
+    mask = _channel(
+        np.full((2, 2), 0.25, dtype=np.float32),
+        ChannelSemantic.LUMINANCE,
+        rgb_image.context,
+    )
+    combined = _combine((mask, mask, mask), ColorSpace.SRGB)
+    assert isinstance(combined, ImageFrame)
+    assert np.array_equal(combined.data, np.stack([mask.data] * 3, axis=2))
+    assert combined.context is rgb_image.context
 
 
 def test_combine_rejects_dimension_and_clock_mismatches(
