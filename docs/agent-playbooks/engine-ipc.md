@@ -15,5 +15,5 @@
 - For plan or generation replacement, define which old data remains valid and which payloads, cursors,
   handles, and UI projections must be cleared. A rejected candidate preserves the working plan; a
   successful replacement must not expose data from the previous generation as current.
-- Preserve best-effort MIDI note-off/panic and device cleanup on stop, reload, port change, graph
-  replacement, engine failure, and application close.
+- Preserve best-effort MIDI note-off/panic and device cleanup on stop, pause, reload, port
+  change, graph replacement, engine failure, and application close.

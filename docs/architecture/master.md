@@ -188,7 +188,8 @@ This is a target, not a promise that every possible graph runs at 60 fps. A larg
 
 ### 5.2 Reliability target
 
-- Stopping, reloading, disconnecting, closing a graph, losing a MIDI port, or crashing the engine must trigger best-effort note-off/panic behaviour.
+- Stopping, pausing, reloading, closing a graph, losing a MIDI port, or crashing the engine
+  must trigger best-effort note-off/panic behaviour.
 - A malformed graph file must never crash the application.
 - A failing node marks itself and its dependent path as unavailable but does not terminate the UI.
 - Autosave recovery must protect unsaved edits after a UI or engine crash.

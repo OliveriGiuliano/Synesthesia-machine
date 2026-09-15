@@ -4,15 +4,27 @@ from __future__ import annotations
 
 import json
 import shutil
+import time
 from pathlib import Path
 from uuid import UUID
 
 from tools.generate_test_video import HUE_FRAME_COUNT, generate_hue_test_video
 
 from synesthesia_machine.app.registry import create_application_registry
-from synesthesia_machine.contracts import MidiStateFrame, NoteActivity, SourceState
+from synesthesia_machine.contracts import (
+    EngineState,
+    MidiStateFrame,
+    NoteActivity,
+    SourceState,
+)
 from synesthesia_machine.graph import GraphDocument
-from synesthesia_machine.midi import SynthConfiguration
+from synesthesia_machine.midi import (
+    MidiMessage,
+    MidiMessageType,
+    MidiOutputService,
+    MockMidiOutputBackend,
+    SynthConfiguration,
+)
 from synesthesia_machine.nodes.output import GENERATE_AUDIO_TYPE_ID
 from synesthesia_machine.persistence import load_graph, save_graph
 from synesthesia_machine.runtime import InProcessEngineClient
@@ -155,3 +167,75 @@ def test_generated_video_drives_expected_midi_previews_and_mock_audio_via_client
         client.close()
 
     assert synth_factory.synths[0].close_count == 1
+
+
+def test_pausing_the_engine_silences_midi_and_resuming_replays_it(tmp_path: Path) -> None:
+    graph_path = _materialize_example(tmp_path / "pause")
+    synth_factory = RecordingSynthFactory()
+    backend = MockMidiOutputBackend()
+    registry = create_application_registry(
+        synth_factory=synth_factory,
+        midi_output_service_factory=lambda: MidiOutputService(backend),
+    )
+    document = GraphDocument.from_snapshot(load_graph(graph_path, registry))
+    document.set_parameter(SOURCE_ID, "loop", False)
+    document.set_parameter(AUDIO_ID, "enabled", True)
+    # Route the same desired MIDI state to a mock MIDI port as well.
+    pitch_id = next(
+        node.id
+        for node in document.snapshot().nodes
+        if node.type_id == "synmachine.synesthesia.channel_to_pitch"
+    )
+    send_id = document.add_node(
+        "synmachine.output.send_midi", parameters={"output_port": "Mock MIDI Out"}
+    )
+    document.add_connection(pitch_id, "midi", send_id, "midi")
+
+    client = InProcessEngineClient(registry)
+
+    def active_note_count() -> int:
+        return sum(status.active_note_count for status in client.midi_output_status())
+
+    try:
+        activation = client.activate(document.snapshot())
+        assert activation.activated and activation.report.is_valid
+
+        client.play(SOURCE_ID)
+        deadline = time.monotonic() + 5.0
+        while active_note_count() == 0:
+            if time.monotonic() > deadline:
+                raise AssertionError("no notes became active before the pause")
+            time.sleep(0.05)
+
+        # Pausing the sole source leaves nothing producing state, so the held
+        # MIDI notes and the debug-synth voices must be silenced.
+        client.pause(SOURCE_ID)
+        assert client.source_status(SOURCE_ID)[0].state is SourceState.PAUSED
+        assert client.metrics().state is EngineState.PAUSED
+        assert active_note_count() == 0
+        sent = backend.opened_ports[0].sent
+        panic_index = len(sent) - 1 - sent[::-1].index(MidiMessage.all_notes_off(0))
+        assert not any(
+            message.message_type is MidiMessageType.NOTE_ON for message in sent[panic_index + 1 :]
+        )
+        assert synth_factory.synths[0].panic_count >= 1
+
+        # Resume: ticks flow again and the diff re-sends the desired notes.
+        client.resume(SOURCE_ID)
+        updates_after_resume = len(synth_factory.synths[0].updates)
+        deadline = time.monotonic() + 5.0
+        while active_note_count() == 0:
+            if time.monotonic() > deadline:
+                raise AssertionError("no notes were re-sent after resume")
+            time.sleep(0.05)
+        assert any(
+            message.message_type is MidiMessageType.NOTE_ON
+            for message in backend.opened_ports[0].sent[panic_index + 1 :]
+        )
+        deadline = time.monotonic() + 5.0
+        while len(synth_factory.synths[0].updates) == updates_after_resume:
+            if time.monotonic() > deadline:
+                raise AssertionError("the debug synth received no state after resume")
+            time.sleep(0.05)
+    finally:
+        client.close()

@@ -803,6 +803,16 @@ class InProcessEngineClient:
                 source.pause()
             self._refresh_transport_state()
 
+            if self._state is not EngineState.RUNNING:
+                # No source is producing state any more: silence the MIDI and
+                # debug-audio outputs (notes off, voices cleared). Drain the
+                # frame worker first so frames already presented cannot execute
+                # after the panic and re-assert the notes that just went off.
+                worker = self._worker
+                if worker is not None:
+                    worker.wait_until_idle(2.0)
+                self._facade.panic()
+
     def resume(self, source_node_id: UUID | None = None) -> None:
         with self._lock:
             sources = self._selected_sources(source_node_id)

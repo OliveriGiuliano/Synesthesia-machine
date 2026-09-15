@@ -10,11 +10,18 @@ import pytest
 from tools.generate_test_video import DEFAULT_FRAME_COUNT, generate_test_video
 
 from synesthesia_machine.app.registry import create_application_registry
-from synesthesia_machine.contracts import EngineState, SourceState, SourceStatus
+from synesthesia_machine.contracts import (
+    EngineState,
+    MidiOutputConnectionState,
+    SourceState,
+    SourceStatus,
+)
 from synesthesia_machine.graph import GraphDocument
+from synesthesia_machine.midi import MidiServiceStatus
 from synesthesia_machine.runtime import InProcessEngineClient
 
 SOURCE_A = UUID("00000000-0000-0000-0000-0000000000a1")
+
 SOURCE_B = UUID("00000000-0000-0000-0000-0000000000b2")
 
 
@@ -338,5 +345,140 @@ def test_preview_disabled_engine_spins_no_preview_worker(tmp_path: Path) -> None
         assert client.poll_value_previews() == ()
         metrics = client.metrics()
         assert metrics.processed_ticks == DEFAULT_FRAME_COUNT
+    finally:
+        client.close()
+
+
+class _PanicRecordingService:
+    """Records the facade's panic calls so tests can observe them."""
+
+    def __init__(self) -> None:
+        self.panic_count = 0
+
+    def publish(self, frame, configuration) -> None:
+        del frame, configuration
+
+    def request_panic(self) -> None:
+        return
+
+    def panic(self, timeout_s: float = 2.0) -> None:
+        del timeout_s
+        self.panic_count += 1
+
+    def refresh_outputs(self) -> None:
+        return
+
+    def status(self) -> MidiServiceStatus:
+        return MidiServiceStatus(MidiOutputConnectionState.UNSELECTED, "", (), 0, (), 0, None, None)
+
+    def wait_until_idle(self, timeout_s: float = 2.0) -> bool:
+        del timeout_s
+        return True
+
+    def close(self) -> None:
+        return
+
+
+class _PanicTestVideoSource:
+    def __init__(self, node_id: UUID, file_path: str) -> None:
+        self.node_id = node_id
+        self.file_path = file_path
+        self.state = SourceState.READY
+
+    def play(self) -> None:
+        self.state = SourceState.PLAYING
+
+    def pause(self) -> None:
+        if self.state is SourceState.PLAYING:
+            self.state = SourceState.PAUSED
+
+    def resume(self) -> None:
+        if self.state is SourceState.PAUSED:
+            self.state = SourceState.PLAYING
+
+    def stop(self) -> None:
+        self.state = SourceState.STOPPED
+
+    def reload(self) -> None:
+        self.state = SourceState.READY
+
+    def seek(self, source_time_s: float) -> None:
+        del source_time_s
+        raise NotImplementedError
+
+    def status(self, *, dropped_before_processing: int = 0) -> SourceStatus:
+        return SourceStatus(self.node_id, self.state, self.file_path, dropped_before_processing)
+
+    def wait_until_finished(self, timeout_s: float = 5.0) -> bool:
+        del timeout_s
+        return True
+
+    def close(self) -> None:
+        self.state = SourceState.CLOSED
+
+
+class _PanicTestVideoFactory:
+    def __init__(self) -> None:
+        self.sources: list[_PanicTestVideoSource] = []
+
+    def __call__(
+        self,
+        node_id: UUID,
+        file_path: str | Path,
+        *,
+        process_every_nth_frame: int,
+        playback_speed: float,
+        loop: bool,
+        stream_index: int,
+        on_frame: object,
+        on_reset: object,
+    ) -> _PanicTestVideoSource:
+        del process_every_nth_frame, playback_speed, loop, stream_index, on_frame, on_reset
+        source = _PanicTestVideoSource(node_id, str(file_path))
+        self.sources.append(source)
+        return source
+
+
+def test_pause_panics_only_when_no_source_stays_playing() -> None:
+    service = _PanicRecordingService()
+    factory = _PanicTestVideoFactory()
+    client = InProcessEngineClient(
+        create_application_registry(midi_output_service_factory=lambda: service),
+        video_source_factory=factory,
+    )
+    document = GraphDocument()
+    document.add_node(
+        "synmachine.input.load_video",
+        node_id=SOURCE_A,
+        parameters={"file_path": "a.mp4"},
+    )
+    document.add_node(
+        "synmachine.input.load_video",
+        node_id=SOURCE_B,
+        parameters={"file_path": "b.mp4"},
+    )
+    luminance = document.add_node("synmachine.image.to_luminance")
+    document.add_connection(SOURCE_A, "image", luminance, "image")
+    pitch = document.add_node("synmachine.synesthesia.channel_to_pitch")
+    document.add_connection(luminance, "channel", pitch, "value")
+    send_id = document.add_node(
+        "synmachine.output.send_midi", parameters={"output_port": "Mock MIDI Out"}
+    )
+    document.add_connection(pitch, "midi", send_id, "midi")
+    try:
+        assert client.activate(document.snapshot()).activated
+        client.play(SOURCE_A)
+        client.play(SOURCE_B)
+        assert client.metrics().state is EngineState.RUNNING
+
+        # While source B is still playing, nothing is silenced.
+        client.pause(SOURCE_A)
+        assert service.panic_count == 0
+        assert client.metrics().state is EngineState.RUNNING
+
+        # Pausing the last producing source leaves nothing generating state.
+        client.pause(SOURCE_B)
+        assert service.panic_count == 1
+        assert client.metrics().state is EngineState.PAUSED
     finally:
         client.close()
