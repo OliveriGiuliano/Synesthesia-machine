@@ -114,6 +114,24 @@ def window(qapp: QApplication, tmp_path: Path) -> Iterator[MainWindow]:
     result.close()
 
 
+@pytest.fixture
+def full_window(qapp: QApplication, tmp_path: Path) -> Iterator[MainWindow]:
+    """A window over the full application registry (image nodes included)."""
+
+    del qapp
+    registry = create_application_registry()
+    result = MainWindow(
+        registry,
+        paths_for(tmp_path),
+        InProcessEngineClient(registry),
+        settings=settings_for(tmp_path),
+        offer_recovery=False,
+    )
+    yield result
+    result.session.new_document()
+    result.close()
+
+
 def test_shell_has_fixed_structure_actions_and_accessible_controls(window: MainWindow) -> None:
     menus = tuple(action.text().replace("&", "") for action in window.menuBar().actions())
     assert menus == ("File", "Edit", "View", "Graph", "Outputs", "Help")
@@ -1270,3 +1288,31 @@ def test_node_category_color_is_stable_when_the_ui_language_changes(window: Main
     assert french_item.view_model.category == "Utility"
     assert french_item.view_model.title == "Nombre"
     assert node_category_color(french_item.view_model.category) == english_color
+
+
+def test_crop_inspector_switches_editors_with_coordinate_mode(full_window: MainWindow) -> None:
+    window = full_window
+    crop_id = window.session.add_node("synmachine.image.crop", (0.0, 0.0))
+    window.scene.select_node_ids({crop_id})
+
+    for bound in ("left", "top", "right", "bottom"):
+        editor = window.inspector.findChild(FloatRangeParameterEditor, f"parameter_{bound}")
+        assert editor is not None, bound
+        assert (editor.minimum(), editor.maximum()) == (0.0, 1.0)
+    assert window.inspector.findChild(QComboBox, "parameter_coordinate_mode") is not None
+
+    window.session.set_parameter(crop_id, "coordinate_mode", "PIXELS")
+    QTest.qWait(1)
+
+    for bound in ("left", "top", "right", "bottom"):
+        assert window.inspector.findChild(FloatRangeParameterEditor, f"parameter_{bound}") is None
+        field = window.inspector.findChild(QDoubleSpinBox, f"parameter_{bound}")
+        assert field is not None, bound
+    assert window.inspector.findChild(QComboBox, "parameter_coordinate_mode") is not None
+
+    window.session.set_parameter(crop_id, "coordinate_mode", "NORMALIZED")
+    QTest.qWait(1)
+
+    editor = window.inspector.findChild(FloatRangeParameterEditor, "parameter_left")
+    assert editor is not None
+    assert (editor.minimum(), editor.maximum()) == (0.0, 1.0)

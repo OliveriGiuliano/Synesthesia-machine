@@ -81,6 +81,19 @@ class GraphViewModel:
     connections: tuple[ConnectionViewModel, ...]
 
 
+def _projected_parameter_spec(
+    definition: NodeDefinition,
+    parameter: ParameterSpec,
+    parameters: Mapping[str, ParameterValue],
+) -> ParameterSpec:
+    """Localise a parameter spec, then apply the node's mode-dependent editor intent."""
+
+    spec = replace(parameter, label=tr(parameter.label), help_text=tr(parameter.help_text))
+    if definition.parameter_editor_resolver is not None:
+        spec = definition.parameter_editor_resolver(spec, parameters)
+    return spec
+
+
 def project_graph(
     snapshot: GraphSnapshot,
     registry: NodeRegistry,
@@ -168,11 +181,7 @@ def project_graph(
         )
         parameter_rows = tuple(
             ParameterViewModel(
-                replace(
-                    parameter,
-                    label=tr(parameter.label),
-                    help_text=tr(parameter.help_text),
-                ),
+                _projected_parameter_spec(definition, parameter, parameters),
                 node.parameters.get(parameter.id, parameter.default),
                 (node.id, parameter.id) in incoming,
             )

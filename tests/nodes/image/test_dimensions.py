@@ -13,7 +13,7 @@ from tests.support.image_conformance import (
 )
 
 from synesthesia_machine.contracts import ColorValue, ImageFrame, ParameterValue, RuntimeValue
-from synesthesia_machine.nodes import ExpectedNodeError
+from synesthesia_machine.nodes import ExpectedNodeError, ParameterEditorHint
 from synesthesia_machine.nodes.image import create_image_definitions
 
 NODE_ID = UUID("00000000-0000-0000-0000-000000005020")
@@ -43,6 +43,38 @@ def _process(
     output = definition.runtime_factory(NODE_ID).process(inputs, parameters, image.context)["image"]
     assert isinstance(output, ImageFrame)
     return output
+
+
+def test_crop_bound_editors_are_sliders_in_normalized_mode() -> None:
+    definition = _definition("synmachine.image.crop")
+    resolver = definition.parameter_editor_resolver
+    assert resolver is not None
+    values, errors = definition.parameter_values({})
+    assert not errors
+    for bound_id in ("left", "top", "right", "bottom"):
+        spec = definition.parameter(bound_id)
+        assert spec is not None
+        resolved = resolver(spec, values)
+        assert (resolved.minimum, resolved.maximum) == (0.0, 1.0)
+        assert resolved.editor_hint is ParameterEditorHint.SLIDER
+    mode = definition.parameter("coordinate_mode")
+    assert mode is not None
+    assert resolver(mode, values) is mode
+
+
+def test_crop_bound_editors_are_plain_fields_in_pixels_mode() -> None:
+    definition = _definition("synmachine.image.crop")
+    resolver = definition.parameter_editor_resolver
+    assert resolver is not None
+    values, errors = definition.parameter_values({"coordinate_mode": "PIXELS"})
+    assert not errors
+    for bound_id in ("left", "top", "right", "bottom"):
+        spec = definition.parameter(bound_id)
+        assert spec is not None
+        assert resolver(spec, values) is spec
+    mode = definition.parameter("coordinate_mode")
+    assert mode is not None
+    assert resolver(mode, values) is mode
 
 
 @pytest.mark.parametrize("type_id", BATCH1_IDS)

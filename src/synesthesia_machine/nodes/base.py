@@ -361,6 +361,9 @@ type RuntimeFactory = Callable[[UUID], NodeRuntime]
 type PortTypeResolver = Callable[[str, bool, Mapping[str, ParameterValue]], PortTypeExpression]
 type RequiredInputResolver = Callable[[Mapping[str, ParameterValue]], Sequence[str]]
 type ParameterValidator = Callable[[Mapping[str, ParameterValue]], Sequence[str]]
+type ParameterEditorResolver = Callable[
+    [ParameterSpec, Mapping[str, ParameterValue]], ParameterSpec
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -382,6 +385,7 @@ class NodeDefinition:
     required_input_resolver: RequiredInputResolver | None = None
     aliases: tuple[str, ...] = ()
     parameter_validator: ParameterValidator | None = None
+    parameter_editor_resolver: ParameterEditorResolver | None = None
     variadic_input: VariadicInputSpec | None = None
     parameter_groups: tuple[ParameterGroupSpec, ...] = ()
 

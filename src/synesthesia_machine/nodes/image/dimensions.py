@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from uuid import UUID
 
 import numpy as np
@@ -168,6 +169,23 @@ def _validate_crop(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
     return errors
 
 
+_CROP_BOUND_IDS = frozenset({"left", "top", "right", "bottom"})
+
+
+def _crop_parameter_editor(
+    spec: ParameterSpec, values: Mapping[str, ParameterValue]
+) -> ParameterSpec:
+    """Present normalized crop bounds as 0..1 sliders; pixel bounds stay plain fields."""
+    if spec.id not in _CROP_BOUND_IDS:
+        return spec
+    if (
+        values.get("coordinate_mode", CoordinateMode.NORMALIZED.value)
+        == CoordinateMode.NORMALIZED.value
+    ):
+        return replace(spec, minimum=0.0, maximum=1.0, editor_hint=ParameterEditorHint.SLIDER)
+    return spec
+
+
 def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
     image_input = (InputPortSpec("image", "Image / Channel", PortType.IMAGE),)
     image_output = (OutputPortSpec("image", "Image / Channel", PortType.IMAGE),)
@@ -322,6 +340,7 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
             CropRuntime,
             aliases=("trim", "bounds", "roi"),
             parameter_validator=_validate_crop,
+            parameter_editor_resolver=_crop_parameter_editor,
             port_type_resolver=_dynamic_image_channel_type,
         ),
         NodeDefinition(
