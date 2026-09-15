@@ -52,7 +52,7 @@ from synesthesia_machine.nodes.synesthesia.optical_flow import (
     MEAN_MAGNITUDE,
     optical_flow_to_midi_state,
 )
-from synesthesia_machine.nodes.synesthesia.scanline import MEAN, scanline_to_midi_state
+from synesthesia_machine.nodes.synesthesia.scanline import MEAN, VALUE, scanline_to_midi_state
 from tools.environment_report import EnvironmentReport, collect_environment_report
 
 DEFAULT_OUTPUT_PATH = Path("docs/evidence/synesthesia-benchmarks.json")
@@ -154,6 +154,7 @@ def run_benchmarks(
                 scanline,
                 row_index=FIXTURE_HEIGHT // 2,
                 line_thickness=5,
+                metric=VALUE,
                 aggregation=MEAN,
                 activation_threshold=0.15,
                 velocity_curve_exponent=1.25,

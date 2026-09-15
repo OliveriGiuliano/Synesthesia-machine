@@ -25,11 +25,14 @@ from synesthesia_machine.midi import resolve_musical_selector
 from synesthesia_machine.nodes import ExecutionKind, ExpectedNodeError, ResetReason
 from synesthesia_machine.nodes.synesthesia import (
     BOTTOM_TO_TOP,
+    CONTRAST,
     MAXIMUM,
     MEAN,
     PING_PONG,
+    SCANLINE_METRICS,
     SCANLINE_TYPE_ID,
     TOP_TO_BOTTOM,
+    VALUE,
     ScanlineRuntime,
     create_scanline_definitions,
     scanline_to_midi_state,
@@ -97,6 +100,7 @@ def test_scanline_area_resize_threshold_curve_and_band_aggregation() -> None:
         channel,
         row_index=0,
         line_thickness=1,
+        metric=VALUE,
         aggregation=MEAN,
         activation_threshold=0.0,
         velocity_curve_exponent=1.0,
@@ -110,6 +114,7 @@ def test_scanline_area_resize_threshold_curve_and_band_aggregation() -> None:
         channel,
         row_index=1,
         line_thickness=1,
+        metric=VALUE,
         aggregation=MEAN,
         activation_threshold=0.25,
         velocity_curve_exponent=2.0,
@@ -123,6 +128,7 @@ def test_scanline_area_resize_threshold_curve_and_band_aggregation() -> None:
         channel,
         row_index=1,
         line_thickness=3,
+        metric=VALUE,
         aggregation=MAXIMUM,
         activation_threshold=0.0,
         velocity_curve_exponent=1.0,
@@ -188,6 +194,107 @@ def test_scanline_advance_direction_and_height_changes_restart_position() -> Non
     assert next(iter(_notes(runtime, channel, direction=BOTTOM_TO_TOP))).note == 62
     shorter = _channel([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
     assert next(iter(_notes(runtime, shorter, direction=BOTTOM_TO_TOP))).note == 62
+
+
+def test_scanline_contrast_metric_measures_row_band_variation() -> None:
+    channel = _channel([[0.0, 0.0, 1.0, 1.0], [1.0, 1.0, 0.0, 0.0]])
+    output = scanline_to_midi_state(
+        channel,
+        row_index=0,
+        line_thickness=2,
+        metric=CONTRAST,
+        aggregation=MEAN,
+        activation_threshold=0.5,
+        velocity_curve_exponent=1.0,
+        settings=_settings(60, 62),
+        node_id=NODE,
+        context=channel.context,
+    )
+    assert output.notes == {
+        MidiNoteKey(0, 60): 127,
+        MidiNoteKey(0, 61): 127,
+        MidiNoteKey(0, 62): 127,
+    }
+
+    # Contrast is a variance measure: aggregation must not change it.
+    maximum = scanline_to_midi_state(
+        channel,
+        row_index=0,
+        line_thickness=2,
+        metric=CONTRAST,
+        aggregation=MAXIMUM,
+        activation_threshold=0.5,
+        velocity_curve_exponent=1.0,
+        settings=_settings(60, 62),
+        node_id=NODE,
+        context=channel.context,
+    )
+    assert maximum.notes == output.notes
+
+    uniform = _channel([[0.5, 0.5, 0.5, 0.5], [0.5, 0.5, 0.5, 0.5]])
+    silent = scanline_to_midi_state(
+        uniform,
+        row_index=0,
+        line_thickness=2,
+        metric=CONTRAST,
+        aggregation=MEAN,
+        activation_threshold=0.0,
+        velocity_curve_exponent=1.0,
+        settings=_settings(60, 62),
+        node_id=NODE,
+        context=uniform.context,
+    )
+    assert silent.notes == {}
+
+
+def test_scanline_contrast_single_row_band_is_silent() -> None:
+    runtime = ScanlineRuntime(NODE)
+    channel = _channel([[1.0, 1.0, 1.0, 1.0]])
+    assert _notes(runtime, channel, metric=CONTRAST, direction=BOTTOM_TO_TOP) == {}
+
+
+def test_scanline_contrast_sanitizes_nonfinite_bands_before_std() -> None:
+    channel = _channel([[np.nan, np.inf, -np.inf, 1.0], [0.0, 0.0, 0.0, 1.0]])
+    output = scanline_to_midi_state(
+        channel,
+        row_index=0,
+        line_thickness=2,
+        metric=CONTRAST,
+        aggregation=MEAN,
+        activation_threshold=0.5,
+        velocity_curve_exponent=1.0,
+        settings=_settings(60, 63),
+        node_id=NODE,
+        context=channel.context,
+    )
+    assert output.notes == {MidiNoteKey(0, 61): 127}
+
+
+def test_scanline_metric_flip_does_not_restart_scan_position() -> None:
+    runtime = ScanlineRuntime(NODE)
+    channel = _channel([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    first = _notes(
+        runtime,
+        channel,
+        direction=TOP_TO_BOTTOM,
+        line_thickness=2,
+        metric=VALUE,
+        activation_threshold=0.0,
+        midi_minimum=60,
+        midi_maximum=62,
+    )
+    assert first == {MidiNoteKey(0, 60): 64, MidiNoteKey(0, 61): 64}
+    second = _notes(
+        runtime,
+        channel,
+        direction=TOP_TO_BOTTOM,
+        line_thickness=2,
+        metric=CONTRAST,
+        activation_threshold=0.0,
+        midi_minimum=60,
+        midi_maximum=62,
+    )
+    assert second == {MidiNoteKey(0, 61): 127, MidiNoteKey(0, 62): 127}
 
 
 @pytest.mark.parametrize("reason", list(ResetReason))
@@ -259,7 +366,9 @@ def test_scanline_metadata_registry_clock_and_nonfinite_contracts() -> None:
     assert parameters["direction"] == BOTTOM_TO_TOP
     assert parameters["advance_rows"] == 1
     assert parameters["line_thickness"] == 1
+    assert parameters["metric"] == VALUE
     assert parameters["aggregation"] == MEAN
+    assert definition.parameter("metric").choices == SCANLINE_METRICS  # type: ignore[union-attr]
     registry = create_application_registry()
     assert len(registry.definitions()) >= 55
     assert registry.require(SCANLINE_TYPE_ID).type_id == definition.type_id
@@ -269,6 +378,7 @@ def test_scanline_metadata_registry_clock_and_nonfinite_contracts() -> None:
         channel,
         row_index=0,
         line_thickness=1,
+        metric=VALUE,
         aggregation=MEAN,
         activation_threshold=0.0,
         velocity_curve_exponent=1.0,
@@ -282,6 +392,7 @@ def test_scanline_metadata_registry_clock_and_nonfinite_contracts() -> None:
             channel,
             row_index=0,
             line_thickness=1,
+            metric=VALUE,
             aggregation=MEAN,
             activation_threshold=0.0,
             velocity_curve_exponent=1.0,
@@ -296,12 +407,14 @@ def test_scanline_runtime_rejects_invalid_direction_and_advance_without_advancin
     channel = _channel([[1.0, 0.0], [0.0, 1.0]])
     assert next(iter(_notes(runtime, channel, direction=TOP_TO_BOTTOM))).note == 60
 
-    for parameter_id, invalid_value, message in (
-        ("direction", "SIDEWAYS", "Unknown scanline direction"),
-        ("advance_rows", 0, "advance rows must be at least one"),
+    for parameter_id, invalid_value, message, direction in (
+        ("direction", "SIDEWAYS", "Unknown scanline direction", "SIDEWAYS"),
+        ("advance_rows", 0, "advance rows must be at least one", TOP_TO_BOTTOM),
+        ("metric", "BRIGHTNESS", "Unknown scanline metric", TOP_TO_BOTTOM),
     ):
         parameters = dict(_parameters())
         parameters[parameter_id] = invalid_value
+        parameters["direction"] = direction
         with pytest.raises(ExpectedNodeError, match=message):
             runtime.process({"value": channel}, parameters, channel.context)
 

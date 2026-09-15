@@ -27,13 +27,15 @@ and exposed through one reusable editor group/view model.
 - **Type:** `synmachine.synesthesia.scanline`
 - **Ports:** Channel `value` → MIDI state `midi`
 - **Controls:** bottom-to-top, top-to-bottom, or ping-pong direction; rows advanced per processed tick;
-  line thickness; mean/maximum band aggregation; activation threshold; velocity curve exponent.
+  line thickness; value/contrast scan metric; mean/maximum band aggregation; activation threshold;
+  velocity curve exponent.
 - **State:** position advances only after a successfully processed input. It does not advance through
   `NoData`, skipped ticks, or source drops. Reset, input-height change, and state-significant parameter
   changes restart the scan deterministically.
-- **Algorithm:** extracts a horizontal band, normalizes through the channel nominal range, sanitizes
-  non-finite samples, area-resizes it to the allowed-note count, then maps surviving samples to
-  velocity strengths.
+- **Algorithm:** extracts a horizontal band, normalizes it through the channel nominal range, sanitizes
+  non-finite samples, then measures either the aggregated band values (Value) or the normalized
+  row-to-row variation across the band (Contrast, zero for a one-row band), area-resizes the result to
+  the allowed-note count, and maps surviving samples to velocity strengths.
 
 ### Edges to Pitch
 

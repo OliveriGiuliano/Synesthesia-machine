@@ -42,6 +42,9 @@ TOP_TO_BOTTOM = "TOP_TO_BOTTOM"
 PING_PONG = "PING_PONG"
 MEAN = "MEAN"
 MAXIMUM = "MAXIMUM"
+VALUE = "VALUE"
+CONTRAST = "CONTRAST"
+SCANLINE_METRICS = (VALUE, CONTRAST)
 
 
 class ScanlineRuntime:
@@ -75,6 +78,7 @@ class ScanlineRuntime:
                 channel,
                 row_index=self._row_index,
                 line_thickness=_integer(parameters["line_thickness"]),
+                metric=_text(parameters["metric"]),
                 aggregation=_text(parameters["aggregation"]),
                 activation_threshold=_number(parameters["activation_threshold"]),
                 velocity_curve_exponent=_number(parameters["velocity_curve_exponent"]),
@@ -83,7 +87,7 @@ class ScanlineRuntime:
                 context=context,
             )
             self._advance(height, direction, advance_rows)
-        except (TypeError, ValueError) as error:
+        except (KeyError, TypeError, ValueError) as error:
             raise ExpectedNodeError("invalid_scanline", str(error)) from error
         return {"midi": midi}
 
@@ -138,6 +142,7 @@ def scanline_to_midi_state(
     *,
     row_index: int,
     line_thickness: int,
+    metric: str,
     aggregation: str,
     activation_threshold: float,
     velocity_curve_exponent: float,
@@ -156,6 +161,8 @@ def scanline_to_midi_state(
         raise ValueError("Scanline line thickness must be at least one")
     if aggregation not in (MEAN, MAXIMUM):
         raise ValueError(f"Unknown scanline aggregation: {aggregation!r}")
+    if metric not in SCANLINE_METRICS:
+        raise ValueError(f"Unknown scanline metric: {metric!r}")
     if not math.isfinite(activation_threshold) or not 0.0 <= activation_threshold <= 1.0:
         raise ValueError("Scanline activation threshold must be finite and in the range 0..1")
     if not math.isfinite(velocity_curve_exponent) or velocity_curve_exponent <= 0.0:
@@ -164,10 +171,25 @@ def scanline_to_midi_state(
     before = (line_thickness - 1) // 2
     after = line_thickness // 2
     band = value.data[max(0, row_index - before) : min(height, row_index + after + 1)]
-    line = np.mean(band, axis=0, dtype=np.float64) if aggregation == MEAN else np.max(band, axis=0)
-    normalized = (line - value.nominal_min) / (value.nominal_max - value.nominal_min)
-    normalized = np.nan_to_num(normalized, nan=0.0, posinf=1.0, neginf=0.0)
-    normalized = np.asarray(np.clip(normalized, 0.0, 1.0), dtype=np.float64)
+    if metric == CONTRAST:
+        # Per-column row-to-row variation across the band. The band is
+        # normalized through its nominal range before the population
+        # standard deviation so the 2 x std bound of 1 holds for any nominal
+        # range, mirroring Region Grid's Contrast metric. Aggregation is
+        # irrelevant for a variance measure.
+        band = np.asarray(band, dtype=np.float64)
+        normalized = (band - value.nominal_min) / (value.nominal_max - value.nominal_min)
+        normalized = np.nan_to_num(normalized, nan=0.0, posinf=1.0, neginf=0.0)
+        normalized = np.asarray(np.clip(normalized, 0.0, 1.0), dtype=np.float64)
+        contrast = 2.0 * normalized.std(axis=0, dtype=np.float64)
+        normalized = np.asarray(np.clip(contrast, 0.0, 1.0), dtype=np.float64)
+    else:
+        line = (
+            np.mean(band, axis=0, dtype=np.float64) if aggregation == MEAN else np.max(band, axis=0)
+        )
+        normalized = (line - value.nominal_min) / (value.nominal_max - value.nominal_min)
+        normalized = np.nan_to_num(normalized, nan=0.0, posinf=1.0, neginf=0.0)
+        normalized = np.asarray(np.clip(normalized, 0.0, 1.0), dtype=np.float64)
     samples = _resize_area_1d(normalized, len(settings.selector.allowed_notes))
 
     candidates: list[tuple[int, float]] = []
@@ -234,6 +256,19 @@ def create_scanline_definitions() -> tuple[NodeDefinition, ...]:
                     ),
                     minimum=1,
                     maximum=8192,
+                ),
+                ParameterSpec(
+                    "metric",
+                    "Scan metric",
+                    PortType.STRING,
+                    VALUE,
+                    help_text=(
+                        "Selects what is measured under the scan line: Value reads the normalized "
+                        "channel samples; Contrast measures the normalized row-to-row variation "
+                        "inside the line band, ignores Aggregation, and needs a line thicker than "
+                        "one row to be non-zero."
+                    ),
+                    choices=SCANLINE_METRICS,
                 ),
                 ParameterSpec(
                     "aggregation",
@@ -310,7 +345,15 @@ def _validate_advance_rows(advance_rows: int) -> None:
 
 
 def _validate_parameters(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
-    return validate_common_musical_parameters(parameters)
+    errors = list(validate_common_musical_parameters(parameters))
+    try:
+        metric = _text(parameters["metric"])
+    except (KeyError, TypeError, ValueError) as error:
+        errors.append(str(error))
+        return errors
+    if metric not in SCANLINE_METRICS:
+        errors.append(f"Unknown scanline metric: {metric!r}")
+    return errors
 
 
 def _channel(value: object) -> ChannelFrame:
@@ -339,11 +382,14 @@ def _text(value: object) -> str:
 
 __all__ = [
     "BOTTOM_TO_TOP",
+    "CONTRAST",
     "MAXIMUM",
     "MEAN",
     "PING_PONG",
+    "SCANLINE_METRICS",
     "SCANLINE_TYPE_ID",
     "TOP_TO_BOTTOM",
+    "VALUE",
     "ScanlineRuntime",
     "create_scanline_definitions",
     "scanline_to_midi_state",

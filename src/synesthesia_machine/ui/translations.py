@@ -698,6 +698,7 @@ _FRENCH: dict[str, str] = {
     "Magnitude minimum": "Amplitude minimale",
     "Magnitude maximum": "Amplitude maximale",
     "Region metric": "Mesure de région",
+    "Scan metric": "Mesure de balayage",
     "Direction": "Direction",
     "Advance rows": "Avance en lignes",
     "Line thickness": "Épaisseur de ligne",
@@ -853,6 +854,7 @@ _FRENCH: dict[str, str] = {
     "Some devices could not be enumerated: {error}": "Certains périphériques n’ont pas pu être détectés : {error}",
     "Could not refresh devices: {error}": "Impossible d’actualiser les périphériques : {error}",
     "Selects what is measured inside every grid cell. Brightness uses linear-light luminance; Contrast uses normalized RMS variation; Saturation and Value use HSV; Red, Green, and Blue use sRGB channels.": "Sélectionne ce qui est mesuré dans chaque cellule de la grille. La luminance utilise la luminance en lumière linéaire ; le contraste utilise la variation RMS normalisée ; la saturation et la valeur utilisent HSV ; le rouge, le vert et le bleu utilisent les canaux RVB.",
+    "Selects what is measured under the scan line: Value reads the normalized channel samples; Contrast measures the normalized row-to-row variation inside the line band, ignores Aggregation, and needs a line thicker than one row to be non-zero.": "Sélectionne ce qui est mesuré sous la ligne de balayage : Valeur lit les échantillons normalisés du canal ; Contraste mesure la variation normalisée entre les lignes à l’intérieur de la bande de la ligne, ignore l’agrégation, et a besoin d’une ligne d’épaisseur supérieure à une ligne pour être non nulle.",
     "Cells at or below this normalized measurement stay silent. Above it, velocity rises from the minimum to the maximum velocity as the measured value approaches 1.": "Les cellules égales ou inférieures à cette mesure normalisée restent silencieuses. Au-dessus, la vélocité passe de la vélocité minimale à la vélocité maximale au fur et à mesure que la valeur mesurée approche 1.",
     # Parameter behaviour help (drafted with the parameter tooltip rewrite)
     "A note is only re-sent when its velocity changes by at least this much.": "Une note n’est renvoyée que si sa vélocité change d’au moins cette valeur.",

@@ -814,6 +814,7 @@
         "activation_threshold": 0.0,
         "amplitude_ceiling": 10.0,
         "amplitude_floor": 0.0,
+        "analysis_max_dimension": 0,
         "band_aggregation": "MEAN",
         "custom_scale_mask": "111111111111",
         "dc_exclusion_radius": 0.0,
@@ -847,6 +848,7 @@
       "implementation_version": 1,
       "parameters": {
         "aggregation": "CELL_NOTES",
+        "analysis_max_dimension": 0,
         "custom_scale_mask": "111111111111",
         "flow_preset": "BALANCED",
         "grid_columns": 4,
@@ -915,6 +917,7 @@
         "line_thickness": 1,
         "maximum_polyphony": 16,
         "maximum_velocity": 127,
+        "metric": "VALUE",
         "midi_channel": 1,
         "midi_maximum": 127,
         "midi_minimum": 0,
