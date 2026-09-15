@@ -608,7 +608,8 @@ Structural edits are debounced for approximately 100 ms, then the UI sends a new
 If compilation of the new snapshot fails, the engine stops (sources stop, MIDI
 outputs panic, previews clear, state `STOPPED`) instead of keeping the previous
 plan running; it resumes automatically when the graph becomes valid again
-(ADR 0013).
+(ADR 0013), and sources that were playing when the stop happened play again from
+the start of their playback (ADR 0020).
 
 ### 9.6 Demand roots
 

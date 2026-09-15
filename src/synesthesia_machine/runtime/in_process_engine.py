@@ -666,6 +666,7 @@ class InProcessEngineClient:
         self._worker: LatestFrameGraphWorker | None = None
         self._sources: dict[UUID, SourceController] = {}
         self._state = EngineState.STOPPED
+        self._interrupted_playing_source_ids: frozenset[UUID] = frozenset()
         self._graph_revision: int | None = None
         self._latest_valid_snapshot: GraphSnapshot | None = None
         self._latest_demand_roots: tuple[UUID, ...] | None = None
@@ -774,6 +775,18 @@ class InProcessEngineClient:
                     if old_states.get(node_id) in {SourceState.PLAYING, SourceState.RECONNECTING}:
                         with suppress(Exception):
                             source.resume() if node_id in reusable_sources else source.play()
+            interrupted = self._interrupted_playing_source_ids
+            if interrupted:
+                # The previous valid plan was torn down by a broken graph
+                # (ADR-0013): sources are fresh in READY, so the sources that
+                # were playing when the stop happened play again without a
+                # user gesture (ADR-0020). Positions are not preserved.
+                self._interrupted_playing_source_ids = frozenset()
+                for node_id, source in sources.items():
+                    if node_id in interrupted:
+                        with suppress(Exception):
+                            source.play()
+                self._refresh_transport_state()
             return EngineActivation(snapshot.revision, prepared.result.report, True)
 
     def play(self, source_node_id: UUID | None = None) -> None:
@@ -993,6 +1006,7 @@ class InProcessEngineClient:
             except Exception as error:
                 errors.append(error)
             finally:
+                self._interrupted_playing_source_ids = frozenset()
                 self._state = EngineState.CLOSED
             _raise_cleanup_errors(errors, "Engine cleanup failed")
 
@@ -1101,6 +1115,15 @@ class InProcessEngineClient:
     def _stop_runtime_for_invalid_graph(self) -> None:
         """Stop and tear down the runtime after a broken graph (client stays open)."""
 
+        # Remember which sources were playing so the next valid activation can
+        # resume them (ADR-0020). Re-capture only while live sources exist: a
+        # second consecutive broken activation must not wipe the memory.
+        if self._sources:
+            self._interrupted_playing_source_ids = frozenset(
+                node_id
+                for node_id, source in self._sources.items()
+                if source.status().state in {SourceState.PLAYING, SourceState.RECONNECTING}
+            )
         sources = tuple(self._sources.values())
         self._sources = {}
         for source in sources:

@@ -253,6 +253,66 @@ def test_broken_graph_stops_the_runtime_and_a_valid_graph_restarts_it(
         client.close()
 
 
+def test_playing_sources_auto_resume_after_broken_graph_stop(tmp_path: Path) -> None:
+    video = generate_test_video(tmp_path / "resume.mp4", frame_count=10, fps=1)
+    document = GraphDocument()
+    source_id = document.add_node(
+        "synmachine.input.load_video",
+        parameters={"file_path": str(video)},
+    )
+    client = InProcessEngineClient(create_application_registry())
+    try:
+        assert client.activate(document.snapshot()).activated
+        client.play(source_id)
+        assert client.metrics().state is EngineState.RUNNING
+
+        # A broken stop captures the playing source; a second consecutive
+        # broken activation must not wipe the captured memory.
+        broken = document.add_node("unknown.node")
+        rejected = client.activate(document.snapshot())
+        assert not rejected.activated
+        assert client.metrics().state is EngineState.STOPPED
+        assert not client.activate(document.snapshot()).activated
+        assert client.metrics().state is EngineState.STOPPED
+
+        # Fixing the graph in place resumes the previously playing source.
+        document.remove_node(broken)
+        assert client.activate(document.snapshot()).activated
+        assert client.source_status(source_id)[0].state is SourceState.PLAYING
+        assert client.metrics().state is EngineState.RUNNING
+    finally:
+        client.close()
+
+
+def test_paused_sources_are_not_auto_played_after_broken_graph_stop(tmp_path: Path) -> None:
+    video = generate_test_video(tmp_path / "paused-resume.mp4", frame_count=10, fps=1)
+    document = GraphDocument()
+    source_id = document.add_node(
+        "synmachine.input.load_video",
+        parameters={"file_path": str(video)},
+    )
+    client = InProcessEngineClient(create_application_registry())
+    try:
+        assert client.activate(document.snapshot()).activated
+        client.play(source_id)
+        assert client.metrics().state is EngineState.RUNNING
+        client.pause(source_id)
+        assert client.metrics().state is EngineState.PAUSED
+
+        broken = document.add_node("unknown.node")
+        rejected = client.activate(document.snapshot())
+        assert not rejected.activated
+        assert client.metrics().state is EngineState.STOPPED
+
+        # The user paused this source, so the auto-resume must not play it.
+        document.remove_node(broken)
+        assert client.activate(document.snapshot()).activated
+        assert client.source_status(source_id)[0].state is SourceState.READY
+        assert client.metrics().state is EngineState.STOPPED
+    finally:
+        client.close()
+
+
 def test_preview_disabled_engine_spins_no_preview_worker(tmp_path: Path) -> None:
     # Offline workloads (MIDI export, UI tests) pay for no preview worker and
     # no broker when previews are disabled; the graph still runs to the end.

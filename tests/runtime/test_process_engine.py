@@ -216,9 +216,13 @@ def test_invalid_candidate_stops_the_engine_and_valid_candidate_restarts_it(
     assert process_client.metrics().state is EngineState.STOPPED
     assert process_client.source_status() == ()
 
-    # A valid candidate restarts the engine through the same IPC path.
+    # A valid candidate restarts the engine through the same IPC path and
+    # auto-resumes the source that was playing before the stop (ADR 0020).
     assert process_client.activate(valid_snapshot).activated
-    assert process_client.source_status(source_id)[0].state is SourceState.READY
+    assert _wait_until(
+        lambda: process_client.source_status(source_id)[0].state is SourceState.PLAYING
+    )
+    assert _wait_until(lambda: process_client.metrics().state is EngineState.RUNNING)
 
 
 def test_forced_crash_fails_boundedly_and_restart_rebuilds_latest_valid_graph(
