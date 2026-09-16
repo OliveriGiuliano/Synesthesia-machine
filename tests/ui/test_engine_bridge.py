@@ -31,8 +31,8 @@ from synesthesia_machine.contracts.engine_client import (
     SourceStatus,
     ValuePreview,
 )
+from synesthesia_machine.graph import ValidationReport
 from synesthesia_machine.graph.model import GraphSnapshot
-from synesthesia_machine.graph.validation import ValidationReport
 from synesthesia_machine.ui.engine_bridge import (
     EngineBridge,
     EngineBridgeState,

@@ -7,13 +7,13 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from uuid import UUID, uuid5
 
-from synesthesia_machine.contracts.runtime_values import ParameterValue, PortType
-from synesthesia_machine.graph.model import ConnectionModel, GraphSnapshot, NodeModel
-from synesthesia_machine.graph.validation import (
+from synesthesia_machine.contracts import (
     ValidationIssue,
     ValidationReport,
     ValidationSeverity,
 )
+from synesthesia_machine.contracts.runtime_values import ParameterValue, PortType
+from synesthesia_machine.graph.model import ConnectionModel, GraphSnapshot, NodeModel
 from synesthesia_machine.nodes.base import (
     ArrayTypeVariable,
     CachePolicy,

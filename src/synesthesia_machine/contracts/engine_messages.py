@@ -18,11 +18,9 @@ from synesthesia_machine.contracts.engine_client import (
     SourceStatus,
     ValuePreview,
 )
-from synesthesia_machine.contracts.runtime_values import ColorValue, NumericMatrix
+from synesthesia_machine.contracts.runtime_values import LiteralValue
 
 ENGINE_PROTOCOL_VERSION = 15
-
-type SnapshotLiteral = str | int | float | bool | ColorValue | NumericMatrix | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,12 +28,12 @@ class WireNode:
     node_id: UUID
     type_id: str
     implementation_version: int
-    parameters: tuple[tuple[str, SnapshotLiteral], ...]
+    parameters: tuple[tuple[str, LiteralValue], ...]
     position: tuple[float, float]
     size: tuple[float, float] | None
     user_label: str | None
     collapsed: bool
-    ui_state: tuple[tuple[str, SnapshotLiteral], ...]
+    ui_state: tuple[tuple[str, LiteralValue], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,7 +43,7 @@ class WireConnection:
     source_port_id: str
     destination_node_id: UUID
     destination_port_id: str
-    ui_state: tuple[tuple[str, SnapshotLiteral], ...]
+    ui_state: tuple[tuple[str, LiteralValue], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,7 +52,7 @@ class GraphSnapshotPayload:
     revision: int
     nodes: tuple[WireNode, ...]
     connections: tuple[WireConnection, ...]
-    document_settings: tuple[tuple[str, SnapshotLiteral], ...]
+    document_settings: tuple[tuple[str, LiteralValue], ...]
 
 
 class TransportAction(StrEnum):

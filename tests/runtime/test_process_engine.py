@@ -25,8 +25,7 @@ from synesthesia_machine.contracts.engine_messages import (
     GraphActivationAcknowledged,
     Panic,
 )
-from synesthesia_machine.graph import GraphDocument
-from synesthesia_machine.graph.validation import ValidationReport
+from synesthesia_machine.graph import GraphDocument, ValidationReport
 from synesthesia_machine.nodes import ResetReason
 from synesthesia_machine.runtime import EngineProtocolError, ProcessEngineClient
 from synesthesia_machine.runtime import engine_client as engine_client_module

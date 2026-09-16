@@ -11,16 +11,18 @@ import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
 import numpy as np
 from numpy.typing import NDArray
 
+from synesthesia_machine.contracts.validation import ValidationReport
+
 if TYPE_CHECKING:
+    # Type-only reference: the client protocol names the graph snapshot it
+    # accepts; no runtime edge from contracts to graph is created.
     from synesthesia_machine.graph.model import GraphSnapshot
-    from synesthesia_machine.graph.validation import ValidationReport
 
 
 class EngineState(StrEnum):
@@ -434,9 +436,3 @@ def freeze_uint8_preview(data: NDArray[np.uint8]) -> NDArray[np.uint8]:
     result = np.array(data, dtype=np.uint8, order="C", copy=True)
     result.flags.writeable = False
     return result
-
-
-def freeze_metric_map(values: Mapping[str, float]) -> Mapping[str, float]:
-    """Small helper reserved for process-decoded diagnostic extensions."""
-
-    return MappingProxyType(dict(values))

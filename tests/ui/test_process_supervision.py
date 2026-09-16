@@ -36,8 +36,12 @@ from synesthesia_machine.contracts import (
     SourceStatus,
     ValuePreview,
 )
-from synesthesia_machine.graph import GraphSnapshot, ValidationReport
-from synesthesia_machine.graph.validation import ValidationIssue, ValidationSeverity
+from synesthesia_machine.graph import (
+    GraphSnapshot,
+    ValidationIssue,
+    ValidationReport,
+    ValidationSeverity,
+)
 from synesthesia_machine.ui.main_window import MainWindow
 
 

@@ -1,5 +1,11 @@
 """Public Qt-free graph-domain facade."""
 
+from synesthesia_machine.contracts import (
+    LiteralValue,
+    ValidationIssue,
+    ValidationReport,
+    ValidationSeverity,
+)
 from synesthesia_machine.graph.compiler import (
     CompilationResult,
     ConnectionCompatibility,
@@ -20,18 +26,12 @@ from synesthesia_machine.graph.model import (
     GraphSnapshot,
     GroupKind,
     GroupModel,
-    LiteralValue,
     NodeModel,
 )
 from synesthesia_machine.graph.random_graph import (
     generate_random_graph,
     randomize_graph_nodes,
     randomize_graph_parameters,
-)
-from synesthesia_machine.graph.validation import (
-    ValidationIssue,
-    ValidationReport,
-    ValidationSeverity,
 )
 
 __all__ = [

@@ -4,9 +4,11 @@ Qt-independent graph authoring, validation, and deterministic compilation.
 
 ## Public imports
 
-Use `synesthesia_machine.graph` for `GraphDocument`, `GraphSnapshot`, `NodeModel`,
-`ConnectionModel`, `ValidationReport`, `GraphCompiler`, `CompilationResult`, and
-`types_compatible`.
+Use `synesthesia_machine.graph` for `GraphDocument`, `GraphSnapshot`,
+`NodeModel`, `ConnectionModel`, `ValidationReport`, `GraphCompiler`,
+`CompilationResult`, and `types_compatible`. `ValidationReport` and the
+`LiteralValue` alias are owned by the contracts package (they cross the engine
+process boundary inside engine activation) and re-exported here.
 
 ## Dependency direction
 

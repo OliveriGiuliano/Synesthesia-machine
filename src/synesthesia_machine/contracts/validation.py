@@ -1,4 +1,10 @@
-"""Structured graph validation diagnostics."""
+"""Structured graph validation diagnostics shared across the engine boundary.
+
+These values cross the engine process boundary inside ``EngineActivation``
+(the UI compiles, the engine revalidates), so they are owned by the
+framework-independent contracts package. The graph package re-exports them
+for facade stability.
+"""
 
 from dataclasses import dataclass
 from enum import StrEnum

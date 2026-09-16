@@ -9,9 +9,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from uuid import UUID, uuid4
 
-from synesthesia_machine.contracts import ColorValue, NumericMatrix
-
-type LiteralValue = str | int | float | bool | ColorValue | NumericMatrix | None
+from synesthesia_machine.contracts import LiteralValue
 
 
 def _empty_literals() -> dict[str, LiteralValue]:

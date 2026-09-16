@@ -402,6 +402,10 @@ class NoDataType:
 NoData: Final = NoDataType()
 
 type ParameterValue = float | int | bool | str | ColorValue | NumericMatrix
+# Persisted/literal values may additionally be absent (``None``); the alias
+# is owned by contracts so the graph model and the engine wire share one
+# definition.
+type LiteralValue = ParameterValue | None
 type RuntimeValue = (
     ImageFrame
     | ChannelFrame
@@ -427,7 +431,3 @@ def clock_id_of(value: RuntimeValue) -> UUID | None:
         }
         return next(iter(clock_ids)) if len(clock_ids) == 1 else None
     return None
-
-
-def is_no_data(value: RuntimeValue) -> bool:
-    return value is NoData
