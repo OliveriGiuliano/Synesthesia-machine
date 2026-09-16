@@ -4,7 +4,7 @@
 
 **Solution:** Move ValidationIssue/ValidationReport/ValidationSeverity into contracts (graph re-exports them for facade stability), define the literal union once in contracts with graph and engine_messages referencing it, and delete the dead exports.
 
-**Status:** open
+**Status:** resolved
 
 **Files:**
 - `src/synesthesia_machine/contracts/runtime_values.py`
@@ -14,8 +14,8 @@
 - `src/synesthesia_machine/graph/__init__.py`
 
 **Acceptance:**
-- [ ] Boundary test can scan every import
-- [ ] One literal definition, three references
-- [ ] Interface truthfulness: no dead exports
-- [ ] Report value sits next to its carrier
-- [ ] Targeted tests pass; `uv run check` green; no unrelated diff
+- [x] Boundary test can scan every import
+- [x] One literal definition, three references
+- [x] Interface truthfulness: no dead exports
+- [x] Report value sits next to its carrier
+- [x] Targeted tests pass; `uv run check` green; no unrelated diff

@@ -4,16 +4,16 @@
 
 **Solution:** One table of package -> forbidden import prefixes evaluated over every import node via ast.walk; derive the headless set from the package directory so a new package is enforced by default (explicit allowlist instead of hardcoded tuple).
 
+- [x] Enforcement defaults to on
+- [x] One table is the true boundary
+- [x] Media/midi/diagnostics gap closed
+- [x] Lazy imports can no longer hide
+- [x] Targeted tests pass; `uv run check` green; no unrelated diff
+
 **Blocked by:** 01
 
-**Status:** open
+**Status:** resolved
 
 **Files:**
 - `tests/architecture/test_boundaries.py`
 
-**Acceptance:**
-- [ ] Enforcement defaults to on
-- [ ] One table is the true boundary
-- [ ] Media/midi/diagnostics gap closed
-- [ ] Lazy imports can no longer hide
-- [ ] Targeted tests pass; `uv run check` green; no unrelated diff
