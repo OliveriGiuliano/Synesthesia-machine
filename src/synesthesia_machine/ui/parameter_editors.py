@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Callable, Sequence
+import re
+from collections.abc import Callable, Mapping, Sequence
 from typing import cast
 
 from PySide6.QtCore import QEvent, QObject, QPointF, Qt, QTimer, Signal, Slot
@@ -61,6 +62,7 @@ def create_parameter_editor(
     *,
     compact: bool = False,
     dynamic_choices: Sequence[tuple[str, LiteralValue]] = (),
+    sibling_values: Mapping[str, LiteralValue] | None = None,
 ) -> QWidget:
     """Create an editor from ParameterSpec metadata without duplicating validation rules."""
 
@@ -73,6 +75,8 @@ def create_parameter_editor(
         )
     elif spec.choices:
         editor = ChoiceParameterEditor(parameter, on_changed)
+    elif spec.editor_hint is ParameterEditorHint.TIMESTAMP and spec.value_type is PortType.FLOAT:
+        editor = TimestampParameterEditor(parameter, on_changed, sibling_values=sibling_values)
     elif spec.value_type is PortType.FLOAT and _uses_slider(parameter):
         editor = FloatRangeParameterEditor(parameter, on_changed)
     elif spec.value_type is PortType.FLOAT:
@@ -611,6 +615,193 @@ class IntParameterEditor(ScrubbableSpinBox):
         blocked = self.blockSignals(True)
         self.setValue(sanitized)
         self.blockSignals(blocked)
+        self._on_changed(sanitized)
+
+
+_TIMESTAMP_PART = re.compile(r"\d+(\.\d+)?")
+_TIMESTAMP_FALLBACK_MAXIMUM = 3600.0
+
+
+def format_timestamp(value: float) -> str:
+    """Render seconds as ``HH:MM:SS[.cS]`` (centiseconds only when nonzero)."""
+
+    centiseconds = max(0, round(max(0.0, value) * 100.0))
+    hours, rest = divmod(centiseconds, 3_600_000)
+    minutes, rest = divmod(rest, 60_000)
+    seconds, fraction = divmod(rest, 100)
+    if fraction:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{fraction:02d}"
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def parse_timestamp(text: str) -> float | None:
+    """Parse ``HH:MM:SS[.cS]``, ``MM:SS[.cS]``, or plain seconds into seconds."""
+
+    text = text.strip()
+    if not text:
+        return None
+    parts = text.split(":")
+    if len(parts) > 3:
+        return None
+    value = 0.0
+    for part in parts:
+        part = part.strip()
+        if not _TIMESTAMP_PART.fullmatch(part):
+            return None
+        value = value * 60.0 + float(part)
+    if not math.isfinite(value):
+        return None
+    return value
+
+
+class TimestampParameterEditor(QWidget):
+    """Slider and editable timestamp field for a video-time FLOAT parameter.
+
+    The slider spans the parameter's resolved bounds (the node's editor
+    resolver bounds them to the video's duration); the field accepts typed
+    timestamps such as ``00:01:30``. Cross-parameter rules (the loop start
+    stops at the loop end, a positive loop end stops at the loop start)
+    come from ``sibling_values`` and are re-evaluated by the inspector on
+    every change.
+    """
+
+    _STEPS = 10_000
+
+    def __init__(
+        self,
+        parameter: ParameterViewModel,
+        on_changed: ParameterChanged,
+        *,
+        sibling_values: Mapping[str, LiteralValue] | None = None,
+    ) -> None:
+        super().__init__()
+        self._on_changed = on_changed
+        spec = parameter.spec
+        self._spec = spec
+        siblings = dict(sibling_values or {})
+        self._minimum = float(spec.minimum) if spec.minimum is not None else 0.0
+        self._maximum = (
+            float(spec.maximum) if spec.maximum is not None else _TIMESTAMP_FALLBACK_MAXIMUM
+        )
+        start_sibling = siblings.get("loop_start_s")
+        end_sibling = siblings.get("loop_end_s")
+        self._start_sibling: float | None = None
+        if spec.id == "loop_start_s" and isinstance(end_sibling, float) and end_sibling > 0.0:
+            self._maximum = min(self._maximum, end_sibling)
+        elif spec.id == "loop_end_s" and isinstance(start_sibling, float) and start_sibling > 0.0:
+            self._start_sibling = start_sibling
+        if self._maximum < self._minimum:
+            self._maximum = self._minimum
+
+        self.slider = DirectDragSlider(Qt.Orientation.Horizontal, self)
+        self.slider.setObjectName(f"parameter_{spec.id}_slider")
+        self.slider.setAccessibleName(trf("{label} slider", label=tr(spec.label)))
+        self.timestamp_field = QLineEdit(self)
+        self.timestamp_field.setObjectName(f"parameter_{spec.id}_timestamp")
+        self.timestamp_field.setAccessibleName(trf("{label} value", label=tr(spec.label)))
+        self.timestamp_field.setProperty("parameterValue", True)
+        self.timestamp_field.setProperty("parameterValueInput", True)
+        self.timestamp_field.setPlaceholderText("HH:MM:SS")
+        self.timestamp_field.setMinimumWidth(86)
+        self.timestamp_field.setMaximumWidth(110)
+        self.timestamp_field.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        layout.addWidget(self.slider, 1)
+        layout.addWidget(self.timestamp_field)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        self._commit_timer = QTimer(self)
+        self._commit_timer.setSingleShot(True)
+        self._commit_timer.timeout.connect(self._flush_commit)
+        self.slider.valueChanged.connect(self._update_field_from_slider)
+        self.slider.sliderReleased.connect(self._schedule_commit)
+        self.timestamp_field.editingFinished.connect(self._commit)
+
+        value = float(parameter.value) if isinstance(parameter.value, float) else self._minimum
+        self._set_value(value, commit=False)
+
+    def minimum(self) -> float:
+        return self._minimum
+
+    def maximum(self) -> float:
+        return self._maximum
+
+    def value(self) -> float:
+        parsed = parse_timestamp(self.timestamp_field.text())
+        if parsed is not None:
+            return self._constrained(parsed)
+        return self._value_for_position()
+
+    def setValue(self, value: float) -> None:
+        self._set_value(value)
+
+    def _position_for_value(self, value: float) -> int:
+        if self._maximum <= self._minimum:
+            return 0
+        clamped = min(self._maximum, max(self._minimum, value))
+        return round((clamped - self._minimum) * self._STEPS / (self._maximum - self._minimum))
+
+    def _value_for_position(self) -> float:
+        if self._maximum <= self._minimum:
+            return self._minimum
+        ratio = self.slider.value() / self._STEPS
+        return self._minimum + ratio * (self._maximum - self._minimum)
+
+    def _constrained(self, value: float) -> float:
+        clamped = min(self._maximum, max(self._minimum, value))
+        # A positive loop end may not sink below a positive loop start; zero
+        # still means "until the end of the video".
+        if self._start_sibling is not None and 0.0 < clamped < self._start_sibling:
+            clamped = self._start_sibling
+        return clamped
+
+    def _set_value(self, value: float, *, commit: bool = True) -> None:
+        clamped = self._constrained(value)
+        blocked = self.slider.blockSignals(True)
+        self.slider.setValue(self._position_for_value(clamped))
+        self.slider.blockSignals(blocked)
+        blocked = self.timestamp_field.blockSignals(True)
+        self.timestamp_field.setText(format_timestamp(clamped))
+        self.timestamp_field.blockSignals(blocked)
+        if commit:
+            self._on_changed(self._spec.sanitize_value(clamped))
+
+    @Slot()
+    def _update_field_from_slider(self) -> None:
+        blocked = self.timestamp_field.blockSignals(True)
+        self.timestamp_field.setText(format_timestamp(self._value_for_position()))
+        self.timestamp_field.blockSignals(blocked)
+        if not self.slider.isSliderDown():
+            self._schedule_commit()
+
+    @Slot()
+    def _schedule_commit(self) -> None:
+        self._commit_timer.start(0)
+
+    @Slot()
+    def _commit(self) -> None:
+        if self.graphicsProxyWidget() is not None:
+            self._schedule_commit()
+            return
+        self._flush_commit()
+
+    @Slot()
+    def _flush_commit(self) -> None:
+        parsed = parse_timestamp(self.timestamp_field.text())
+        value = self._value_for_position() if parsed is None else parsed
+        clamped = self._constrained(value)
+        sanitized = self._spec.sanitize_value(clamped)
+        if not isinstance(sanitized, float):
+            raise TypeError("Timestamp sanitization produced a non-float value")
+        if sanitized != clamped:
+            # The static spec (e.g. the resolved video duration) bound the
+            # value differently than the sibling-derived editor bounds.
+            clamped = sanitized
+        self._set_value(clamped, commit=False)
         self._on_changed(sanitized)
 
 

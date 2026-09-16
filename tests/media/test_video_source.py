@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from fractions import Fraction
 from pathlib import Path
 from uuid import UUID
@@ -264,3 +265,181 @@ def test_video_source_rejects_invalid_playback_speed(tmp_path: Path, playback_sp
             playback_speed=playback_speed,
             on_frame=lambda _frame: None,
         )
+
+
+def _wait_for_position(
+    source: VideoSourceService, at_least_s: float, timeout_s: float = 5.0
+) -> bool:
+    deadline = time.monotonic() + timeout_s
+    while True:
+        position = source.status().source_time_s
+        if position is not None and position >= at_least_s:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.01)
+
+
+def test_seek_while_playing_reanchors_and_resets_source_clock(tmp_path: Path) -> None:
+    path = generate_test_video(tmp_path / "seek-playing.mp4", frame_count=12, fps=12)
+    clock = AdvancingClock()
+    received: list[PresentedVideoFrame] = []
+    resets: list[ResetReason] = []
+    source = VideoSourceService(
+        SOURCE_ID,
+        path,
+        loop=True,
+        on_frame=received.append,
+        on_reset=resets.append,
+        clock=clock,
+    )
+    try:
+        source.play()
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and len(received) < 2:
+            time.sleep(0.01)
+        assert len(received) >= 2
+        pre_seek_count = len(received)
+        source.seek(0.9)
+        # The position jumps to the (clamped) target immediately.
+        assert source.status().source_time_s == pytest.approx(0.9)
+        # The interrupted pass is discarded and the source clock restarts.
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and ResetReason.SOURCE_RESTARTED not in resets:
+            time.sleep(0.01)
+        assert ResetReason.SOURCE_RESTARTED in resets
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if (
+                len(received) > pre_seek_count
+                and received[-1].image.context.source_time_s >= 0.9 - 1e-6
+            ):
+                break
+            time.sleep(0.01)
+        assert len(received) > pre_seek_count
+        assert received[-1].image.context.source_time_s >= 0.9 - 1e-6
+        assert source.status().state is SourceState.PLAYING
+    finally:
+        source.close()
+
+
+def test_seek_while_stopped_starts_playback_at_seek_point(tmp_path: Path) -> None:
+    path = generate_test_video(tmp_path / "seek-stopped.mp4", frame_count=24, fps=12)
+    received: list[PresentedVideoFrame] = []
+    source = VideoSourceService(SOURCE_ID, path, on_frame=received.append, clock=AdvancingClock())
+    try:
+        source.seek(1.0)
+        assert source.status().source_time_s == pytest.approx(1.0)
+
+        source.play()
+        assert source.wait_until_finished()
+        assert source.status().state is SourceState.ENDED
+        times = [packet.image.context.source_time_s for packet in received]
+        assert times and all(t >= 1.0 for t in times)
+    finally:
+        source.close()
+
+
+def test_seek_while_paused_applies_on_resume(tmp_path: Path) -> None:
+    path = generate_test_video(tmp_path / "seek-paused.mp4", frame_count=24, fps=12)
+    clock = AdvancingClock()
+    received: list[PresentedVideoFrame] = []
+    paused_at_first = threading.Event()
+    source: VideoSourceService
+
+    def on_frame(packet: PresentedVideoFrame) -> None:
+        received.append(packet)
+        if len(received) == 1:
+            source.pause()
+            paused_at_first.set()
+
+    source = VideoSourceService(SOURCE_ID, path, loop=True, on_frame=on_frame, clock=clock)
+    try:
+        source.play()
+        assert paused_at_first.wait(5.0)
+        source.seek(1.5)
+        assert source.status().source_time_s == pytest.approx(1.5)
+        source.resume()
+        # Resuming after a paused seek restarts the pass at the seek target:
+        # the presented frames land at/after it and the source keeps playing.
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if received and received[-1].image.context.source_time_s >= 1.5:
+                break
+            time.sleep(0.01)
+        assert received[-1].image.context.source_time_s >= 1.5
+        assert source.status().state is SourceState.PLAYING
+    finally:
+        source.close()
+
+
+def test_loop_pass_restarts_from_region_start_not_seek_point(tmp_path: Path) -> None:
+    path = generate_test_video(tmp_path / "seek-loop.mp4", frame_count=24, fps=12)
+    received: list[PresentedVideoFrame] = []
+    resets: list[ResetReason] = []
+    source = VideoSourceService(
+        SOURCE_ID,
+        path,
+        loop=True,
+        loop_start_s=0.5,
+        loop_end_s=1.5,
+        on_frame=received.append,
+        on_reset=resets.append,
+        clock=AdvancingClock(),
+    )
+    try:
+        source.play()
+        assert _wait_for_position(source, 0.9)
+        source.seek(1.3)
+        # The loop pass completes at the region end and restarts at the
+        # region start, not at the seek point.
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            restarted = resets.count(ResetReason.SOURCE_RESTARTED) >= 2
+            if restarted and received:
+                last = received[-1].image.context.source_time_s
+                if 0.5 - 0.02 <= last <= 0.5 + 1 / 12 + 0.02:
+                    break
+            time.sleep(0.01)
+        last = received[-1].image.context.source_time_s
+        assert 0.5 - 0.02 <= last <= 0.5 + 1 / 12 + 0.02
+    finally:
+        source.close()
+
+
+def test_seek_clamps_to_the_played_segment(tmp_path: Path) -> None:
+    path = generate_test_video(tmp_path / "seek-clamp.mp4", frame_count=24, fps=12)
+    source = VideoSourceService(
+        SOURCE_ID,
+        path,
+        loop_start_s=0.5,
+        loop_end_s=1.5,
+        on_frame=lambda _frame: None,
+    )
+    try:
+        source.seek(0.0)
+        assert source.status().source_time_s == pytest.approx(0.5)
+        source.seek(100.0)
+        assert source.status().source_time_s == pytest.approx(1.5)
+    finally:
+        source.close()
+
+
+@pytest.mark.parametrize("position", (-1.0, float("inf"), float("nan")))
+def test_seek_rejects_invalid_positions(tmp_path: Path, position: float) -> None:
+    path = generate_test_video(tmp_path / "seek-invalid.mp4", frame_count=2)
+    source = VideoSourceService(SOURCE_ID, path, on_frame=lambda _frame: None)
+    try:
+        with pytest.raises(ValueError, match="finite"):
+            source.seek(position)
+    finally:
+        source.close()
+
+
+def test_seek_rejects_closed_source(tmp_path: Path) -> None:
+    path = generate_test_video(tmp_path / "seek-closed.mp4", frame_count=2)
+    source = VideoSourceService(SOURCE_ID, path, on_frame=lambda _frame: None)
+    source.close()
+
+    with pytest.raises(RuntimeError, match="closed"):
+        source.seek(0.1)

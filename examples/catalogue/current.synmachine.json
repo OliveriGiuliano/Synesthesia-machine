@@ -682,10 +682,12 @@
     {
       "collapsed": false,
       "id": "65000000-0000-0000-0000-000000000037",
-      "implementation_version": 1,
+      "implementation_version": 2,
       "parameters": {
         "file_path": "",
         "loop": false,
+        "loop_end_s": 0.0,
+        "loop_start_s": 0.0,
         "playback_speed": 1.0,
         "process_every_nth_frame": 1,
         "stream_index": 0

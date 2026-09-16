@@ -101,6 +101,9 @@ class GroupGraphicsItem(QGraphicsObject):
         self._move_start_scene = QPointF()
         self._move_items: list[GroupGraphicsItem] = []
         self._move_start_positions: list[QPointF] = []
+        self._stuck_node_items: list[NodeGraphicsItem] = []
+        self._stuck_node_origins: dict[UUID, tuple[float, float]] = {}
+        self._stuck_node_start_positions: list[QPointF] = []
         self.setFlags(
             QGraphicsItem.GraphicsItemFlag.ItemIsMovable
             | QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
@@ -234,6 +237,27 @@ class GroupGraphicsItem(QGraphicsObject):
             self._move_items = [self]
         self._move_start_scene = event.scenePos()
         self._move_start_positions = [item.pos() for item in self._move_items]
+        self._stuck_node_items = []
+        self._stuck_node_origins = {}
+        self._stuck_node_start_positions = []
+        if (
+            self.model.kind is GroupKind.GROUP
+            and event.button() is Qt.MouseButton.LeftButton
+            and not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+            and self._move_items
+        ):
+            # Groups stick to the nodes they overlap: dragging the group moves
+            # those nodes with it, so a drawn region moves its contents.
+            # Shift at press time suppresses the sticking.
+            body = self.mapToScene(self._body_rect())
+            for node in scene.all_node_items():
+                if body.intersects(node.mapToScene(node.boundingRect())):
+                    self._stuck_node_items.append(node)
+                    self._stuck_node_origins[node.view_model.node_id] = (
+                        node.pos().x(),
+                        node.pos().y(),
+                    )
+                    self._stuck_node_start_positions.append(node.pos())
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         if self._resize_edges is None:
@@ -250,6 +274,10 @@ class GroupGraphicsItem(QGraphicsObject):
                         self._move_items, self._move_start_positions, strict=True
                     ):
                         item.setPos(start.x() + translation.x(), start.y() + translation.y())
+                    for node, start in zip(
+                        self._stuck_node_items, self._stuck_node_start_positions, strict=True
+                    ):
+                        node.setPos(start.x() + translation.x(), start.y() + translation.y())
                     event.accept()
                     return
             super().mouseMoveEvent(event)
@@ -288,11 +316,16 @@ class GroupGraphicsItem(QGraphicsObject):
             return
         super().mouseReleaseEvent(event)
         scene = cast("object | None", self.scene())
+        if scene is not None and self._stuck_node_origins:
+            cast("GraphSceneProtocol", scene).commit_node_move(self._stuck_node_origins)
         if scene is not None:
             cast("GraphSceneProtocol", scene).commit_group_move(self._drag_origin)
         self._drag_origin = {}
         self._move_items = []
         self._move_start_positions = []
+        self._stuck_node_items = []
+        self._stuck_node_origins = {}
+        self._stuck_node_start_positions = []
 
     def _bounded_move_translation(self, desired: QPointF, scene: GraphSceneProtocol) -> QPointF:
         """Intersect the per-group translation bounds so the selection moves as a unit."""
@@ -567,6 +600,7 @@ class NodeGraphicsItem(QGraphicsObject):
             callback,
             compact=True,
             dynamic_choices=dynamic_choices,
+            sibling_values={p.spec.id: p.value for p in self.view_model.parameters},
         )
         editor.setFixedWidth(round(NODE_EDITOR_WIDTH))
         proxy = QGraphicsProxyWidget(self)
@@ -1190,6 +1224,7 @@ class GraphSceneProtocol:
         self, x: float, y: float, width: float, height: float
     ) -> tuple[float, float]: ...
     def selected_node_items(self) -> list[NodeGraphicsItem]: ...
+    def all_node_items(self) -> list[NodeGraphicsItem]: ...
     def selected_node_positions(self) -> dict[UUID, tuple[float, float]]: ...
     def commit_node_move(self, origins: dict[UUID, tuple[float, float]]) -> None: ...
     def selected_group_items(self) -> list[GroupGraphicsItem]: ...

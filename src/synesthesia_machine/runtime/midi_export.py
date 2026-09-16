@@ -17,6 +17,7 @@ opens a MIDI port, sends a note, or plays audio.
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -135,19 +136,25 @@ class _ExportVideoSourceFactory:
         playback_speed: float,
         loop: bool,
         stream_index: int,
+        loop_start_s: float,
+        loop_end_s: float,
         on_frame: object,
         on_reset: object,
     ) -> VideoSourceService:
+        del loop
         return VideoSourceService(
             node_id,
             file_path,
             process_every_nth_frame=process_every_nth_frame,
             playback_speed=playback_speed,
             # Export always simulates a single pass: the saved source's loop
-            # setting is ignored so virtual time reaches the end of the video
-            # and the source reports ENDED, ending the simulation.
+            # setting is ignored so virtual time reaches the end of the
+            # played segment and the source reports ENDED, ending the
+            # simulation.
             loop=False,
             stream_index=stream_index,
+            loop_start_s=loop_start_s,
+            loop_end_s=loop_end_s,
             on_frame=cast(FrameCallback, on_frame),
             on_reset=cast(ResetCallback | None, on_reset),
             clock=FastForwardPlaybackClock(),
@@ -166,25 +173,71 @@ class _NullDeviceCatalogueService:
 
 
 class _SourceFrameCount:
-    __slots__ = ("every", "file_path", "node_id", "stream_index", "total")
+    __slots__ = (
+        "end_s",
+        "every",
+        "file_path",
+        "node_id",
+        "start_s",
+        "stream_index",
+        "timeline_end_s",
+        "total",
+    )
 
-    def __init__(self, node_id: UUID, file_path: str, stream_index: int, every: int) -> None:
+    def __init__(
+        self,
+        node_id: UUID,
+        file_path: str,
+        stream_index: int,
+        every: int,
+        start_s: float = 0.0,
+        end_s: float = 0.0,
+    ) -> None:
         self.node_id = node_id
         self.file_path = file_path
         self.stream_index = stream_index
         self.every = every
+        self.start_s = start_s
+        self.end_s = end_s
         metadata = inspect_video(file_path, stream_index=stream_index)
-        self.total = _processed_frame_count(metadata, every)
+        # A zero end means "until the end of the video"; both timestamps are
+        # clamped to the file so the progress denominator matches the pass
+        # the export actually simulates.
+        duration_s = metadata.duration_s
+        if end_s > 0.0:
+            self.timeline_end_s = end_s
+        elif duration_s is not None:
+            self.timeline_end_s = duration_s
+        else:
+            self.timeline_end_s = 0.0
+        self.total = _processed_frame_count(metadata, every, start_s, end_s)
 
 
-def _processed_frame_count(metadata: VideoMetadata, every: int) -> int | None:
+def _processed_frame_count(
+    metadata: VideoMetadata,
+    every: int,
+    start_s: float = 0.0,
+    end_s: float = 0.0,
+) -> int | None:
+    span = _region_span_s(metadata.duration_s, start_s, end_s)
+    if span <= 0.0:
+        return 0
     if metadata.frame_count is not None and metadata.frame_count > 0:
-        return -(-metadata.frame_count // max(1, every))
+        if metadata.duration_s is None or metadata.duration_s <= 0.0:
+            return -(-metadata.frame_count // max(1, every))
+        region_frames = max(0.0, span / metadata.duration_s) * metadata.frame_count
+        return max(0, int(region_frames) // max(1, every))
     if metadata.duration_s is not None and metadata.average_rate:
-        count = int(max(0.0, metadata.duration_s) * metadata.average_rate) // max(1, every)
+        count = int(max(0.0, span) * metadata.average_rate) // max(1, every)
         if count > 0:
             return count
     return None
+
+
+def _region_span_s(duration_s: float | None, start_s: float, end_s: float) -> float:
+    end = end_s if end_s > 0.0 else (duration_s if duration_s is not None else 0.0)
+    start = min(start_s, end) if end > 0.0 else min(start_s, duration_s or 0.0)
+    return max(0.0, end - start)
 
 
 def _int_parameter(node: NodeModel, parameter_id: str, default: int) -> int:
@@ -236,6 +289,8 @@ def _validate_export_inputs(
                 file_path,
                 _int_parameter(node, "stream_index", 0),
                 _int_parameter(node, "process_every_nth_frame", 1),
+                start_s=_float_parameter(node, "loop_start_s", 0.0),
+                end_s=_float_parameter(node, "loop_end_s", 0.0),
             )
         )
     if not saw_source:
@@ -246,6 +301,15 @@ def _validate_export_inputs(
             "The graph has no MIDI output node (Send MIDI or Generate Audio) to export.",
         )
     return sources, midi_output_ids
+
+
+def _float_parameter(node: NodeModel, parameter_id: str, default: float) -> float:
+    """Read a float node parameter with a tolerant fallback for odd values."""
+
+    value = node.parameters.get(parameter_id, default)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return default
+    return max(0.0, float(value))
 
 
 def run_midi_export(
@@ -369,17 +433,15 @@ def _export_duration(
     collected: Mapping[UUID, list[tuple[float, MidiStateFrame]]],
     sources: Sequence[_SourceFrameCount],
 ) -> float:
-    """End of the simulated timeline: the last captured event or the video end."""
+    """End of the simulated timeline: the last captured event or the segment end."""
 
     last_sample = max(
         (time_s for entries in collected.values() for time_s, _ in entries), default=0.0
     )
-    video_end = 0.0
+    segment_end = 0.0
     for source in sources:
-        metadata = inspect_video(source.file_path, stream_index=source.stream_index)
-        if metadata.duration_s is not None:
-            video_end = max(video_end, metadata.duration_s)
-    return max(last_sample, video_end)
+        segment_end = max(segment_end, source.timeline_end_s)
+    return max(last_sample, segment_end)
 
 
 def _diff_to_events(

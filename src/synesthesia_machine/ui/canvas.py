@@ -421,6 +421,9 @@ class GraphScene(QGraphicsScene):
             if isinstance(item, ConnectionGraphicsItem)
         }
 
+    def all_node_items(self) -> list[NodeGraphicsItem]:
+        return list(self.node_items.values())
+
     def selected_group_items(self) -> list[GroupGraphicsItem]:
         return [
             self.group_items[group_id] for group_id in sorted(self.selected_group_ids(), key=str)

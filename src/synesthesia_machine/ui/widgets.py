@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from functools import partial
 from uuid import UUID
@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from synesthesia_machine.contracts import NodeMemoryDiagnostic
+from synesthesia_machine.contracts import NodeMemoryDiagnostic, SourceStatus
 from synesthesia_machine.graph import (
     LiteralValue,
     ValidationIssue,
@@ -33,9 +33,11 @@ from synesthesia_machine.graph import (
     ValidationSeverity,
 )
 from synesthesia_machine.nodes import NodeDefinition, NodeRegistry
+from synesthesia_machine.nodes.input import LOAD_VIDEO_TYPE_ID
 from synesthesia_machine.ui.canvas import NODE_MIME_TYPE
 from synesthesia_machine.ui.musical_controls import MusicalParameterEditor
 from synesthesia_machine.ui.parameter_editors import create_parameter_editor, parameter_tooltip
+from synesthesia_machine.ui.playback_controls import VideoPlaybackControls
 from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.theme import node_category_color
 from synesthesia_machine.ui.tooltips import format_tooltip
@@ -358,6 +360,8 @@ class NodeSearchDialog(QDialog):
 class InspectorPanel(QWidget):
     """Render selection metadata, scalar editors, and compiler diagnostics."""
 
+    videoSeekRequested = Signal(object, float)
+
     def __init__(self, session: DocumentSession, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("inspector_panel")
@@ -366,6 +370,8 @@ class InspectorPanel(QWidget):
         self._connection_ids: set[UUID] = set()
         self._memory_diagnostic: NodeMemoryDiagnostic | None = None
         self._diagnostic_labels: tuple[QLabel, QLabel, QLabel] | None = None
+        self._playback_controls: VideoPlaybackControls | None = None
+        self._playback_node_id: UUID | None = None
         self.title = QLabel(tr("Nothing selected"), self)
         title_font = self.title.font()
         title_font.setBold(True)
@@ -493,6 +499,7 @@ class InspectorPanel(QWidget):
                 parameter,
                 callback,
                 dynamic_choices=self.session.device_parameter_choices(parameter),
+                sibling_values={p.spec.id: p.value for p in node.parameters},
             )
             label = QLabel(tr(parameter.spec.label), self.form_container)
             help_text = parameter_tooltip(parameter.spec)
@@ -505,6 +512,10 @@ class InspectorPanel(QWidget):
                 help_label.setWordWrap(True)
                 help_label.setStyleSheet("color: #9aa6b2; font-size: 8pt;")
                 self.form.addRow("", help_label)
+        if node.type_id == LOAD_VIDEO_TYPE_ID:
+            self._attach_playback_controls(node.node_id)
+        else:
+            self._playback_node_id = None
         diagnostic = self._memory_diagnostic
         if diagnostic is not None and diagnostic.node_id == node.node_id:
             # Keep references to the value labels so set_memory_diagnostic can
@@ -554,15 +565,41 @@ class InspectorPanel(QWidget):
         if count == 0:
             self.validation.addItem(tr("No validation issues"))
 
+    def _attach_playback_controls(self, node_id: UUID) -> None:
+        self._playback_node_id = node_id
+        controls = self._playback_controls
+        if controls is None:
+            controls = VideoPlaybackControls(self.form_container)
+            controls.seekRequested.connect(self._forward_seek)
+            self._playback_controls = controls
+        self.form.addRow(tr("Playback"), controls)
+
+    def _forward_seek(self, position_s: float) -> None:
+        if self._playback_node_id is not None:
+            self.videoSeekRequested.emit(self._playback_node_id, position_s)
+
+    def set_source_statuses(self, statuses: Sequence[SourceStatus]) -> None:
+        """Refresh the playback controls from the engine's source statuses."""
+
+        if self._playback_controls is None or self._playback_node_id is None:
+            return
+        for status in statuses:
+            if status.node_id == self._playback_node_id:
+                self._playback_controls.set_progress(status.source_time_s, status.duration_s)
+                return
+
     def retranslate(self) -> None:
         self.validation_title.setText(tr("Validation"))
         self.validation.setAccessibleName(tr("Validation issues"))
+        if self._playback_controls is not None:
+            self._playback_controls.retranslate()
         self.refresh()
 
     def _set_parameter(self, node_id: UUID, parameter_id: str, value: LiteralValue) -> None:
         self.session.set_parameter(node_id, parameter_id, value)
 
     def _clear_form(self) -> None:
+        self._playback_node_id = None
         self._diagnostic_labels = None
         while self.form.rowCount():
             self.form.removeRow(0)

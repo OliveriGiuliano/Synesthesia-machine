@@ -92,6 +92,8 @@ class VideoSourceFactory(Protocol):
         playback_speed: float,
         loop: bool,
         stream_index: int,
+        loop_start_s: float,
+        loop_end_s: float,
         on_frame: object,
         on_reset: object,
     ) -> SourceController: ...
@@ -1052,6 +1054,8 @@ class InProcessEngineClient:
                 playback_speed=config.playback_speed,
                 loop=config.loop,
                 stream_index=config.stream_index,
+                loop_start_s=config.loop_start_s,
+                loop_end_s=config.loop_end_s,
                 on_frame=partial(worker.publish, node.node_id),
                 on_reset=partial(worker.reset_source, node.node_id),
             )

@@ -133,6 +133,7 @@ def create_reference_document(media_path: str) -> GraphDocument:
     document = GraphDocument(document_id=UUID("80000000-0000-0000-0000-000000000000"))
     document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         node_id=SOURCE_ID,
         parameters={
             "file_path": media_path,

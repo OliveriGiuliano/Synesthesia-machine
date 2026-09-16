@@ -133,7 +133,7 @@ def test_scheduler_applies_rounds_and_bounds_connected_numeric_parameter() -> No
 def test_dynamic_image_node_resolves_to_channel_and_hides_image_only_parameters() -> None:
     registry = create_application_registry()
     document = GraphDocument()
-    source = document.add_node("synmachine.input.load_video")
+    source = document.add_node("synmachine.input.load_video", implementation_version=2)
     luminance = document.add_node("synmachine.image.to_luminance")
     add = document.add_node("synmachine.image.add_scalar", implementation_version=2)
     # GraphDocument.add_node defaults to implementation version 1; the editor
@@ -430,6 +430,7 @@ def test_parameter_randomization_preserves_context_dependent_video_identity() ->
     document = GraphDocument()
     video = document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         parameters={"file_path": "clip.mkv", "stream_index": 3},
     )
 

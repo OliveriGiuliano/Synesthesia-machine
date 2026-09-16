@@ -54,9 +54,12 @@ def test_legacy_load_video_parameter_is_migrated() -> None:
     text = (FIXTURES / "legacy_video_node_v0.synmachine.json").read_text(encoding="utf-8")
     snapshot = graph_from_json(text, create_application_registry())
 
-    assert snapshot.nodes[0].implementation_version == 1
+    assert snapshot.nodes[0].implementation_version == 2
     assert snapshot.nodes[0].parameters["file_path"] == "media/legacy.mp4"
     assert "path" not in snapshot.nodes[0].parameters
+    # The v1-to-v2 migration back-fills the loop timestamp defaults.
+    assert snapshot.nodes[0].parameters["loop_start_s"] == 0.0
+    assert snapshot.nodes[0].parameters["loop_end_s"] == 0.0
 
 
 @pytest.mark.parametrize(

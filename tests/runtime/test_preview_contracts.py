@@ -70,6 +70,7 @@ def _image_plan() -> ExecutionPlan:
     document = GraphDocument()
     document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         node_id=SOURCE_ID,
         parameters={"file_path": "unused.mp4"},
     )
@@ -89,6 +90,7 @@ def _note_plan() -> ExecutionPlan:
     document = GraphDocument()
     document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         node_id=SOURCE_ID,
         parameters={"file_path": "unused.mp4"},
     )
@@ -110,6 +112,7 @@ def _pill_only_image_plan() -> ExecutionPlan:
     document = GraphDocument()
     document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         node_id=SOURCE_ID,
         parameters={"file_path": "unused.mp4"},
     )

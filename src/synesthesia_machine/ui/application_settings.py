@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
 from PySide6.QtCore import QSettings
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -15,6 +17,8 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
+    QKeySequenceEdit,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -30,6 +34,9 @@ class EditorPreferences:
     grid_size: float = 24.0
     recent_file_limit: int = 8
     language: UiLanguage = UiLanguage.ENGLISH
+    # action key -> QKeySequence string; a key mapped to "" is explicitly
+    # cleared, a missing key keeps the built-in default shortcut.
+    shortcuts: Mapping[str, str] = field(default_factory=dict[str, str])
 
     def __post_init__(self) -> None:
         if not 10 <= self.autosave_delay_seconds <= 3600:
@@ -71,6 +78,7 @@ class ApplicationSettingsStore:
                 maximum=20,
             ),
             language=_language(self.settings.value("editor/language"), defaults.language),
+            shortcuts=self.load_shortcuts(),
         )
 
     def save_preferences(self, preferences: EditorPreferences) -> None:
@@ -79,7 +87,20 @@ class ApplicationSettingsStore:
         self.settings.setValue("editor/gridSize", preferences.grid_size)
         self.settings.setValue("editor/recentFileLimit", preferences.recent_file_limit)
         self.settings.setValue("editor/language", preferences.language.value)
+        self.settings.setValue(
+            "editor/shortcuts", {key: value for key, value in preferences.shortcuts.items()}
+        )
         self.settings.sync()
+
+    def load_shortcuts(self) -> dict[str, str]:
+        raw: object = self.settings.value("editor/shortcuts", {})
+        if not isinstance(raw, dict):
+            return {}
+        return {
+            key: value
+            for key, value in cast(dict[object, object], raw).items()
+            if isinstance(key, str) and isinstance(value, str)
+        }
 
     def load_recent_files(self, limit: int) -> list[Path]:
         raw: object = self.settings.value("recentFiles", [])
@@ -132,10 +153,13 @@ class PreferencesDialog(QDialog):
         self,
         preferences: EditorPreferences,
         parent: QWidget | None = None,
+        shortcut_items: Sequence[tuple[str, str, str]] = (),
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(tr("Preferences"))
         self.setModal(True)
+        self._shortcut_edits: dict[str, QKeySequenceEdit] = {}
+        self._shortcut_items = tuple(shortcut_items)
         self.autosave_delay = QSpinBox(self)
         self.autosave_delay.setRange(10, 3600)
         self.autosave_delay.setSuffix(" s")
@@ -162,6 +186,8 @@ class PreferencesDialog(QDialog):
         form.addRow(tr("Grid spacing"), self.grid_size)
         form.addRow(tr("Recent graphs"), self.recent_limit)
         form.addRow(self.grid_snap)
+        if self._shortcut_items:
+            form.addRow(tr("Shortcuts"), self._build_shortcut_section(preferences))
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
             parent=self,
@@ -173,6 +199,24 @@ class PreferencesDialog(QDialog):
         layout.addLayout(form)
         layout.addWidget(buttons)
 
+    def _build_shortcut_section(self, preferences: EditorPreferences) -> QWidget:
+        shortcut_form = QFormLayout()
+        for key, label, default in self._shortcut_items:
+            edit = QKeySequenceEdit(self)
+            edit.setObjectName(f"shortcut_{key}")
+            edit.setAccessibleName(tr(label))
+            edit.setKeySequence(QKeySequence(preferences.shortcuts.get(key, default)))
+            self._shortcut_edits[key] = edit
+            shortcut_form.addRow(tr(label), edit)
+        shortcut_container = QWidget(self)
+        shortcut_container.setLayout(shortcut_form)
+        shortcut_container.setMinimumHeight(180)
+        shortcuts_scroll = QScrollArea(self)
+        shortcuts_scroll.setObjectName("preferences_shortcuts_scroll")
+        shortcuts_scroll.setWidgetResizable(True)
+        shortcuts_scroll.setWidget(shortcut_container)
+        return shortcuts_scroll
+
     def preferences(self) -> EditorPreferences:
         return EditorPreferences(
             autosave_delay_seconds=self.autosave_delay.value(),
@@ -180,6 +224,9 @@ class PreferencesDialog(QDialog):
             grid_size=self.grid_size.value(),
             recent_file_limit=self.recent_limit.value(),
             language=UiLanguage(str(self.language_combo.currentData())),
+            shortcuts={
+                key: edit.keySequence().toString() for key, edit in self._shortcut_edits.items()
+            },
         )
 
 

@@ -39,6 +39,7 @@ def _video_preview_document(
     document = GraphDocument()
     source_id = document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         parameters={"file_path": str(video_path)},
     )
     resize_id = document.add_node(
@@ -209,7 +210,9 @@ def test_spawned_engine_delivers_scalar_value_preview_for_synesthesia_param(
     video_path = generate_test_video(tmp_path / "value-param-preview.mp4", fps=60)
     document = GraphDocument()
     source_id = document.add_node(
-        "synmachine.input.load_video", parameters={"file_path": str(video_path)}
+        "synmachine.input.load_video",
+        implementation_version=2,
+        parameters={"file_path": str(video_path)},
     )
     luminance_id = document.add_node("synmachine.image.to_luminance")
     pitch_id = document.add_node("synmachine.synesthesia.channel_to_pitch")

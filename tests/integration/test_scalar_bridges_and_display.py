@@ -102,6 +102,7 @@ def _channel_display_plan() -> tuple[ExecutionPlan, PortKey]:
     document = GraphDocument()
     document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         node_id=SOURCE_ID,
         parameters={"file_path": "unused.mp4"},
     )

@@ -34,6 +34,8 @@ class VideoSourceConfig:
     process_every_nth_frame: int
     loop: bool
     stream_index: int
+    loop_start_s: float
+    loop_end_s: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +66,10 @@ def build_video_source_config(params: Mapping[str, object]) -> VideoSourceConfig
         process_every_nth_frame=_require_int(params, "process_every_nth_frame"),
         loop=_require_bool(params, "loop"),
         stream_index=_require_int(params, "stream_index"),
+        # 0.0 means "video start" / "video end", so omitted timestamps fall
+        # back to the same values the node definition declares.
+        loop_start_s=_optional_float(params, "loop_start_s", 0.0),
+        loop_end_s=_optional_float(params, "loop_end_s", 0.0),
     )
 
 
@@ -100,6 +106,12 @@ def _require_float(params: Mapping[str, object], name: str) -> float:
     if not isinstance(value, float):
         raise TypeError(f"Expected float source parameter {name!r}")
     return value
+
+
+def _optional_float(params: Mapping[str, object], name: str, default: float) -> float:
+    if name not in params:
+        return default
+    return _require_float(params, name)
 
 
 def _require_bool(params: Mapping[str, object], name: str) -> bool:

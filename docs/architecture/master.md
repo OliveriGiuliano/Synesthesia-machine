@@ -504,7 +504,8 @@ class NodeRuntime(Protocol):
     def close(self) -> None: ...
 ```
 
-Sources expose start, pause, resume, stop, reload, and close commands plus a callback/mailbox into the engine scheduler.
+Sources expose start, pause, resume, stop, seek, reload, and close commands plus a
+callback/mailbox into the engine scheduler. Sources that cannot seek reject the command.
 
 Sinks must return quickly. Blocking I/O belongs in a dedicated worker owned by the sink runtime.
 
@@ -737,17 +738,29 @@ Use PyAV for container opening, stream selection, decoding, and frame timestamps
 #### Parameters
 
 - `file_path: path`, not connectable.
-- `process_every_nth_frame: int`, minimum 1, live-updateable after a source reset.
 - `loop: bool`, default false.
+- `playback_speed: float`, default 1.0; restarts the source.
+- `loop: bool`, default false.
+- `loop_start_s: float`, seconds from the video start, default 0.0; restarts the source.
+- `loop_end_s: float`, seconds from the video start, default 0.0 meaning "video end";
+  restarts the source. While looping, playback is confined to the segment
+  `[loop_start_s, loop_end_s)`.
 - `stream_index: int`, hidden unless multiple video streams exist.
 
 #### Commands
 
-Play, Pause, Stop, Reload. Seeking is deferred from the minimum vertical slice but the source API must reserve it.
+Play, Pause, Stop, Seek, Reload. Seek jumps to a timestamp clamped to the played
+segment; sources that cannot seek reject the command. The current position is
+reported through the per-source status telemetry (`SourceStatus.source_time_s`).
 
 #### Behaviour
 
-- Opening reads metadata without starting playback.
+- When looping, playback is confined to the segment `[loop_start_s, loop_end_s)`,
+  then restarts at the segment start; 0.0 means the video start / video end.
+- An empty or inverted loop segment falls back to a valid one so a source always
+  has something to play.
+- Seek clamps to the played segment; a seek while stopped records the position for
+  the next play.
 - Play starts from the current position; Stop resets to the start and resets emitted `processed_index`.
 - Pause preserves position and node states; Stop resets the source component's stateful nodes.
 - Real-time pacing uses presentation timestamps relative to a monotonic playback anchor.

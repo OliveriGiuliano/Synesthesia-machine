@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from uuid import UUID
 
 from synesthesia_machine.contracts import (
@@ -12,6 +13,8 @@ from synesthesia_machine.contracts import (
     PortType,
     RuntimeValue,
 )
+from synesthesia_machine.media.video_source import inspect_video
+from synesthesia_machine.media_path import normalize_media_path
 from synesthesia_machine.nodes.base import (
     CachePolicy,
     ExecutionKind,
@@ -22,9 +25,16 @@ from synesthesia_machine.nodes.base import (
     ParameterUpdateMode,
     ResetReason,
 )
-from synesthesia_machine.nodes.migrations import migrate_load_video_v0_to_v1
+from synesthesia_machine.nodes.migrations import (
+    migrate_load_video_v0_to_v1,
+    migrate_load_video_v1_to_v2,
+)
 
 LOAD_VIDEO_TYPE_ID = "synmachine.input.load_video"
+
+_LOOP_TIMESTAMP_IDS = frozenset({"loop_start_s", "loop_end_s"})
+_DURATION_CACHE_MAX_ENTRIES = 128
+_video_duration_cache: dict[tuple[str, int, int], float | None] = {}
 
 
 class LoadVideoRuntime:
@@ -49,11 +59,72 @@ class LoadVideoRuntime:
         return
 
 
+def _video_region_duration(file_path: str, stream_index: int) -> float | None:
+    """Cached playback duration for one video file/stream pair.
+
+    The editor resolver calls this on every re-projection, so the container
+    is only re-opened when the file's mtime (or the stream choice) changes.
+    """
+
+    try:
+        source_path = normalize_media_path(file_path)
+        key = (str(source_path), int(source_path.stat().st_mtime_ns), stream_index)
+    except (OSError, ValueError):
+        return None
+    if key in _video_duration_cache:
+        return _video_duration_cache[key]
+    if len(_video_duration_cache) >= _DURATION_CACHE_MAX_ENTRIES:
+        _video_duration_cache.clear()
+    duration: float | None
+    try:
+        duration = inspect_video(source_path, stream_index=stream_index).duration_s
+    except Exception:
+        duration = None
+    _video_duration_cache[key] = duration
+    return duration
+
+
+def _validate_load_video(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
+    start = parameters.get("loop_start_s")
+    end = parameters.get("loop_end_s")
+    if isinstance(start, float) and isinstance(end, float) and end > 0.0 and start >= end:
+        return ("loop end must be after loop start",)
+    return ()
+
+
+def _load_video_parameter_editor(
+    spec: ParameterSpec, values: Mapping[str, ParameterValue]
+) -> ParameterSpec:
+    """Bound the loop timestamp editors to the video's real time range.
+
+    With a resolvable file the sliders stop at the video's duration; the
+    start timestamp additionally stops at a concrete loop end.
+    """
+
+    if spec.id not in _LOOP_TIMESTAMP_IDS:
+        return spec
+    file_path = values.get("file_path")
+    stream_index = values.get("stream_index")
+    if not isinstance(file_path, str) or not file_path or not isinstance(stream_index, int):
+        return spec
+    duration = _video_region_duration(file_path, stream_index)
+    if duration is None:
+        return spec
+    maximum = float(duration)
+    if spec.id == "loop_start_s":
+        end = values.get("loop_end_s")
+        if isinstance(end, float) and end > 0.0:
+            maximum = min(maximum, end)
+    if maximum <= 0.0:
+        return spec
+    return replace(spec, maximum=maximum)
+
+
 def create_input_definitions() -> tuple[NodeDefinition, ...]:
     return (
         NodeDefinition(
             LOAD_VIDEO_TYPE_ID,
-            1,
+            2,
             "Load Video",
             "Input",
             "Plays a video file.",
@@ -100,9 +171,37 @@ def create_input_definitions() -> tuple[NodeDefinition, ...]:
                     PortType.BOOL,
                     False,
                     help_text=(
-                        "When on, the video plays again from the start when it reaches the end."
+                        "When on, the played segment starts again from the loop start when it "
+                        "reaches the loop end."
                     ),
                     update_mode=ParameterUpdateMode.RESTART_SOURCE,
+                ),
+                ParameterSpec(
+                    "loop_start_s",
+                    "Loop start",
+                    PortType.FLOAT,
+                    0.0,
+                    help_text=(
+                        "Where playback (and the loop) starts in the video, as a timestamp "
+                        "such as 00:01:30. 00:00:00 is the beginning of the file."
+                    ),
+                    minimum=0.0,
+                    update_mode=ParameterUpdateMode.RESTART_SOURCE,
+                    editor_hint=ParameterEditorHint.TIMESTAMP,
+                ),
+                ParameterSpec(
+                    "loop_end_s",
+                    "Loop end",
+                    PortType.FLOAT,
+                    0.0,
+                    help_text=(
+                        "Where playback (and the loop) ends, as a timestamp such as 00:01:30. "
+                        "00:00:00 means the end of the video; otherwise it must stay after the "
+                        "loop start."
+                    ),
+                    minimum=0.0,
+                    update_mode=ParameterUpdateMode.RESTART_SOURCE,
+                    editor_hint=ParameterEditorHint.TIMESTAMP,
                 ),
                 ParameterSpec(
                     "stream_index",
@@ -118,7 +217,9 @@ def create_input_definitions() -> tuple[NodeDefinition, ...]:
             LoadVideoRuntime,
             cache_policy=CachePolicy.NEVER,
             aliases=("video", "movie", "file video"),
-            migrations={0: migrate_load_video_v0_to_v1},
+            parameter_validator=_validate_load_video,
+            parameter_editor_resolver=_load_video_parameter_editor,
+            migrations={0: migrate_load_video_v0_to_v1, 1: migrate_load_video_v1_to_v2},
         ),
     )
 

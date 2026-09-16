@@ -101,6 +101,16 @@ def migrate_load_video_v0_to_v1(data: JsonObject) -> JsonObject:
     return migrated
 
 
+def migrate_load_video_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Load Video v2 adds the optional loop start/end timestamps (seconds)."""
+    migrated = deepcopy(data)
+    parameters = _parameters(migrated)
+    parameters.setdefault("loop_start_s", 0.0)
+    parameters.setdefault("loop_end_s", 0.0)
+    migrated["implementation_version"] = 2
+    return migrated
+
+
 def migrate_hue_v1_to_v2(data: JsonObject) -> JsonObject:
     """Normalize legacy hue turns into the new single-turn literal range."""
 
@@ -256,6 +266,7 @@ __all__ = [
     "migrate_hue_v1_to_v2",
     "migrate_invert_colour_v1_to_v2",
     "migrate_load_video_v0_to_v1",
+    "migrate_load_video_v1_to_v2",
     "migrate_node_data",
     "migrate_number_v0_to_v1",
     "migrate_separate_channels_v1_to_v2",

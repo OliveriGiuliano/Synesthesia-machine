@@ -34,7 +34,7 @@ def test_fan_out_image_branches_merge_to_midi_after_levels_black_point() -> None
     """A low input level must not poison the sibling MIDI branch with NaNs."""
 
     document = GraphDocument()
-    document.add_node("synmachine.input.load_video", node_id=SOURCE_ID)
+    document.add_node("synmachine.input.load_video", implementation_version=2, node_id=SOURCE_ID)
     document.add_node("synmachine.image.to_luminance", node_id=DIRECT_LUMINANCE_ID)
     document.add_node("synmachine.synesthesia.channel_to_pitch", node_id=DIRECT_PITCH_ID)
     document.add_node(

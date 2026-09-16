@@ -20,7 +20,7 @@ from synesthesia_machine.contracts.engine_client import (
 )
 from synesthesia_machine.contracts.runtime_values import ColorValue, NumericMatrix
 
-ENGINE_PROTOCOL_VERSION = 14
+ENGINE_PROTOCOL_VERSION = 15
 
 type SnapshotLiteral = str | int | float | bool | ColorValue | NumericMatrix | None
 

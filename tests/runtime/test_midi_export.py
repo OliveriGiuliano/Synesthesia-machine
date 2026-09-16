@@ -30,7 +30,9 @@ def _video_pitch_midi_document(video: Path, *, loop: bool = False) -> GraphDocum
     parameters: dict[str, object] = {"file_path": str(video)}
     if loop:
         parameters["loop"] = True
-    source = document.add_node("synmachine.input.load_video", parameters=parameters)
+    source = document.add_node(
+        "synmachine.input.load_video", implementation_version=2, parameters=parameters
+    )
     luminance = document.add_node("synmachine.image.to_luminance")
     pitch = document.add_node("synmachine.synesthesia.channel_to_pitch")
     send = document.add_node("synmachine.output.send_midi")
@@ -89,7 +91,11 @@ def test_export_rejects_camera_sources(export_env) -> None:
 def test_export_requires_a_midi_output_node(export_env) -> None:
     video, registry = export_env
     document = GraphDocument()
-    document.add_node("synmachine.input.load_video", parameters={"file_path": str(video)})
+    document.add_node(
+        "synmachine.input.load_video",
+        implementation_version=2,
+        parameters={"file_path": str(video)},
+    )
     with pytest.raises(MidiExportError) as excinfo:
         run_midi_export(document.snapshot(), registry=registry)
     assert excinfo.value.code == "no_midi_output"
@@ -109,6 +115,7 @@ def test_export_rejects_missing_video_files(export_env) -> None:
     document = GraphDocument()
     document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         parameters={"file_path": str(export_env[0].parent / "absent.mp4")},
     )
     document.add_node("synmachine.output.send_midi")
@@ -120,7 +127,11 @@ def test_export_rejects_missing_video_files(export_env) -> None:
 def test_export_rejects_graphs_that_do_not_activate(export_env) -> None:
     video, registry = export_env
     document = GraphDocument()
-    source = document.add_node("synmachine.input.load_video", parameters={"file_path": str(video)})
+    source = document.add_node(
+        "synmachine.input.load_video",
+        implementation_version=2,
+        parameters={"file_path": str(video)},
+    )
     pitch = document.add_node("synmachine.synesthesia.channel_to_pitch")
     send = document.add_node("synmachine.output.send_midi")
     # Wrong type on purpose: an image into a value input is rejected.
@@ -160,7 +171,11 @@ def test_export_of_looping_video_sources_simulates_a_single_pass(export_env) -> 
 def test_export_collects_notes_from_generate_audio_outputs(export_env) -> None:
     video, registry = export_env
     document = GraphDocument()
-    source = document.add_node("synmachine.input.load_video", parameters={"file_path": str(video)})
+    source = document.add_node(
+        "synmachine.input.load_video",
+        implementation_version=2,
+        parameters={"file_path": str(video)},
+    )
     luminance = document.add_node("synmachine.image.to_luminance")
     pitch = document.add_node("synmachine.synesthesia.channel_to_pitch")
     audio = document.add_node("synmachine.output.generate_audio", parameters={"enabled": True})

@@ -163,10 +163,20 @@ class _ManualVideoFactory:
         playback_speed: float,
         loop: bool,
         stream_index: int,
+        loop_start_s: float,
+        loop_end_s: float,
         on_frame: object,
         on_reset: object,
     ) -> _ManualVideoSource:
-        del process_every_nth_frame, playback_speed, loop, stream_index, on_reset
+        del (
+            process_every_nth_frame,
+            playback_speed,
+            loop,
+            stream_index,
+            loop_start_s,
+            loop_end_s,
+            on_reset,
+        )
         assert callable(on_frame)
         source = _ManualVideoSource(
             node_id,
@@ -205,10 +215,12 @@ class _ResettableVideoFactory:
         playback_speed: float,
         loop: bool,
         stream_index: int,
+        loop_start_s: float,
+        loop_end_s: float,
         on_frame: object,
         on_reset: object,
     ) -> _ResettableManualSource:
-        del process_every_nth_frame, playback_speed, loop, stream_index
+        del process_every_nth_frame, playback_speed, loop, stream_index, loop_start_s, loop_end_s
         assert callable(on_frame)
         assert callable(on_reset)
         source = _ResettableManualSource(
@@ -266,6 +278,7 @@ def test_slow_graph_drops_stale_frames_with_bounded_latency_and_visible_metrics(
     document = GraphDocument(document_id=DOCUMENT_ID)
     document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         node_id=SOURCE_ID,
         parameters={"file_path": "simulated.mp4"},
     )
@@ -347,6 +360,7 @@ def test_tick_published_while_source_reset_is_queued_runs_after_the_reset() -> N
     document = GraphDocument(document_id=DOCUMENT_ID)
     document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         node_id=SOURCE_ID,
         parameters={"file_path": "simulated.mp4"},
     )
@@ -392,6 +406,7 @@ def test_plan_metric_reset_clears_stale_input_and_processed_fps_windows() -> Non
     document = GraphDocument(document_id=DOCUMENT_ID)
     document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         node_id=SOURCE_ID,
         parameters={"file_path": "simulated.mp4"},
     )
@@ -445,6 +460,7 @@ def test_slow_preview_conversion_coalesces_without_blocking_graph_ticks() -> Non
     document = GraphDocument(document_id=DOCUMENT_ID)
     document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         node_id=SOURCE_ID,
         parameters={"file_path": "simulated.mp4"},
     )

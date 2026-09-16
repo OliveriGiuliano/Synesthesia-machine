@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QSettings
-from PySide6.QtWidgets import QApplication, QDialogButtonBox
+from PySide6.QtGui import QKeySequence
+from PySide6.QtWidgets import QApplication, QDialogButtonBox, QKeySequenceEdit
 
 from synesthesia_machine.app.settings import ApplicationPaths
 from synesthesia_machine.nodes.utility import create_utility_registry
@@ -48,6 +49,75 @@ def test_preferences_round_trip_and_invalid_values_fall_back(tmp_path: Path) -> 
     broken.setValue("editor/language", "de")
     broken.sync()
     assert ApplicationSettingsStore(_settings(path)).load_preferences() == EditorPreferences()
+
+
+def test_shortcut_preferences_round_trip_and_invalid_values_fall_back(tmp_path: Path) -> None:
+    path = tmp_path / "shortcuts.ini"
+    store = ApplicationSettingsStore(_settings(path))
+    expected = EditorPreferences(shortcuts={"play": "Ctrl+K", "pause": ""})
+    store.save_preferences(expected)
+    assert ApplicationSettingsStore(_settings(path)).load_preferences() == expected
+
+    broken = _settings(path)
+    broken.setValue("editor/shortcuts", "not-a-mapping")
+    broken.sync()
+    reloaded = ApplicationSettingsStore(_settings(path)).load_preferences()
+    assert reloaded.shortcuts == {}
+    assert reloaded.autosave_delay_seconds == expected.autosave_delay_seconds
+
+
+def test_preferences_dialog_edits_shortcut_sequences(qapp: QApplication) -> None:
+    del qapp
+    dialog = PreferencesDialog(
+        EditorPreferences(shortcuts={"play": "Ctrl+K"}),
+        None,
+        shortcut_items=(
+            ("play", "Play", "F5"),
+            ("pause", "Pause", "F6"),
+        ),
+    )
+
+    play_edit = dialog.findChild(QKeySequenceEdit, "shortcut_play")
+    pause_edit = dialog.findChild(QKeySequenceEdit, "shortcut_pause")
+    assert play_edit is not None and pause_edit is not None
+    # A configured override is shown; an unconfigured action keeps its default.
+    assert play_edit.keySequence() == QKeySequence("Ctrl+K")
+    assert pause_edit.keySequence() == QKeySequence("F6")
+
+    play_edit.setKeySequence(QKeySequence("Ctrl+Shift+K"))
+    pause_edit.setKeySequence(QKeySequence())
+    shortcuts = dialog.preferences().shortcuts
+    assert shortcuts["play"] == "Ctrl+Shift+K"
+    assert shortcuts["pause"] == ""
+
+
+def test_main_window_applies_and_reapplies_configured_shortcuts(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    del qapp
+    settings = _settings(tmp_path / "shortcuts.ini")
+    settings.setValue("editor/shortcuts", {"play": "Ctrl+K"})
+    settings.sync()
+    paths = ApplicationPaths(tmp_path / "data", tmp_path / "logs", tmp_path / "recovery")
+    registry = create_utility_registry()
+    window = MainWindow(
+        registry,
+        paths,
+        InProcessEngineClient(registry),
+        settings=settings,
+        offer_recovery=False,
+    )
+    try:
+        assert window.action_registry.require("play").shortcut() == QKeySequence("Ctrl+K")
+        # An empty configured shortcut clears the action's default binding.
+        window.apply_preferences(EditorPreferences(shortcuts={"pause": ""}))
+        assert window.action_registry.require("pause").shortcut().toString() == ""
+        # Falling back to defaults restores the built-in bindings.
+        window.apply_preferences(EditorPreferences())
+        assert window.action_registry.require("play").shortcut() == QKeySequence("F5")
+    finally:
+        window.session.new_document()
+        window.close()
 
 
 def test_recent_files_are_resolved_deduplicated_pruned_and_limited(tmp_path: Path) -> None:

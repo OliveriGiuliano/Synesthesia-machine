@@ -143,6 +143,7 @@ class SourceStatus:
     width: int | None = None
     height: int | None = None
     duration_s: float | None = None
+    source_time_s: float | None = None
     source_frame_index: int | None = None
     processed_index: int = 0
     skipped_by_selection: int = 0

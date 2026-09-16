@@ -119,6 +119,7 @@ class ParameterEditorHint(StrEnum):
 
     DEFAULT = "DEFAULT"
     SLIDER = "SLIDER"
+    TIMESTAMP = "TIMESTAMP"
 
 
 @dataclass(frozen=True, slots=True)

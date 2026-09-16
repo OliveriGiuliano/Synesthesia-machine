@@ -73,10 +73,12 @@
     {
       "collapsed": false,
       "id": "52000000-0000-0000-0000-000000000001",
-      "implementation_version": 1,
+      "implementation_version": 2,
       "parameters": {
         "file_path": "media/reference.mp4",
         "loop": true,
+        "loop_end_s": 0.0,
+        "loop_start_s": 0.0,
         "process_every_nth_frame": 1,
         "stream_index": 0
       },

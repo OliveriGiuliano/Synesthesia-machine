@@ -169,6 +169,7 @@ class MainWindow(QMainWindow):
         self.view = GraphView(self.scene, theme)
         self.library = NodeLibrary(registry, self)
         self.inspector = InspectorPanel(self.session, self)
+        self.inspector.videoSeekRequested.connect(self._on_inspector_video_seek)
         self.issues_panel = ValidationIssuePanel(self)
         self.image_preview_panel = ImagePreviewPanel(self)
         self.note_preview_panel = NotePreviewPanel(self)
@@ -245,6 +246,10 @@ class MainWindow(QMainWindow):
         self._create_actions()
         self._create_toolbar()
         self._create_menus()
+        self._shortcut_labels: dict[str, str] = {}
+        self._shortcut_defaults: dict[str, str] = {}
+        self._snapshot_default_shortcuts()
+        self._apply_shortcuts()
         self._create_status_bar()
         self._connect_signals()
         self._restore_window_state()
@@ -747,6 +752,14 @@ class MainWindow(QMainWindow):
         if target is None:
             return
         self.engine_bridge.reload(target)
+
+    @Slot(object, float)
+    def _on_inspector_video_seek(self, node_id: object, position_s: float) -> None:
+        """Seek the Load Video source shown in the inspector (engine IPC)."""
+
+        if self._engine_closed or not isinstance(node_id, UUID):
+            return
+        self.engine_bridge.seek(node_id, position_s)
 
     @Slot()
     def panic(self) -> None:
@@ -1490,6 +1503,7 @@ class MainWindow(QMainWindow):
         sources = state.source_statuses
         midi_outputs = state.midi_output_statuses
         self.inspector.set_memory_diagnostic(state.diagnostic)
+        self.inspector.set_source_statuses(sources)
         source_text = ", ".join(tr(status.state.value) for status in sources) or tr("no source")
         source_errors = tuple(
             (status.node_id, status.last_error or tr("Unknown source error"))
@@ -1995,9 +2009,40 @@ class MainWindow(QMainWindow):
         self.settings_store.clear_recent()
         self._refresh_recent_menu()
 
+    def _snapshot_default_shortcuts(self) -> None:
+        """Capture each action's built-in shortcut before user overrides apply."""
+
+        for key, source_text, _status_tip in self.action_registry.sources():
+            default = self.action_registry.require(key).shortcut().toString()
+            if not default:
+                continue
+            self._shortcut_defaults[key] = default
+            self._shortcut_labels[key] = tr(source_text).replace("&", "")
+
+    def _shortcut_items(self) -> tuple[tuple[str, str, str], ...]:
+        return tuple(
+            (key, self._shortcut_labels[key], default)
+            for key, default in self._shortcut_defaults.items()
+        )
+
+    def _apply_shortcuts(self) -> None:
+        """Apply configured hotkeys to every registered action.
+
+        A configured shortcut wins over the built-in default; a key mapped to
+        an empty string clears the shortcut entirely.
+        """
+
+        custom = self.preferences.shortcuts
+        for key, default in self._shortcut_defaults.items():
+            sequence = custom.get(key, default)
+            if sequence:
+                self.action_registry.require(key).setShortcut(QKeySequence(sequence))
+            else:
+                self.action_registry.require(key).setShortcut(QKeySequence())
+
     @Slot()
     def edit_preferences(self) -> None:
-        dialog = PreferencesDialog(self.preferences, self)
+        dialog = PreferencesDialog(self.preferences, self, shortcut_items=self._shortcut_items())
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.apply_preferences(dialog.preferences())
 
@@ -2005,6 +2050,7 @@ class MainWindow(QMainWindow):
         language_changed = preferences.language is not self.preferences.language
         self.preferences = preferences
         self.settings_store.save_preferences(preferences)
+        self._apply_shortcuts()
         if language_changed:
             set_language(preferences.language)
         self._autosave_timer.setInterval(preferences.autosave_delay_seconds * 1000)

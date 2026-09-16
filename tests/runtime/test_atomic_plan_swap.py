@@ -532,10 +532,20 @@ class _FakeVideoFactory:
         playback_speed: float,
         loop: bool,
         stream_index: int,
+        loop_start_s: float,
+        loop_end_s: float,
         on_frame: object,
         on_reset: object,
     ) -> _FakeVideoSource:
-        del process_every_nth_frame, loop, stream_index, on_frame, on_reset
+        del (
+            process_every_nth_frame,
+            loop,
+            stream_index,
+            loop_start_s,
+            loop_end_s,
+            on_frame,
+            on_reset,
+        )
         self.playback_speeds.append(playback_speed)
         source = _FakeVideoSource(node_id, str(file_path), self.events)
         self.sources.append(source)
@@ -546,6 +556,7 @@ def _video_document(file_path: str = "first.mp4") -> tuple[GraphDocument, UUID]:
     document = GraphDocument(document_id=DOCUMENT_ID)
     source_id = document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         node_id=SOURCE_A,
         parameters={"file_path": file_path},
     )
@@ -591,6 +602,7 @@ def test_source_controller_retention_restart_and_new_source_start_policy() -> No
 
         new_source_id = document.add_node(
             "synmachine.input.load_video",
+            implementation_version=2,
             node_id=SOURCE_B,
             parameters={"file_path": "new.mp4"},
         )
@@ -611,6 +623,7 @@ def test_source_scoped_transport_preserves_other_sources_and_aggregate_state() -
     document, source_a = _video_document()
     source_b = document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         node_id=SOURCE_B,
         parameters={"file_path": "second.mp4"},
     )

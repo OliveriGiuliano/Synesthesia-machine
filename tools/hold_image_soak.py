@@ -134,7 +134,7 @@ def _git_state() -> tuple[str | None, bool | None]:
 def _compiled_scheduler(*, delay_frames: int, memory_limit_mb: int) -> Scheduler:
     registry = create_application_registry()
     document = GraphDocument(document_id=DOCUMENT_ID)
-    document.add_node("synmachine.input.load_video", node_id=SOURCE_ID)
+    document.add_node("synmachine.input.load_video", implementation_version=2, node_id=SOURCE_ID)
     document.add_node(
         "synmachine.image.hold_image",
         parameters={

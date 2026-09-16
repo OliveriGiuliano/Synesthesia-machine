@@ -59,6 +59,7 @@ def test_client_activates_real_video_and_drives_graph_through_final_api(tmp_path
     document = GraphDocument()
     source_id = document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         parameters={"file_path": str(video)},
     )
     resize_id = document.add_node(
@@ -111,6 +112,7 @@ def test_auto_stop_forgets_the_last_preview_frame(tmp_path: Path) -> None:
     document = GraphDocument()
     source_id = document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         parameters={"file_path": str(video)},
     )
     resize_id = document.add_node(
@@ -151,6 +153,7 @@ def test_invalid_source_path_reports_error_without_rejecting_valid_graph(tmp_pat
     document = GraphDocument()
     source_id = document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         parameters={"file_path": str(tmp_path / "missing.mp4")},
     )
     client = InProcessEngineClient(create_application_registry())
@@ -166,18 +169,25 @@ def test_invalid_source_path_reports_error_without_rejecting_valid_graph(tmp_pat
         client.close()
 
 
-def test_seek_is_explicitly_reserved(tmp_path: Path) -> None:
-    video = generate_test_video(tmp_path / "seek.mp4", frame_count=2)
+def test_seek_moves_video_playback_position(tmp_path: Path) -> None:
+    # 30 frames at 12 fps give a 2.5 s video, so a 0.5 s seek stays inside
+    # the played segment and is not clamped.
+    video = generate_test_video(tmp_path / "seek.mp4", frame_count=30)
     document = GraphDocument()
     source_id = document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         parameters={"file_path": str(video)},
     )
     client = InProcessEngineClient(create_application_registry())
     try:
         assert client.activate(document.snapshot()).activated
-        with pytest.raises(NotImplementedError, match="reserved"):
-            client.seek(source_id, 0.5)
+        client.pause(source_id)
+        client.seek(source_id, 0.5)
+        status = client.source_status(source_id)[0]
+        assert status.state is not SourceState.ERROR
+        assert status.source_time_s is not None
+        assert status.source_time_s == pytest.approx(0.5, abs=0.05)
     finally:
         client.close()
 
@@ -187,6 +197,7 @@ def test_runtime_node_errors_are_exposed_through_typed_engine_metrics(tmp_path: 
     document = GraphDocument()
     source_id = document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         parameters={"file_path": str(video)},
     )
     resize_id = document.add_node(
@@ -229,6 +240,7 @@ def test_broken_graph_stops_the_runtime_and_a_valid_graph_restarts_it(
     document = GraphDocument()
     source_id = document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         parameters={"file_path": str(video)},
     )
     client = InProcessEngineClient(create_application_registry())
@@ -252,6 +264,7 @@ def test_broken_graph_stops_the_runtime_and_a_valid_graph_restarts_it(
         restarted = GraphDocument()
         restarted_source_id = restarted.add_node(
             "synmachine.input.load_video",
+            implementation_version=2,
             parameters={"file_path": str(video)},
         )
         assert client.activate(restarted.snapshot()).activated
@@ -265,6 +278,7 @@ def test_playing_sources_auto_resume_after_broken_graph_stop(tmp_path: Path) -> 
     document = GraphDocument()
     source_id = document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         parameters={"file_path": str(video)},
     )
     client = InProcessEngineClient(create_application_registry())
@@ -296,6 +310,7 @@ def test_paused_sources_are_not_auto_played_after_broken_graph_stop(tmp_path: Pa
     document = GraphDocument()
     source_id = document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         parameters={"file_path": str(video)},
     )
     client = InProcessEngineClient(create_application_registry())
@@ -330,6 +345,7 @@ def test_preview_disabled_engine_spins_no_preview_worker(tmp_path: Path) -> None
     document = GraphDocument()
     source_id = document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         parameters={"file_path": str(video)},
     )
     client = InProcessEngineClient(registry, use_previews=False)
@@ -430,10 +446,21 @@ class _PanicTestVideoFactory:
         playback_speed: float,
         loop: bool,
         stream_index: int,
+        loop_start_s: float,
+        loop_end_s: float,
         on_frame: object,
         on_reset: object,
     ) -> _PanicTestVideoSource:
-        del process_every_nth_frame, playback_speed, loop, stream_index, on_frame, on_reset
+        del (
+            process_every_nth_frame,
+            playback_speed,
+            loop,
+            stream_index,
+            loop_start_s,
+            loop_end_s,
+            on_frame,
+            on_reset,
+        )
         source = _PanicTestVideoSource(node_id, str(file_path))
         self.sources.append(source)
         return source
@@ -449,11 +476,13 @@ def test_pause_panics_only_when_no_source_stays_playing() -> None:
     document = GraphDocument()
     document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         node_id=SOURCE_A,
         parameters={"file_path": "a.mp4"},
     )
     document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         node_id=SOURCE_B,
         parameters={"file_path": "b.mp4"},
     )

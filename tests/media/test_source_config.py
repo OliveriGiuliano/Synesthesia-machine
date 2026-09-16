@@ -33,6 +33,9 @@ def test_build_video_source_config_maps_every_declared_parameter() -> None:
     assert config.process_every_nth_frame == 2
     assert config.loop is True
     assert config.stream_index == 1
+    # Omitted loop timestamps default to "video start" / "video end".
+    assert config.loop_start_s == 0.0
+    assert config.loop_end_s == 0.0
 
 
 def test_build_camera_source_config_maps_parameter_and_converts_backend() -> None:

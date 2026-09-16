@@ -142,7 +142,9 @@ def test_process_metrics_transport_structured_runtime_errors(
     video = generate_test_video(tmp_path / "runtime-error.mp4", frame_count=2)
     document = GraphDocument()
     source_id = document.add_node(
-        "synmachine.input.load_video", parameters={"file_path": str(video)}
+        "synmachine.input.load_video",
+        implementation_version=2,
+        parameters={"file_path": str(video)},
     )
     resize_id = document.add_node(
         "synmachine.image.resize",
@@ -199,6 +201,7 @@ def test_invalid_candidate_stops_the_engine_and_valid_candidate_restarts_it(
     document = GraphDocument()
     source_id = document.add_node(
         "synmachine.input.load_video",
+        implementation_version=2,
         parameters={"file_path": str(video)},
     )
     valid_snapshot = document.snapshot()

@@ -56,11 +56,14 @@ def _export_action(window: MainWindow):
 
 
 def _wire_valid_graph(window: MainWindow, video: str) -> None:
-    document = window.session.document
-    source = document.add_node("synmachine.input.load_video", parameters={"file_path": video})
-    luminance = document.add_node("synmachine.image.to_luminance")
-    pitch = document.add_node("synmachine.synesthesia.channel_to_pitch")
-    send = document.add_node("synmachine.output.send_midi")
+    session = window.session
+    source = session.add_node(
+        "synmachine.input.load_video", (0.0, 0.0), parameters={"file_path": video}
+    )
+    luminance = session.add_node("synmachine.image.to_luminance", (0.0, 100.0))
+    pitch = session.add_node("synmachine.synesthesia.channel_to_pitch", (0.0, 200.0))
+    send = session.add_node("synmachine.output.send_midi", (0.0, 300.0))
+    document = session.document
     document.add_connection(source, "image", luminance, "image")
     document.add_connection(luminance, "channel", pitch, "value")
     document.add_connection(pitch, "midi", send, "midi")
@@ -83,8 +86,7 @@ def test_export_action_enables_for_a_valid_video_to_midi_graph(
 
 
 def test_export_action_reports_the_most_actionable_reason(video_window: MainWindow) -> None:
-    document = video_window.session.document
-    document.add_node("synmachine.output.send_midi")
+    video_window.session.add_node("synmachine.output.send_midi", (0.0, 0.0))
     video_window.session._refresh()
     video_window._refresh_action_states()
     assert not _export_action(video_window).isEnabled()
@@ -92,8 +94,9 @@ def test_export_action_reports_the_most_actionable_reason(video_window: MainWind
 
     # A missing video file yields a more specific reason than the generic
     # invalid-graph text.
-    document.add_node(
+    video_window.session.add_node(
         "synmachine.input.load_video",
+        (0.0, 0.0),
         parameters={"file_path": "/nonexistent/export-midi-test.mp4"},
     )
     video_window.session._refresh()
@@ -103,9 +106,7 @@ def test_export_action_reports_the_most_actionable_reason(video_window: MainWind
 
 
 def test_camera_source_disables_the_action(video_window: MainWindow, tmp_path: Path) -> None:
-    _wire_valid_graph(video_window, str(tmp_path / "hue.mp4"))
-    document = video_window.session.document
-    document.add_node("synmachine.input.load_camera")
+    video_window.session.add_node("synmachine.input.load_camera", (0.0, 0.0))
     video_window.session._refresh()
     video_window._refresh_action_states()
     assert not _export_action(video_window).isEnabled()
@@ -162,14 +163,16 @@ def test_looping_video_source_stays_eligible_for_export(
 ) -> None:
     from synesthesia_machine.ui.midi_export import midi_export_eligibility
 
-    document = video_window.session.document
-    source = document.add_node(
+    session = video_window.session
+    source = session.add_node(
         "synmachine.input.load_video",
+        (0.0, 0.0),
         parameters={"file_path": str(tmp_path / "hue.mp4"), "loop": True},
     )
-    luminance = document.add_node("synmachine.image.to_luminance")
-    pitch = document.add_node("synmachine.synesthesia.channel_to_pitch")
-    send = document.add_node("synmachine.output.send_midi")
+    luminance = session.add_node("synmachine.image.to_luminance", (0.0, 100.0))
+    pitch = session.add_node("synmachine.synesthesia.channel_to_pitch", (0.0, 200.0))
+    send = session.add_node("synmachine.output.send_midi", (0.0, 300.0))
+    document = session.document
     document.add_connection(source, "image", luminance, "image")
     document.add_connection(luminance, "channel", pitch, "value")
     document.add_connection(pitch, "midi", send, "midi")

@@ -70,6 +70,11 @@ class ActionRegistry(QObject):
     def values(self) -> tuple[QAction, ...]:
         return tuple(self._actions.values())
 
+    def sources(self) -> tuple[tuple[str, str, str], ...]:
+        """Registered actions as ``(key, source text, status tip)`` in order."""
+
+        return tuple((key, *value) for key, value in self._sources.items())
+
     def retranslate(self) -> None:
         """Refresh authored action text after an application language change."""
 

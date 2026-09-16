@@ -7,7 +7,7 @@ from dataclasses import replace
 from uuid import UUID
 
 import pytest
-from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtCore import QPoint, QPointF, QRectF, QSizeF, Qt
 from PySide6.QtGui import QUndoStack
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QInputDialog, QWidget
@@ -205,6 +205,78 @@ def test_group_border_drag_resizes_and_is_undoable(qapp: QApplication) -> None:
     restored = session.document.group(group_id)
     assert restored is not None
     assert restored.size == (300.0, 120.0)
+    view.close()
+
+
+def test_group_drag_sticks_to_overlapping_nodes(qapp: QApplication) -> None:
+    session = DocumentSession(create_utility_registry())
+    scene = GraphScene(session, DEFAULT_THEME)
+    group_id = session.add_group(
+        GroupKind.GROUP, (100.0, 100.0), title="Batch", size=(400.0, 300.0)
+    )
+    inside = session.add_node("synmachine.utility.number", (130.0, 130.0))
+    outside = session.add_node("synmachine.utility.number", (600.0, 400.0))
+    view = GraphView(scene, DEFAULT_THEME)
+    view.resize(900, 600)
+    view.show()
+    qapp.processEvents()
+
+    press_scene = QPointF(450.0, 200.0)
+    node_item = scene.node_items[inside]
+    top_left = node_item.mapToScene(QPointF(0.0, 0.0))
+    node_rect = QRectF(
+        top_left, QSizeF(node_item.boundingRect().width(), node_item.boundingRect().height())
+    )
+    assert not node_rect.contains(press_scene)
+
+    press = view.mapFromScene(press_scene)
+    destination = press + QPoint(120, 0)
+    QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=press)
+    QTest.mouseMove(view.viewport(), destination)
+    qapp.processEvents()
+    # While the drag is in flight the overlapping node follows the group.
+    in_flight = scene.node_items[inside].pos()
+    assert (in_flight.x(), in_flight.y()) == pytest.approx((250.0, 130.0))
+    QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=destination)
+    qapp.processEvents()
+
+    moved = session.document.node(inside)
+    assert moved is not None and moved.position == (250.0, 130.0)
+    stayed = session.document.node(outside)
+    assert stayed is not None and stayed.position == (600.0, 400.0)
+    group = session.document.group(group_id)
+    assert group is not None and group.position == pytest.approx((220.0, 100.0))
+    view.close()
+
+
+def test_group_drag_with_shift_held_does_not_stick_to_nodes(qapp: QApplication) -> None:
+    session = DocumentSession(create_utility_registry())
+    scene = GraphScene(session, DEFAULT_THEME)
+    group_id = session.add_group(
+        GroupKind.GROUP, (100.0, 100.0), title="Batch", size=(400.0, 300.0)
+    )
+    inside = session.add_node("synmachine.utility.number", (130.0, 130.0))
+    view = GraphView(scene, DEFAULT_THEME)
+    view.resize(900, 600)
+    view.show()
+    qapp.processEvents()
+
+    press = view.mapFromScene(QPointF(450.0, 200.0))
+    destination = press + QPoint(120, 0)
+    QTest.mousePress(
+        view.viewport(),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.ShiftModifier,
+        pos=press,
+    )
+    QTest.mouseMove(view.viewport(), destination)
+    QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=destination)
+    qapp.processEvents()
+
+    node = session.document.node(inside)
+    assert node is not None and node.position == (130.0, 130.0)
+    group = session.document.group(group_id)
+    assert group is not None and group.position == pytest.approx((220.0, 100.0))
     view.close()
 
 

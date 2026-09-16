@@ -105,6 +105,16 @@ and exposed through one reusable editor group/view model.
   the media timestamps attached to emitted frames. Updating it restarts the source and resets its
   source-clock component.
 
+- **Loop region:** `Loop start` and `Loop end` are timestamps in seconds from the start of
+  the video, edited as a slider plus a `HH:MM:SS` field. While `Loop` is on, playback replays
+  only the segment between them, then returns to the start of the segment. A value of `0:00:00`
+  means "the whole video" on that side, the start cannot be past the end, and both are kept
+  inside the file's duration. Changing either timestamp restarts the source.
+- **Playback controls:** for a Load Video node the inspector shows a progress slider and
+  rewind/forward buttons that seek 5 or 15 seconds back and forward. The slider follows the
+  engine's reported position; drag it to scrub, and the slider is not moved by telemetry while
+  you hold it down. Seeks are clamped to the loop segment when one is active.
+
 ## Runtime and diagnostic contract
 
 Required-input `NoData` is propagated by the Scheduler before these runtimes execute. Runtime validation
