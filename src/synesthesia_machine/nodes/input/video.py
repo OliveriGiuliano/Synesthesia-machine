@@ -22,6 +22,7 @@ from synesthesia_machine.nodes.base import (
     ParameterUpdateMode,
     ResetReason,
 )
+from synesthesia_machine.nodes.migrations import migrate_load_video_v0_to_v1
 
 LOAD_VIDEO_TYPE_ID = "synmachine.input.load_video"
 
@@ -117,6 +118,7 @@ def create_input_definitions() -> tuple[NodeDefinition, ...]:
             LoadVideoRuntime,
             cache_policy=CachePolicy.NEVER,
             aliases=("video", "movie", "file video"),
+            migrations={0: migrate_load_video_v0_to_v1},
         ),
     )
 

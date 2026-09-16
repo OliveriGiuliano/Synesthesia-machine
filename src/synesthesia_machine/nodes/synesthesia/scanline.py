@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from typing import cast
 from uuid import UUID
 
 import numpy as np
@@ -64,9 +65,9 @@ class ScanlineRuntime:
         context: FrameContext,
     ) -> Mapping[str, RuntimeValue]:
         try:
-            channel = _channel(inputs["value"])
-            direction = _text(parameters["direction"])
-            advance_rows = _integer(parameters["advance_rows"])
+            channel = cast(ChannelFrame, inputs["value"])
+            direction = cast(str, parameters["direction"])
+            advance_rows = cast(int, parameters["advance_rows"])
             _validate_direction(direction)
             _validate_advance_rows(advance_rows)
             height = channel.data.shape[0]
@@ -77,11 +78,11 @@ class ScanlineRuntime:
             midi = scanline_to_midi_state(
                 channel,
                 row_index=self._row_index,
-                line_thickness=_integer(parameters["line_thickness"]),
-                metric=_text(parameters["metric"]),
-                aggregation=_text(parameters["aggregation"]),
-                activation_threshold=_number(parameters["activation_threshold"]),
-                velocity_curve_exponent=_number(parameters["velocity_curve_exponent"]),
+                line_thickness=cast(int, parameters["line_thickness"]),
+                metric=cast(str, parameters["metric"]),
+                aggregation=cast(str, parameters["aggregation"]),
+                activation_threshold=cast(float, parameters["activation_threshold"]),
+                velocity_curve_exponent=cast(float, parameters["velocity_curve_exponent"]),
                 settings=settings,
                 node_id=self.node_id,
                 context=context,
@@ -347,37 +348,13 @@ def _validate_advance_rows(advance_rows: int) -> None:
 def _validate_parameters(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
     errors = list(validate_common_musical_parameters(parameters))
     try:
-        metric = _text(parameters["metric"])
+        metric = cast(str, parameters["metric"])
     except (KeyError, TypeError, ValueError) as error:
         errors.append(str(error))
         return errors
     if metric not in SCANLINE_METRICS:
         errors.append(f"Unknown scanline metric: {metric!r}")
     return errors
-
-
-def _channel(value: object) -> ChannelFrame:
-    if isinstance(value, ChannelFrame):
-        return value
-    raise TypeError(f"Expected ChannelFrame, got {type(value).__name__}")
-
-
-def _integer(value: object) -> int:
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    raise TypeError(f"Expected integer value, got {type(value).__name__}")
-
-
-def _number(value: object) -> float:
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    raise TypeError(f"Expected numeric value, got {type(value).__name__}")
-
-
-def _text(value: object) -> str:
-    if isinstance(value, str):
-        return value
-    raise TypeError(f"Expected string value, got {type(value).__name__}")
 
 
 __all__ = [

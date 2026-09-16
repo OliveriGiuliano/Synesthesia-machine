@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from functools import partial
+from typing import cast
 from uuid import UUID
 
 from synesthesia_machine.contracts import (
@@ -62,15 +63,13 @@ class SendMidiRuntime:
                 self._service.request_panic()
                 self._input_missing = True
             return {}
-        if not isinstance(midi, MidiStateFrame):
-            raise TypeError("Send MIDI requires MIDI state input")
         self._input_missing = False
         configuration = MidiOutputConfiguration(
-            output_port=_text(parameters["output_port"]),
-            velocity_policy=VelocityUpdatePolicy(_text(parameters["velocity_update_policy"])),
-            velocity_change_threshold=_integer(parameters["velocity_change_threshold"]),
+            output_port=cast(str, parameters["output_port"]),
+            velocity_policy=VelocityUpdatePolicy(cast(str, parameters["velocity_update_policy"])),
+            velocity_change_threshold=cast(int, parameters["velocity_change_threshold"]),
         )
-        self._service.publish(midi, configuration)
+        self._service.publish(cast(MidiStateFrame, midi), configuration)
         status = self._service.status()
         if configuration.output_port and status.connection_state in {
             MidiOutputConnectionState.ERROR,
@@ -163,18 +162,6 @@ def create_midi_output_definitions(
             aliases=("midi output", "send notes", "rtmidi"),
         ),
     )
-
-
-def _integer(value: ParameterValue) -> int:
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise TypeError("Expected integer parameter")
-    return value
-
-
-def _text(value: ParameterValue) -> str:
-    if not isinstance(value, str):
-        raise TypeError("Expected text parameter")
-    return value
 
 
 __all__ = ["SEND_MIDI_TYPE_ID", "SendMidiRuntime", "create_midi_output_definitions"]

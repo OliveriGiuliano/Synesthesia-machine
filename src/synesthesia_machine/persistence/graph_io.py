@@ -23,7 +23,7 @@ from synesthesia_machine.graph import (
     NodeModel,
 )
 from synesthesia_machine.media_path import normalize_media_path
-from synesthesia_machine.nodes import NodeRegistry
+from synesthesia_machine.nodes import NodeRegistry, migrate_node_data
 from synesthesia_machine.nodes.input import LOAD_VIDEO_TYPE_ID
 from synesthesia_machine.persistence.media_relink import (
     MEDIA_ABSOLUTE_FALLBACK_KEY,
@@ -31,7 +31,6 @@ from synesthesia_machine.persistence.media_relink import (
     MEDIA_SIZE_KEY,
     media_fingerprint,
 )
-from synesthesia_machine.persistence.node_migrations import BUILTIN_NODE_MIGRATIONS
 from synesthesia_machine.persistence.schemas import (
     GRAPH_SCHEMA_VERSION,
     ConnectionSchemaV1,
@@ -431,9 +430,10 @@ def _node_from_data(value: object, registry: NodeRegistry, index: int) -> NodeMo
         try:
             data = cast(
                 "dict[str, object]",
-                BUILTIN_NODE_MIGRATIONS.migrate(
+                migrate_node_data(
+                    type_id,
+                    definition.migrations,
                     cast("JsonObject", data),
-                    type_id=type_id,
                     target_version=definition.implementation_version,
                 ).data,
             )

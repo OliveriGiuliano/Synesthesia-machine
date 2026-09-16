@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from typing import cast
 from uuid import UUID
 
 from synesthesia_machine.contracts.runtime_values import (
@@ -23,6 +24,7 @@ from synesthesia_machine.nodes.base import (
     ResetReason,
     TypeVariable,
 )
+from synesthesia_machine.nodes.migrations import migrate_number_v0_to_v1
 from synesthesia_machine.nodes.registry import NodeRegistry
 from synesthesia_machine.nodes.utility.dynamic import create_dynamic_definitions
 from synesthesia_machine.nodes.utility.midi import create_midi_utility_definitions
@@ -51,8 +53,8 @@ class NumberRuntime(_RuntimeBase):
     ) -> Mapping[str, RuntimeValue]:
         del inputs, context
         if parameters["number_type"] == "INT":
-            return {"value": _integer(parameters["int_value"])}
-        return {"value": _number(parameters["float_value"])}
+            return {"value": cast(int, parameters["int_value"])}
+        return {"value": cast(float, parameters["float_value"])}
 
 
 class PassThroughRuntime(_RuntimeBase):
@@ -74,7 +76,8 @@ class ConditionalRuntime(_RuntimeBase):
         context: FrameContext,
     ) -> Mapping[str, RuntimeValue]:
         del parameters, context
-        return {"value": inputs["if_true"] if _boolean(inputs["condition"]) else inputs["if_false"]}
+        value = inputs["if_true"] if cast(bool, inputs["condition"]) else inputs["if_false"]
+        return {"value": value}
 
 
 class CompareRuntime(_RuntimeBase):
@@ -85,8 +88,8 @@ class CompareRuntime(_RuntimeBase):
         context: FrameContext,
     ) -> Mapping[str, RuntimeValue]:
         del context
-        a, b = _number(inputs["a"]), _number(inputs["b"])
-        operation = _text(parameters["operation"])
+        a, b = cast(float, inputs["a"]), cast(float, inputs["b"])
+        operation = cast(str, parameters["operation"])
         if operation == "EQ":
             value = a == b
         elif operation == "NE":
@@ -103,8 +106,8 @@ class CompareRuntime(_RuntimeBase):
             value = math.isclose(
                 a,
                 b,
-                rel_tol=_number(parameters["relative_tolerance"]),
-                abs_tol=_number(parameters["absolute_tolerance"]),
+                rel_tol=cast(float, parameters["relative_tolerance"]),
+                abs_tol=cast(float, parameters["absolute_tolerance"]),
             )
         return {"value": value}
 
@@ -117,8 +120,8 @@ class LogicRuntime(_RuntimeBase):
         context: FrameContext,
     ) -> Mapping[str, RuntimeValue]:
         del context
-        a, b = _boolean(inputs["a"]), _boolean(inputs["b"])
-        operation = _text(parameters["operation"])
+        a, b = cast(bool, inputs["a"]), cast(bool, inputs["b"])
+        operation = cast(str, parameters["operation"])
         values = {
             "AND": a and b,
             "OR": a or b,
@@ -138,8 +141,8 @@ class MathRuntime(_RuntimeBase):
         context: FrameContext,
     ) -> Mapping[str, RuntimeValue]:
         del context
-        a = _number(inputs["a"])
-        operation = _text(parameters["operation"])
+        a = cast(float, inputs["a"])
+        operation = cast(str, parameters["operation"])
         try:
             if operation == "ABS":
                 return {"value": abs(a)}
@@ -157,7 +160,7 @@ class MathRuntime(_RuntimeBase):
                 return {"value": math.cos(a)}
             if operation == "TAN":
                 return {"value": math.tan(a)}
-            b = _number(inputs["b"])
+            b = cast(float, inputs["b"])
             if operation == "ADD":
                 value = a + b
             elif operation == "SUBTRACT":
@@ -233,6 +236,7 @@ def create_utility_registry() -> NodeRegistry:
             cache_policy=CachePolicy.STATIC,
             port_type_resolver=_number_port_type,
             aliases=("constant", "literal", "scalar"),
+            migrations={0: migrate_number_v0_to_v1},
         ),
         NodeDefinition(
             "synmachine.utility.pass_through",
@@ -382,27 +386,3 @@ def create_utility_registry() -> NodeRegistry:
         *create_dynamic_definitions(),
     )
     return NodeRegistry(definitions)
-
-
-def _number(value: object) -> float:
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    raise TypeError(f"Expected numeric value, got {type(value).__name__}")
-
-
-def _integer(value: object) -> int:
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    raise TypeError(f"Expected integer value, got {type(value).__name__}")
-
-
-def _boolean(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
-    raise TypeError(f"Expected boolean value, got {type(value).__name__}")
-
-
-def _text(value: object) -> str:
-    if isinstance(value, str):
-        return value
-    raise TypeError(f"Expected string value, got {type(value).__name__}")

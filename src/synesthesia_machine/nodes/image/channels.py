@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from typing import cast
 
 from synesthesia_machine.contracts import (
+    ChannelFrame,
     ColorSpace,
     FrameContext,
     FrameProvenance,
+    ImageFrame,
     NoData,
     ParameterValue,
     PortType,
@@ -33,12 +36,10 @@ from synesthesia_machine.nodes import (
     ParameterSpec,
     ParameterUpdateMode,
 )
-from synesthesia_machine.nodes.image.runtime_support import (
-    StatelessImageRuntime,
-    channel_value,
-    image_value,
-    number_value,
-    text_value,
+from synesthesia_machine.nodes.image.runtime_support import StatelessImageRuntime
+from synesthesia_machine.nodes.migrations import (
+    migrate_combine_channels_v1_to_v2,
+    migrate_separate_channels_v1_to_v2,
 )
 
 
@@ -53,12 +54,12 @@ class BlendImagesRuntime(StatelessImageRuntime):
         mask_value = inputs.get("mask")
         try:
             result = blend_images(
-                image_value(inputs["a"]),
-                image_value(inputs["b"]),
-                blend_mode=BlendMode(text_value(parameters["blend_mode"])),
-                opacity=number_value(inputs.get("opacity", parameters["opacity"])),
-                alpha_policy=AlphaPolicy(text_value(parameters["alpha_policy"])),
-                mask=None if mask_value is None else channel_value(mask_value),
+                cast(ImageFrame, inputs["a"]),
+                cast(ImageFrame, inputs["b"]),
+                blend_mode=BlendMode(cast(str, parameters["blend_mode"])),
+                opacity=cast(float, inputs.get("opacity", parameters["opacity"])),
+                alpha_policy=AlphaPolicy(cast(str, parameters["alpha_policy"])),
+                mask=None if mask_value is None else cast(ChannelFrame, mask_value),
             )
         except (TypeError, ValueError) as error:
             raise ExpectedNodeError("invalid_blend_images", str(error)) from error
@@ -75,7 +76,7 @@ class SeparateChannelsRuntime(StatelessImageRuntime):
         del parameters, context
         # Sources never carry an alpha channel, so the node exposes the three
         # descriptor channels; a fourth (alpha) view would be dead clutter.
-        channels = separate_image_channels(image_value(inputs["image"]))[:3]
+        channels = separate_image_channels(cast(ImageFrame, inputs["image"]))[:3]
         return {
             f"channel_{index}": NoData if channel is None else channel
             for index, channel in enumerate(channels, start=1)
@@ -90,7 +91,7 @@ class CombineChannelsRuntime(StatelessImageRuntime):
         context: FrameContext,
     ) -> Mapping[str, RuntimeValue]:
         del context
-        target = ColorSpace(text_value(parameters["target_colour_space"]))
+        target = ColorSpace(cast(str, parameters["target_colour_space"]))
         required_count = len(color_space_descriptor(target).channels)
         required_values = tuple(
             inputs.get(f"channel_{index}", NoData) for index in range(1, required_count + 1)
@@ -98,7 +99,7 @@ class CombineChannelsRuntime(StatelessImageRuntime):
         if any(value is NoData for value in required_values):
             return {"image": NoData}
         try:
-            channels = tuple(channel_value(value) for value in required_values)
+            channels = tuple(cast(ChannelFrame, value) for value in required_values)
             result = combine_channels(
                 channels,
                 target,
@@ -118,14 +119,14 @@ class ImageToLuminanceRuntime(StatelessImageRuntime):
     ) -> Mapping[str, RuntimeValue]:
         del parameters, context
         try:
-            result = image_to_luminance(image_value(inputs["image"]))
+            result = image_to_luminance(cast(ImageFrame, inputs["image"]))
         except (TypeError, ValueError) as error:
             raise ExpectedNodeError("invalid_image_to_luminance", str(error)) from error
         return {"channel": result}
 
 
 def _validate_blend_parameters(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
-    opacity = number_value(parameters["opacity"])
+    opacity = cast(float, parameters["opacity"])
     if not math.isfinite(opacity):
         return ("opacity must be finite",)
     if not 0.0 <= opacity <= 1.0:
@@ -134,7 +135,7 @@ def _validate_blend_parameters(parameters: Mapping[str, ParameterValue]) -> Sequ
 
 
 def _required_combine_inputs(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
-    target = ColorSpace(text_value(parameters["target_colour_space"]))
+    target = ColorSpace(cast(str, parameters["target_colour_space"]))
     return tuple(
         f"channel_{index}" for index in range(1, len(color_space_descriptor(target).channels) + 1)
     )
@@ -221,6 +222,7 @@ def create_channel_definitions() -> tuple[NodeDefinition, ...]:
             ExecutionKind.STATELESS,
             SeparateChannelsRuntime,
             aliases=("split channels", "rgb channels", "hsv channels"),
+            migrations={1: migrate_separate_channels_v1_to_v2},
         ),
         NodeDefinition(
             "synmachine.image.combine_channels",
@@ -261,6 +263,7 @@ def create_channel_definitions() -> tuple[NodeDefinition, ...]:
             handles_no_data=True,
             required_input_resolver=_required_combine_inputs,
             aliases=("merge channels", "assemble image", "channels to image"),
+            migrations={1: migrate_combine_channels_v1_to_v2},
         ),
         NodeDefinition(
             "synmachine.image.to_luminance",

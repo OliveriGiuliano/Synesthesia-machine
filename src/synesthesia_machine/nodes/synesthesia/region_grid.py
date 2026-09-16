@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import cast
 from uuid import UUID
 
 import numpy as np
@@ -73,11 +74,11 @@ class RegionGridRuntime:
     ) -> Mapping[str, RuntimeValue]:
         try:
             midi = region_grid_to_midi_state(
-                _image(inputs["image"]),
-                metric=_text(parameters["metric"]),
-                grid_rows=_integer(parameters["grid_rows"]),
-                grid_columns=_integer(parameters["grid_columns"]),
-                activation_threshold=_number(parameters["activation_threshold"]),
+                cast(ImageFrame, inputs["image"]),
+                metric=cast(str, parameters["metric"]),
+                grid_rows=cast(int, parameters["grid_rows"]),
+                grid_columns=cast(int, parameters["grid_columns"]),
+                activation_threshold=cast(float, parameters["activation_threshold"]),
                 settings=resolve_common_musical_settings(parameters),
                 node_id=self.node_id,
                 context=context,
@@ -332,38 +333,14 @@ def _validate_parameters(parameters: Mapping[str, ParameterValue]) -> Sequence[s
     errors = list(validate_common_musical_parameters(parameters))
     try:
         _validate_algorithm_parameters(
-            metric=_text(parameters["metric"]),
-            grid_rows=_integer(parameters["grid_rows"]),
-            grid_columns=_integer(parameters["grid_columns"]),
-            activation_threshold=_number(parameters["activation_threshold"]),
+            metric=cast(str, parameters["metric"]),
+            grid_rows=cast(int, parameters["grid_rows"]),
+            grid_columns=cast(int, parameters["grid_columns"]),
+            activation_threshold=cast(float, parameters["activation_threshold"]),
         )
     except (KeyError, TypeError, ValueError) as error:
         errors.append(str(error))
     return errors
-
-
-def _image(value: object) -> ImageFrame:
-    if isinstance(value, ImageFrame):
-        return value
-    raise TypeError(f"Expected ImageFrame, got {type(value).__name__}")
-
-
-def _integer(value: object) -> int:
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    raise TypeError(f"Expected integer value, got {type(value).__name__}")
-
-
-def _number(value: object) -> float:
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    raise TypeError(f"Expected numeric value, got {type(value).__name__}")
-
-
-def _text(value: object) -> str:
-    if isinstance(value, str):
-        return value
-    raise TypeError(f"Expected string value, got {type(value).__name__}")
 
 
 __all__ = [

@@ -5,18 +5,18 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
 import pytest
+from tests.support.graph_factories import make_definition
 from tools.validate_graphs import validate_paths
 
 from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.graph import GraphCompiler
-from synesthesia_machine.persistence import (
-    GraphPersistenceError,
-    NodeMigrationRegistry,
-    graph_from_json,
+from synesthesia_machine.nodes import migrate_node_data
+from synesthesia_machine.nodes.migrations import (
     migrate_adjustment_channel_selection_v1_to_v2,
     migrate_change_colour_space_v1_to_v2,
     migrate_channel_display_v1_to_v2,
@@ -27,6 +27,10 @@ from synesthesia_machine.persistence import (
     migrate_invert_colour_v1_to_v2,
     migrate_separate_channels_v1_to_v2,
     migrate_statistics_v1_to_v2,
+)
+from synesthesia_machine.persistence import (
+    GraphPersistenceError,
+    graph_from_json,
     migrate_v2_to_v3,
     migrate_v3_to_v4,
 )
@@ -117,7 +121,10 @@ def test_legacy_display_preview_params_are_dropped_purely(
     assert migrated["parameters"] == {"fit_mode": "FILL"}
 
 
-def test_registry_applies_multiple_steps_sequentially_and_purely() -> None:
+def test_definition_migrations_apply_multiple_steps_sequentially_and_purely() -> None:
+    # Each NodeDefinition owns its (from_version -> step) chain; the loader
+    # looks up the definition through the injected registry and drives the
+    # chain with migrate_node_data, never a separately hard-coded table.
     def step(target_version: int):  # type: ignore[no-untyped-def]
         def migrate(data):  # type: ignore[no-untyped-def]
             migrated = deepcopy(data)
@@ -127,8 +134,12 @@ def test_registry_applies_multiple_steps_sequentially_and_purely() -> None:
 
         return migrate
 
-    registry = NodeMigrationRegistry({("test.node", 0): step(1), ("test.node", 1): step(2)})
-    source = {
+    definition = replace(
+        make_definition("test.node"),
+        implementation_version=2,
+        migrations={0: step(1), 1: step(2)},
+    )
+    source: JsonObject = {
         "id": "70000000-0000-0000-0000-000000000020",
         "type_id": "test.node",
         "implementation_version": 0,
@@ -136,7 +147,7 @@ def test_registry_applies_multiple_steps_sequentially_and_purely() -> None:
     }
     original = deepcopy(source)
 
-    result = registry.migrate(source, type_id="test.node", target_version=2)  # type: ignore[arg-type]
+    result = migrate_node_data("test.node", definition.migrations, source, target_version=2)
 
     assert source == original
     assert tuple((step.from_version, step.to_version) for step in result.steps) == ((0, 1), (1, 2))

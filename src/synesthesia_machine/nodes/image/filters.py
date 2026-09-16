@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Mapping, Sequence
+from typing import cast
 from uuid import UUID
 
 import numpy as np
@@ -52,15 +53,10 @@ from synesthesia_machine.nodes import (
     ParameterSpec,
     TypeVariable,
 )
-from synesthesia_machine.nodes.image.runtime_support import (
-    StatelessImageRuntime,
-    boolean_value,
-    channel_value,
-    image_value,
-    integer_value,
-    matrix_value,
-    number_value,
-    text_value,
+from synesthesia_machine.nodes.image.runtime_support import StatelessImageRuntime
+from synesthesia_machine.nodes.migrations import (
+    NodeMigration,
+    migrate_adjustment_channel_selection_v1_to_v2,
 )
 
 IMAGE_OR_CHANNEL = TypeVariable("IMAGE_OR_CHANNEL", frozenset({PortType.IMAGE, PortType.CHANNEL}))
@@ -120,8 +116,8 @@ class ThresholdRuntime(StatelessImageRuntime):
         del context
         try:
             result = threshold_channel(
-                channel_value(inputs["channel"]),
-                mode=ThresholdMode(text_value(parameters["mode"])),
+                cast(ChannelFrame, inputs["channel"]),
+                mode=ThresholdMode(cast(str, parameters["mode"])),
                 threshold=_number(inputs, parameters, "threshold"),
                 maximum=_number(inputs, parameters, "maximum"),
             )
@@ -140,12 +136,12 @@ class CannyRuntime(StatelessImageRuntime):
         del context
         try:
             result = canny_image(
-                image_value(inputs["image"]),
-                low_threshold=number_value(parameters["low_threshold"]),
-                high_threshold=number_value(parameters["high_threshold"]),
-                aperture_size=integer_value(parameters["aperture_size"]),
-                l2_gradient=boolean_value(parameters["l2_gradient"]),
-                pre_blur_sigma=number_value(parameters["pre_blur_sigma"]),
+                cast(ImageFrame, inputs["image"]),
+                low_threshold=cast(float, parameters["low_threshold"]),
+                high_threshold=cast(float, parameters["high_threshold"]),
+                aperture_size=cast(int, parameters["aperture_size"]),
+                l2_gradient=cast(bool, parameters["l2_gradient"]),
+                pre_blur_sigma=cast(float, parameters["pre_blur_sigma"]),
             )
         except (TypeError, ValueError) as error:
             raise ExpectedNodeError("invalid_canny", str(error)) from error
@@ -172,7 +168,7 @@ def _number(
     parameters: Mapping[str, ParameterValue],
     parameter_id: str,
 ) -> float:
-    return number_value(inputs.get(parameter_id, parameters[parameter_id]))
+    return cast(float, inputs.get(parameter_id, parameters[parameter_id]))
 
 
 def _gaussian_blur(
@@ -184,11 +180,11 @@ def _gaussian_blur(
     del inputs, context
     return gaussian_blur_image(
         image,
-        kernel_width=integer_value(parameters["kernel_width"]),
-        kernel_height=integer_value(parameters["kernel_height"]),
-        sigma_x=number_value(parameters["sigma_x"]),
-        sigma_y=number_value(parameters["sigma_y"]),
-        border_mode=BorderMode(text_value(parameters["border_mode"])),
+        kernel_width=cast(int, parameters["kernel_width"]),
+        kernel_height=cast(int, parameters["kernel_height"]),
+        sigma_x=cast(float, parameters["sigma_x"]),
+        sigma_y=cast(float, parameters["sigma_y"]),
+        border_mode=BorderMode(cast(str, parameters["border_mode"])),
     )
 
 
@@ -201,10 +197,10 @@ def _sharpen(
     del inputs, context
     return sharpen_image(
         image,
-        amount=number_value(parameters["amount"]),
-        sigma=number_value(parameters["sigma"]),
-        threshold=number_value(parameters["threshold"]),
-        border_mode=BorderMode(text_value(parameters["border_mode"])),
+        amount=cast(float, parameters["amount"]),
+        sigma=cast(float, parameters["sigma"]),
+        threshold=cast(float, parameters["threshold"]),
+        border_mode=BorderMode(cast(str, parameters["border_mode"])),
     )
 
 
@@ -217,13 +213,13 @@ def _add_noise(
     del inputs
     return add_noise_image(
         image,
-        noise_type=NoiseType(text_value(parameters["noise_type"])),
-        amount=number_value(parameters["amount"]),
-        seed=integer_value(parameters["seed"]),
-        monochrome=boolean_value(parameters["monochrome"]),
-        animate_seed=boolean_value(parameters["animate_seed"]),
+        noise_type=NoiseType(cast(str, parameters["noise_type"])),
+        amount=cast(float, parameters["amount"]),
+        seed=cast(int, parameters["seed"]),
+        monochrome=cast(bool, parameters["monochrome"]),
+        animate_seed=cast(bool, parameters["animate_seed"]),
         tick_index=context.tick_index,
-        selection=ChannelSelection(text_value(parameters["channels"])),
+        selection=ChannelSelection(cast(str, parameters["channels"])),
     )
 
 
@@ -236,9 +232,9 @@ def _posterize(
     del inputs, context
     return posterize_image(
         image,
-        levels=integer_value(parameters["levels"]),
-        clamp_input=boolean_value(parameters["clamp_input"]),
-        selection=ChannelSelection(text_value(parameters["channels"])),
+        levels=cast(int, parameters["levels"]),
+        clamp_input=cast(bool, parameters["clamp_input"]),
+        selection=ChannelSelection(cast(str, parameters["channels"])),
     )
 
 
@@ -251,11 +247,11 @@ def _convolve(
     del inputs, context
     return convolve_image(
         image,
-        kernel=matrix_value(parameters["kernel"]),
-        normalization=ConvolutionNormalization(text_value(parameters["normalization"])),
-        scale=number_value(parameters["scale"]),
-        delta=number_value(parameters["delta"]),
-        border_mode=BorderMode(text_value(parameters["border_mode"])),
+        kernel=cast(NumericMatrix, parameters["kernel"]),
+        normalization=ConvolutionNormalization(cast(str, parameters["normalization"])),
+        scale=cast(float, parameters["scale"]),
+        delta=cast(float, parameters["delta"]),
+        border_mode=BorderMode(cast(str, parameters["border_mode"])),
     )
 
 
@@ -268,14 +264,14 @@ def _morph(
     operation = dilate_image if dilate else erode_image
     return operation(
         image,
-        kernel_shape=MorphKernelShape(text_value(parameters["kernel_shape"])),
-        kernel_width=integer_value(parameters["kernel_width"]),
-        kernel_height=integer_value(parameters["kernel_height"]),
-        iterations=integer_value(parameters["iterations"]),
-        anchor_x=integer_value(parameters["anchor_x"]),
-        anchor_y=integer_value(parameters["anchor_y"]),
-        border_mode=BorderMode(text_value(parameters["border_mode"])),
-        process_alpha=boolean_value(parameters["process_alpha"]),
+        kernel_shape=MorphKernelShape(cast(str, parameters["kernel_shape"])),
+        kernel_width=cast(int, parameters["kernel_width"]),
+        kernel_height=cast(int, parameters["kernel_height"]),
+        iterations=cast(int, parameters["iterations"]),
+        anchor_x=cast(int, parameters["anchor_x"]),
+        anchor_y=cast(int, parameters["anchor_y"]),
+        border_mode=BorderMode(cast(str, parameters["border_mode"])),
+        process_alpha=cast(bool, parameters["process_alpha"]),
     )
 
 
@@ -308,10 +304,10 @@ def _high_pass(
     del inputs, context
     return high_pass_image(
         image,
-        sigma=number_value(parameters["sigma"]),
-        display_offset=number_value(parameters["display_offset"]),
-        gain=number_value(parameters["gain"]),
-        border_mode=BorderMode(text_value(parameters["border_mode"])),
+        sigma=cast(float, parameters["sigma"]),
+        display_offset=cast(float, parameters["display_offset"]),
+        gain=cast(float, parameters["gain"]),
+        border_mode=BorderMode(cast(str, parameters["border_mode"])),
     )
 
 
@@ -324,8 +320,8 @@ def _low_pass(
     del inputs, context
     return low_pass_image(
         image,
-        sigma=number_value(parameters["sigma"]),
-        border_mode=BorderMode(text_value(parameters["border_mode"])),
+        sigma=cast(float, parameters["sigma"]),
+        border_mode=BorderMode(cast(str, parameters["border_mode"])),
     )
 
 
@@ -391,8 +387,8 @@ def _float_parameter(
 
 
 def _validate_gaussian(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
-    width = integer_value(parameters["kernel_width"])
-    height = integer_value(parameters["kernel_height"])
+    width = cast(int, parameters["kernel_width"])
+    height = cast(int, parameters["kernel_height"])
     try:
         validate_odd_kernel(width, height)
     except ValueError as error:
@@ -401,8 +397,8 @@ def _validate_gaussian(parameters: Mapping[str, ParameterValue]) -> Sequence[str
 
 
 def _validate_sharpen(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
-    sigma = number_value(parameters["sigma"])
-    threshold = number_value(parameters["threshold"])
+    sigma = cast(float, parameters["sigma"])
+    threshold = cast(float, parameters["threshold"])
     errors: list[str] = []
     if sigma <= 0.0:
         errors.append("sigma must be positive")
@@ -412,7 +408,7 @@ def _validate_sharpen(parameters: Mapping[str, ParameterValue]) -> Sequence[str]
 
 
 def _validate_noise(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
-    amount = number_value(parameters["amount"])
+    amount = cast(float, parameters["amount"])
     if amount < 0.0:
         return ("amount must be non-negative",)
     if parameters["noise_type"] == NoiseType.SALT_AND_PEPPER.value and amount > 1.0:
@@ -421,9 +417,9 @@ def _validate_noise(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
 
 
 def _validate_canny(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
-    low = number_value(parameters["low_threshold"])
-    high = number_value(parameters["high_threshold"])
-    sigma = number_value(parameters["pre_blur_sigma"])
+    low = cast(float, parameters["low_threshold"])
+    high = cast(float, parameters["high_threshold"])
+    sigma = cast(float, parameters["pre_blur_sigma"])
     errors: list[str] = []
     if not 0.0 <= low <= 1.0 or not 0.0 <= high <= 1.0:
         errors.append("Canny thresholds must be between 0 and 1")
@@ -435,12 +431,12 @@ def _validate_canny(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
 
 
 def _validate_convolve(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
-    kernel = matrix_value(parameters["kernel"])
+    kernel = cast(NumericMatrix, parameters["kernel"])
     try:
         validate_odd_kernel(kernel.width, kernel.height, maximum=15)
     except ValueError as error:
         return (str(error),)
-    normalization = ConvolutionNormalization(text_value(parameters["normalization"]))
+    normalization = ConvolutionNormalization(cast(str, parameters["normalization"]))
     if normalization is ConvolutionNormalization.SUM_TO_ONE:
         denominator = sum(sum(row) for row in kernel.rows)
     elif normalization is ConvolutionNormalization.ABSOLUTE_SUM_TO_ONE:
@@ -451,14 +447,14 @@ def _validate_convolve(parameters: Mapping[str, ParameterValue]) -> Sequence[str
 
 
 def _validate_morph(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
-    width = integer_value(parameters["kernel_width"])
-    height = integer_value(parameters["kernel_height"])
+    width = cast(int, parameters["kernel_width"])
+    height = cast(int, parameters["kernel_height"])
     try:
         validate_odd_kernel(width, height)
     except ValueError as error:
         return (str(error),)
-    anchor_x = integer_value(parameters["anchor_x"])
-    anchor_y = integer_value(parameters["anchor_y"])
+    anchor_x = cast(int, parameters["anchor_x"])
+    anchor_y = cast(int, parameters["anchor_y"])
     if (anchor_x, anchor_y) == (-1, -1):
         return ()
     if anchor_x < 0 or anchor_y < 0 or anchor_x >= width or anchor_y >= height:
@@ -472,7 +468,7 @@ def _validate_positive(
     def validate(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
         return (
             ()
-            if number_value(parameters[parameter_id]) > 0.0
+            if cast(float, parameters[parameter_id]) > 0.0
             else (f"{parameter_id} must be positive",)
         )
 
@@ -491,7 +487,7 @@ def _combined_validator(
         finite_errors = tuple(
             f"{parameter_id} must be finite"
             for parameter_id in float_parameter_ids
-            if not math.isfinite(number_value(parameters[parameter_id]))
+            if not math.isfinite(cast(float, parameters[parameter_id]))
         )
         if finite_errors:
             return finite_errors
@@ -510,6 +506,7 @@ def _definition(
     aliases: tuple[str, ...] = (),
     validator: Callable[[Mapping[str, ParameterValue]], Sequence[str]] | None = None,
     implementation_version: int = 1,
+    migrations: Mapping[int, NodeMigration] | None = None,
 ) -> NodeDefinition:
     return NodeDefinition(
         type_id,
@@ -525,6 +522,7 @@ def _definition(
         aliases=aliases,
         parameter_validator=_combined_validator(parameters, validator),
         port_type_resolver=_dynamic_image_channel_type,
+        migrations=migrations or {},
     )
 
 
@@ -917,6 +915,7 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
             aliases=("grain", "random", "salt pepper"),
             validator=_validate_noise,
             implementation_version=2,
+            migrations={1: migrate_adjustment_channel_selection_v1_to_v2},
         ),
         _definition(
             "synmachine.image.posterize",
@@ -926,6 +925,7 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
             _posterize,
             aliases=("quantize", "colour levels", "color levels"),
             implementation_version=2,
+            migrations={1: migrate_adjustment_channel_selection_v1_to_v2},
         ),
         NodeDefinition(
             "synmachine.image.threshold",

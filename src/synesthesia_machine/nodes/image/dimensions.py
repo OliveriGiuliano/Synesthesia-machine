@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
+from typing import cast
 from uuid import UUID
 
 import numpy as np
@@ -44,14 +45,7 @@ from synesthesia_machine.nodes import (
     ParameterSpec,
     TypeVariable,
 )
-from synesthesia_machine.nodes.image.runtime_support import (
-    StatelessImageRuntime,
-    boolean_value,
-    color_value,
-    integer_value,
-    number_value,
-    text_value,
-)
+from synesthesia_machine.nodes.image.runtime_support import StatelessImageRuntime
 
 IMAGE_OR_CHANNEL = TypeVariable("IMAGE_OR_CHANNEL", frozenset({PortType.IMAGE, PortType.CHANNEL}))
 
@@ -68,11 +62,11 @@ class ResizeRuntime(StatelessImageRuntime):
             source = _image_or_channel(inputs["image"])
             result = resize_image(
                 _as_image(source, self.node_id),
-                integer_value(inputs.get("width", parameters["width"])),
-                integer_value(inputs.get("height", parameters["height"])),
-                preserve_aspect=boolean_value(parameters["preserve_aspect"]),
-                fit_mode=FitMode(text_value(parameters["fit_mode"])),
-                interpolation=Interpolation(text_value(parameters["interpolation"])),
+                cast(int, inputs.get("width", parameters["width"])),
+                cast(int, inputs.get("height", parameters["height"])),
+                preserve_aspect=cast(bool, parameters["preserve_aspect"]),
+                fit_mode=FitMode(cast(str, parameters["fit_mode"])),
+                interpolation=Interpolation(cast(str, parameters["interpolation"])),
             )
         except ValueError as error:
             raise ExpectedNodeError("invalid_resize", str(error)) from error
@@ -94,13 +88,13 @@ class CropRuntime(StatelessImageRuntime):
             else:
                 result = crop_image(
                     source,
-                    coordinate_mode=CoordinateMode(text_value(parameters["coordinate_mode"])),
-                    left=number_value(parameters["left"]),
-                    top=number_value(parameters["top"]),
-                    right=number_value(parameters["right"]),
-                    bottom=number_value(parameters["bottom"]),
-                    out_of_bounds=CropOutOfBounds(text_value(parameters["out_of_bounds"])),
-                    pad_colour=color_value(parameters["pad_colour"]),
+                    coordinate_mode=CoordinateMode(cast(str, parameters["coordinate_mode"])),
+                    left=cast(float, parameters["left"]),
+                    top=cast(float, parameters["top"]),
+                    right=cast(float, parameters["right"]),
+                    bottom=cast(float, parameters["bottom"]),
+                    out_of_bounds=CropOutOfBounds(cast(str, parameters["out_of_bounds"])),
+                    pad_colour=cast(ColorValue, parameters["pad_colour"]),
                 )
         except ValueError as error:
             raise ExpectedNodeError("invalid_crop", str(error)) from error
@@ -118,7 +112,7 @@ class FlipRuntime(StatelessImageRuntime):
         try:
             source = _image_or_channel(inputs["image"])
             result = flip_image(
-                _as_image(source, self.node_id), FlipMode(text_value(parameters["mode"]))
+                _as_image(source, self.node_id), FlipMode(cast(str, parameters["mode"]))
             )
         except ValueError as error:
             raise ExpectedNodeError("invalid_flip", str(error)) from error
@@ -137,15 +131,13 @@ class RotateRuntime(StatelessImageRuntime):
             source = _image_or_channel(inputs["image"])
             result = rotate_image(
                 _as_image(source, self.node_id),
-                angle_degrees=number_value(
-                    inputs.get("angle_degrees", parameters["angle_degrees"])
-                ),
-                centre_x=number_value(inputs.get("centre_x", parameters["centre_x"])),
-                centre_y=number_value(inputs.get("centre_y", parameters["centre_y"])),
-                expand_canvas=boolean_value(parameters["expand_canvas"]),
-                interpolation=Interpolation(text_value(parameters["interpolation"])),
-                border_mode=BorderMode(text_value(parameters["border_mode"])),
-                border_colour=color_value(parameters["border_colour"]),
+                angle_degrees=cast(float, inputs.get("angle_degrees", parameters["angle_degrees"])),
+                centre_x=cast(float, inputs.get("centre_x", parameters["centre_x"])),
+                centre_y=cast(float, inputs.get("centre_y", parameters["centre_y"])),
+                expand_canvas=cast(bool, parameters["expand_canvas"]),
+                interpolation=Interpolation(cast(str, parameters["interpolation"])),
+                border_mode=BorderMode(cast(str, parameters["border_mode"])),
+                border_colour=cast(ColorValue, parameters["border_colour"]),
             )
         except ValueError as error:
             raise ExpectedNodeError("invalid_rotation", str(error)) from error
@@ -153,7 +145,7 @@ class RotateRuntime(StatelessImageRuntime):
 
 
 def _validate_crop(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
-    bounds = tuple(number_value(parameters[key]) for key in ("left", "top", "right", "bottom"))
+    bounds = tuple(cast(float, parameters[key]) for key in ("left", "top", "right", "bottom"))
     if not all(math.isfinite(value) for value in bounds):
         return ("crop bounds must be finite",)
     left, top, right, bottom = bounds
@@ -506,8 +498,8 @@ def _restore_type(
 
 def _crop_channel(channel: ChannelFrame, parameters: Mapping[str, ParameterValue]) -> ChannelFrame:
     height, width = channel.data.shape
-    bounds = [number_value(parameters[key]) for key in ("left", "top", "right", "bottom")]
-    if CoordinateMode(text_value(parameters["coordinate_mode"])) is CoordinateMode.NORMALIZED:
+    bounds = [cast(float, parameters[key]) for key in ("left", "top", "right", "bottom")]
+    if CoordinateMode(cast(str, parameters["coordinate_mode"])) is CoordinateMode.NORMALIZED:
         left, top, right, bottom = (
             round(bounds[0] * width),
             round(bounds[1] * height),
@@ -520,7 +512,7 @@ def _crop_channel(channel: ChannelFrame, parameters: Mapping[str, ParameterValue
     if target_width <= 0 or target_height <= 0:
         raise ValueError("crop bounds must produce a non-empty channel")
     outside = left < 0 or top < 0 or right > width or bottom > height
-    policy = CropOutOfBounds(text_value(parameters["out_of_bounds"]))
+    policy = CropOutOfBounds(cast(str, parameters["out_of_bounds"]))
     if policy is CropOutOfBounds.ERROR and outside:
         raise ValueError("crop bounds extend outside the source channel")
     source_left, source_top = max(0, left), max(0, top)

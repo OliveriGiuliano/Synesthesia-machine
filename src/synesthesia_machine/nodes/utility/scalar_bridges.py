@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
+from typing import cast
 from uuid import UUID
 
 import numpy as np
@@ -54,12 +55,12 @@ class RemapNumberRuntime(_ScalarBridgeRuntime):
         del context
         try:
             value = _remap_number(
-                _number(inputs["value"]),
+                cast(float, inputs["value"]),
                 input_minimum=_connected_number(inputs, parameters, "input_minimum"),
                 input_maximum=_connected_number(inputs, parameters, "input_maximum"),
                 output_minimum=_connected_number(inputs, parameters, "output_minimum"),
                 output_maximum=_connected_number(inputs, parameters, "output_maximum"),
-                clamp=_boolean(parameters["clamp"]),
+                clamp=cast(bool, parameters["clamp"]),
             )
         except (ArithmeticError, TypeError, ValueError) as error:
             raise ExpectedNodeError("invalid_remap_number", str(error)) from error
@@ -74,13 +75,13 @@ class FloatToIntegerRuntime(_ScalarBridgeRuntime):
         context: FrameContext,
     ) -> Mapping[str, RuntimeValue]:
         del context
-        value = _number(inputs["value"])
+        value = cast(float, inputs["value"])
         if not math.isfinite(value):
             raise ExpectedNodeError(
                 "finite_required",
                 "Float to Integer requires a finite input value",
             )
-        mode = IntegerConversionMode(_text(parameters["mode"]))
+        mode = IntegerConversionMode(cast(str, parameters["mode"]))
         if mode is IntegerConversionMode.ROUND:
             result = round(value)
         elif mode is IntegerConversionMode.FLOOR:
@@ -119,7 +120,7 @@ def _remap_number(
 
 
 def _validate_remap(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
-    if _number(parameters["input_minimum"]) == _number(parameters["input_maximum"]):
+    if cast(float, parameters["input_minimum"]) == cast(float, parameters["input_maximum"]):
         return ("input endpoints must not be equal",)
     return ()
 
@@ -225,25 +226,7 @@ def _connected_number(
     parameters: Mapping[str, ParameterValue],
     parameter_id: str,
 ) -> float:
-    return _number(inputs.get(parameter_id, parameters[parameter_id]))
-
-
-def _number(value: object) -> float:
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    raise TypeError(f"Expected number, got {type(value).__name__}")
-
-
-def _boolean(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
-    raise TypeError(f"Expected boolean, got {type(value).__name__}")
-
-
-def _text(value: object) -> str:
-    if isinstance(value, str):
-        return value
-    raise TypeError(f"Expected string, got {type(value).__name__}")
+    return cast(float, inputs.get(parameter_id, parameters[parameter_id]))
 
 
 __all__ = [

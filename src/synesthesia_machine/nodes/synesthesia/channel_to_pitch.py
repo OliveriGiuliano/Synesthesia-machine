@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from typing import cast
 from uuid import UUID
 
 import cv2
@@ -51,26 +52,26 @@ class ChannelToPitchRuntime:
         try:
             musical = resolve_common_musical_settings(parameters)
             midi = channel_histogram_to_midi_state(
-                _channel(inputs["value"]),
+                cast(ChannelFrame, inputs["value"]),
                 node_id=self.node_id,
                 context=context,
                 selector=musical.selector,
-                parameter_a=_optional_channel(inputs.get("parameter_a")),
-                parameter_b=_optional_channel(inputs.get("parameter_b")),
-                occupancy_threshold_percent=_number(parameters["occupancy_threshold_percent"]),
-                minimum_a=_number(inputs.get("minimum_a", parameters["minimum_a"])),
+                parameter_a=cast(ChannelFrame | None, inputs.get("parameter_a")),
+                parameter_b=cast(ChannelFrame | None, inputs.get("parameter_b")),
+                occupancy_threshold_percent=cast(float, parameters["occupancy_threshold_percent"]),
+                minimum_a=cast(float, inputs.get("minimum_a", parameters["minimum_a"])),
                 maximum_a=(
-                    _number(inputs.get("maximum_a", parameters["maximum_a"]))
-                    if _boolean(parameters["maximum_a_enabled"])
+                    cast(float, inputs.get("maximum_a", parameters["maximum_a"]))
+                    if cast(bool, parameters["maximum_a_enabled"])
                     else None
                 ),
-                minimum_b=_number(inputs.get("minimum_b", parameters["minimum_b"])),
+                minimum_b=cast(float, inputs.get("minimum_b", parameters["minimum_b"])),
                 maximum_b=(
-                    _number(inputs.get("maximum_b", parameters["maximum_b"]))
-                    if _boolean(parameters["maximum_b_enabled"])
+                    cast(float, inputs.get("maximum_b", parameters["maximum_b"]))
+                    if cast(bool, parameters["maximum_b_enabled"])
                     else None
                 ),
-                ignore_non_finite=_boolean(parameters["ignore_non_finite"]),
+                ignore_non_finite=cast(bool, parameters["ignore_non_finite"]),
                 midi_channel=musical.midi_channel,
                 maximum_polyphony=musical.maximum_polyphony,
                 minimum_velocity=musical.minimum_velocity,
@@ -316,12 +317,12 @@ def create_synesthesia_definitions() -> tuple[NodeDefinition, ...]:
 
 def _validate_parameters(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
     errors = list(validate_common_musical_parameters(parameters))
-    if _boolean(parameters["maximum_a_enabled"]) and _number(parameters["minimum_a"]) > _number(
-        parameters["maximum_a"]
+    if cast(bool, parameters["maximum_a_enabled"]) and cast(float, parameters["minimum_a"]) > cast(
+        float, parameters["maximum_a"]
     ):
         errors.append("Minimum A cannot exceed maximum A")
-    if _boolean(parameters["maximum_b_enabled"]) and _number(parameters["minimum_b"]) > _number(
-        parameters["maximum_b"]
+    if cast(bool, parameters["maximum_b_enabled"]) and cast(float, parameters["minimum_b"]) > cast(
+        float, parameters["maximum_b"]
     ):
         errors.append("Minimum B cannot exceed maximum B")
     return errors
@@ -345,25 +346,3 @@ def _occupancy_strength(occupancy: float, threshold: float) -> float | None:
     if occupancy <= threshold:
         return None
     return (occupancy - threshold) / (1.0 - threshold)
-
-
-def _channel(value: object) -> ChannelFrame:
-    if isinstance(value, ChannelFrame):
-        return value
-    raise TypeError(f"Expected ChannelFrame, got {type(value).__name__}")
-
-
-def _optional_channel(value: object | None) -> ChannelFrame | None:
-    return None if value is None else _channel(value)
-
-
-def _number(value: object) -> float:
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    raise TypeError(f"Expected numeric value, got {type(value).__name__}")
-
-
-def _boolean(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
-    raise TypeError(f"Expected boolean value, got {type(value).__name__}")

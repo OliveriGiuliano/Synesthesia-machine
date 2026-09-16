@@ -20,6 +20,10 @@ from synesthesia_machine.nodes.base import (
     ParameterSpec,
     ResetReason,
 )
+from synesthesia_machine.nodes.migrations import (
+    migrate_channel_display_v1_to_v2,
+    migrate_display_image_data_v1_to_v2,
+)
 
 DISPLAY_IMAGE_DATA_TYPE_ID = "synmachine.visualization.display_image_data"
 CHANNEL_DISPLAY_TYPE_ID = "synmachine.visualization.channel_display"
@@ -100,6 +104,7 @@ def create_visualization_definitions() -> tuple[NodeDefinition, ...]:
             _VisualizerRuntime,
             cache_policy=CachePolicy.NEVER,
             aliases=("image preview", "view image", "monitor image"),
+            migrations={1: migrate_display_image_data_v1_to_v2},
         ),
         NodeDefinition(
             CHANNEL_DISPLAY_TYPE_ID,
@@ -145,6 +150,7 @@ def create_visualization_definitions() -> tuple[NodeDefinition, ...]:
             _VisualizerRuntime,
             cache_policy=CachePolicy.NEVER,
             aliases=("channel preview", "view channel", "monitor channel"),
+            migrations={1: migrate_channel_display_v1_to_v2},
         ),
         NodeDefinition(
             NOTE_VISUALIZER_TYPE_ID,

@@ -35,6 +35,10 @@ from synesthesia_machine.contracts import (
 )
 from synesthesia_machine.graph.model import GraphSnapshot
 from synesthesia_machine.media.camera_source import CameraBackendPreference, CameraSourceService
+from synesthesia_machine.media.source_config import (
+    build_camera_source_config,
+    build_video_source_config,
+)
 from synesthesia_machine.media.video_source import PresentedSourceFrame, VideoSourceService
 from synesthesia_machine.nodes.base import ResetReason
 from synesthesia_machine.nodes.input import LOAD_CAMERA_TYPE_ID, LOAD_VIDEO_TYPE_ID
@@ -45,6 +49,7 @@ from synesthesia_machine.runtime.device_catalogue import (
 )
 from synesthesia_machine.runtime.engine_facade import EngineFacade
 from synesthesia_machine.runtime.execution_plan import CompiledNode, ExecutionPlan, PortKey
+from synesthesia_machine.runtime.preview_channel import InMemoryPreviewTransport, PreviewTransport
 from synesthesia_machine.runtime.previews import (
     PreviewBroker,
     _PreviewConfiguration,  # type: ignore[reportPrivateUsage]  # null broker returns the real type
@@ -647,6 +652,7 @@ class InProcessEngineClient:
         tick_observer: TickObserver | None = None,
         use_previews: bool = True,
         preview_dirty_notifier: Callable[[], None] | None = None,
+        preview_transport: PreviewTransport | None = None,
     ) -> None:
         self._lock = threading.RLock()
         self._profiler = RuntimeProfiler()
@@ -658,8 +664,14 @@ class InProcessEngineClient:
         self._device_catalogue_service = device_catalogue_service or SystemDeviceCatalogueService()
         self._worker_clock = worker_clock
         self._use_previews = use_previews
+        self._preview_transport = (
+            preview_transport if preview_transport is not None else InMemoryPreviewTransport()
+        )
         self._preview_broker: PreviewBroker | _NoPreviewBroker = (
-            PreviewBroker(dirty_notifier=preview_dirty_notifier)
+            PreviewBroker(
+                transport=self._preview_transport,
+                dirty_notifier=preview_dirty_notifier,
+            )
             if use_previews
             else _NoPreviewBroker()
         )
@@ -1032,13 +1044,14 @@ class InProcessEngineClient:
     ) -> SourceController:
         file_path = _text_parameter(node, "file_path")
         try:
+            config = build_video_source_config(node.parameters)
             return self._video_source_factory(
                 node.node_id,
-                file_path,
-                process_every_nth_frame=_int_parameter(node, "process_every_nth_frame"),
-                playback_speed=_float_parameter(node, "playback_speed"),
-                loop=_bool_parameter(node, "loop"),
-                stream_index=_int_parameter(node, "stream_index"),
+                config.file_path,
+                process_every_nth_frame=config.process_every_nth_frame,
+                playback_speed=config.playback_speed,
+                loop=config.loop,
+                stream_index=config.stream_index,
                 on_frame=partial(worker.publish, node.node_id),
                 on_reset=partial(worker.reset_source, node.node_id),
             )
@@ -1050,17 +1063,16 @@ class InProcessEngineClient:
     ) -> SourceController:
         device_id = _text_parameter(node, "device_id")
         try:
+            config = build_camera_source_config(node.parameters)
             return self._camera_source_factory(
                 node.node_id,
-                device_id,
-                requested_width=_int_parameter(node, "requested_width"),
-                requested_height=_int_parameter(node, "requested_height"),
-                requested_fps=_float_parameter(node, "requested_fps"),
-                backend_preference=CameraBackendPreference(
-                    _text_parameter(node, "backend_preference")
-                ),
-                process_every_nth_frame=_int_parameter(node, "process_every_nth_frame"),
-                reconnect_automatically=_bool_parameter(node, "reconnect_automatically"),
+                config.device_id,
+                requested_width=config.requested_width,
+                requested_height=config.requested_height,
+                requested_fps=config.requested_fps,
+                backend_preference=config.backend_preference,
+                process_every_nth_frame=config.process_every_nth_frame,
+                reconnect_automatically=config.reconnect_automatically,
                 on_frame=partial(worker.publish, node.node_id),
                 on_reset=partial(worker.reset_source, node.node_id),
             )
@@ -1218,27 +1230,6 @@ def _raise_cleanup_errors(errors: list[Exception], summary: str) -> None:
         first.add_note(f"Additional cleanup failure: {type(error).__name__}: {error}")
     first.add_note(summary)
     raise first
-
-
-def _int_parameter(node: CompiledNode, parameter_id: str) -> int:
-    value = node.parameters[parameter_id]
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise TypeError(f"Expected integer parameter {parameter_id!r}")
-    return value
-
-
-def _float_parameter(node: CompiledNode, parameter_id: str) -> float:
-    value = node.parameters[parameter_id]
-    if not isinstance(value, float):
-        raise TypeError(f"Expected float parameter {parameter_id!r}")
-    return value
-
-
-def _bool_parameter(node: CompiledNode, parameter_id: str) -> bool:
-    value = node.parameters[parameter_id]
-    if not isinstance(value, bool):
-        raise TypeError(f"Expected boolean parameter {parameter_id!r}")
-    return value
 
 
 __all__ = [

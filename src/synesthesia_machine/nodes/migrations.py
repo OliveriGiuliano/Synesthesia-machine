@@ -1,4 +1,12 @@
-"""Pure, sequential migrations for persisted node implementation payloads."""
+"""Node-implementation-version migrations owned by node definitions.
+
+Each node definition declares the chain of migrations that raise a saved node
+payload from an older implementation version to the current one. ``migrate_node_data``
+walks that chain; persistence asks a definition for its migrations rather than
+consulting a separately hard-coded table. The functions here operate on the shared
+``JsonObject`` value type (from ``contracts``) so they live in the headless
+``nodes`` layer, which ``persistence`` may depend on but not vice-versa.
+"""
 
 from __future__ import annotations
 
@@ -8,10 +16,9 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import cast
 
-from synesthesia_machine.persistence.schemas import JsonObject, JsonValue
+from synesthesia_machine.contracts import JsonObject, JsonValue
 
 type NodeMigration = Callable[[JsonObject], JsonObject]
-type NodeMigrationKey = tuple[str, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,49 +34,44 @@ class NodeMigrationResult:
     steps: tuple[NodeMigrationStep, ...]
 
 
-class NodeMigrationRegistry:
-    """Map ``(type_id, from_version)`` to one deterministic migration step."""
+def migrate_node_data(
+    type_id: str,
+    migrations: Mapping[int, NodeMigration],
+    data: JsonObject,
+    *,
+    target_version: int,
+) -> NodeMigrationResult:
+    """Chain ``migrations`` from the saved version up to ``target_version``.
 
-    def __init__(
-        self,
-        migrations: Mapping[NodeMigrationKey, NodeMigration] | None = None,
-    ) -> None:
-        self._migrations = dict(migrations or {})
-
-    def migrate(
-        self,
-        data: JsonObject,
-        *,
-        type_id: str,
-        target_version: int,
-    ) -> NodeMigrationResult:
-        migrated = deepcopy(data)
-        version = _implementation_version(migrated)
-        if version > target_version:
+    Mirrors the historical hard-coded registry: each step must raise the
+    ``implementation_version`` by exactly one and preserve the node ``id`` and
+    ``type_id``. A version newer than ``target_version`` is an error, as is a
+    missing step for an older version.
+    """
+    migrated = deepcopy(data)
+    version = _implementation_version(migrated)
+    if version > target_version:
+        raise ValueError(
+            f"{type_id!r} version {version} is newer than supported version {target_version}"
+        )
+    steps: list[NodeMigrationStep] = []
+    while version < target_version:
+        migration = migrations.get(version)
+        if migration is None:
+            raise ValueError(f"No node migration is registered for {type_id!r} version {version}")
+        source_id = migrated.get("id")
+        migrated_type = migrated.get("type_id")
+        migrated = migration(deepcopy(migrated))
+        next_version = _implementation_version(migrated)
+        if next_version != version + 1:
             raise ValueError(
-                f"{type_id!r} version {version} is newer than supported version {target_version}"
+                f"Node migration {type_id!r} version {version} must produce version {version + 1}"
             )
-        steps: list[NodeMigrationStep] = []
-        while version < target_version:
-            migration = self._migrations.get((type_id, version))
-            if migration is None:
-                raise ValueError(
-                    f"No node migration is registered for {type_id!r} version {version}"
-                )
-            source_id = migrated.get("id")
-            migrated_type = migrated.get("type_id")
-            migrated = migration(deepcopy(migrated))
-            next_version = _implementation_version(migrated)
-            if next_version != version + 1:
-                raise ValueError(
-                    f"Node migration {type_id!r} version {version} must produce version "
-                    f"{version + 1}"
-                )
-            if migrated.get("id") != source_id or migrated.get("type_id") != migrated_type:
-                raise ValueError("Node migrations cannot change node identity or type")
-            steps.append(NodeMigrationStep(type_id, version, next_version))
-            version = next_version
-        return NodeMigrationResult(migrated, tuple(steps))
+        if migrated.get("id") != source_id or migrated.get("type_id") != migrated_type:
+            raise ValueError("Node migrations cannot change node identity or type")
+        steps.append(NodeMigrationStep(type_id, version, next_version))
+        version = next_version
+    return NodeMigrationResult(migrated, tuple(steps))
 
 
 def migrate_number_v0_to_v1(data: JsonObject) -> JsonObject:
@@ -241,37 +243,8 @@ def _implementation_version(data: JsonObject) -> int:
     return value
 
 
-BUILTIN_NODE_MIGRATIONS = NodeMigrationRegistry(
-    {
-        ("synmachine.image.add_noise", 1): migrate_adjustment_channel_selection_v1_to_v2,
-        ("synmachine.image.add_scalar", 1): migrate_adjustment_channel_selection_v1_to_v2,
-        ("synmachine.image.brightness", 1): migrate_adjustment_channel_selection_v1_to_v2,
-        ("synmachine.image.clamp", 1): migrate_clamp_v1_to_v2,
-        ("synmachine.image.change_colour_space", 1): migrate_change_colour_space_v1_to_v2,
-        ("synmachine.image.combine_channels", 1): migrate_combine_channels_v1_to_v2,
-        ("synmachine.image.colour_levels", 1): migrate_adjustment_channel_selection_v1_to_v2,
-        ("synmachine.image.contrast", 1): migrate_adjustment_channel_selection_v1_to_v2,
-        ("synmachine.image.divide_scalar", 1): migrate_adjustment_channel_selection_v1_to_v2,
-        ("synmachine.image.gamma", 1): migrate_adjustment_channel_selection_v1_to_v2,
-        ("synmachine.image.hue", 1): migrate_hue_v1_to_v2,
-        ("synmachine.image.invert_colour", 1): migrate_invert_colour_v1_to_v2,
-        ("synmachine.image.multiply_scalar", 1): migrate_adjustment_channel_selection_v1_to_v2,
-        ("synmachine.image.posterize", 1): migrate_adjustment_channel_selection_v1_to_v2,
-        ("synmachine.image.separate_channels", 1): migrate_separate_channels_v1_to_v2,
-        ("synmachine.image.stretch_contrast", 1): migrate_adjustment_channel_selection_v1_to_v2,
-        ("synmachine.input.load_video", 0): migrate_load_video_v0_to_v1,
-        ("synmachine.utility.number", 0): migrate_number_v0_to_v1,
-        ("synmachine.utility.statistics", 1): migrate_statistics_v1_to_v2,
-        ("synmachine.visualization.channel_display", 1): migrate_channel_display_v1_to_v2,
-        ("synmachine.visualization.display_image_data", 1): migrate_display_image_data_v1_to_v2,
-    }
-)
-
-
 __all__ = [
-    "BUILTIN_NODE_MIGRATIONS",
     "NodeMigration",
-    "NodeMigrationRegistry",
     "NodeMigrationResult",
     "NodeMigrationStep",
     "migrate_adjustment_channel_selection_v1_to_v2",
@@ -283,6 +256,7 @@ __all__ = [
     "migrate_hue_v1_to_v2",
     "migrate_invert_colour_v1_to_v2",
     "migrate_load_video_v0_to_v1",
+    "migrate_node_data",
     "migrate_number_v0_to_v1",
     "migrate_separate_channels_v1_to_v2",
     "migrate_statistics_v1_to_v2",

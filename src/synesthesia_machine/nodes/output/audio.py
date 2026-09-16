@@ -7,6 +7,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import partial
+from typing import cast
 from uuid import UUID
 
 from synesthesia_machine.contracts import (
@@ -56,22 +57,21 @@ class GenerateAudioRuntime:
         context: FrameContext,
     ) -> Mapping[str, RuntimeValue]:
         del context
-        if not _boolean(parameters["enabled"]):
+        if not cast(bool, parameters["enabled"]):
             self._service.disable()
             return {}
         midi = inputs["midi"]
         if midi is NoData:
             self._service.panic()
             return {}
-        if not isinstance(midi, MidiStateFrame):
-            raise TypeError("Generate Audio requires MIDI state input")
+        midi = cast(MidiStateFrame, midi)
         configuration = SynthConfiguration(
-            waveform=SynthWaveform(_text(parameters["waveform"])),
-            volume=_number(parameters["volume"]),
-            attack_ms=_number(parameters["attack_ms"]),
-            release_ms=_number(parameters["release_ms"]),
-            max_voices=_integer(parameters["max_voices"]),
-            output_device=_text(parameters["output_device"]),
+            waveform=SynthWaveform(cast(str, parameters["waveform"])),
+            volume=cast(float, parameters["volume"]),
+            attack_ms=cast(float, parameters["attack_ms"]),
+            release_ms=cast(float, parameters["release_ms"]),
+            max_voices=cast(int, parameters["max_voices"]),
+            output_device=cast(str, parameters["output_device"]),
         )
         error = self._service.publish(configuration, midi)
         if error is not None:
@@ -371,30 +371,6 @@ def create_output_definitions(
             aliases=("debug synth", "synthesizer", "sound"),
         ),
     )
-
-
-def _boolean(value: ParameterValue) -> bool:
-    if not isinstance(value, bool):
-        raise TypeError("Expected bool parameter")
-    return value
-
-
-def _integer(value: ParameterValue) -> int:
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise TypeError("Expected integer parameter")
-    return value
-
-
-def _number(value: ParameterValue) -> float:
-    if not isinstance(value, float):
-        raise TypeError("Expected float parameter")
-    return value
-
-
-def _text(value: ParameterValue) -> str:
-    if not isinstance(value, str):
-        raise TypeError("Expected text parameter")
-    return value
 
 
 __all__ = ["GENERATE_AUDIO_TYPE_ID", "GenerateAudioRuntime", "create_output_definitions"]

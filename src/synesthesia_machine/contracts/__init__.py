@@ -68,6 +68,7 @@ from synesthesia_machine.contracts.engine_messages import (
     WaitUntilIdle,
     WriteSharedFrame,
 )
+from synesthesia_machine.contracts.json import JsonObject, JsonValue
 from synesthesia_machine.contracts.runtime_values import (
     AlphaMode,
     ChannelFrame,
@@ -123,6 +124,8 @@ __all__ = [
     "IdleResponse",
     "ImageFrame",
     "ImagePreview",
+    "JsonObject",
+    "JsonValue",
     "MetricsResponse",
     "MidiNoteKey",
     "MidiOutputConnectionState",

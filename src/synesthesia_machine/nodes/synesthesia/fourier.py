@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import cast
 from uuid import UUID
 
 import cv2
@@ -121,19 +122,19 @@ class FourierRuntime:
     ) -> Mapping[str, RuntimeValue]:
         try:
             midi = fourier_to_midi_state(
-                _channel(inputs["value"]),
-                window=_text(parameters["window"]),
-                subtract_mean=_boolean(parameters["subtract_mean"]),
-                frequency_mapping=_text(parameters["frequency_mapping"]),
-                frequency_minimum=_number(parameters["frequency_minimum"]),
-                frequency_maximum=_number(parameters["frequency_maximum"]),
-                amplitude_floor=_number(parameters["amplitude_floor"]),
-                amplitude_ceiling=_number(parameters["amplitude_ceiling"]),
-                dc_exclusion_radius=_number(parameters["dc_exclusion_radius"]),
-                band_aggregation=_text(parameters["band_aggregation"]),
-                percentile=_number(parameters["percentile"]),
-                activation_threshold=_number(parameters["activation_threshold"]),
-                analysis_max_dimension=_integer(parameters["analysis_max_dimension"]),
+                cast(ChannelFrame, inputs["value"]),
+                window=cast(str, parameters["window"]),
+                subtract_mean=cast(bool, parameters["subtract_mean"]),
+                frequency_mapping=cast(str, parameters["frequency_mapping"]),
+                frequency_minimum=cast(float, parameters["frequency_minimum"]),
+                frequency_maximum=cast(float, parameters["frequency_maximum"]),
+                amplitude_floor=cast(float, parameters["amplitude_floor"]),
+                amplitude_ceiling=cast(float, parameters["amplitude_ceiling"]),
+                dc_exclusion_radius=cast(float, parameters["dc_exclusion_radius"]),
+                band_aggregation=cast(str, parameters["band_aggregation"]),
+                percentile=cast(float, parameters["percentile"]),
+                activation_threshold=cast(float, parameters["activation_threshold"]),
+                analysis_max_dimension=cast(int, parameters["analysis_max_dimension"]),
                 settings=resolve_common_musical_settings(parameters),
                 node_id=self.node_id,
                 context=context,
@@ -609,51 +610,21 @@ def _validate_parameters(parameters: Mapping[str, ParameterValue]) -> Sequence[s
     errors = list(validate_common_musical_parameters(parameters))
     try:
         _validate_algorithm_parameters(
-            window=_text(parameters["window"]),
-            frequency_mapping=_text(parameters["frequency_mapping"]),
-            frequency_minimum=_number(parameters["frequency_minimum"]),
-            frequency_maximum=_number(parameters["frequency_maximum"]),
-            amplitude_floor=_number(parameters["amplitude_floor"]),
-            amplitude_ceiling=_number(parameters["amplitude_ceiling"]),
-            dc_exclusion_radius=_number(parameters["dc_exclusion_radius"]),
-            band_aggregation=_text(parameters["band_aggregation"]),
-            percentile=_number(parameters["percentile"]),
-            activation_threshold=_number(parameters["activation_threshold"]),
-            analysis_max_dimension=_integer(parameters["analysis_max_dimension"]),
+            window=cast(str, parameters["window"]),
+            frequency_mapping=cast(str, parameters["frequency_mapping"]),
+            frequency_minimum=cast(float, parameters["frequency_minimum"]),
+            frequency_maximum=cast(float, parameters["frequency_maximum"]),
+            amplitude_floor=cast(float, parameters["amplitude_floor"]),
+            amplitude_ceiling=cast(float, parameters["amplitude_ceiling"]),
+            dc_exclusion_radius=cast(float, parameters["dc_exclusion_radius"]),
+            band_aggregation=cast(str, parameters["band_aggregation"]),
+            percentile=cast(float, parameters["percentile"]),
+            activation_threshold=cast(float, parameters["activation_threshold"]),
+            analysis_max_dimension=cast(int, parameters["analysis_max_dimension"]),
         )
     except (KeyError, TypeError, ValueError) as error:
         errors.append(str(error))
     return errors
-
-
-def _channel(value: object) -> ChannelFrame:
-    if isinstance(value, ChannelFrame):
-        return value
-    raise TypeError(f"Expected ChannelFrame, got {type(value).__name__}")
-
-
-def _number(value: object) -> float:
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    raise TypeError(f"Expected numeric value, got {type(value).__name__}")
-
-
-def _integer(value: object) -> int:
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    raise TypeError(f"Expected integer value, got {type(value).__name__}")
-
-
-def _boolean(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
-    raise TypeError(f"Expected boolean value, got {type(value).__name__}")
-
-
-def _text(value: object) -> str:
-    if isinstance(value, str):
-        return value
-    raise TypeError(f"Expected string value, got {type(value).__name__}")
 
 
 __all__ = [

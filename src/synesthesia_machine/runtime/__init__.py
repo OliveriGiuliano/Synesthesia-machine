@@ -2,6 +2,7 @@
 
 from typing import TYPE_CHECKING
 
+from synesthesia_machine.runtime.engine_session import EngineSession, RestartOutcome
 from synesthesia_machine.runtime.execution_plan import (
     CompiledNode,
     ExecutionPlan,
@@ -26,18 +27,24 @@ if TYPE_CHECKING:
         MidiExportResult,
         run_midi_export,
     )
-    from synesthesia_machine.runtime.previews import PreviewBroker
-    from synesthesia_machine.runtime.shared_previews import (
+    from synesthesia_machine.runtime.preview_channel import (
         AttachedPreviewSlot,
+        InMemoryPreviewTransport,
         OwnedPreviewSlot,
+        PreviewTransport,
+        SharedMemoryPreviewReader,
+        SharedMemoryPreviewWriter,
     )
+    from synesthesia_machine.runtime.previews import PreviewBroker
 
 __all__ = [
     "AttachedPreviewSlot",
     "CompiledNode",
     "EngineFacade",
     "EngineProtocolError",
+    "EngineSession",
     "ExecutionPlan",
+    "InMemoryPreviewTransport",
     "InProcessEngineClient",
     "InputBinding",
     "LatestFrameGraphWorker",
@@ -47,10 +54,14 @@ __all__ = [
     "OwnedPreviewSlot",
     "PortKey",
     "PreviewBroker",
+    "PreviewTransport",
     "ProcessEngineClient",
+    "RestartOutcome",
     "RuntimeProfiler",
     "ScalarConversion",
     "Scheduler",
+    "SharedMemoryPreviewReader",
+    "SharedMemoryPreviewWriter",
     "TickObserver",
     "TickResult",
     "run_midi_export",
@@ -104,14 +115,29 @@ def __getattr__(name: str) -> object:
         from synesthesia_machine.runtime.previews import PreviewBroker
 
         return PreviewBroker
-    if name in {"AttachedPreviewSlot", "OwnedPreviewSlot"}:
-        from synesthesia_machine.runtime.shared_previews import (
+    if name in {
+        "AttachedPreviewSlot",
+        "InMemoryPreviewTransport",
+        "OwnedPreviewSlot",
+        "PreviewTransport",
+        "SharedMemoryPreviewReader",
+        "SharedMemoryPreviewWriter",
+    }:
+        from synesthesia_machine.runtime.preview_channel import (
             AttachedPreviewSlot,
+            InMemoryPreviewTransport,
             OwnedPreviewSlot,
+            PreviewTransport,
+            SharedMemoryPreviewReader,
+            SharedMemoryPreviewWriter,
         )
 
         return {
             "AttachedPreviewSlot": AttachedPreviewSlot,
+            "InMemoryPreviewTransport": InMemoryPreviewTransport,
             "OwnedPreviewSlot": OwnedPreviewSlot,
+            "PreviewTransport": PreviewTransport,
+            "SharedMemoryPreviewReader": SharedMemoryPreviewReader,
+            "SharedMemoryPreviewWriter": SharedMemoryPreviewWriter,
         }[name]
     raise AttributeError(name)

@@ -33,6 +33,7 @@ from synesthesia_machine.nodes.visualization import (
     NOTE_VISUALIZER_TYPE_ID,
 )
 from synesthesia_machine.runtime.execution_plan import CompiledNode, ExecutionPlan, PortKey
+from synesthesia_machine.runtime.preview_channel import InMemoryPreviewTransport, PreviewTransport
 from synesthesia_machine.runtime.scheduler import TickResult
 
 type MonotonicClock = Callable[[], float]
@@ -89,6 +90,7 @@ class PreviewBroker:
         image_converter: ImagePreviewConverter | None = None,
         channel_converter: ChannelPreviewConverter | None = None,
         dirty_notifier: Callable[[], None] | None = None,
+        transport: PreviewTransport | None = None,
     ) -> None:
         self._monotonic = monotonic
         # Optional wake-up hook for out-of-thread pollers (e.g. the engine
@@ -97,10 +99,10 @@ class PreviewBroker:
         self._dirty_notifier = dirty_notifier
         self._image_converter = image_converter or _preview_image_data
         self._channel_converter = channel_converter or _preview_channel_data
+        self._transport = transport if transport is not None else InMemoryPreviewTransport()
         self._lock = threading.Lock()
         self._image_targets: tuple[_ImageTarget, ...] = ()
         self._note_targets: tuple[_NoteTarget, ...] = ()
-        self._image_previews: dict[tuple[UUID, str], ImagePreview] = {}
         self._note_previews: dict[UUID, NotePreview] = {}
         self._image_sequences: dict[tuple[UUID, str], int] = {}
         self._note_sequences: dict[UUID, int] = {}
@@ -176,6 +178,7 @@ class PreviewBroker:
             self._note_targets = configuration.note_targets
             self._value_targets = configuration.value_targets
             self._clear_locked()
+        self._transport.clear()
 
     def clear(self) -> None:
         """Forget current targets and previews, preventing stale cross-activation data."""
@@ -186,6 +189,7 @@ class PreviewBroker:
             self._note_targets = ()
             self._value_targets = ()
             self._clear_locked()
+        self._transport.clear()
 
     @property
     def generation(self) -> int:
@@ -284,15 +288,19 @@ class PreviewBroker:
                     continue
                 sequence = self._image_sequences.get(key, 0) + 1
                 height, width, channels = data.shape
-                self._image_previews[key] = ImagePreview(
+                self._transport.publish_image(
                     target.node_id,
                     target.source.port_id,
-                    sequence,
-                    value.context.tick_index,
-                    width,
-                    height,
-                    channels,
-                    data,
+                    ImagePreview(
+                        target.node_id,
+                        target.source.port_id,
+                        sequence,
+                        value.context.tick_index,
+                        width,
+                        height,
+                        channels,
+                        data,
+                    ),
                 )
                 self._image_sequences[key] = sequence
                 self._image_last_published[key] = now
@@ -357,16 +365,9 @@ class PreviewBroker:
     def poll_images(
         self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
     ) -> tuple[ImagePreview, ...]:
-        thresholds = after_sequences or {}
-        with self._lock:
-            return tuple(
-                preview
-                for key, preview in sorted(
-                    self._image_previews.items(),
-                    key=lambda item: (str(item[0][0]), item[0][1]),
-                )
-                if preview.sequence > thresholds.get(key, 0)
-            )
+        # Image frames live in the transport adapter (the in-process store or
+        # the shared-memory slots), not in the broker; delegate the poll.
+        return self._transport.poll_images(after_sequences)
 
     def poll_notes(
         self, after_sequences: Mapping[UUID, int] | None = None
@@ -414,7 +415,6 @@ class PreviewBroker:
             self._image_publication_times.popleft()
 
     def _clear_locked(self) -> None:
-        self._image_previews.clear()
         self._note_previews.clear()
         self._value_previews.clear()
         self._image_sequences.clear()

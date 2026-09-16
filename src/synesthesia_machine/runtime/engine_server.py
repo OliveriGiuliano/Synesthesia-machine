@@ -13,14 +13,13 @@ from contextlib import suppress
 from dataclasses import replace
 from multiprocessing.shared_memory import SharedMemory
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast, get_args
 from uuid import UUID
 
 import cv2
 import numpy as np
 import psutil
 
-from synesthesia_machine.contracts.engine_client import ImagePreview
 from synesthesia_machine.contracts.engine_messages import (
     ENGINE_PROTOCOL_VERSION,
     ActivateGraph,
@@ -74,7 +73,7 @@ from synesthesia_machine.diagnostics.logging_setup import (
 from synesthesia_machine.nodes.composition import create_builtin_registry
 from synesthesia_machine.runtime.graph_payload import payload_to_snapshot
 from synesthesia_machine.runtime.in_process_engine import InProcessEngineClient
-from synesthesia_machine.runtime.shared_previews import AttachedPreviewSlot
+from synesthesia_machine.runtime.preview_channel import SharedMemoryPreviewWriter
 
 HEARTBEAT_INTERVAL_S = 0.25
 # While an announced shared-preview slot has not yet received its first frame
@@ -111,25 +110,9 @@ class EventQueueWriter(Protocol):
     def close(self) -> None: ...
 
 
-_COMMAND_TYPES = (
-    Ping,
-    WriteSharedFrame,
-    Handshake,
-    ActivateGraph,
-    TransportCommand,
-    Panic,
-    QuerySourceStatus,
-    QueryMidiOutputStatus,
-    QueryDeviceCatalogue,
-    QueryNodeMemoryDiagnostics,
-    QueryNodeProfiles,
-    ResetProfiling,
-    SetProfilingEnabled,
-    QueryMetrics,
-    WaitUntilIdle,
-    ConfigurePreviewSlot,
-    Shutdown,
-)
+# Keep the accepted-command set sourced from the protocol union so a newly added command type is
+# valid on both the in-process and child-process paths without editing a hand-maintained list.
+_COMMAND_TYPES: tuple[type[object], ...] = get_args(EngineCommand)
 
 _REVISION_EXEMPT_COMMANDS = (
     Ping,
@@ -153,6 +136,7 @@ class _EventPublisher:
         engine: InProcessEngineClient,
         event_queue: EventQueueWriter,
         *,
+        writer: SharedMemoryPreviewWriter,
         started_monotonic_ns: int,
         heartbeat_interval_s: float,
         preview_wake: threading.Event,
@@ -163,21 +147,18 @@ class _EventPublisher:
         # it is the source of truth for "publish now" and the event wait is
         # only a sleep bounded by the next heartbeat/preview deadline.
         self._preview_wake = preview_wake
+        # Shared with the preview broker: the broker writes frames into it and
+        # fills the pending-format queue, while the publisher drains that queue
+        # to announce formats and attaches the slots the UI created in response.
+        self._writer = writer
         self._started_monotonic_ns = started_monotonic_ns
         self._heartbeat_interval_s = heartbeat_interval_s
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._graph_revision: int | None = None
         self._heartbeat_sequence = 0
-        self._image_sequences: dict[tuple[UUID, str], int] = {}
         self._note_sequences: dict[UUID, int] = {}
         self._value_sequences: dict[tuple[UUID, str], int] = {}
-        self._format_generations: dict[tuple[UUID, str], int] = {}
-        self._announced_formats: dict[tuple[UUID, str], tuple[int, int, int, int]] = {}
-        self._slots: dict[tuple[UUID, str], AttachedPreviewSlot] = {}
-        # Announced slots that have not yet written a first frame; drives the
-        # safety-poll phase of the parent/child preview handshake.
-        self._slot_ready: dict[tuple[UUID, str], bool] = {}
         self._thread = threading.Thread(
             target=self._run,
             name="engine-event-publisher",
@@ -190,44 +171,25 @@ class _EventPublisher:
     def graph_activated(self, graph_revision: int) -> None:
         with self._lock:
             self._graph_revision = graph_revision
-            self._image_sequences.clear()
             self._note_sequences.clear()
             self._value_sequences.clear()
-            self._announced_formats.clear()
-            self._slot_ready.clear()
-            self._close_slots_locked()
+            self._writer.clear()
 
     def configure_slot(self, descriptor: PreviewSlotDescriptor, graph_revision: int) -> None:
-        replacement = AttachedPreviewSlot(descriptor)
         with self._lock:
             if graph_revision != self._graph_revision:
-                replacement.close()
                 raise ValueError(
                     f"Preview slot revision {graph_revision} is stale; "
                     f"active revision is {self._graph_revision}"
                 )
-            slot_key = (descriptor.owner_id, descriptor.source_port_id)
-            expected = self._announced_formats.get(slot_key)
-            configured = (
-                descriptor.generation,
-                descriptor.width,
-                descriptor.height,
-                descriptor.channels,
-            )
-            if expected != configured:
-                replacement.close()
-                raise ValueError("Preview slot does not match the announced format")
-            previous = self._slots.get(slot_key)
-            self._slots[slot_key] = replacement
-        if previous is not None:
-            previous.close()
+            self._writer.attach_slot(descriptor)
 
     def close(self) -> None:
         self._stop.set()
         if self._thread is not threading.current_thread():
             self._thread.join(timeout=2.0)
         with self._lock:
-            self._close_slots_locked()
+            self._writer.clear()
 
     def _run(self) -> None:
         next_heartbeat = 0.0
@@ -241,7 +203,7 @@ class _EventPublisher:
             # a RuntimeError there kills this thread and heartbeats stop
             # forever, pinning the parent's state at UNRESPONSIVE.
             with self._lock:
-                handshake_pending = any(not ready for ready in self._slot_ready.values())
+                handshake_pending = self._writer.pending_handshake()
             if self._preview_wake.is_set() or (handshake_pending and now >= next_handshake_poll):
                 # The wake event is the source of truth for new previews: the
                 # broker sets it the moment anything advanced, and Event.wait
@@ -292,34 +254,26 @@ class _EventPublisher:
     def _publish_previews(self) -> None:
         with self._lock:
             graph_revision = self._graph_revision
-            image_sequences = dict(self._image_sequences)
             note_sequences = dict(self._note_sequences)
             value_sequences = dict(self._value_sequences)
         if graph_revision is None:
             return
-        for preview in self._engine.poll_image_previews(image_sequences):
-            slot_key = (preview.owner_id, preview.source_port_id)
-            with self._lock:
-                if graph_revision != self._graph_revision:
-                    return
-                slot = self._slots.get(slot_key)
-                if slot is None or (
-                    slot.descriptor.width != preview.width
-                    or slot.descriptor.height != preview.height
-                    or slot.descriptor.channels != preview.channels
-                ):
-                    self._announce_format_locked(graph_revision, preview)
-                    continue
-                try:
-                    slot.write(preview)
-                except (BufferError, OSError, RuntimeError, ValueError):
-                    slot.close()
-                    self._slots.pop(slot_key, None)
-                    self._announce_format_locked(graph_revision, preview)
-                    continue
-                self._image_sequences[slot_key] = preview.sequence
-                if self._slot_ready.get(slot_key) is False:
-                    self._slot_ready[slot_key] = True
+        # Image frames reach the UI-owned slots directly through the broker (and
+        # the writer). Here we only drive the announce handshake for formats
+        # that still lack an attached slot, then ship the compact note/value
+        # previews the broker produced.
+        for key, generation, dimensions in self._writer.take_pending_announcements():
+            self._put_event(
+                PreviewFormatChanged(
+                    graph_revision,
+                    key[0],
+                    key[1],
+                    generation,
+                    dimensions[0],
+                    dimensions[1],
+                    dimensions[2],
+                )
+            )
         note_previews = self._engine.poll_note_previews(note_sequences)
         if note_previews and self._put_event(NotePreviewsPublished(graph_revision, note_previews)):
             with self._lock:
@@ -337,45 +291,12 @@ class _EventPublisher:
                             preview.sequence
                         )
 
-    def _announce_format_locked(self, graph_revision: int, preview: ImagePreview) -> None:
-        slot_key = (preview.owner_id, preview.source_port_id)
-        current = self._announced_formats.get(slot_key)
-        dimensions = (preview.width, preview.height, preview.channels)
-        if current is None or current[1:] != dimensions:
-            generation = self._format_generations.get(slot_key, 0) + 1
-            self._format_generations[slot_key] = generation
-            announced = (generation, *dimensions)
-            self._announced_formats[slot_key] = announced
-            previous = self._slots.pop(slot_key, None)
-            if previous is not None:
-                previous.close()
-            self._slot_ready[slot_key] = False
-        else:
-            generation = current[0]
-        self._put_event(
-            PreviewFormatChanged(
-                graph_revision,
-                preview.owner_id,
-                preview.source_port_id,
-                generation,
-                preview.width,
-                preview.height,
-                preview.channels,
-            )
-        )
-
     def _put_event(self, event: EngineAsyncEvent) -> bool:
         try:
             self._event_queue.put_nowait(event)
         except queue.Full:
             return False
         return True
-
-    def _close_slots_locked(self) -> None:
-        slots = tuple(self._slots.values())
-        self._slots.clear()
-        for slot in slots:
-            slot.close()
 
 
 class EngineServer:
@@ -394,14 +315,17 @@ class EngineServer:
         self._started_monotonic_ns = time.monotonic_ns()
         self._graph_revision: int | None = None
         self._preview_wake = threading.Event()
+        self._preview_writer = SharedMemoryPreviewWriter()
         self._engine = InProcessEngineClient(
             create_builtin_registry(),
             preview_dirty_notifier=self._preview_wake.set,
+            preview_transport=self._preview_writer,
         )
         self._process = psutil.Process()
         self._events = _EventPublisher(
             self._engine,
             event_queue,
+            writer=self._preview_writer,
             started_monotonic_ns=self._started_monotonic_ns,
             heartbeat_interval_s=heartbeat_interval_s,
             preview_wake=self._preview_wake,
@@ -423,7 +347,7 @@ class EngineServer:
                         TypeError(f"Unsupported engine command: {type(raw_command).__name__}"),
                     )
                     continue
-                command: EngineCommand = raw_command
+                command = cast(EngineCommand, raw_command)
                 if command.protocol_version != ENGINE_PROTOCOL_VERSION:
                     self._connection.send(
                         ProtocolMismatch(

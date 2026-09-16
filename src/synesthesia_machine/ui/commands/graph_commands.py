@@ -18,6 +18,7 @@ from synesthesia_machine.graph import (
 )
 from synesthesia_machine.persistence.clipboard import ClipboardFragment
 from synesthesia_machine.persistence.media_relink import relinked_media_node
+from synesthesia_machine.ui.connection_state import PREVIEW_VISIBLE_KEY
 from synesthesia_machine.ui.translations import tr
 
 type ChangeCallback = Callable[[], None]
@@ -300,9 +301,6 @@ class SetParameterCommand(_DocumentCommand):
     def undo(self) -> None:
         self.document.restore_node(self.old_node, replace_existing=True)
         self._changed()
-
-
-PREVIEW_VISIBLE_KEY = "preview_visible"
 
 
 class SetConnectionPreviewCommand(_DocumentCommand):

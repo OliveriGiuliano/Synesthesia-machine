@@ -75,7 +75,7 @@ from synesthesia_machine.contracts.engine_messages import (
 from synesthesia_machine.graph.model import GraphSnapshot
 from synesthesia_machine.runtime.engine_server import engine_server_main
 from synesthesia_machine.runtime.graph_payload import snapshot_to_payload
-from synesthesia_machine.runtime.shared_previews import OwnedPreviewSlot
+from synesthesia_machine.runtime.preview_channel import SharedMemoryPreviewReader
 
 DEFAULT_REQUEST_TIMEOUT_S = 3.0
 DEFAULT_ACTIVATION_TIMEOUT_S = 10.0
@@ -181,7 +181,7 @@ class ProcessEngineClient:
         self._latest_demand_roots: tuple[UUID, ...] | None = None
         self._note_previews: dict[UUID, NotePreview] = {}
         self._value_previews: dict[tuple[UUID, str], ValuePreview] = {}
-        self._image_slots: dict[tuple[UUID, str], OwnedPreviewSlot] = {}
+        self._preview_reader = SharedMemoryPreviewReader()
         self._closed = False
         # True while the event thread is inside a slow synchronous request
         # (preview slot configuration). Heartbeats queue up unconsumed
@@ -382,32 +382,16 @@ class ProcessEngineClient:
     def poll_image_previews(
         self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
     ) -> tuple[ImagePreview, ...]:
-        # The UI polls at display cadence, so the cheap seqlock-header peek runs
-        # for every slot and the full frame copy only for slots that advanced
-        # past the caller's threshold. Slots idle at their last frame cost a
-        # 48-byte header read per tick instead of a full preview memcpy.
-        thresholds = after_sequences or {}
-        previews: list[ImagePreview] = []
-        with self._preview_lock:
-            for key, slot in sorted(
-                self._image_slots.items(), key=lambda item: (str(item[0][0]), item[0][1])
-            ):
-                threshold = thresholds.get(key, 0)
-                if slot.peek_sequence() <= threshold:
-                    continue
-                preview = slot.read()
-                if preview is not None and preview.sequence > threshold:
-                    previews.append(preview)
-        return tuple(previews)
+        # The UI polls at display cadence, so the reader's cheap seqlock-header
+        # peek runs for every slot and the full frame copy only for slots that
+        # advanced past the caller's threshold. Slots idle at their last frame
+        # cost a 48-byte header read per tick instead of a full preview memcpy.
+        return self._preview_reader.poll_images(after_sequences)
 
     def preview_shared_memory_names(self) -> tuple[str, ...]:
         """Expose owned slot names for lifecycle diagnostics and cleanup tests."""
 
-        with self._preview_lock:
-            ordered_slots = sorted(
-                self._image_slots.items(), key=lambda item: (str(item[0][0]), item[0][1])
-            )
-            return tuple(slot.name for _, slot in ordered_slots)
+        return self._preview_reader.shared_memory_names()
 
     def clear_previews(self) -> None:
         """Forget retained preview state after the engine stops.
@@ -421,11 +405,9 @@ class ProcessEngineClient:
         """
 
         with self._preview_lock:
-            for slot in self._image_slots.values():
-                slot.close()
-            self._image_slots.clear()
             self._note_previews.clear()
             self._value_previews.clear()
+        self._preview_reader.clear()
 
     def poll_note_previews(
         self, after_sequences: Mapping[UUID, int] | None = None
@@ -538,7 +520,7 @@ class ProcessEngineClient:
         with self._preview_lock:
             self._note_previews.clear()
             self._value_previews.clear()
-            self._close_image_slots_locked()
+        self._preview_reader.clear()
         if activation.activated:
             with self._lifecycle_lock:
                 self._graph_revision = activation.graph_revision
@@ -707,17 +689,15 @@ class ProcessEngineClient:
                 self._connection_state = EngineConnectionState.CRASHED
 
     def _configure_preview_slot(self, event: PreviewFormatChanged) -> None:
-        slot_key = (event.owner_id, event.source_port_id)
-        with self._preview_lock:
-            current = self._image_slots.get(slot_key)
-            if current is not None and (
-                current.descriptor.generation == event.generation
-                and current.descriptor.width == event.width
-                and current.descriptor.height == event.height
-                and current.descriptor.channels == event.channels
-            ):
-                return
-        replacement = OwnedPreviewSlot.create(
+        current = self._preview_reader.current_descriptor(event.owner_id, event.source_port_id)
+        if current is not None and (
+            current.generation == event.generation
+            and current.width == event.width
+            and current.height == event.height
+            and current.channels == event.channels
+        ):
+            return
+        replacement = self._preview_reader.create_slot(
             owner_id=event.owner_id,
             source_port_id=event.source_port_id,
             generation=event.generation,
@@ -740,7 +720,7 @@ class ProcessEngineClient:
                 PreviewSlotConfigured,
             )
         except Exception as error:
-            replacement.close()
+            self._preview_reader.drop_slot(event.owner_id, event.source_port_id)
             with self._lifecycle_lock:
                 self._last_error = (
                     f"Could not configure preview slot for {event.owner_id}: "
@@ -753,13 +733,8 @@ class ProcessEngineClient:
         with self._lifecycle_lock:
             stale = self._closed or event.graph_revision != self._graph_revision
         if stale:
-            replacement.close()
+            self._preview_reader.drop_slot(event.owner_id, event.source_port_id)
             return
-        with self._preview_lock:
-            previous = self._image_slots.get(slot_key)
-            self._image_slots[slot_key] = replacement
-        if previous is not None:
-            previous.close()
 
     def _stop_current_process(
         self,
@@ -789,8 +764,7 @@ class ProcessEngineClient:
             process.join(self._close_timeout_s)
         if process.is_alive():
             raise TimeoutError(f"Engine process {process.pid} did not terminate")
-        with self._preview_lock:
-            self._close_image_slots_locked()
+        self._preview_reader.clear()
         with self._lifecycle_lock:
             self._last_exit_code = process.exitcode
             if mark_crashed and not self._closed:
@@ -876,12 +850,6 @@ class ProcessEngineClient:
         for request in pending:
             request.error = error
             request.event.set()
-
-    def _close_image_slots_locked(self) -> None:
-        slots = tuple(self._image_slots.values())
-        self._image_slots.clear()
-        for slot in slots:
-            slot.close()
 
     def _refresh_liveness_locked(self) -> None:
         process = self._process

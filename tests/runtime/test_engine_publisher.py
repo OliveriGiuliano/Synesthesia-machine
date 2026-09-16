@@ -13,8 +13,16 @@ import time
 from collections.abc import Mapping
 from uuid import UUID
 
-from synesthesia_machine.contracts import NoteActivity, NotePreview
+import numpy as np
+
+from synesthesia_machine.contracts import (
+    ImagePreview,
+    NoteActivity,
+    NotePreview,
+    freeze_uint8_preview,
+)
 from synesthesia_machine.runtime.engine_server import _EventPublisher
+from synesthesia_machine.runtime.preview_channel import SharedMemoryPreviewWriter
 
 OWNER_ID = UUID("00000000-0000-0000-0000-0000000000e0")
 
@@ -63,6 +71,7 @@ def _make_publisher(
     publisher = _EventPublisher(
         engine,  # type: ignore[arg-type]
         queue,
+        writer=SharedMemoryPreviewWriter(),
         started_monotonic_ns=0,
         heartbeat_interval_s=heartbeat_interval_s,
         preview_wake=wake,
@@ -120,10 +129,26 @@ def test_publisher_handshake_poll_keeps_going_until_slots_settle() -> None:
     # announce/configure handshake after the last preview).
     publisher, engine, _, _ = _make_publisher(_StubEngine(), _CollectingQueue())
     publisher.graph_activated(1)
+    # Drive the writer's public surface to announce a slot that never receives
+    # a first frame: publishing records the pending format, and draining it
+    # marks the slot announced-but-not-ready, keeping the safety poll alive.
+    publisher._writer.publish_image(  # pyright: ignore[reportPrivateUsage]
+        OWNER_ID,
+        "image",
+        ImagePreview(
+            OWNER_ID,
+            "image",
+            1,
+            1,
+            2,
+            2,
+            3,
+            freeze_uint8_preview(np.full((2, 2, 3), 1, dtype=np.uint8)),
+        ),
+    )
+    publisher._writer.take_pending_announcements()  # pyright: ignore[reportPrivateUsage]
     publisher.start()
     try:
-        with publisher._lock:
-            publisher._slot_ready[(OWNER_ID, "image")] = False
         time.sleep(0.35)
         assert engine.poll_calls >= 2  # safety polls kept the handshake alive
     finally:

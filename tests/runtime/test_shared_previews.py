@@ -102,7 +102,9 @@ def test_poll_image_previews_copies_only_frames_past_the_threshold(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = ProcessEngineClient(auto_start=False)
-    owner = OwnedPreviewSlot.create(
+    # Create the owned slot through the client's reader so the poll loop
+    # exercises the same slot table it reads from.
+    owner = client._preview_reader.create_slot(  # pyright: ignore[reportPrivateUsage]
         owner_id=uuid4(),
         source_port_id="image",
         generation=1,
@@ -121,9 +123,9 @@ def test_poll_image_previews_copies_only_frames_past_the_threshold(
         return original_read()
 
     try:
-        # Inject the slot without a live engine: the poll loop only touches the
-        # owned-slot table, so the copy-skip behaviour is testable in isolation.
-        monkeypatch.setitem(client._image_slots, key, owner)  # pyright: ignore[reportPrivateUsage]
+        # The slot is already in the client's reader; the poll loop only
+        # touches the owned-slot table, so the copy-skip behaviour is testable
+        # in isolation without a live engine.
         monkeypatch.setattr(owner, "read", counting_read)
 
         first_frame = freeze_uint8_preview(np.full((2, 2, 3), 1, dtype=np.uint8))
@@ -146,5 +148,4 @@ def test_poll_image_previews_copies_only_frames_past_the_threshold(
     finally:
         monkeypatch.undo()
         attachment.close()
-        owner.close()
         client.close()

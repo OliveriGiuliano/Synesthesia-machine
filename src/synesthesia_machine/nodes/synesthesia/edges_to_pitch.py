@@ -89,17 +89,17 @@ class EdgesToPitchRuntime:
     ) -> Mapping[str, RuntimeValue]:
         try:
             midi = edges_to_midi_state(
-                _channel(inputs["edges"]),
-                retrieval_mode=_text(parameters["retrieval_mode"]),
-                minimum_contour_area=_number(parameters["minimum_contour_area"]),
-                minimum_contour_perimeter=_number(parameters["minimum_contour_perimeter"]),
-                contour_limit=_integer(parameters["contour_limit"]),
-                pitch_feature=_text(parameters["pitch_feature"]),
-                velocity_feature=_text(parameters["velocity_feature"]),
-                pitch_minimum=_number(parameters["pitch_minimum"]),
-                pitch_maximum=_number(parameters["pitch_maximum"]),
-                velocity_minimum=_number(parameters["velocity_minimum"]),
-                velocity_maximum=_number(parameters["velocity_maximum"]),
+                cast(ChannelFrame, inputs["edges"]),
+                retrieval_mode=cast(str, parameters["retrieval_mode"]),
+                minimum_contour_area=cast(float, parameters["minimum_contour_area"]),
+                minimum_contour_perimeter=cast(float, parameters["minimum_contour_perimeter"]),
+                contour_limit=cast(int, parameters["contour_limit"]),
+                pitch_feature=cast(str, parameters["pitch_feature"]),
+                velocity_feature=cast(str, parameters["velocity_feature"]),
+                pitch_minimum=cast(float, parameters["pitch_minimum"]),
+                pitch_maximum=cast(float, parameters["pitch_maximum"]),
+                velocity_minimum=cast(float, parameters["velocity_minimum"]),
+                velocity_maximum=cast(float, parameters["velocity_maximum"]),
                 settings=resolve_common_musical_settings(parameters),
                 node_id=self.node_id,
                 context=context,
@@ -398,11 +398,13 @@ def _validate_parameters(parameters: Mapping[str, ParameterValue]) -> Sequence[s
     errors = list(validate_common_musical_parameters(parameters))
     try:
         _validate_range(
-            _number(parameters["pitch_minimum"]), _number(parameters["pitch_maximum"]), "pitch"
+            cast(float, parameters["pitch_minimum"]),
+            cast(float, parameters["pitch_maximum"]),
+            "pitch",
         )
         _validate_range(
-            _number(parameters["velocity_minimum"]),
-            _number(parameters["velocity_maximum"]),
+            cast(float, parameters["velocity_minimum"]),
+            cast(float, parameters["velocity_maximum"]),
             "velocity",
         )
     except (KeyError, TypeError, ValueError) as error:
@@ -432,30 +434,6 @@ def _validate_range(minimum: float, maximum: float, role: str) -> None:
 def _require_non_negative(value: float, name: str) -> None:
     if not math.isfinite(value) or value < 0.0:
         raise ValueError(f"{name} must be finite and non-negative")
-
-
-def _channel(value: object) -> ChannelFrame:
-    if isinstance(value, ChannelFrame):
-        return value
-    raise TypeError(f"Expected ChannelFrame, got {type(value).__name__}")
-
-
-def _integer(value: object) -> int:
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    raise TypeError(f"Expected integer value, got {type(value).__name__}")
-
-
-def _number(value: object) -> float:
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    raise TypeError(f"Expected numeric value, got {type(value).__name__}")
-
-
-def _text(value: object) -> str:
-    if isinstance(value, str):
-        return value
-    raise TypeError(f"Expected string value, got {type(value).__name__}")
 
 
 __all__ = [

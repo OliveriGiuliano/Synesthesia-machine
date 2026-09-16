@@ -137,18 +137,18 @@ class OpticalFlowRuntime:
     ) -> Mapping[str, RuntimeValue]:
         try:
             midi = optical_flow_to_midi_state(
-                _image(inputs["current"]),
-                _image(inputs["reference"]),
-                flow_preset=_text(parameters["flow_preset"]),
-                minimum_motion_magnitude=_number(parameters["minimum_motion_magnitude"]),
-                pitch_feature=_text(parameters["pitch_feature"]),
-                velocity_feature=_text(parameters["velocity_feature"]),
-                grid_rows=_integer(parameters["grid_rows"]),
-                grid_columns=_integer(parameters["grid_columns"]),
-                aggregation=_text(parameters["aggregation"]),
-                magnitude_minimum=_number(parameters["magnitude_minimum"]),
-                magnitude_maximum=_number(parameters["magnitude_maximum"]),
-                analysis_max_dimension=_integer(parameters["analysis_max_dimension"]),
+                cast(ImageFrame, inputs["current"]),
+                cast(ImageFrame, inputs["reference"]),
+                flow_preset=cast(str, parameters["flow_preset"]),
+                minimum_motion_magnitude=cast(float, parameters["minimum_motion_magnitude"]),
+                pitch_feature=cast(str, parameters["pitch_feature"]),
+                velocity_feature=cast(str, parameters["velocity_feature"]),
+                grid_rows=cast(int, parameters["grid_rows"]),
+                grid_columns=cast(int, parameters["grid_columns"]),
+                aggregation=cast(str, parameters["aggregation"]),
+                magnitude_minimum=cast(float, parameters["magnitude_minimum"]),
+                magnitude_maximum=cast(float, parameters["magnitude_maximum"]),
+                analysis_max_dimension=cast(int, parameters["analysis_max_dimension"]),
                 settings=resolve_common_musical_settings(parameters),
                 node_id=self.node_id,
                 context=context,
@@ -704,17 +704,17 @@ def _validate_parameters(parameters: Mapping[str, ParameterValue]) -> Sequence[s
     errors = list(validate_common_musical_parameters(parameters))
     try:
         _validate_algorithm_parameters(
-            minimum_motion_magnitude=_number(parameters["minimum_motion_magnitude"]),
-            pitch_feature=_text(parameters["pitch_feature"]),
-            velocity_feature=_text(parameters["velocity_feature"]),
-            grid_rows=_integer(parameters["grid_rows"]),
-            grid_columns=_integer(parameters["grid_columns"]),
-            aggregation=_text(parameters["aggregation"]),
-            magnitude_minimum=_number(parameters["magnitude_minimum"]),
-            magnitude_maximum=_number(parameters["magnitude_maximum"]),
-            analysis_max_dimension=_integer(parameters["analysis_max_dimension"]),
+            minimum_motion_magnitude=cast(float, parameters["minimum_motion_magnitude"]),
+            pitch_feature=cast(str, parameters["pitch_feature"]),
+            velocity_feature=cast(str, parameters["velocity_feature"]),
+            grid_rows=cast(int, parameters["grid_rows"]),
+            grid_columns=cast(int, parameters["grid_columns"]),
+            aggregation=cast(str, parameters["aggregation"]),
+            magnitude_minimum=cast(float, parameters["magnitude_minimum"]),
+            magnitude_maximum=cast(float, parameters["magnitude_maximum"]),
+            analysis_max_dimension=cast(int, parameters["analysis_max_dimension"]),
         )
-        if _text(parameters["flow_preset"]) not in FLOW_PRESETS:
+        if cast(str, parameters["flow_preset"]) not in FLOW_PRESETS:
             raise ValueError(f"Unknown optical-flow preset: {parameters['flow_preset']!r}")
     except (KeyError, TypeError, ValueError) as error:
         errors.append(str(error))
@@ -724,30 +724,6 @@ def _validate_parameters(parameters: Mapping[str, ParameterValue]) -> Sequence[s
 def _require_non_negative(value: float, name: str) -> None:
     if not math.isfinite(value) or value < 0.0:
         raise ValueError(f"{name} must be finite and non-negative")
-
-
-def _image(value: object) -> ImageFrame:
-    if isinstance(value, ImageFrame):
-        return value
-    raise TypeError(f"Expected ImageFrame, got {type(value).__name__}")
-
-
-def _integer(value: object) -> int:
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    raise TypeError(f"Expected integer value, got {type(value).__name__}")
-
-
-def _number(value: object) -> float:
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    raise TypeError(f"Expected numeric value, got {type(value).__name__}")
-
-
-def _text(value: object) -> str:
-    if isinstance(value, str):
-        return value
-    raise TypeError(f"Expected string value, got {type(value).__name__}")
 
 
 __all__ = [

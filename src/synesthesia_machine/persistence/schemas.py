@@ -6,12 +6,11 @@ from collections.abc import Callable, Mapping
 from copy import deepcopy
 from typing import TypedDict, cast
 
+from synesthesia_machine.contracts import JsonObject, JsonValue
 from synesthesia_machine.version import __version__
 
 GRAPH_SCHEMA_VERSION = 4
 
-type JsonValue = bool | int | float | str | list[JsonValue] | dict[str, JsonValue] | None
-type JsonObject = dict[str, JsonValue]
 type GraphMigration = Callable[[JsonObject], JsonObject]
 
 

@@ -20,6 +20,12 @@ from synesthesia_machine.nodes.base import (
     TypeVariable,
     VariadicInputSpec,
 )
+from synesthesia_machine.nodes.migrations import (
+    NodeMigration,
+    NodeMigrationResult,
+    NodeMigrationStep,
+    migrate_node_data,
+)
 from synesthesia_machine.nodes.registry import NodeRegistry
 
 __all__ = [
@@ -31,6 +37,9 @@ __all__ = [
     "NodeDefinition",
     "NodeExecutionError",
     "NodeMemoryDiagnosticProvider",
+    "NodeMigration",
+    "NodeMigrationResult",
+    "NodeMigrationStep",
     "NodeRegistry",
     "NodeRuntime",
     "OutputPortSpec",
@@ -42,4 +51,5 @@ __all__ = [
     "ResetReason",
     "TypeVariable",
     "VariadicInputSpec",
+    "migrate_node_data",
 ]

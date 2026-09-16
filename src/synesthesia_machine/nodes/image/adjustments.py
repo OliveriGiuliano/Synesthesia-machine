@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Mapping, Sequence
+from typing import cast
 from uuid import UUID
 
 import numpy as np
@@ -46,11 +47,13 @@ from synesthesia_machine.nodes import (
     ParameterSpec,
     TypeVariable,
 )
-from synesthesia_machine.nodes.image.runtime_support import (
-    StatelessImageRuntime,
-    boolean_value,
-    number_value,
-    text_value,
+from synesthesia_machine.nodes.image.runtime_support import StatelessImageRuntime
+from synesthesia_machine.nodes.migrations import (
+    NodeMigration,
+    migrate_adjustment_channel_selection_v1_to_v2,
+    migrate_clamp_v1_to_v2,
+    migrate_hue_v1_to_v2,
+    migrate_invert_colour_v1_to_v2,
 )
 
 IMAGE_OR_CHANNEL = TypeVariable("IMAGE_OR_CHANNEL", frozenset({PortType.IMAGE, PortType.CHANNEL}))
@@ -98,11 +101,11 @@ def _number(
     parameters: Mapping[str, ParameterValue],
     parameter_id: str,
 ) -> float:
-    return number_value(inputs.get(parameter_id, parameters[parameter_id]))
+    return cast(float, inputs.get(parameter_id, parameters[parameter_id]))
 
 
 def _selection(parameters: Mapping[str, ParameterValue]) -> ChannelSelection:
-    return ChannelSelection(text_value(parameters["channels"]))
+    return ChannelSelection(cast(str, parameters["channels"]))
 
 
 def _brightness(
@@ -195,11 +198,11 @@ def _stretch(
     del inputs
     return stretch_contrast_image(
         image,
-        mode=StretchMode(text_value(parameters["mode"])),
-        lower_percentile=number_value(parameters["lower_percentile"]),
-        upper_percentile=number_value(parameters["upper_percentile"]),
-        ignore_non_finite=boolean_value(parameters["ignore_non_finite"]),
-        constant_policy=ConstantChannelPolicy(text_value(parameters["constant_policy"])),
+        mode=StretchMode(cast(str, parameters["mode"])),
+        lower_percentile=cast(float, parameters["lower_percentile"]),
+        upper_percentile=cast(float, parameters["upper_percentile"]),
+        ignore_non_finite=cast(bool, parameters["ignore_non_finite"]),
+        constant_policy=ConstantChannelPolicy(cast(str, parameters["constant_policy"])),
         selection=_selection(parameters),
     )
 
@@ -241,8 +244,8 @@ def _divide_scalar(
 ) -> ImageFrame | ChannelFrame:
     if isinstance(image, ChannelFrame):
         denominator = _number(inputs, parameters, "value")
-        epsilon = number_value(parameters["epsilon"])
-        policy = NearZeroPolicy(text_value(parameters["near_zero_policy"]))
+        epsilon = cast(float, parameters["epsilon"])
+        policy = NearZeroPolicy(cast(str, parameters["near_zero_policy"]))
         if abs(denominator) < epsilon:
             if policy is NearZeroPolicy.ERROR:
                 raise ValueError("division scalar is near zero")
@@ -254,8 +257,8 @@ def _divide_scalar(
         image,
         _number(inputs, parameters, "value"),
         _selection(parameters),
-        near_zero_policy=NearZeroPolicy(text_value(parameters["near_zero_policy"])),
-        epsilon=number_value(parameters["epsilon"]),
+        near_zero_policy=NearZeroPolicy(cast(str, parameters["near_zero_policy"])),
+        epsilon=cast(float, parameters["epsilon"]),
     )
 
 
@@ -305,11 +308,11 @@ def _float_parameter(
 
 def _validate_levels(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
     errors: list[str] = []
-    input_black = number_value(parameters["input_black"])
-    input_white = number_value(parameters["input_white"])
-    gamma = number_value(parameters["gamma"])
-    output_black = number_value(parameters["output_black"])
-    output_white = number_value(parameters["output_white"])
+    input_black = cast(float, parameters["input_black"])
+    input_white = cast(float, parameters["input_white"])
+    gamma = cast(float, parameters["gamma"])
+    output_black = cast(float, parameters["output_black"])
+    output_white = cast(float, parameters["output_white"])
     if not all(
         math.isfinite(value)
         for value in (input_black, input_white, gamma, output_black, output_white)
@@ -323,8 +326,8 @@ def _validate_levels(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
 
 
 def _validate_clamp(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
-    minimum = number_value(parameters["minimum"])
-    maximum = number_value(parameters["maximum"])
+    minimum = cast(float, parameters["minimum"])
+    maximum = cast(float, parameters["maximum"])
     if not math.isfinite(minimum) or not math.isfinite(maximum):
         return ("clamp bounds must be finite",)
     if maximum < minimum:
@@ -333,8 +336,8 @@ def _validate_clamp(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
 
 
 def _validate_stretch(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
-    lower = number_value(parameters["lower_percentile"])
-    upper = number_value(parameters["upper_percentile"])
+    lower = cast(float, parameters["lower_percentile"])
+    upper = cast(float, parameters["upper_percentile"])
     if not math.isfinite(lower) or not math.isfinite(upper):
         return ("stretch percentiles must be finite",)
     if not 0.0 <= lower < upper <= 100.0:
@@ -346,7 +349,7 @@ def _validate_positive(
     parameter_id: str,
 ) -> Callable[[Mapping[str, ParameterValue]], Sequence[str]]:
     def validate(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
-        value = number_value(parameters[parameter_id])
+        value = cast(float, parameters[parameter_id])
         if not math.isfinite(value) or value <= 0.0:
             return (f"{parameter_id} must be finite and positive",)
         return ()
@@ -366,7 +369,7 @@ def _combined_validator(
         finite_errors = tuple(
             f"{parameter_id} must be finite"
             for parameter_id in float_parameter_ids
-            if not math.isfinite(number_value(parameters[parameter_id]))
+            if not math.isfinite(cast(float, parameters[parameter_id]))
         )
         if finite_errors:
             return finite_errors
@@ -386,6 +389,7 @@ def _definition(
     validator: Callable[[Mapping[str, ParameterValue]], Sequence[str]] | None = None,
     dynamic: bool = False,
     implementation_version: int = 1,
+    migrations: Mapping[int, NodeMigration] | None = None,
 ) -> NodeDefinition:
     return NodeDefinition(
         type_id,
@@ -401,6 +405,7 @@ def _definition(
         aliases=aliases,
         parameter_validator=_combined_validator(parameters, validator),
         port_type_resolver=_dynamic_image_channel_type if dynamic else None,
+        migrations=migrations or {},
     )
 
 
@@ -433,6 +438,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             _brightness,
             aliases=("exposure offset", "lighten", "darken"),
             implementation_version=2,
+            migrations={1: migrate_adjustment_channel_selection_v1_to_v2},
         ),
         _definition(
             "synmachine.image.contrast",
@@ -458,6 +464,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             ),
             _contrast,
             implementation_version=2,
+            migrations={1: migrate_adjustment_channel_selection_v1_to_v2},
         ),
         _definition(
             "synmachine.image.clamp",
@@ -483,6 +490,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             validator=_validate_clamp,
             dynamic=True,
             implementation_version=2,
+            migrations={1: migrate_clamp_v1_to_v2},
         ),
         _definition(
             "synmachine.image.colour_levels",
@@ -530,6 +538,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             aliases=("levels", "black point", "white point"),
             validator=_validate_levels,
             implementation_version=2,
+            migrations={1: migrate_adjustment_channel_selection_v1_to_v2},
         ),
         _definition(
             "synmachine.image.hue",
@@ -555,6 +564,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             _hue,
             aliases=("hue shift", "colour rotate"),
             implementation_version=2,
+            migrations={1: migrate_hue_v1_to_v2},
         ),
         _definition(
             "synmachine.image.saturation",
@@ -583,6 +593,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             _invert,
             aliases=("negative", "invert color"),
             implementation_version=2,
+            migrations={1: migrate_invert_colour_v1_to_v2},
         ),
         _definition(
             "synmachine.image.stretch_contrast",
@@ -644,6 +655,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             aliases=("normalize", "auto levels", "dynamic range"),
             validator=_validate_stretch,
             implementation_version=2,
+            migrations={1: migrate_adjustment_channel_selection_v1_to_v2},
         ),
         _definition(
             "synmachine.image.gamma",
@@ -666,6 +678,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             _gamma,
             validator=_validate_positive("gamma"),
             implementation_version=2,
+            migrations={1: migrate_adjustment_channel_selection_v1_to_v2},
         ),
         _definition(
             "synmachine.image.add_scalar",
@@ -685,6 +698,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             aliases=("image offset",),
             dynamic=True,
             implementation_version=2,
+            migrations={1: migrate_adjustment_channel_selection_v1_to_v2},
         ),
         _definition(
             "synmachine.image.multiply_scalar",
@@ -704,6 +718,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             aliases=("image scale",),
             dynamic=True,
             implementation_version=2,
+            migrations={1: migrate_adjustment_channel_selection_v1_to_v2},
         ),
         _definition(
             "synmachine.image.divide_scalar",
@@ -742,6 +757,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             validator=_validate_positive("epsilon"),
             dynamic=True,
             implementation_version=2,
+            migrations={1: migrate_adjustment_channel_selection_v1_to_v2},
         ),
     )
 

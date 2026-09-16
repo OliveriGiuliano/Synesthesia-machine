@@ -6,6 +6,7 @@ import math
 from collections import deque
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from threading import Lock
+from typing import cast
 from uuid import UUID
 
 import numpy as np
@@ -36,6 +37,7 @@ from synesthesia_machine.nodes import (
     TypeVariable,
     VariadicInputSpec,
 )
+from synesthesia_machine.nodes.migrations import migrate_statistics_v1_to_v2
 
 _DYNAMIC_TYPES = frozenset({PortType.FLOAT, PortType.INT, PortType.IMAGE, PortType.CHANNEL})
 _BUFFER_MEMORY_LIMIT_BYTES = 256 * 1024 * 1024
@@ -62,8 +64,8 @@ class DifferenceRuntime(_RuntimeBase):
         context: FrameContext,
     ) -> Mapping[str, RuntimeValue]:
         del context
-        first = _image(inputs["a"])
-        second = _image(inputs["b"])
+        first = cast(ImageFrame, inputs["a"])
+        second = cast(ImageFrame, inputs["b"])
         if first.data.shape != second.data.shape:
             raise ExpectedNodeError("difference_shape", "Difference inputs must have equal shapes")
         if (
@@ -75,7 +77,7 @@ class DifferenceRuntime(_RuntimeBase):
                 "difference_descriptor", "Difference inputs must use matching image descriptors"
             )
         result = np.abs(first.data - second.data)
-        if _boolean(parameters["normalize"]):
+        if cast(bool, parameters["normalize"]):
             result = _normalize_array(result, data_minimum=None, data_maximum=None)
         return {"image": frame_like(first, result)}
 
@@ -142,7 +144,7 @@ class BufferRuntime(_RuntimeBase):
     ) -> Mapping[str, RuntimeValue]:
         del context
         value = _array_item(inputs["value"])
-        capacity = _integer(parameters["capacity"], "capacity")
+        capacity = cast(int, parameters["capacity"])
         item_type = _runtime_port_type(value)
         signature = _buffer_signature(value)
         estimated_retained_bytes = _buffer_item_bytes(value) * capacity
@@ -200,27 +202,27 @@ class StatisticsRuntime(_RuntimeBase):
         samples = _flatten_samples(inputs.values())
         if not samples:
             raise ExpectedNodeError("statistics_empty", "Statistics requires a non-empty input")
-        statistic = _text(parameters["statistic"])
-        percentile = _number(parameters["percentile"])
+        statistic = cast(str, parameters["statistic"])
+        percentile = cast(float, parameters["percentile"])
         first = samples[0]
         if isinstance(first, ImageFrame):
-            frames = tuple(_image(value) for value in samples)
+            frames = tuple(cast(ImageFrame, value) for value in samples)
             _require_matching_descriptors(frames)
             data = _statistic(
                 np.stack([frame.data for frame in frames]), statistic, percentile, axis=0
             )
             return {"value": frame_like(first, np.asarray(data, dtype=np.float32))}
         if isinstance(first, ChannelFrame):
-            channels = tuple(_channel(value) for value in samples)
+            channels = tuple(cast(ChannelFrame, value) for value in samples)
             _require_matching_descriptors(channels)
             data = _statistic(
                 np.stack([channel.data for channel in channels]), statistic, percentile, axis=0
             )
             return {"value": _channel_like(channels[0], np.asarray(data, dtype=np.float32))}
         if isinstance(first, (int, float)) and not isinstance(first, bool):
-            # Every connected value resolves to the same scalar element type, so
-            # each sample is a number; _number guards against any other value.
-            sample_array = np.asarray([_number(value) for value in samples], dtype=np.float64)
+            # The compiler unifies the scalar element types, so every sample
+            # here is a number; the cast only narrows the static type.
+            sample_array = np.asarray([cast(float, value) for value in samples], dtype=np.float64)
             result = _statistic(sample_array, statistic, percentile, axis=0)
             scalar: float | int = float(result)
             all_int = all(
@@ -263,17 +265,17 @@ class NormalizeRuntime(_RuntimeBase):
     ) -> Mapping[str, RuntimeValue]:
         del context
         value = inputs["value"]
-        mode = _text(parameters["mode"])
-        output_minimum = _number(parameters["output_minimum"])
-        output_maximum = _number(parameters["output_maximum"])
+        mode = cast(str, parameters["mode"])
+        output_minimum = cast(float, parameters["output_minimum"])
+        output_maximum = cast(float, parameters["output_maximum"])
         if output_maximum < output_minimum:
             raise ExpectedNodeError(
                 "normalize_range", "Normalize output maximum must not be below its minimum"
             )
         if isinstance(value, (ImageFrame, ChannelFrame)):
             data = value.data
-            input_minimum = _number(parameters["input_minimum"]) if mode == "EXPLICIT" else None
-            input_maximum = _number(parameters["input_maximum"]) if mode == "EXPLICIT" else None
+            input_minimum = cast(float, parameters["input_minimum"]) if mode == "EXPLICIT" else None
+            input_maximum = cast(float, parameters["input_maximum"]) if mode == "EXPLICIT" else None
             normalized = _normalize_array(
                 data,
                 data_minimum=input_minimum,
@@ -282,9 +284,9 @@ class NormalizeRuntime(_RuntimeBase):
                 output_maximum=output_maximum,
             )
             return {"value": _value_like(value, normalized)}
-        number = _number(value)
-        input_minimum = _number(parameters["input_minimum"])
-        input_maximum = _number(parameters["input_maximum"])
+        number = cast(float, value)
+        input_minimum = cast(float, parameters["input_minimum"])
+        input_maximum = cast(float, parameters["input_maximum"])
         if input_maximum == input_minimum:
             raise ExpectedNodeError(
                 "normalize_range", "Normalize input endpoints must not be equal"
@@ -304,10 +306,10 @@ class CurveRuntime(_RuntimeBase):
     ) -> Mapping[str, RuntimeValue]:
         del context
         value = inputs["value"]
-        curve = _text(parameters["curve"])
+        curve = cast(str, parameters["curve"])
         exponent = _positive_number(parameters["exponent"], "exponent")
         gain = _positive_number(parameters["gain"], "gain")
-        midpoint = _number(parameters["midpoint"])
+        midpoint = cast(float, parameters["midpoint"])
 
         def transform(data: NDArray[np.float32]) -> NDArray[np.float32]:
             source = np.asarray(data, dtype=np.float32)
@@ -328,14 +330,14 @@ class CurveRuntime(_RuntimeBase):
 
         if isinstance(value, (ImageFrame, ChannelFrame)):
             return {"value": _value_like(value, transform(value.data))}
-        scalar_data = np.asarray([_number(value)], dtype=np.float32)
+        scalar_data = np.asarray([cast(float, value)], dtype=np.float32)
         result = float(transform(scalar_data)[0])
         return {"value": round(result) if isinstance(value, int) else result}
 
 
 def _validate_normalize_parameters(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
-    output_minimum = _number(parameters["output_minimum"])
-    output_maximum = _number(parameters["output_maximum"])
+    output_minimum = cast(float, parameters["output_minimum"])
+    output_maximum = cast(float, parameters["output_maximum"])
     if output_maximum < output_minimum:
         return ("output maximum must not be below output minimum",)
     return ()
@@ -465,6 +467,7 @@ def _create_all_definitions() -> tuple[NodeDefinition, ...]:
             StatisticsRuntime,
             aliases=("array statistics", "mean", "median", "standard deviation"),
             variadic_input=VariadicInputSpec("values", "Value", T_ARRAY, minimum_count=1),
+            migrations={1: migrate_statistics_v1_to_v2},
         ),
         NodeDefinition(
             "synmachine.utility.normalize",
@@ -641,7 +644,7 @@ def _normalize_array(
 def _modulo_value(value: RuntimeValue, modulo: float) -> RuntimeValue:
     if isinstance(value, (ImageFrame, ChannelFrame)):
         return _value_like(value, np.mod(value.data, modulo))
-    number = _number(value)
+    number = cast(float, value)
     result = number % modulo
     return int(result) if isinstance(value, int) and float(modulo).is_integer() else float(result)
 
@@ -650,7 +653,7 @@ def _combine_modulo(accumulator: RuntimeValue, value: RuntimeValue, modulo: floa
     if isinstance(value, (ImageFrame, ChannelFrame)):
         assert isinstance(accumulator, (ImageFrame, ChannelFrame))
         return _value_like(value, np.mod(accumulator.data + value.data, modulo))
-    result = (_number(accumulator) + _number(value)) % modulo
+    result = (cast(float, accumulator) + cast(float, value)) % modulo
     return int(result) if isinstance(value, int) and float(modulo).is_integer() else float(result)
 
 
@@ -781,47 +784,11 @@ def _array_item(value: RuntimeValue) -> ImageFrame | ChannelFrame | float | int:
     return value  # type: ignore[return-value]
 
 
-def _image(value: object) -> ImageFrame:
-    if isinstance(value, ImageFrame):
-        return value
-    raise TypeError(f"Expected ImageFrame, got {type(value).__name__}")
-
-
-def _channel(value: object) -> ChannelFrame:
-    if isinstance(value, ChannelFrame):
-        return value
-    raise TypeError(f"Expected ChannelFrame, got {type(value).__name__}")
-
-
-def _number(value: object) -> float:
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    raise TypeError(f"Expected number, got {type(value).__name__}")
-
-
 def _positive_number(value: object, name: str) -> float:
-    result = _number(value)
+    result = cast(float, value)
     if not math.isfinite(result) or result <= 0.0:
         raise ExpectedNodeError("invalid_parameter", f"{name} must be finite and positive")
     return result
-
-
-def _integer(value: object, name: str) -> int:
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    raise ExpectedNodeError("invalid_parameter", f"{name} must be an integer")
-
-
-def _boolean(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
-    raise TypeError(f"Expected boolean, got {type(value).__name__}")
-
-
-def _text(value: object) -> str:
-    if isinstance(value, str):
-        return value
-    raise TypeError(f"Expected string, got {type(value).__name__}")
 
 
 __all__ = ["create_difference_definitions", "create_dynamic_definitions"]

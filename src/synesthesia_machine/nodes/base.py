@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 from uuid import UUID
@@ -27,6 +27,7 @@ from synesthesia_machine.contracts.runtime_values import (
     PortType,
     RuntimeValue,
 )
+from synesthesia_machine.nodes.migrations import NodeMigration
 
 _STABLE_ID = re.compile(r"^[a-z][a-z0-9_]*$")
 _TYPE_ID = re.compile(r"^[a-z][a-z0-9_.]*$")
@@ -388,6 +389,7 @@ class NodeDefinition:
     parameter_editor_resolver: ParameterEditorResolver | None = None
     variadic_input: VariadicInputSpec | None = None
     parameter_groups: tuple[ParameterGroupSpec, ...] = ()
+    migrations: Mapping[int, NodeMigration] = field(default_factory=dict[int, NodeMigration])
 
     def __post_init__(self) -> None:
         if not _TYPE_ID.fullmatch(self.type_id):

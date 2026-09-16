@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from typing import cast
 from uuid import UUID
 
 from synesthesia_machine.contracts import FrameContext, MidiStateFrame, ParameterValue, PortType
@@ -149,20 +150,20 @@ def resolve_common_musical_settings(
     """Resolve persisted common values, including UI channel 1..16 to runtime 0..15."""
 
     selector = resolve_musical_selector(
-        _text(parameters["root_pitch_class"]),
-        _text(parameters["scale"]),
-        _integer(parameters["midi_minimum"]),
-        _integer(parameters["midi_maximum"]),
-        custom_pitch_class_mask=_text(parameters["custom_scale_mask"]),
+        cast(str, parameters["root_pitch_class"]),
+        cast(str, parameters["scale"]),
+        cast(int, parameters["midi_minimum"]),
+        cast(int, parameters["midi_maximum"]),
+        custom_pitch_class_mask=cast(str, parameters["custom_scale_mask"]),
     )
-    minimum_velocity = _integer(parameters["minimum_velocity"])
-    maximum_velocity = _integer(parameters["maximum_velocity"])
+    minimum_velocity = cast(int, parameters["minimum_velocity"])
+    maximum_velocity = cast(int, parameters["maximum_velocity"])
     if minimum_velocity > maximum_velocity:
         raise ValueError("Minimum velocity cannot exceed maximum velocity")
     return CommonMusicalSettings(
         selector,
-        _integer(parameters["midi_channel"]) - 1,
-        _integer(parameters["maximum_polyphony"]),
+        cast(int, parameters["midi_channel"]) - 1,
+        cast(int, parameters["maximum_polyphony"]),
         minimum_velocity,
         maximum_velocity,
     )
@@ -195,15 +196,3 @@ def midi_state_from_candidates(
         maximum_velocity=settings.maximum_velocity,
     )
     return MidiStateFrame(notes, context, source_node_id)
-
-
-def _integer(value: object) -> int:
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    raise TypeError(f"Expected integer value, got {type(value).__name__}")
-
-
-def _text(value: object) -> str:
-    if isinstance(value, str):
-        return value
-    raise TypeError(f"Expected string value, got {type(value).__name__}")

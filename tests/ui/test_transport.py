@@ -427,8 +427,8 @@ def test_preview_and_metrics_polling_update_ui_with_sequence_coalescing(
     assert window.image_preview_panel.image_widget.isVisible()
     assert window.note_preview_panel.note_widget.isVisible()
     assert "sequence 1" in window.image_preview_panel.image_caption.text()
-    assert window._image_sequences == {(source_id, "image"): 1}
-    assert window._note_sequences == {NOTE_NODE: 1}
+    assert window.preview_router.image_sequences == {(source_id, "image"): 1}
+    assert window.preview_router.note_sequences == {NOTE_NODE: 1}
     assert "42 ticks" in window._engine_status.text()
     assert "3 dropped" in window._engine_status.text()
     assert "Input / processed / preview: 0.0 / 29.5 / 0.0 FPS" in (window._engine_status.toolTip())
@@ -481,9 +481,9 @@ def test_successful_activation_clears_all_stale_runtime_previews(
     window.scene.set_connection_image_preview(source_id, "image", thumbnail)
     window.image_preview_panel.show_preview(image_preview)
     window.note_preview_panel.show_preview(note_preview)
-    window._image_sequences[(source_id, "image")] = 1
-    window._note_sequences[NOTE_NODE] = 1
-    window._canvas_value_sequences[(number_id, "value")] = 1
+    window.preview_router.image_sequences[(source_id, "image")] = 1
+    window.preview_router.note_sequences[NOTE_NODE] = 1
+    window.preview_router.value_sequences[(number_id, "value")] = 1
 
     window._apply_engine_activation(
         EngineActivation(window.session.document.revision, ValidationReport(), True)
@@ -493,9 +493,9 @@ def test_successful_activation_clears_all_stale_runtime_previews(
     assert window.scene.connection_items[image_connection]._image is None
     assert window.image_preview_panel.image_widget.latest_preview is None
     assert window.note_preview_panel.note_widget.latest_preview is None
-    assert window._image_sequences == {}
-    assert window._note_sequences == {}
-    assert window._canvas_value_sequences == {}
+    assert window.preview_router.image_sequences == {}
+    assert window.preview_router.note_sequences == {}
+    assert window.preview_router.value_sequences == {}
 
 
 def test_node_drag_release_preserves_live_connection_pills(

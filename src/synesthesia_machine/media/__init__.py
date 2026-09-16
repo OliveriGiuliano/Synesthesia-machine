@@ -86,6 +86,12 @@ from synesthesia_machine.media.image_common import (
     validate_odd_kernel,
 )
 from synesthesia_machine.media.resize import FitMode, Interpolation, resize_image
+from synesthesia_machine.media.source_config import (
+    CameraSourceConfig,
+    VideoSourceConfig,
+    build_camera_source_config,
+    build_video_source_config,
+)
 from synesthesia_machine.media.video_source import (
     DecodedVideoFrame,
     PlaybackClock,
@@ -110,6 +116,7 @@ __all__ = [
     "CameraClock",
     "CameraDevice",
     "CameraEnumerationService",
+    "CameraSourceConfig",
     "CameraSourceService",
     "CameraUnavailableError",
     "ChannelDescriptor",
@@ -137,12 +144,15 @@ __all__ = [
     "SystemPlaybackClock",
     "ThresholdMode",
     "VideoMetadata",
+    "VideoSourceConfig",
     "VideoSourceService",
     "add_noise_image",
     "add_scalar_image",
     "alpha_channel_index",
     "blend_images",
     "brightness_image",
+    "build_camera_source_config",
+    "build_video_source_config",
     "camera_index_from_device_id",
     "canny_image",
     "clamp_image",

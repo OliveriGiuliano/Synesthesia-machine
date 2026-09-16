@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Mapping, Sequence
+from typing import cast
 from uuid import UUID
 
 from synesthesia_machine.contracts import (
@@ -48,8 +49,8 @@ class MultiplyVelocityRuntime(_MidiRuntimeBase):
         parameters: Mapping[str, ParameterValue],
         context: FrameContext,
     ) -> Mapping[str, RuntimeValue]:
-        state = _midi_state(inputs["midi"])
-        factor = _number(inputs.get("factor", parameters["factor"]))
+        state = cast(MidiStateFrame, inputs["midi"])
+        factor = cast(float, inputs.get("factor", parameters["factor"]))
         try:
             return {"midi": multiply_velocity(state, factor, self.node_id, context)}
         except ValueError as error:
@@ -63,8 +64,8 @@ class TransposeRuntime(_MidiRuntimeBase):
         parameters: Mapping[str, ParameterValue],
         context: FrameContext,
     ) -> Mapping[str, RuntimeValue]:
-        state = _midi_state(inputs["midi"])
-        semitones = _integer(inputs.get("semitones", parameters["semitones"]))
+        state = cast(MidiStateFrame, inputs["midi"])
+        semitones = cast(int, inputs.get("semitones", parameters["semitones"]))
         try:
             return {"midi": transpose_midi_state(state, semitones, self.node_id, context)}
         except ValueError as error:
@@ -80,7 +81,7 @@ class MidiMergeRuntime(_MidiRuntimeBase):
     ) -> Mapping[str, RuntimeValue]:
         del parameters
         try:
-            states = tuple(_midi_state(value) for value in inputs.values())
+            states = tuple(cast(MidiStateFrame, value) for value in inputs.values())
             return {"midi": merge_midi_states(states, self.node_id, context)}
         except ValueError as error:
             raise ExpectedNodeError("invalid_midi_merge", str(error)) from error
@@ -221,31 +222,13 @@ def create_midi_utility_definitions() -> tuple[NodeDefinition, ...]:
 
 
 def _validate_multiply_parameters(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
-    factor = _number(parameters["factor"])
+    factor = cast(float, parameters["factor"])
     return () if math.isfinite(factor) else ("Velocity factor must be finite",)
 
 
 def _validate_input_clock(state: MidiStateFrame, context: FrameContext) -> None:
     if state.context.clock_id != context.clock_id:
         raise ValueError("MIDI state clock does not match the execution clock")
-
-
-def _midi_state(value: object) -> MidiStateFrame:
-    if isinstance(value, MidiStateFrame):
-        return value
-    raise TypeError(f"Expected MidiStateFrame, got {type(value).__name__}")
-
-
-def _number(value: object) -> float:
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    raise TypeError(f"Expected numeric value, got {type(value).__name__}")
-
-
-def _integer(value: object) -> int:
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    raise TypeError(f"Expected integer value, got {type(value).__name__}")
 
 
 __all__ = [

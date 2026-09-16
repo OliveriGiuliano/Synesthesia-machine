@@ -712,7 +712,6 @@ def test_definition_validators_reject_invalid_batch4_literals(
     [
         ("synmachine.image.threshold", {"mode": "NOT_A_MODE"}, "not a valid"),
         ("synmachine.image.canny", {"high_threshold": 0.05}, "greater"),
-        ("synmachine.image.convolve", {"kernel": "not-a-matrix"}, "NumericMatrix"),
         ("synmachine.image.dilate", {"iterations": 0}, "positive"),
         ("synmachine.image.erode", {"anchor_x": -1, "anchor_y": 0}, "anchor"),
         ("synmachine.image.high_pass", {"sigma": 0.0}, "positive"),

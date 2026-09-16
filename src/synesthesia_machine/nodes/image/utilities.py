@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import cast
 
 from synesthesia_machine.contracts import (
     ColorSpace,
     FrameContext,
+    ImageFrame,
     ParameterValue,
     PortType,
     RuntimeValue,
@@ -19,11 +21,8 @@ from synesthesia_machine.nodes import (
     OutputPortSpec,
     ParameterSpec,
 )
-from synesthesia_machine.nodes.image.runtime_support import (
-    StatelessImageRuntime,
-    image_value,
-    text_value,
-)
+from synesthesia_machine.nodes.image.runtime_support import StatelessImageRuntime
+from synesthesia_machine.nodes.migrations import migrate_change_colour_space_v1_to_v2
 
 
 class ChangeColourSpaceRuntime(StatelessImageRuntime):
@@ -38,8 +37,8 @@ class ChangeColourSpaceRuntime(StatelessImageRuntime):
         del context
         return {
             "image": convert_image(
-                image_value(inputs["image"]),
-                ColorSpace(text_value(parameters["target_colour_space"])),
+                cast(ImageFrame, inputs["image"]),
+                ColorSpace(cast(str, parameters["target_colour_space"])),
             )
         }
 
@@ -77,6 +76,7 @@ def create_utility_definitions() -> tuple[NodeDefinition, ...]:
             ExecutionKind.STATELESS,
             ChangeColourSpaceRuntime,
             aliases=("convert colour", "convert color", "hsv", "lab", "ycrcb"),
+            migrations={1: migrate_change_colour_space_v1_to_v2},
         ),
     )
 
