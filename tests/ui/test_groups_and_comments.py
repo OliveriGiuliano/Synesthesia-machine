@@ -249,6 +249,65 @@ def test_group_drag_sticks_to_overlapping_nodes(qapp: QApplication) -> None:
     view.close()
 
 
+def test_group_drag_with_stuck_nodes_is_a_single_undo_step(qapp: QApplication) -> None:
+    session = DocumentSession(create_utility_registry())
+    scene = GraphScene(session, DEFAULT_THEME)
+    group_id = session.add_group(
+        GroupKind.GROUP, (100.0, 100.0), title="Batch", size=(400.0, 300.0)
+    )
+    inside = session.add_node("synmachine.utility.number", (130.0, 130.0))
+    view = GraphView(scene, DEFAULT_THEME)
+    view.resize(900, 600)
+    view.show()
+    qapp.processEvents()
+
+    press = view.mapFromScene(QPointF(450.0, 200.0))
+    destination = press + QPoint(120, 0)
+    depth_before = session.undo_stack.index()
+    QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=press)
+    QTest.mouseMove(view.viewport(), destination)
+    QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=destination)
+    qapp.processEvents()
+
+    # One gesture, one undo step: the group move and its stuck node join a
+    # single macro instead of committing two commands.
+    assert session.undo_stack.index() == depth_before + 1
+
+    session.undo_stack.undo()
+    node = session.document.node(inside)
+    assert node is not None and node.position == (130.0, 130.0)
+    group = session.document.group(group_id)
+    assert group is not None and group.position == (100.0, 100.0)
+
+    session.undo_stack.redo()
+    node = session.document.node(inside)
+    assert node is not None and node.position == pytest.approx((250.0, 130.0))
+    group = session.document.group(group_id)
+    assert group is not None and group.position == pytest.approx((220.0, 100.0))
+    view.close()
+
+
+def test_plain_group_drag_is_still_one_undo_step(qapp: QApplication) -> None:
+    session = DocumentSession(create_utility_registry())
+    scene = GraphScene(session, DEFAULT_THEME)
+    session.add_group(GroupKind.GROUP, (100.0, 100.0), title="Batch", size=(400.0, 300.0))
+    view = GraphView(scene, DEFAULT_THEME)
+    view.resize(900, 600)
+    view.show()
+    qapp.processEvents()
+
+    press = view.mapFromScene(QPointF(450.0, 200.0))
+    destination = press + QPoint(120, 0)
+    depth_before = session.undo_stack.index()
+    QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=press)
+    QTest.mouseMove(view.viewport(), destination)
+    QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=destination)
+    qapp.processEvents()
+
+    assert session.undo_stack.index() == depth_before + 1
+    view.close()
+
+
 def test_group_drag_with_shift_held_does_not_stick_to_nodes(qapp: QApplication) -> None:
     session = DocumentSession(create_utility_registry())
     scene = GraphScene(session, DEFAULT_THEME)

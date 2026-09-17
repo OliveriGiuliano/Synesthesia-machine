@@ -122,6 +122,14 @@ class DocumentSession(QObject):
     def push(self, command: QUndoCommand) -> None:
         self.undo_stack.push(command)
 
+    def begin_macro(self, label: str) -> None:
+        """Open a single undo step for the commands pushed until end_macro."""
+
+        self.undo_stack.beginMacro(label)
+
+    def end_macro(self) -> None:
+        self.undo_stack.endMacro()
+
     def set_device_catalogue(self, catalogue: DeviceCatalogue) -> None:
         if catalogue == self._device_catalogue:
             return
@@ -340,14 +348,14 @@ class DocumentSession(QObject):
             connection.id for connection in self.document.incident_connections(node_ids)
         }
         independent_connections = connection_ids - incident_ids
-        self.undo_stack.beginMacro(tr("Delete selection"))
+        self.begin_macro(tr("Delete selection"))
         try:
             for connection_id in sorted(independent_connections, key=str):
                 self.remove_connection(connection_id)
             self.delete_nodes(node_ids)
             self.delete_groups(selected_groups)
         finally:
-            self.undo_stack.endMacro()
+            self.end_macro()
 
     def move_nodes(
         self,
@@ -614,7 +622,7 @@ class DocumentSession(QObject):
         existing_is_output: bool,
         position: tuple[float, float],
     ) -> UUID:
-        self.undo_stack.beginMacro(tr("Insert and connect node"))
+        self.begin_macro(tr("Insert and connect node"))
         try:
             node_id = self.add_node(definition.type_id, position)
             if existing_is_output:
@@ -622,7 +630,7 @@ class DocumentSession(QObject):
             else:
                 self.add_connection(node_id, new_port_id, existing_node_id, existing_port_id)
         finally:
-            self.undo_stack.endMacro()
+            self.end_macro()
         return node_id
 
     def rebuild_view_model(self) -> None:

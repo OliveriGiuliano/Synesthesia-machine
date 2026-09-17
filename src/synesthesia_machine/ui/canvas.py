@@ -485,6 +485,23 @@ class GraphScene(QGraphicsScene):
             )
         self.session.move_groups(surviving, current)
 
+    def commit_group_drag(
+        self,
+        group_origins: dict[UUID, tuple[float, float]],
+        node_origins: dict[UUID, tuple[float, float]],
+    ) -> None:
+        # A group drag that also moved stuck nodes is one gesture: both moves
+        # join a single undo step so one undo reverts the whole drag.
+        if not node_origins:
+            self.commit_group_move(group_origins)
+            return
+        self.session.begin_macro(tr("Move group with contents"))
+        try:
+            self.commit_node_move(node_origins)
+            self.commit_group_move(group_origins)
+        finally:
+            self.session.end_macro()
+
     def commit_group_resize(
         self,
         group_id: UUID,

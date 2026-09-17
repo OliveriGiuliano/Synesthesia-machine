@@ -317,10 +317,10 @@ class GroupGraphicsItem(QGraphicsObject):
             return
         super().mouseReleaseEvent(event)
         scene = cast("object | None", self.scene())
-        if scene is not None and self._stuck_node_origins:
-            cast("GraphSceneProtocol", scene).commit_node_move(self._stuck_node_origins)
         if scene is not None:
-            cast("GraphSceneProtocol", scene).commit_group_move(self._drag_origin)
+            cast("GraphSceneProtocol", scene).commit_group_drag(
+                self._drag_origin, self._stuck_node_origins
+            )
         self._drag_origin = {}
         self._move_items = []
         self._move_start_positions = []
@@ -1225,6 +1225,11 @@ class GraphSceneProtocol:
     def selected_group_items(self) -> list[GroupGraphicsItem]: ...
     def selected_group_positions(self) -> dict[UUID, tuple[float, float]]: ...
     def commit_group_move(self, origins: dict[UUID, tuple[float, float]]) -> None: ...
+    def commit_group_drag(
+        self,
+        group_origins: dict[UUID, tuple[float, float]],
+        node_origins: dict[UUID, tuple[float, float]],
+    ) -> None: ...
     def commit_group_resize(
         self,
         group_id: UUID,
