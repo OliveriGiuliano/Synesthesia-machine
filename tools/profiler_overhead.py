@@ -24,6 +24,7 @@ from synesthesia_machine.graph import GraphCompiler
 from synesthesia_machine.runtime import RuntimeProfiler, Scheduler
 from synesthesia_machine.runtime.execution_plan import ExecutionPlan, PortKey
 from tools.reference_benchmark import SOURCE_ID, create_reference_document
+from tools.reporting import write_report
 
 DEFAULT_OUTPUT = Path("docs/evidence/profiler-overhead.json")
 
@@ -129,9 +130,7 @@ def main() -> int:
         measured_ticks=args.ticks,
         repetitions=args.repetitions,
     )
-    output = args.output.expanduser().resolve()
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(asdict(report), indent=2) + "\n", encoding="utf-8", newline="\n")
+    write_report(report, args.output)
     print(json.dumps(asdict(report), indent=2))
     return 0
 

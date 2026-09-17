@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import math
-import subprocess
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -53,7 +51,7 @@ from synesthesia_machine.nodes.synesthesia.optical_flow import (
     optical_flow_to_midi_state,
 )
 from synesthesia_machine.nodes.synesthesia.scanline import MEAN, VALUE, scanline_to_midi_state
-from tools.environment_report import EnvironmentReport, collect_environment_report
+from tools.reporting import EnvironmentReport, collect_environment_report, git_state, write_report
 
 DEFAULT_OUTPUT_PATH = Path("docs/evidence/synesthesia-benchmarks.json")
 DEFAULT_WARMUP_RUNS = 3
@@ -243,7 +241,7 @@ def run_benchmarks(
             ),
         ),
     )
-    git_commit, git_dirty = _git_state()
+    git_commit, git_dirty = git_state()
     passed = all(item.output_state_stable and bool(item.output_notes) for item in benchmarks)
     report = SynesthesiaBenchmarkReport(
         schema_version=1,
@@ -278,13 +276,7 @@ def run_benchmarks(
         benchmarks=benchmarks,
         passed=passed,
     )
-    destination = output_path.expanduser().resolve()
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(
-        json.dumps(asdict(report), indent=2) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
+    write_report(report, output_path)
     return report
 
 
@@ -462,25 +454,6 @@ def _combined_digest(*values: NDArray[np.float32]) -> str:
     for value in values:
         digest.update(np.ascontiguousarray(value).tobytes())
     return digest.hexdigest()
-
-
-def _git_state() -> tuple[str | None, bool | None]:
-    commit = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    status = subprocess.run(
-        ["git", "status", "--porcelain"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    return (
-        commit.stdout.strip() if commit.returncode == 0 else None,
-        bool(status.stdout.strip()) if status.returncode == 0 else None,
-    )
 
 
 def _validate_configuration(*, warmup_runs: int, measured_runs: int) -> None:

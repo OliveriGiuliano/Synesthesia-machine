@@ -17,14 +17,13 @@ stays in lockstep with the production bootstrap.
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import subprocess
 import sys
 import tempfile
 import time
 from contextlib import suppress
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from multiprocessing import freeze_support
 from pathlib import Path
@@ -53,8 +52,8 @@ from synesthesia_machine.contracts import (
 from synesthesia_machine.graph import GraphDocument
 from synesthesia_machine.persistence import load_graph, save_graph
 from synesthesia_machine.ui.main_window import MainWindow
-from tools.environment_report import EnvironmentReport, collect_environment_report
 from tools.generate_test_video import generate_hue_test_video
+from tools.reporting import EnvironmentReport, collect_environment_report, git_state, write_report
 
 CANONICAL_SOURCE_ID = UUID("30000000-0000-0000-0000-000000000001")
 CANONICAL_AUDIO_ID = UUID("30000000-0000-0000-0000-000000000008")
@@ -193,16 +192,6 @@ def _percentile_ms(intervals_ns: tuple[int, ...], percentile: float) -> float:
     return float(np.percentile(values, percentile))
 
 
-def _git_commit() -> str | None:
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout.strip() if result.returncode == 0 else None
-
-
 def _windows_power_mode() -> str | None:
     if sys.platform != "win32":
         return None
@@ -321,12 +310,7 @@ class _PerformanceRun(QObject):
             if not self._window.grab().save(str(self._screenshot_path), "PNG"):
                 raise OSError(f"Could not write screenshot to {self._screenshot_path}")
             self.report = self._create_report(metrics, source, elapsed_s)
-            self._output_path.parent.mkdir(parents=True, exist_ok=True)
-            self._output_path.write_text(
-                json.dumps(asdict(self.report), indent=2) + "\n",
-                encoding="utf-8",
-                newline="\n",
-            )
+            write_report(self.report, self._output_path)
         except Exception as error:  # CLI boundary records Qt callback failures for the caller.
             self.error = str(error)
         finally:
@@ -375,7 +359,7 @@ class _PerformanceRun(QObject):
         )
         return UiDiagnosticReport(
             generated_at_utc=datetime.now(UTC).isoformat(),
-            git_commit=_git_commit(),
+            git_commit=git_state()[0],
             engine_mode=self._engine_mode,
             canonical_graph_path=str(self._canonical_graph_path),
             methodology=BenchmarkMethodology(

@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import tempfile
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
@@ -21,6 +20,7 @@ from synesthesia_machine.persistence import save_graph
 from synesthesia_machine.ui.canvas import GraphScene, GraphView
 from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.theme import DEFAULT_THEME
+from tools.reporting import write_report
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,9 +125,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=Path("docs/evidence/large-graph.json"))
     args = parser.parse_args()
     report = profile_large_graph(args.node_count)
-    payload = json.dumps(asdict(report), indent=2, sort_keys=True) + "\n"
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(payload, encoding="utf-8")
+    payload = write_report(report, args.output)
     print(payload, end="")
     return 0 if report.passed else 1
 

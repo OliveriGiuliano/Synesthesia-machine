@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import argparse
-import json
-import subprocess
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
@@ -25,7 +23,7 @@ from synesthesia_machine.contracts import (
 from synesthesia_machine.graph import GraphCompiler, GraphDocument
 from synesthesia_machine.nodes import ResetReason
 from synesthesia_machine.runtime import PortKey, Scheduler
-from tools.environment_report import EnvironmentReport, collect_environment_report
+from tools.reporting import EnvironmentReport, collect_environment_report, git_state, write_report
 
 DEFAULT_OUTPUT_PATH = Path("docs/evidence/hold-image-soak.json")
 DEFAULT_TICKS = 30 * 60 * 60
@@ -110,25 +108,6 @@ class HoldImageSoakReport:
     process_memory: ProcessMemoryResult
     passed: bool
     samples: tuple[MemorySample, ...]
-
-
-def _git_state() -> tuple[str | None, bool | None]:
-    commit = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    status = subprocess.run(
-        ["git", "status", "--porcelain"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    return (
-        commit.stdout.strip() if commit.returncode == 0 else None,
-        bool(status.stdout.strip()) if status.returncode == 0 else None,
-    )
 
 
 def _compiled_scheduler(*, delay_frames: int, memory_limit_mb: int) -> Scheduler:
@@ -242,7 +221,7 @@ def run_soak(
         raise ValueError("configured Hold Image estimate exceeds memory_limit_mb")
 
     environment = collect_environment_report()
-    git_commit, git_dirty = _git_state()
+    git_commit, git_dirty = git_state()
     process = psutil.Process()
     scheduler = _compiled_scheduler(
         delay_frames=delay_frames,
@@ -410,13 +389,7 @@ def run_soak(
         passed=passed,
         samples=tuple(samples),
     )
-    output_path = output_path.expanduser().resolve()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps(asdict(report), indent=2) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
+    write_report(report, output_path)
     return report
 
 

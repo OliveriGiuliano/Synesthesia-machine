@@ -13,7 +13,7 @@ uv run python -m tools.camera_probe --start 0 --stop 5
 uv run python -m tools.midi_probe --list
 uv run python -m tools.audio_probe --play
 uv run python -m tools.process_ipc_probe
-uv run python -m tools.environment_report --output packaging/environment-report.json
+uv run python -m tools.reporting --output packaging/environment-report.json
 ```
 
 `camera_probe` opens the selected indexes briefly. `audio_probe --play` sends a quiet tone to the

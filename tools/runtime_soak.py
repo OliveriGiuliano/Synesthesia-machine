@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import tempfile
 import threading
 import time
@@ -24,6 +23,7 @@ from synesthesia_machine.midi import (
 )
 from synesthesia_machine.runtime import RuntimeProfiler
 from tools.hold_image_soak import run_soak
+from tools.reporting import git_state, write_report
 
 DEFAULT_OUTPUT = Path("docs/evidence/runtime-soak.json")
 DEFAULT_TICKS = 60 * 60 * 60
@@ -153,7 +153,7 @@ def run_runtime_soak(*, output_path: Path, total_ticks: int = DEFAULT_TICKS) -> 
     passed = memory_result.bounded and profiler_result.bounded and midi_result.no_stuck_notes
     report = RuntimeSoakReport(
         generated_at_utc=datetime.now(UTC).isoformat(),
-        git_commit=_git_commit(),
+        git_commit=git_state()[0],
         methodology={
             "accelerated": True,
             "target_fps": FPS,
@@ -167,9 +167,7 @@ def run_runtime_soak(*, output_path: Path, total_ticks: int = DEFAULT_TICKS) -> 
         midi_overload=midi_result,
         passed=passed,
     )
-    output = output_path.expanduser().resolve()
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(asdict(report), indent=2) + "\n", encoding="utf-8", newline="\n")
+    write_report(report, output_path)
     return report
 
 
@@ -226,13 +224,6 @@ def _require_blocking_port(backend: _BlockingMidiBackend) -> _BlockingNoteOnPort
             return port
         time.sleep(0.005)
     raise TimeoutError("mock MIDI output did not open")
-
-
-def _git_commit() -> str | None:
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD"], check=False, capture_output=True, text=True
-    )
-    return result.stdout.strip() if result.returncode == 0 else None
 
 
 def main() -> int:

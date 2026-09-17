@@ -28,11 +28,11 @@ from synesthesia_machine.app.application import create_application
 from synesthesia_machine.app.settings import ApplicationPaths
 from synesthesia_machine.app.shell import create_app_shell, process_client_factory
 from synesthesia_machine.contracts import EngineClient, NodeProfile
-from synesthesia_machine.diagnostics import collect_hardware_snapshot, dependency_versions
 from synesthesia_machine.graph import GraphDocument
 from synesthesia_machine.persistence import save_graph
 from synesthesia_machine.runtime.engine_server import MAX_OPENCV_THREADS
 from tools.generate_test_video import generate_hue_test_video
+from tools.reporting import EnvironmentReport, collect_environment_report, git_state, write_report
 
 SOURCE_ID = UUID("80000000-0000-0000-0000-000000000001")
 RESIZE_ID = UUID("80000000-0000-0000-0000-000000000002")
@@ -120,7 +120,8 @@ class ReferenceBenchmarkReport:
     git_commit: str | None
     methodology: dict[str, object]
     reference_graph: dict[str, object]
-    environment: dict[str, object]
+    environment: EnvironmentReport
+    run_context: dict[str, object]
     release_gate: ReleaseGate
     runs: tuple[BenchmarkRun, ...]
 
@@ -265,7 +266,7 @@ def run_benchmark(
         raise ValueError("warmup must be non-negative; measurement and run count must be positive")
     application = create_application(["synmachine-reference-benchmark"])
     application.setQuitOnLastWindowClosed(False)
-    hardware = collect_hardware_snapshot()
+    environment_report = collect_environment_report()
     with tempfile.TemporaryDirectory(prefix="synmachine-reference-benchmark-") as temporary:
         root = Path(temporary)
         source_seconds = max(10, int(np.ceil(warmup_s + measurement_s)) + 5)
@@ -295,7 +296,7 @@ def run_benchmark(
     report = ReferenceBenchmarkReport(
         generated_at_utc=datetime.now(UTC).isoformat(),
         label=label,
-        git_commit=_git_commit(),
+        git_commit=git_state()[0],
         methodology={
             "scope": "Real Qt main window with spawned child engine and visible preview branch",
             "warmup_s": warmup_s,
@@ -322,13 +323,16 @@ def run_benchmark(
                 "Channel Display equivalent of the architecture packet's Display Image endpoint."
             ),
         },
-        environment={
-            "hardware": asdict(hardware),
-            "dependencies": dependency_versions(),
+        environment=environment_report,
+        run_context={
             "opencv_thread_policy": {
                 "maximum_threads": MAX_OPENCV_THREADS,
                 "selected_threads": max(
-                    1, min(MAX_OPENCV_THREADS, hardware.cpu_physical or hardware.cpu_logical or 1)
+                    1,
+                    min(
+                        MAX_OPENCV_THREADS,
+                        environment_report.cpu_physical or environment_report.cpu_logical or 1,
+                    ),
                 ),
             },
             "qt_platform": QGuiApplication.platformName(),
@@ -338,9 +342,7 @@ def run_benchmark(
         release_gate=aggregate_release_gate(results),
         runs=results,
     )
-    output = output_path.expanduser().resolve()
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(asdict(report), indent=2) + "\n", encoding="utf-8", newline="\n")
+    write_report(report, output_path)
     return report
 
 
@@ -515,13 +517,6 @@ def _percentile_ms(values_ns: list[int], percentile: float) -> float:
     if not values_ns:
         return 0.0
     return float(np.percentile(np.asarray(values_ns, dtype=np.float64), percentile) / 1_000_000.0)
-
-
-def _git_commit() -> str | None:
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD"], check=False, capture_output=True, text=True
-    )
-    return result.stdout.strip() if result.returncode == 0 else None
 
 
 def _windows_power_scheme() -> str | None:
