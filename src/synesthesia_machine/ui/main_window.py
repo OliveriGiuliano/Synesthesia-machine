@@ -9,7 +9,7 @@ which owns the engine client; the window renders the state the bridge publishes
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import suppress
 from functools import partial
 from pathlib import Path
@@ -49,8 +49,10 @@ from synesthesia_machine.contracts import (
     EngineConnectionState,
     EngineMetrics,
     EngineStatus,
+    ImagePreview,
     MidiOutputConnectionState,
     NodeProfile,
+    NotePreview,
     SourceState,
 )
 from synesthesia_machine.diagnostics import create_diagnostic_bundle
@@ -877,6 +879,37 @@ class MainWindow(QMainWindow):
 
     def open_path(self, path: Path) -> bool:
         return self.document_lifecycle.open_path(path)
+
+    # -- Harness driver / observation API ---------------------------------
+    # Stable public surface for the diagnostic and benchmark tools to drive the
+    # window, so they stop reaching into panels, docks, widgets, and the
+    # session view model directly.
+
+    def reveal_preview_docks(self) -> None:
+        self.image_preview_dock.show()
+        self.note_preview_dock.show()
+
+    def frame_all(self) -> None:
+        self.view.frame_all()
+
+    def node_titles(self) -> Mapping[UUID, str]:
+        return {node.node_id: node.title for node in self.session.view_model.nodes}
+
+    def latest_image_preview(self) -> ImagePreview | None:
+        return self.image_preview_panel.image_widget.latest_preview
+
+    def latest_note_preview(self) -> NotePreview | None:
+        return self.note_preview_panel.note_widget.latest_preview
+
+    def push_previews(
+        self,
+        image_previews: Iterable[ImagePreview],
+        note_previews: Iterable[NotePreview],
+    ) -> None:
+        for preview in image_previews:
+            self.image_preview_panel.show_preview(preview)
+        for preview in note_previews:
+            self.note_preview_panel.show_preview(preview)
 
     @Slot(Path)
     def _open_graph_file_from_drop(self, path: Path) -> None:

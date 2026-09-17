@@ -4,23 +4,12 @@ import logging
 import sys
 from collections.abc import Sequence
 from multiprocessing import freeze_support
-from pathlib import Path
-from typing import Protocol
 
 from PySide6.QtCore import QTimer
 
-from synesthesia_machine.app.application import MainWindow, create_application
 from synesthesia_machine.app.logging_setup import UI_LOGGER_NAME, configure_logging
-from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.app.settings import ApplicationPaths
-from synesthesia_machine.runtime import ProcessEngineClient
-
-
-class ApplicationEngineClientFactory(Protocol):
-    def __call__(self, *, crash_log_path: str | Path | None = None) -> ProcessEngineClient: ...
-
-
-ENGINE_CLIENT_FACTORY: ApplicationEngineClientFactory = ProcessEngineClient
+from synesthesia_machine.app.shell import create_app_shell, process_client_factory
 
 
 def _option_value(arguments: Sequence[str], option: str) -> str | None:
@@ -70,20 +59,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     logger = logging.getLogger(UI_LOGGER_NAME)
     logger.info("Starting UI", extra={"session_id": session.session_id})
 
-    application = create_application(qt_arguments)
-    registry = create_application_registry()
-    engine_client = ENGINE_CLIENT_FACTORY(crash_log_path=paths.logs / "engine-crash.log")
-    window = MainWindow(registry, paths, engine_client, offer_recovery=not smoke_test)
+    shell = create_app_shell(
+        argv=qt_arguments,
+        paths=paths,
+        engine_client_factory=process_client_factory(),
+        offer_recovery=not smoke_test,
+    )
+    window = shell.window
     window.show()
 
     if smoke_test:
-        QTimer.singleShot(100, application.quit)
+        QTimer.singleShot(100, shell.application.quit)
 
     try:
-        exit_code = application.exec()
+        exit_code = shell.application.exec()
     finally:
         try:
-            engine_client.close()
+            shell.engine_client.close()
         except (RuntimeError, TimeoutError):
             logger.exception("Engine cleanup did not complete before UI shutdown")
     logger.info("UI stopped", extra={"exit_code": exit_code})

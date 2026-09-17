@@ -11,7 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -25,15 +25,13 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication
 
 from synesthesia_machine.app.application import create_application
-from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.app.settings import ApplicationPaths
-from synesthesia_machine.contracts import NodeProfile
+from synesthesia_machine.app.shell import create_app_shell, process_client_factory
+from synesthesia_machine.contracts import EngineClient, NodeProfile
 from synesthesia_machine.diagnostics import collect_hardware_snapshot, dependency_versions
 from synesthesia_machine.graph import GraphDocument
 from synesthesia_machine.persistence import save_graph
-from synesthesia_machine.runtime import ProcessEngineClient
 from synesthesia_machine.runtime.engine_server import MAX_OPENCV_THREADS
-from synesthesia_machine.ui.main_window import MainWindow
 from tools.generate_test_video import generate_hue_test_video
 
 SOURCE_ID = UUID("80000000-0000-0000-0000-000000000001")
@@ -357,26 +355,23 @@ def _run_once(
 ) -> BenchmarkRun:
     paths = ApplicationPaths(run_root, run_root / "logs", run_root / "recovery")
     paths.ensure_exists()
-    registry = create_application_registry()
-    client = ProcessEngineClient(
-        request_timeout_s=2.0,
-        activation_timeout_s=8.0,
-        heartbeat_timeout_s=2.0,
-        close_timeout_s=1.0,
-        crash_log_path=paths.logs / "engine-crash.log",
-    )
-    window = MainWindow(
-        registry,
-        paths,
-        client,
+    shell = create_app_shell(
+        paths=paths,
+        engine_client_factory=process_client_factory(
+            request_timeout_s=2.0,
+            activation_timeout_s=8.0,
+            heartbeat_timeout_s=2.0,
+            close_timeout_s=1.0,
+        ),
         settings=QSettings(str(run_root / "settings.ini"), QSettings.Format.IniFormat),
         offer_recovery=False,
     )
+    window = shell.window
+    client = shell.engine_client
     try:
         window.resize(1500, 900)
         window.show()
-        window.image_preview_dock.show()
-        window.note_preview_dock.show()
+        window.reveal_preview_docks()
         if not window.open_path(graph_path):
             raise RuntimeError("could not open the reference benchmark graph")
         if not _wait_until(application, lambda: _source_is_available(client), 10.0):
@@ -420,7 +415,7 @@ def _run_once(
         profiles = client.node_profiles()
         processed_ticks = final_metrics.processed_ticks - started_metrics.processed_ticks
         input_ticks = source.processed_index - started_source.processed_index
-        names = {node.node_id: node.title for node in window.session.view_model.nodes}
+        names = window.node_titles()
         heartbeat_p50 = _percentile_ms(heartbeat_ns, 50.0)
         heartbeat_p95 = _percentile_ms(heartbeat_ns, 95.0)
         heartbeat_max = max(heartbeat_ns, default=0) / 1_000_000.0
@@ -468,7 +463,7 @@ def _run_once(
 
 
 def _per_node_results(
-    profiles: tuple[NodeProfile, ...], names: dict[UUID, str]
+    profiles: tuple[NodeProfile, ...], names: Mapping[UUID, str]
 ) -> tuple[PerNodeResult, ...]:
     return tuple(
         PerNodeResult(
@@ -489,7 +484,7 @@ def _per_node_results(
     )
 
 
-def _source_is_available(client: ProcessEngineClient) -> bool:
+def _source_is_available(client: EngineClient) -> bool:
     try:
         source = client.source_status(SOURCE_ID)[0]
     except (IndexError, KeyError, RuntimeError, TimeoutError):

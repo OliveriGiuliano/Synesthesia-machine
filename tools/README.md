@@ -23,7 +23,7 @@ default output. The other commands above do not select or write to physical outp
 
 ```powershell
 uv run python -m tools.ui_diagnostic
-uv run python -m tools.process_ui_diagnostic
+uv run python -m tools.ui_diagnostic --engine in-process
 uv run python -m tools.reference_benchmark
 uv run python -m tools.profiler_overhead
 uv run python -m tools.large_graph_profile
@@ -32,6 +32,12 @@ uv run python -m tools.large_graph_profile
 These commands launch Qt and write JSON, and the UI diagnostics also write screenshots. Default
 outputs live under `docs/evidence`. Benchmark results are machine-specific; follow architecture
 section 18.6 before using them as release evidence.
+
+`tools.ui_diagnostic` is the single UI diagnostic tool: it drives the real Qt UI through the
+application's `create_app_shell` seam, with `--engine spawned` (default, child engine process) or
+`--engine in-process` (the in-process engine; diagnostic-only, never a production runtime). The
+spawned and in-process evidence defaults land in `docs/evidence/process-ui-diagnostic.*` and
+`docs/evidence/ui-diagnostic.*` respectively.
 
 ## Explicit MIDI hardware evidence
 

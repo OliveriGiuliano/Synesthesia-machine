@@ -1,16 +1,34 @@
-"""Run the canonical graph in the real Qt UI and record diagnostic evidence."""
+"""Measure the canonical graph in the real Qt UI against an in-process or spawned engine.
+
+This single tool replaces the former ``ui_diagnostic`` (in-process) and
+``process_ui_diagnostic`` (spawned) twins. Select the engine with ``--engine``:
+
+* ``spawned`` (default): the UI talks to a child engine process, so the report
+  records the process relationship and connection state.
+* ``in-process``: the UI executes the engine in its own process. This mode is
+  explicitly diagnostic-only and must never be offered as the production
+  runtime.
+
+The tool assembles the application through ``create_app_shell`` (the app's
+composition seam) and drives it through the public ``MainWindow`` API, so it
+stays in lockstep with the production bootstrap.
+"""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
+import sys
 import tempfile
 import time
 from contextlib import suppress
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from multiprocessing import freeze_support
 from pathlib import Path
+from typing import Literal
 from uuid import UUID
 
 import numpy as np
@@ -21,19 +39,41 @@ from PySide6.QtWidgets import QApplication
 from synesthesia_machine.app.application import create_application
 from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.app.settings import ApplicationPaths
-from synesthesia_machine.contracts import EngineMetrics, SourceStatus
+from synesthesia_machine.app.shell import (
+    create_app_shell,
+    in_process_client_factory,
+    process_client_factory,
+)
+from synesthesia_machine.contracts import (
+    EngineClient,
+    EngineConnectionState,
+    EngineMetrics,
+    SourceStatus,
+)
 from synesthesia_machine.graph import GraphDocument
 from synesthesia_machine.persistence import load_graph, save_graph
-from synesthesia_machine.runtime import InProcessEngineClient
 from synesthesia_machine.ui.main_window import MainWindow
 from tools.environment_report import EnvironmentReport, collect_environment_report
 from tools.generate_test_video import generate_hue_test_video
 
 CANONICAL_SOURCE_ID = UUID("30000000-0000-0000-0000-000000000001")
 CANONICAL_AUDIO_ID = UUID("30000000-0000-0000-0000-000000000008")
+CANONICAL_CANVAS_ID = UUID("30000000-0000-0000-0000-000000000007")
+CANONICAL_PREVIEW_ID = UUID("30000000-0000-0000-0000-000000000006")
+CANONICAL_MIDI_ID = UUID("30000000-0000-0000-0000-000000000009")
 DEFAULT_GRAPH_PATH = Path("examples/library/hue-chord.synmachine.json")
-DEFAULT_OUTPUT_PATH = Path("docs/evidence/ui-diagnostic.json")
-DEFAULT_SCREENSHOT_PATH = Path("docs/evidence/ui-diagnostic.png")
+DEFAULT_OUTPUT_PATHS = {
+    "spawned": Path("docs/evidence/process-ui-diagnostic.json"),
+    "in_process": Path("docs/evidence/ui-diagnostic.json"),
+}
+DEFAULT_SCREENSHOT_PATHS = {
+    "spawned": Path("docs/evidence/process-ui-diagnostic.png"),
+    "in_process": Path("docs/evidence/ui-diagnostic.png"),
+}
+DEFAULT_WARMUP_S = 5.0
+DEFAULT_MEASUREMENT_S = 30.0
+
+EngineMode = Literal["spawned", "in_process"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,24 +127,46 @@ class UiResponsivenessResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ProcessResult:
+    parent_process_id: int
+    child_process_id: int | None
+    separate_process: bool
+    connection_state: str
+
+
+@dataclass(frozen=True, slots=True)
 class SourceFixture:
     generated_width: int
     generated_height: int
     generated_fps: int
     generated_frame_count: int
-    generated_duration_s: float
+    generated_duration_s: int
     codec: str
+
+
+@dataclass(frozen=True, slots=True)
+class BenchmarkMethodology:
+    scope: str
+    warmup_s: float
+    measurement_s: float
+    run_count: int
+    preview_policy: str
+    windows_power_mode: str | None
+    limitations: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class UiDiagnosticReport:
     generated_at_utc: str
     git_commit: str | None
+    engine_mode: str
     canonical_graph_path: str
+    methodology: BenchmarkMethodology
     run_duration_requested_s: float
     run_duration_observed_s: float
     qt_platform: str
     environment: EnvironmentReport
+    process: ProcessResult | None
     source_fixture: SourceFixture
     engine: EngineResult
     source: SourceResult
@@ -141,17 +203,32 @@ def _git_commit() -> str | None:
     return result.stdout.strip() if result.returncode == 0 else None
 
 
+def _windows_power_mode() -> str | None:
+    if sys.platform != "win32":
+        return None
+    result = subprocess.run(
+        ["powercfg", "/getactivescheme"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    value = result.stdout.strip()
+    return value if result.returncode == 0 and value else None
+
+
 class _PerformanceRun(QObject):
     def __init__(
         self,
         application: QApplication,
         window: MainWindow,
-        client: InProcessEngineClient,
+        client: EngineClient,
         *,
+        engine_mode: EngineMode,
         canonical_graph_path: Path,
         output_path: Path,
         screenshot_path: Path,
-        duration_s: float,
+        warmup_s: float,
+        measurement_s: float,
         heartbeat_interval_ms: int,
         source_fixture: SourceFixture,
         environment: EnvironmentReport,
@@ -160,10 +237,12 @@ class _PerformanceRun(QObject):
         self._application = application
         self._window = window
         self._client = client
+        self._engine_mode = engine_mode
         self._canonical_graph_path = canonical_graph_path
         self._output_path = output_path
         self._screenshot_path = screenshot_path
-        self._duration_s = duration_s
+        self._warmup_s = warmup_s
+        self._measurement_s = measurement_s
         self._heartbeat_interval_ms = heartbeat_interval_ms
         self._source_fixture = source_fixture
         self._environment = environment
@@ -184,6 +263,10 @@ class _PerformanceRun(QObject):
         self._sample_timer.setInterval(1_000)
         self._sample_timer.timeout.connect(self._record_sample)
 
+        self._warmup_timer = QTimer(self)
+        self._warmup_timer.setSingleShot(True)
+        self._warmup_timer.timeout.connect(self._begin_measurement)
+
         self._finish_timer = QTimer(self)
         self._finish_timer.setSingleShot(True)
         self._finish_timer.timeout.connect(self._finish)
@@ -193,14 +276,19 @@ class _PerformanceRun(QObject):
             status = self._client.source_status(CANONICAL_SOURCE_ID)[0]
             if status.last_error is not None:
                 raise RuntimeError(status.last_error)
-            self._started_ns = time.perf_counter_ns()
-            self._last_heartbeat_ns = self._started_ns
             self._window.play()
-            self._heartbeat_timer.start()
-            self._sample_timer.start()
-            self._finish_timer.start(round(self._duration_s * 1_000.0))
+            self._warmup_timer.start(round(self._warmup_s * 1_000.0))
         except Exception as error:  # CLI boundary records Qt callback failures for the caller.
             self._abort(error)
+
+    def _begin_measurement(self) -> None:
+        self._started_ns = time.perf_counter_ns()
+        self._last_heartbeat_ns = self._started_ns
+        self._heartbeat_intervals_ns.clear()
+        self._samples.clear()
+        self._heartbeat_timer.start()
+        self._sample_timer.start()
+        self._finish_timer.start(round(self._measurement_s * 1_000.0))
 
     def _record_heartbeat(self) -> None:
         now_ns = time.perf_counter_ns()
@@ -227,10 +315,7 @@ class _PerformanceRun(QObject):
             self._samples.append(_metric_sample(metrics, elapsed_s))
             image_previews = self._client.next_image_previews()
             note_previews = self._client.next_note_previews()
-            for preview in image_previews:
-                self._window.image_preview_panel.show_preview(preview)
-            for preview in note_previews:
-                self._window.note_preview_panel.show_preview(preview)
+            self._window.push_previews(image_previews, note_previews)
             self._application.processEvents()
             self._screenshot_path.parent.mkdir(parents=True, exist_ok=True)
             if not self._window.grab().save(str(self._screenshot_path), "PNG"):
@@ -260,20 +345,59 @@ class _PerformanceRun(QObject):
         p95_ms = _percentile_ms(intervals, 95)
         maximum_ms = max(intervals, default=0) / 1_000_000.0
         responsive = callback_ratio >= 0.9 and p95_ms <= 100.0 and maximum_ms <= 250.0
-        image_preview = self._window.image_preview_panel.image_widget.latest_preview
-        note_preview = self._window.note_preview_panel.note_widget.latest_preview
+        image_preview = self._window.latest_image_preview()
+        note_preview = self._window.latest_note_preview()
         peak_memory = max(
             (sample.memory_bytes for sample in self._samples),
             default=metrics.memory_bytes,
         )
+
+        process: ProcessResult | None = None
+        if self._engine_mode == "spawned":
+            engine_status = self._client.status()
+            child_process_id = engine_status.child_process_id
+            if (
+                engine_status.connection_state is not EngineConnectionState.CONNECTED
+                or child_process_id is None
+            ):
+                raise RuntimeError(f"Spawned engine is not connected: {engine_status!r}")
+            process = ProcessResult(
+                parent_process_id=os.getpid(),
+                child_process_id=child_process_id,
+                separate_process=child_process_id != os.getpid(),
+                connection_state=engine_status.connection_state.value,
+            )
+
+        scope = (
+            "Spawned-engine process-backed canonical diagnostic baseline"
+            if self._engine_mode == "spawned"
+            else "In-process diagnostic-only run of the canonical graph"
+        )
         return UiDiagnosticReport(
             generated_at_utc=datetime.now(UTC).isoformat(),
             git_commit=_git_commit(),
+            engine_mode=self._engine_mode,
             canonical_graph_path=str(self._canonical_graph_path),
-            run_duration_requested_s=self._duration_s,
+            methodology=BenchmarkMethodology(
+                scope=scope,
+                warmup_s=self._warmup_s,
+                measurement_s=self._measurement_s,
+                run_count=1,
+                preview_policy="Canonical graph includes image and note preview branches",
+                windows_power_mode=_windows_power_mode(),
+                limitations=(
+                    "Source input FPS is recorded as the generated fixture rate, not a separate "
+                    "runtime counter because EngineClient does not expose one yet.",
+                    "Engine IPC exposes aggregate p95 node time, not p50/p99 latency.",
+                    "Per-node rolling timings are not yet exposed through EngineClient.",
+                    "This diagnostic is one evidence run, not the three-run median release gate.",
+                ),
+            ),
+            run_duration_requested_s=self._measurement_s,
             run_duration_observed_s=elapsed_s,
             qt_platform=QGuiApplication.platformName(),
             environment=self._environment,
+            process=process,
             source_fixture=self._source_fixture,
             engine=EngineResult(
                 state=metrics.state.value,
@@ -326,6 +450,7 @@ class _PerformanceRun(QObject):
         self.error = str(error)
         self._heartbeat_timer.stop()
         self._sample_timer.stop()
+        self._warmup_timer.stop()
         self._finish_timer.stop()
         self._shutdown()
 
@@ -385,10 +510,12 @@ def _prepare_runtime_graph(
 
 def run_diagnostic(
     *,
+    engine_mode: EngineMode,
     canonical_graph_path: Path,
     output_path: Path,
     screenshot_path: Path,
-    duration_s: float,
+    warmup_s: float,
+    measurement_s: float,
     fps: int,
     source_seconds: int,
     heartbeat_interval_ms: int,
@@ -404,36 +531,44 @@ def run_diagnostic(
             fps=fps,
             source_seconds=source_seconds,
         )
-        application = create_application(["synmachine-ui-diagnostic"])
-        registry = create_application_registry()
-        client = InProcessEngineClient(registry)
-        window = MainWindow(
-            registry,
-            _paths(runtime_root),
-            client,
-            settings=QSettings(
-                str(runtime_root / "settings.ini"),
-                QSettings.Format.IniFormat,
-            ),
+        create_application(f"synmachine-ui-diagnostic-{engine_mode}")
+        engine_client_factory = (
+            process_client_factory(
+                request_timeout_s=1.5,
+                activation_timeout_s=5.0,
+                heartbeat_timeout_s=1.5,
+                close_timeout_s=0.5,
+            )
+            if engine_mode == "spawned"
+            else in_process_client_factory()
+        )
+        shell = create_app_shell(
+            paths=_paths(runtime_root),
+            engine_client_factory=engine_client_factory,
+            settings=QSettings(str(runtime_root / "settings.ini"), QSettings.Format.IniFormat),
             offer_recovery=False,
         )
+        window = shell.window
+        client = shell.engine_client
+        application = shell.application
         window.resize(1600, 950)
         window.show()
         if not window.open_path(runtime_graph_path):
             client.close()
             raise RuntimeError("Could not open the temporary UI diagnostic graph")
-        window.image_preview_dock.show()
-        window.note_preview_dock.show()
-        window.view.frame_all()
+        window.reveal_preview_docks()
+        window.frame_all()
         application.processEvents()
         controller = _PerformanceRun(
             application,
             window,
             client,
+            engine_mode=engine_mode,
             canonical_graph_path=canonical_graph_path,
             output_path=output_path,
             screenshot_path=screenshot_path,
-            duration_s=duration_s,
+            warmup_s=warmup_s,
+            measurement_s=measurement_s,
             heartbeat_interval_ms=heartbeat_interval_ms,
             source_fixture=source_fixture,
             environment=collect_environment_report(),
@@ -449,10 +584,17 @@ def run_diagnostic(
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--engine",
+        choices=("spawned", "in-process"),
+        default="spawned",
+        help="Engine runtime: spawned child process (default) or in-process (diagnostic-only).",
+    )
     parser.add_argument("--graph", type=Path, default=DEFAULT_GRAPH_PATH)
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_PATH)
-    parser.add_argument("--screenshot", type=Path, default=DEFAULT_SCREENSHOT_PATH)
-    parser.add_argument("--duration-seconds", type=float, default=60.0)
+    parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--screenshot", type=Path, default=None)
+    parser.add_argument("--warmup-seconds", type=float, default=DEFAULT_WARMUP_S)
+    parser.add_argument("--measurement-seconds", type=float, default=DEFAULT_MEASUREMENT_S)
     parser.add_argument("--fps", type=int, default=60)
     parser.add_argument("--source-seconds", type=int, default=10)
     parser.add_argument("--heartbeat-interval-ms", type=int, default=50)
@@ -460,29 +602,40 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    freeze_support()
     parser = _parser()
     args = parser.parse_args()
-    if args.duration_seconds <= 0:
-        parser.error("--duration-seconds must be positive")
+    if args.warmup_seconds < 0 or args.measurement_seconds < 30.0:
+        parser.error("--warmup-seconds must be non-negative and --measurement-seconds at least 30")
     if args.fps <= 0 or args.source_seconds <= 0 or args.heartbeat_interval_ms <= 0:
         parser.error("--fps, --source-seconds, and --heartbeat-interval-ms must be positive")
+    engine_mode: EngineMode = "in_process" if args.engine == "in-process" else "spawned"
+    output_path = args.output or DEFAULT_OUTPUT_PATHS[engine_mode]
+    screenshot_path = args.screenshot or DEFAULT_SCREENSHOT_PATHS[engine_mode]
     report = run_diagnostic(
+        engine_mode=engine_mode,
         canonical_graph_path=args.graph,
-        output_path=args.output,
-        screenshot_path=args.screenshot,
-        duration_s=args.duration_seconds,
+        output_path=output_path,
+        screenshot_path=screenshot_path,
+        warmup_s=args.warmup_seconds,
+        measurement_s=args.measurement_seconds,
         fps=args.fps,
         source_seconds=args.source_seconds,
         heartbeat_interval_ms=args.heartbeat_interval_ms,
     )
+    suffix = (
+        f", child PID={report.process.child_process_id}"
+        if report.process is not None
+        else " (in-process)"
+    )
     print(
-        f"UI diagnostic: {report.engine.processed_fps:.2f} processed FPS, "
+        f"UI diagnostic ({args.engine}): {report.engine.processed_fps:.2f} processed FPS, "
         f"p95 node {report.engine.p95_node_time_ms:.3f} ms, "
         f"drops {report.engine.dropped_before_processing}, "
-        f"UI responsive={report.ui.responsive}"
+        f"UI responsive={report.ui.responsive}{suffix}"
     )
-    print(args.output.resolve())
-    print(args.screenshot.resolve())
+    print(output_path.resolve())
+    print(screenshot_path.resolve())
     return 0
 
 

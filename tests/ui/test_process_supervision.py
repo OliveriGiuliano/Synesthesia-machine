@@ -18,7 +18,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from synesthesia_machine.app import bootstrap
+from synesthesia_machine.app import bootstrap, shell
 from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.app.settings import ApplicationPaths
 from synesthesia_machine.contracts import (
@@ -246,11 +246,17 @@ def test_production_bootstrap_uses_process_client_and_freeze_support(
     def create_application(_arguments: object) -> _Application:
         return _Application()
 
+    def process_client_factory(*_args: object, **_kwargs: object) -> object:
+        def factory(*, registry: object, paths: ApplicationPaths) -> _Client:
+            return _Client(crash_log_path=paths.logs / "engine-crash.log")
+
+        return factory
+
     monkeypatch.setattr(bootstrap, "configure_logging", configure_logging)
-    monkeypatch.setattr(bootstrap, "create_application", create_application)
-    monkeypatch.setattr(bootstrap, "create_application_registry", lambda: object())
-    monkeypatch.setattr(bootstrap, "ENGINE_CLIENT_FACTORY", _Client)
-    monkeypatch.setattr(bootstrap, "MainWindow", _Window)
+    monkeypatch.setattr(shell, "create_application", create_application)
+    monkeypatch.setattr(shell, "create_application_registry", lambda: object())
+    monkeypatch.setattr(bootstrap, "process_client_factory", process_client_factory)
+    monkeypatch.setattr(shell, "MainWindow", _Window)
 
     assert bootstrap.main(["synmachine"]) == 0
 
