@@ -182,6 +182,7 @@ def test_reactivation_replaces_generation_and_unlinks_previous_slot(
     for name in first_names:
         _assert_shared_memory_unlinked(name)
 
+
 def test_forced_child_termination_unlinks_parent_owned_preview_slot(
     tmp_path: Path,
 ) -> None:
