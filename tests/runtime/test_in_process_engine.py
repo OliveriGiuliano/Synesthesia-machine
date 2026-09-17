@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import threading
+import time
+from dataclasses import replace
 from pathlib import Path
 from uuid import UUID
 
@@ -17,7 +19,10 @@ from synesthesia_machine.contracts import (
     SourceStatus,
 )
 from synesthesia_machine.graph import GraphDocument
+from synesthesia_machine.media.source_config import VideoSourceConfig
 from synesthesia_machine.midi import MidiServiceStatus
+from synesthesia_machine.nodes.input import LOAD_VIDEO_TYPE_ID, create_input_definitions
+from synesthesia_machine.nodes.registry import NodeRegistry
 from synesthesia_machine.runtime import InProcessEngineClient
 
 SOURCE_A = UUID("00000000-0000-0000-0000-0000000000a1")
@@ -441,28 +446,12 @@ class _PanicTestVideoFactory:
     def __call__(
         self,
         node_id: UUID,
-        file_path: str | Path,
-        *,
-        process_every_nth_frame: int,
-        playback_speed: float,
-        loop: bool,
-        stream_index: int,
-        loop_start_s: float,
-        loop_end_s: float,
+        config: VideoSourceConfig,
         on_frame: object,
         on_reset: object,
     ) -> _PanicTestVideoSource:
-        del (
-            process_every_nth_frame,
-            playback_speed,
-            loop,
-            stream_index,
-            loop_start_s,
-            loop_end_s,
-            on_frame,
-            on_reset,
-        )
-        source = _PanicTestVideoSource(node_id, str(file_path))
+        del on_frame, on_reset
+        source = _PanicTestVideoSource(node_id, config.file_path)
         self.sources.append(source)
         return source
 
@@ -510,5 +499,42 @@ def test_pause_panics_only_when_no_source_stays_playing() -> None:
         client.pause(SOURCE_B)
         assert service.panic_count == 1
         assert client.metrics().state is EngineState.PAUSED
+    finally:
+        client.close()
+
+
+def test_source_tick_without_declared_outputs_fails_loudly(tmp_path: Path) -> None:
+    """A source that publishes frames but declares no output contract on its own
+    definition must surface the worker error instead of orphaning its outputs."""
+
+    video_definition = next(
+        definition
+        for definition in create_input_definitions()
+        if definition.type_id == LOAD_VIDEO_TYPE_ID
+    )
+    undetermined = replace(
+        video_definition,
+        type_id="test.engine.source_without_contract",
+        source_outputs=None,
+    )
+    video = generate_test_video(tmp_path / "no-contract.mp4", frame_count=10)
+    document = GraphDocument()
+    document.add_node(
+        "test.engine.source_without_contract",
+        implementation_version=video_definition.implementation_version,
+        node_id=SOURCE_A,
+        parameters={"file_path": str(video)},
+    )
+    client = InProcessEngineClient(NodeRegistry((undetermined,)))
+    try:
+        assert client.activate(document.snapshot()).activated
+        client.play(SOURCE_A)
+        worker = client._worker
+        assert worker is not None
+        deadline = time.monotonic() + 5.0
+        while worker.last_error is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert worker.last_error is not None
+        assert "declares no output contract" in worker.last_error
     finally:
         client.close()

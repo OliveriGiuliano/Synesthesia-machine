@@ -13,6 +13,7 @@ from synesthesia_machine.contracts import (
     PortType,
     RuntimeValue,
 )
+from synesthesia_machine.media import build_camera_source_config
 from synesthesia_machine.media.camera_source import CameraBackendPreference
 from synesthesia_machine.nodes.base import (
     CachePolicy,
@@ -22,6 +23,7 @@ from synesthesia_machine.nodes.base import (
     ParameterSpec,
     ParameterUpdateMode,
     ResetReason,
+    SourceOutputContract,
 )
 
 LOAD_CAMERA_TYPE_ID = "synmachine.input.load_camera"
@@ -145,6 +147,8 @@ def create_camera_definitions() -> tuple[NodeDefinition, ...]:
             LoadCameraRuntime,
             cache_policy=CachePolicy.NEVER,
             aliases=("camera", "webcam", "live camera"),
+            source_outputs=SourceOutputContract("image", "processed_index"),
+            source_config_builder=build_camera_source_config,
         ),
     )
 

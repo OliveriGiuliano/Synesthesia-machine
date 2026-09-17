@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
-from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -20,6 +19,7 @@ from synesthesia_machine.contracts import (
     SourceStatus,
 )
 from synesthesia_machine.graph import GraphDocument, LiteralValue
+from synesthesia_machine.media.source_config import VideoSourceConfig
 from synesthesia_machine.nodes import (
     CachePolicy,
     ExecutionKind,
@@ -526,28 +526,13 @@ class _FakeVideoFactory:
     def __call__(
         self,
         node_id: UUID,
-        file_path: str | Path,
-        *,
-        process_every_nth_frame: int,
-        playback_speed: float,
-        loop: bool,
-        stream_index: int,
-        loop_start_s: float,
-        loop_end_s: float,
+        config: VideoSourceConfig,
         on_frame: object,
         on_reset: object,
     ) -> _FakeVideoSource:
-        del (
-            process_every_nth_frame,
-            loop,
-            stream_index,
-            loop_start_s,
-            loop_end_s,
-            on_frame,
-            on_reset,
-        )
-        self.playback_speeds.append(playback_speed)
-        source = _FakeVideoSource(node_id, str(file_path), self.events)
+        del on_frame, on_reset
+        self.playback_speeds.append(config.playback_speed)
+        source = _FakeVideoSource(node_id, config.file_path, self.events)
         self.sources.append(source)
         return source
 

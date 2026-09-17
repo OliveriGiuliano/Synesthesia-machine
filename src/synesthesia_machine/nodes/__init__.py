@@ -17,6 +17,7 @@ from synesthesia_machine.nodes.base import (
     ParameterSpec,
     ParameterUpdateMode,
     ResetReason,
+    SourceOutputContract,
     TypeVariable,
     VariadicInputSpec,
 )
@@ -49,6 +50,7 @@ __all__ = [
     "ParameterSpec",
     "ParameterUpdateMode",
     "ResetReason",
+    "SourceOutputContract",
     "TypeVariable",
     "VariadicInputSpec",
     "migrate_node_data",

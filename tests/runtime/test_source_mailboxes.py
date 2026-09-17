@@ -26,6 +26,7 @@ from synesthesia_machine.contracts import (
 )
 from synesthesia_machine.graph import GraphDocument
 from synesthesia_machine.media import PresentedVideoFrame
+from synesthesia_machine.media.source_config import VideoSourceConfig
 from synesthesia_machine.nodes import (
     CachePolicy,
     ExecutionKind,
@@ -157,30 +158,15 @@ class _ManualVideoFactory:
     def __call__(
         self,
         node_id: UUID,
-        file_path: str | Path,
-        *,
-        process_every_nth_frame: int,
-        playback_speed: float,
-        loop: bool,
-        stream_index: int,
-        loop_start_s: float,
-        loop_end_s: float,
+        config: VideoSourceConfig,
         on_frame: object,
         on_reset: object,
     ) -> _ManualVideoSource:
-        del (
-            process_every_nth_frame,
-            playback_speed,
-            loop,
-            stream_index,
-            loop_start_s,
-            loop_end_s,
-            on_reset,
-        )
+        del on_reset
         assert callable(on_frame)
         source = _ManualVideoSource(
             node_id,
-            file_path,
+            config.file_path,
             cast(Callable[[PresentedVideoFrame], None], on_frame),
         )
         self.source = source
@@ -209,23 +195,15 @@ class _ResettableVideoFactory:
     def __call__(
         self,
         node_id: UUID,
-        file_path: str | Path,
-        *,
-        process_every_nth_frame: int,
-        playback_speed: float,
-        loop: bool,
-        stream_index: int,
-        loop_start_s: float,
-        loop_end_s: float,
+        config: VideoSourceConfig,
         on_frame: object,
         on_reset: object,
     ) -> _ResettableManualSource:
-        del process_every_nth_frame, playback_speed, loop, stream_index, loop_start_s, loop_end_s
         assert callable(on_frame)
         assert callable(on_reset)
         source = _ResettableManualSource(
             node_id,
-            file_path,
+            config.file_path,
             cast(Callable[[PresentedVideoFrame], None], on_frame),
             cast(Callable[[ResetReason], None], on_reset),
         )

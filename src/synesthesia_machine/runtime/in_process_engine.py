@@ -11,8 +11,7 @@ from collections.abc import Callable, Iterable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from functools import partial
-from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 from uuid import UUID
 
 import psutil
@@ -34,15 +33,11 @@ from synesthesia_machine.contracts import (
     ValuePreview,
 )
 from synesthesia_machine.graph.model import GraphSnapshot
-from synesthesia_machine.media.camera_source import CameraBackendPreference, CameraSourceService
-from synesthesia_machine.media.source_config import (
-    build_camera_source_config,
-    build_video_source_config,
-)
+from synesthesia_machine.media.camera_source import CameraSourceService
+from synesthesia_machine.media.source_config import CameraSourceConfig, VideoSourceConfig
 from synesthesia_machine.media.source_frame import PresentedSourceFrame
 from synesthesia_machine.media.video_source import VideoSourceService
-from synesthesia_machine.nodes.base import ResetReason
-from synesthesia_machine.nodes.input import LOAD_CAMERA_TYPE_ID, LOAD_VIDEO_TYPE_ID
+from synesthesia_machine.nodes.base import ExecutionKind, ResetReason
 from synesthesia_machine.nodes.registry import NodeRegistry
 from synesthesia_machine.runtime.device_catalogue import (
     DeviceCatalogueService,
@@ -88,14 +83,7 @@ class VideoSourceFactory(Protocol):
     def __call__(
         self,
         node_id: UUID,
-        file_path: str | Path,
-        *,
-        process_every_nth_frame: int,
-        playback_speed: float,
-        loop: bool,
-        stream_index: int,
-        loop_start_s: float,
-        loop_end_s: float,
+        config: VideoSourceConfig,
         on_frame: object,
         on_reset: object,
     ) -> SourceController: ...
@@ -105,17 +93,50 @@ class CameraSourceFactory(Protocol):
     def __call__(
         self,
         node_id: UUID,
-        device_id: str,
-        *,
-        requested_width: int,
-        requested_height: int,
-        requested_fps: float,
-        backend_preference: CameraBackendPreference,
-        process_every_nth_frame: int,
-        reconnect_automatically: bool,
+        config: CameraSourceConfig,
         on_frame: object,
         on_reset: object,
     ) -> SourceController: ...
+
+
+def _create_default_video_source(
+    node_id: UUID,
+    config: VideoSourceConfig,
+    on_frame: object,
+    on_reset: object,
+) -> VideoSourceService:
+    """Map a declared video source configuration onto the service constructor."""
+
+    return VideoSourceService(
+        node_id,
+        config.file_path,
+        process_every_nth_frame=config.process_every_nth_frame,
+        playback_speed=config.playback_speed,
+        loop=config.loop,
+        stream_index=config.stream_index,
+        on_frame=cast(Callable[[PresentedSourceFrame], None], on_frame),
+        on_reset=cast(Callable[[ResetReason], None] | None, on_reset),
+    )
+
+
+def _create_default_camera_source(
+    node_id: UUID,
+    config: CameraSourceConfig,
+    on_frame: object,
+    on_reset: object,
+) -> CameraSourceService:
+    """Map a declared camera source configuration onto the service constructor."""
+
+    return CameraSourceService(
+        node_id,
+        config.device_id,
+        requested_width=config.requested_width,
+        requested_height=config.requested_height,
+        requested_fps=config.requested_fps,
+        backend_preference=config.backend_preference,
+        on_frame=cast(Callable[[PresentedSourceFrame], None], on_frame),
+        on_reset=cast(Callable[[ResetReason], None] | None, on_reset),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -425,22 +446,36 @@ class LatestFrameGraphWorker:
                     self._facade.reset_source(command.source_node_id, command.reason)
                 else:
                     frame = command.frame
+                    plan = self._facade.active_plan
+                    if plan is None:
+                        raise RuntimeError(
+                            f"Source tick for {command.source_node_id} "
+                            "published while no plan is active"
+                        )
+                    source_node = plan.node(command.source_node_id)
+                    contract = (
+                        source_node.definition.source_outputs if source_node is not None else None
+                    )
+                    if contract is None:
+                        # A source whose outputs are not declared on its own
+                        # definition would publish into ports that nothing
+                        # reads: fail loudly instead of orphaning.
+                        raise RuntimeError(
+                            f"Source {command.source_node_id} declares no output contract"
+                        )
                     graph_started_ns = self._execution_clock_ns()
                     result = self._facade.tick(
                         frame.context,
                         source_values={
-                            PortKey(command.source_node_id, "image"): frame.image,
-                            PortKey(command.source_node_id, "processed_index"): (
+                            PortKey(command.source_node_id, contract.image_port): frame.image,
+                            PortKey(command.source_node_id, contract.processed_index_port): (
                                 frame.processed_index
                             ),
                         },
                     )
                     if self._preview_worker is not None:
                         self._preview_worker.submit(result)
-                    if (
-                        self._tick_observer is not None
-                        and (plan := self._facade.active_plan) is not None
-                    ):
+                    if self._tick_observer is not None:
                         # Observation is diagnostic: a broken observer must not
                         # stop the tick loop that feeds the real outputs.
                         try:
@@ -577,8 +612,8 @@ class InProcessEngineClient:
         self._tick_observer = tick_observer
         self._facade = EngineFacade(registry)
         self._profiling_enabled = False
-        self._video_source_factory = video_source_factory or VideoSourceService
-        self._camera_source_factory = camera_source_factory or CameraSourceService
+        self._video_source_factory = video_source_factory or _create_default_video_source
+        self._camera_source_factory = camera_source_factory or _create_default_camera_source
         self._device_catalogue_service = device_catalogue_service or SystemDeviceCatalogueService()
         self._worker_clock = worker_clock
         self._use_previews = use_previews
@@ -658,7 +693,7 @@ class InProcessEngineClient:
             sources: dict[UUID, SourceController] = {}
             try:
                 for node in plan.nodes:
-                    if node.definition.type_id not in {LOAD_CAMERA_TYPE_ID, LOAD_VIDEO_TYPE_ID}:
+                    if node.definition.execution_kind is not ExecutionKind.SOURCE:
                         continue
                     existing = self._sources.get(node.node_id)
                     sources[node.node_id] = (
@@ -991,46 +1026,69 @@ class InProcessEngineClient:
     def _create_source(
         self, node: CompiledNode, worker: LatestFrameGraphWorker
     ) -> SourceController:
-        if node.definition.type_id == LOAD_CAMERA_TYPE_ID:
-            return self._create_camera_source(node, worker)
-        return self._create_video_source(node, worker)
+        """Build a source from the configuration its node definition declares."""
+
+        definition = node.definition
+        builder = definition.source_config_builder
+        if builder is None:
+            return _FailedSource(
+                node.node_id,
+                RuntimeError(f"{definition.type_id} declares no source configuration builder"),
+                source_kind="unknown",
+            )
+        try:
+            # Compiled nodes retain only the parameters the graph sets
+            # explicitly; source configuration needs the full declared
+            # mapping, so the definition's defaults are merged in first.
+            effective_parameters = {spec.id: spec.default for spec in definition.parameters}
+            effective_parameters.update(node.parameters)
+            config = builder(effective_parameters)
+        except Exception as error:
+            return _FailedSource(node.node_id, error, source_kind="unknown")
+        if isinstance(config, VideoSourceConfig):
+            return self._create_video_source(node, worker, config)
+        if isinstance(config, CameraSourceConfig):
+            return self._create_camera_source(node, worker, config)
+        return _FailedSource(
+            node.node_id,
+            RuntimeError(
+                f"{definition.type_id} declares an unsupported source configuration "
+                f"type {type(config).__name__}"
+            ),
+            source_kind="unknown",
+        )
 
     def _create_video_source(
-        self, node: CompiledNode, worker: LatestFrameGraphWorker
+        self,
+        node: CompiledNode,
+        worker: LatestFrameGraphWorker,
+        config: VideoSourceConfig,
     ) -> SourceController:
-        file_path = _text_parameter(node, "file_path")
         try:
-            config = build_video_source_config(node.parameters)
             return self._video_source_factory(
                 node.node_id,
-                config.file_path,
-                process_every_nth_frame=config.process_every_nth_frame,
-                playback_speed=config.playback_speed,
-                loop=config.loop,
-                stream_index=config.stream_index,
-                loop_start_s=config.loop_start_s,
-                loop_end_s=config.loop_end_s,
+                config,
                 on_frame=partial(worker.publish, node.node_id),
                 on_reset=partial(worker.reset_source, node.node_id),
             )
         except Exception as error:
-            return _FailedSource(node.node_id, error, source_kind="video", file_path=file_path)
+            return _FailedSource(
+                node.node_id,
+                error,
+                source_kind="video",
+                file_path=config.file_path,
+            )
 
     def _create_camera_source(
-        self, node: CompiledNode, worker: LatestFrameGraphWorker
+        self,
+        node: CompiledNode,
+        worker: LatestFrameGraphWorker,
+        config: CameraSourceConfig,
     ) -> SourceController:
-        device_id = _text_parameter(node, "device_id")
         try:
-            config = build_camera_source_config(node.parameters)
             return self._camera_source_factory(
                 node.node_id,
-                config.device_id,
-                requested_width=config.requested_width,
-                requested_height=config.requested_height,
-                requested_fps=config.requested_fps,
-                backend_preference=config.backend_preference,
-                process_every_nth_frame=config.process_every_nth_frame,
-                reconnect_automatically=config.reconnect_automatically,
+                config,
                 on_frame=partial(worker.publish, node.node_id),
                 on_reset=partial(worker.reset_source, node.node_id),
             )
@@ -1039,7 +1097,7 @@ class InProcessEngineClient:
                 node.node_id,
                 error,
                 source_kind="camera",
-                device_id=device_id,
+                device_id=config.device_id,
             )
 
     @staticmethod
@@ -1053,12 +1111,12 @@ class InProcessEngineClient:
         old_sources = {
             node.node_id: node
             for node in old_plan.nodes
-            if node.definition.type_id in {LOAD_CAMERA_TYPE_ID, LOAD_VIDEO_TYPE_ID}
+            if node.definition.execution_kind is ExecutionKind.SOURCE
         }
         return frozenset(
             node.node_id
             for node in new_plan.nodes
-            if node.definition.type_id in {LOAD_CAMERA_TYPE_ID, LOAD_VIDEO_TYPE_ID}
+            if node.definition.execution_kind is ExecutionKind.SOURCE
             and (old := old_sources.get(node.node_id)) is not None
             and old.state_retention_key == node.state_retention_key
         )
@@ -1183,13 +1241,6 @@ class InProcessEngineClient:
     def _ensure_open(self) -> None:
         if self._state is EngineState.CLOSED:
             raise RuntimeError("Engine client is closed")
-
-
-def _text_parameter(node: CompiledNode, parameter_id: str) -> str:
-    value = node.parameters[parameter_id]
-    if not isinstance(value, str):
-        raise TypeError(f"Expected string parameter {parameter_id!r}")
-    return value
 
 
 def _raise_cleanup_errors(errors: list[Exception], summary: str) -> None:

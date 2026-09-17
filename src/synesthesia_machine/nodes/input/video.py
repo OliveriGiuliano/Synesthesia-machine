@@ -13,6 +13,7 @@ from synesthesia_machine.contracts import (
     PortType,
     RuntimeValue,
 )
+from synesthesia_machine.media import build_video_source_config
 from synesthesia_machine.media.video_source import inspect_video
 from synesthesia_machine.media_path import normalize_media_path
 from synesthesia_machine.nodes.base import (
@@ -24,6 +25,7 @@ from synesthesia_machine.nodes.base import (
     ParameterSpec,
     ParameterUpdateMode,
     ResetReason,
+    SourceOutputContract,
 )
 from synesthesia_machine.nodes.migrations import (
     migrate_load_video_v0_to_v1,
@@ -220,6 +222,9 @@ def create_input_definitions() -> tuple[NodeDefinition, ...]:
             parameter_validator=_validate_load_video,
             parameter_editor_resolver=_load_video_parameter_editor,
             migrations={0: migrate_load_video_v0_to_v1, 1: migrate_load_video_v1_to_v2},
+            media_parameter_id="file_path",
+            source_outputs=SourceOutputContract("image", "processed_index"),
+            source_config_builder=build_video_source_config,
         ),
     )
 

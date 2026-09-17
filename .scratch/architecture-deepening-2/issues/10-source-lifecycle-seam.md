@@ -4,7 +4,7 @@
 
 **Solution:** Put the wake/stop primitives on the injectable surface — extend the clock/protocol protocols (or accept pre-created events) so a test harness can inject controllable wake and stop objects — and drive the race scenarios through the public play/pause/resume/seek/close API.
 
-**Status:** open
+**Status:** resolved
 
 **Files:**
 - `src/synesthesia_machine/media/video_source.py`
@@ -13,8 +13,8 @@
 - `tests/media/test_camera_source.py`
 
 **Acceptance:**
-- [ ] Races testable through the real interface
-- [ ] Race knowledge stays in the service
-- [ ] Lock moves break tests honestly
-- [ ] No more object-private surgery in tests
-- [ ] Targeted tests pass; `uv run check` green; no unrelated diff
+- [x] Races testable through the real interface
+- [x] Race knowledge stays in the service
+- [x] Lock moves break tests honestly
+- [x] No more object-private surgery in tests
+- [x] Targeted tests pass; `uv run check` green; no unrelated diff

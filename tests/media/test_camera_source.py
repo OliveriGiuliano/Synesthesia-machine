@@ -37,6 +37,7 @@ from synesthesia_machine.media import (
 from synesthesia_machine.media.camera_source import (
     _backend_order,  # pyright: ignore[reportPrivateUsage]
 )
+from synesthesia_machine.media.source_config import CameraSourceConfig
 from synesthesia_machine.nodes import ExecutionKind, ParameterUpdateMode, ResetReason
 from synesthesia_machine.nodes.input import LOAD_CAMERA_TYPE_ID, create_input_definitions
 from synesthesia_machine.nodes.registry import NodeRegistry
@@ -773,32 +774,25 @@ class _ManualCameraFactory:
     def __call__(
         self,
         node_id: UUID,
-        device_id: str,
-        *,
-        requested_width: int,
-        requested_height: int,
-        requested_fps: float,
-        backend_preference: CameraBackendPreference,
-        process_every_nth_frame: int,
-        reconnect_automatically: bool,
+        config: CameraSourceConfig,
         on_frame: object,
         on_reset: object,
     ) -> _ManualCameraSource:
         self.calls.append(
             {
                 "node_id": node_id,
-                "device_id": device_id,
-                "requested_width": requested_width,
-                "requested_height": requested_height,
-                "requested_fps": requested_fps,
-                "backend_preference": backend_preference,
-                "process_every_nth_frame": process_every_nth_frame,
-                "reconnect_automatically": reconnect_automatically,
+                "device_id": config.device_id,
+                "requested_width": config.requested_width,
+                "requested_height": config.requested_height,
+                "requested_fps": config.requested_fps,
+                "backend_preference": config.backend_preference,
+                "process_every_nth_frame": config.process_every_nth_frame,
+                "reconnect_automatically": config.reconnect_automatically,
             }
         )
         source = _ManualCameraSource(
             node_id,
-            device_id,
+            config.device_id,
             cast(Callable[[PresentedSourceFrame], None], on_frame),
             cast(Callable[[ResetReason], None], on_reset),
         )

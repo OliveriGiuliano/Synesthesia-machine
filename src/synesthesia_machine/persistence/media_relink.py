@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
@@ -10,13 +11,28 @@ from uuid import UUID
 
 from synesthesia_machine.graph import GraphSnapshot, NodeModel
 from synesthesia_machine.media_path import normalize_media_path
-from synesthesia_machine.nodes.input import LOAD_VIDEO_TYPE_ID
+from synesthesia_machine.nodes.input import create_input_definitions
 
 MEDIA_ABSOLUTE_FALLBACK_KEY = "media_absolute_fallback"
 MEDIA_FINGERPRINT_KEY = "media_fingerprint"
 MEDIA_SIZE_KEY = "media_size_bytes"
-_FINGERPRINT_BLOCK_SIZE = 1024 * 1024
 _FINGERPRINT_PREFIX = "sha256-sampled-v1:"
+_FINGERPRINT_BLOCK_SIZE = 1024 * 1024
+
+# Media-reference parameters declared by the built-in input node definitions;
+# persistence resolves them from the declarations instead of special-casing
+# one node type and parameter name.
+_MEDIA_PARAMETER_IDS: Mapping[str, str] = {
+    definition.type_id: parameter_id
+    for definition in create_input_definitions()
+    if (parameter_id := definition.media_parameter_id) is not None
+}
+
+
+def media_parameter_id(type_id: str) -> str | None:
+    """Return the media reference parameter declared by ``type_id``, if any."""
+
+    return _MEDIA_PARAMETER_IDS.get(type_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,9 +78,10 @@ def media_fingerprint(path: str | Path) -> str:
 def find_missing_media(snapshot: GraphSnapshot) -> tuple[MissingMediaReference, ...]:
     references: list[MissingMediaReference] = []
     for node in snapshot.nodes:
-        if node.type_id != LOAD_VIDEO_TYPE_ID:
+        parameter_id = media_parameter_id(node.type_id)
+        if parameter_id is None:
             continue
-        raw_path = node.parameters.get("file_path")
+        raw_path = node.parameters.get(parameter_id)
         if not isinstance(raw_path, str) or not raw_path:
             continue
         missing_path = normalize_media_path(raw_path).resolve()
@@ -85,7 +102,7 @@ def find_missing_media(snapshot: GraphSnapshot) -> tuple[MissingMediaReference, 
         references.append(
             MissingMediaReference(
                 node.id,
-                "file_path",
+                parameter_id,
                 missing_path,
                 fallback,
                 fingerprint,
@@ -124,13 +141,14 @@ def verify_relink_candidate(
 def relinked_media_node(node: NodeModel, candidate: str | Path) -> NodeModel:
     """Return a complete node value with a new verified-on-save media identity."""
 
-    if node.type_id != LOAD_VIDEO_TYPE_ID:
-        raise ValueError("Only Load Video nodes contain relinkable media")
+    parameter_id = media_parameter_id(node.type_id)
+    if parameter_id is None:
+        raise ValueError(f"{node.type_id!r} declares no relinkable media reference")
     path = normalize_media_path(candidate).resolve()
     if not path.is_file():
         raise FileNotFoundError(path)
     parameters = dict(node.parameters)
-    parameters["file_path"] = str(path)
+    parameters[parameter_id] = str(path)
     ui_state = dict(node.ui_state)
     ui_state[MEDIA_ABSOLUTE_FALLBACK_KEY] = str(path)
     ui_state[MEDIA_FINGERPRINT_KEY] = media_fingerprint(path)

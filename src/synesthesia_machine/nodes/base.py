@@ -369,6 +369,34 @@ type ParameterEditorResolver = Callable[
 
 
 @dataclass(frozen=True, slots=True)
+class SourceOutputContract:
+    """Declared mapping from a source's published frame onto its output ports.
+
+    Both port IDs must be declared in the owning definition's ``outputs``.
+    The graph worker resolves a source's tick values through this contract
+    instead of port-name literals, so a source that publishes under other
+    names is caught at declaration time rather than silently orphaning its
+    outputs at runtime.
+    """
+
+    image_port: str
+    processed_index_port: str
+
+    def __post_init__(self) -> None:
+        _validate_stable_id(self.image_port, "source image port")
+        _validate_stable_id(self.processed_index_port, "source processed-index port")
+        if self.image_port == self.processed_index_port:
+            msg = "Source image and processed-index ports must differ"
+            raise ValueError(msg)
+
+
+# Maps a source node's validated parameter values to its typed source
+# configuration value (e.g. ``VideoSourceConfig``); declared by the node
+# definition so source construction knowledge stays with the node.
+type SourceConfigBuilder = Callable[[Mapping[str, object]], object]
+
+
+@dataclass(frozen=True, slots=True)
 class NodeDefinition:
     type_id: str
     implementation_version: int
@@ -391,6 +419,9 @@ class NodeDefinition:
     variadic_input: VariadicInputSpec | None = None
     parameter_groups: tuple[ParameterGroupSpec, ...] = ()
     migrations: Mapping[int, NodeMigration] = field(default_factory=dict[int, NodeMigration])
+    media_parameter_id: str | None = None
+    source_outputs: SourceOutputContract | None = None
+    source_config_builder: SourceConfigBuilder | None = None
 
     def __post_init__(self) -> None:
         if not _TYPE_ID.fullmatch(self.type_id):
@@ -436,6 +467,37 @@ class NodeDefinition:
             msg = "Node aliases must not be empty"
             raise ValueError(msg)
         _ensure_unique((alias.casefold() for alias in self.aliases), "node alias")
+        if self.source_outputs is not None:
+            if self.execution_kind is not ExecutionKind.SOURCE:
+                msg = f"Non-source node {self.type_id!r} must not declare a source output contract"
+                raise ValueError(msg)
+            for port_id in (
+                self.source_outputs.image_port,
+                self.source_outputs.processed_index_port,
+            ):
+                if self.output(port_id) is None:
+                    msg = (
+                        f"Source output port {port_id!r} of {self.type_id!r} "
+                        "is not declared in its outputs"
+                    )
+                    raise ValueError(msg)
+        if (
+            self.source_config_builder is not None
+            and self.execution_kind is not ExecutionKind.SOURCE
+        ):
+            msg = f"Non-source node {self.type_id!r} must not declare a source config builder"
+            raise ValueError(msg)
+        if self.media_parameter_id is not None:
+            parameter = self.parameter(self.media_parameter_id)
+            if parameter is None:
+                msg = (
+                    f"Media reference parameter {self.media_parameter_id!r} "
+                    f"of {self.type_id!r} is not declared in its parameters"
+                )
+                raise ValueError(msg)
+            if parameter.value_type is not PortType.STRING:
+                msg = f"Media reference parameter {self.media_parameter_id!r} must be a string"
+                raise ValueError(msg)
 
     def input(self, port_id: str) -> InputPortSpec | None:
         fixed = next((port for port in self.inputs if port.id == port_id), None)

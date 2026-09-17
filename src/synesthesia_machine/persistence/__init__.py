@@ -26,6 +26,7 @@ from synesthesia_machine.persistence.media_relink import (
     RelinkVerification,
     find_missing_media,
     media_fingerprint,
+    relinked_media_node,
     verify_relink_candidate,
 )
 from synesthesia_machine.persistence.schemas import (
@@ -75,6 +76,7 @@ __all__ = [
     "migrate_v1_to_v2",
     "migrate_v2_to_v3",
     "migrate_v3_to_v4",
+    "relinked_media_node",
     "remap_fragment",
     "save_graph",
     "verify_relink_candidate",

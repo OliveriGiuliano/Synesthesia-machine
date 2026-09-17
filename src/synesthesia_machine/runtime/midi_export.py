@@ -34,6 +34,7 @@ from synesthesia_machine.contracts import (
     SourceState,
 )
 from synesthesia_machine.graph.model import GraphSnapshot, NodeModel
+from synesthesia_machine.media.source_config import VideoSourceConfig
 from synesthesia_machine.media.video_source import (
     FrameCallback,
     PresentedSourceFrame,
@@ -140,31 +141,23 @@ class _ExportVideoSourceFactory:
     def __call__(
         self,
         node_id: UUID,
-        file_path: str | Path,
-        *,
-        process_every_nth_frame: int,
-        playback_speed: float,
-        loop: bool,
-        stream_index: int,
-        loop_start_s: float,
-        loop_end_s: float,
+        config: VideoSourceConfig,
         on_frame: object,
         on_reset: object,
     ) -> VideoSourceService:
-        del loop
         return VideoSourceService(
             node_id,
-            file_path,
-            process_every_nth_frame=process_every_nth_frame,
-            playback_speed=playback_speed,
+            config.file_path,
+            process_every_nth_frame=config.process_every_nth_frame,
+            playback_speed=config.playback_speed,
             # Export always simulates a single pass: the saved source's loop
             # setting is ignored so virtual time reaches the end of the
             # played segment and the source reports ENDED, ending the
             # simulation.
             loop=False,
-            stream_index=stream_index,
-            loop_start_s=loop_start_s,
-            loop_end_s=loop_end_s,
+            stream_index=config.stream_index,
+            loop_start_s=config.loop_start_s,
+            loop_end_s=config.loop_end_s,
             on_frame=cast(FrameCallback, on_frame),
             on_reset=cast(ResetCallback | None, on_reset),
             clock=FastForwardPlaybackClock(),

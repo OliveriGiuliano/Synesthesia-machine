@@ -24,12 +24,12 @@ from synesthesia_machine.graph import (
 )
 from synesthesia_machine.media_path import normalize_media_path
 from synesthesia_machine.nodes import NodeRegistry, migrate_node_data
-from synesthesia_machine.nodes.input import LOAD_VIDEO_TYPE_ID
 from synesthesia_machine.persistence.media_relink import (
     MEDIA_ABSOLUTE_FALLBACK_KEY,
     MEDIA_FINGERPRINT_KEY,
     MEDIA_SIZE_KEY,
     media_fingerprint,
+    media_parameter_id,
 )
 from synesthesia_machine.persistence.schemas import (
     GRAPH_SCHEMA_VERSION,
@@ -300,7 +300,7 @@ def _with_resolved_media_paths(snapshot: GraphSnapshot, graph_directory: Path) -
     return replace(
         snapshot,
         nodes=tuple(
-            _replace_video_path(node, _resolve_media_path, graph_directory)
+            _replace_media_path(node, _resolve_media_path, graph_directory)
             for node in snapshot.nodes
         ),
     )
@@ -312,15 +312,16 @@ def _with_persisted_media_paths(snapshot: GraphSnapshot, graph_directory: Path) 
     return replace(
         snapshot,
         nodes=tuple(
-            _with_persisted_video_identity(node, graph_directory) for node in snapshot.nodes
+            _with_persisted_media_identity(node, graph_directory) for node in snapshot.nodes
         ),
     )
 
 
-def _with_persisted_video_identity(node: NodeModel, graph_directory: Path) -> NodeModel:
-    if node.type_id != LOAD_VIDEO_TYPE_ID:
+def _with_persisted_media_identity(node: NodeModel, graph_directory: Path) -> NodeModel:
+    parameter_id = media_parameter_id(node.type_id)
+    if parameter_id is None:
         return node
-    value = node.parameters.get("file_path")
+    value = node.parameters.get(parameter_id)
     if not isinstance(value, str) or not value:
         return node
     candidate = normalize_media_path(value)
@@ -328,7 +329,7 @@ def _with_persisted_video_identity(node: NodeModel, graph_directory: Path) -> No
         candidate = graph_directory / candidate
     resolved = candidate.resolve()
     parameters = dict(node.parameters)
-    parameters["file_path"] = _persisted_media_path(str(resolved), graph_directory)
+    parameters[parameter_id] = _persisted_media_path(str(resolved), graph_directory)
     ui_state = dict(node.ui_state)
     if resolved.is_file():
         ui_state[MEDIA_ABSOLUTE_FALLBACK_KEY] = str(resolved)
@@ -339,21 +340,22 @@ def _with_persisted_video_identity(node: NodeModel, graph_directory: Path) -> No
     return replace(node, parameters=parameters, ui_state=ui_state)
 
 
-def _replace_video_path(
+def _replace_media_path(
     node: NodeModel,
     transform: Callable[[str, Path], str],
     graph_directory: Path,
 ) -> NodeModel:
-    if node.type_id != LOAD_VIDEO_TYPE_ID:
+    parameter_id = media_parameter_id(node.type_id)
+    if parameter_id is None:
         return node
-    value = node.parameters.get("file_path")
+    value = node.parameters.get(parameter_id)
     if not isinstance(value, str) or not value:
         return node
     transformed = transform(value, graph_directory)
     if transformed == value:
         return node
     parameters = dict(node.parameters)
-    parameters["file_path"] = transformed
+    parameters[parameter_id] = transformed
     return replace(node, parameters=parameters)
 
 

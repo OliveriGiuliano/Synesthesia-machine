@@ -16,8 +16,7 @@ from synesthesia_machine.graph import (
     LiteralValue,
     NodeModel,
 )
-from synesthesia_machine.persistence.clipboard import ClipboardFragment
-from synesthesia_machine.persistence.media_relink import relinked_media_node
+from synesthesia_machine.persistence import ClipboardFragment, relinked_media_node
 from synesthesia_machine.ui.connection_state import PREVIEW_VISIBLE_KEY
 from synesthesia_machine.ui.translations import tr
 

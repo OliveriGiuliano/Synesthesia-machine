@@ -4,7 +4,7 @@
 
 **Solution:** Source node definitions declare their media-reference parameter, their output-port contract, and their source-config builder; persistence asks the registry instead of special-casing, the engine factory builds sources from the declared config, the worker reads declared output ports (validating against the node's own definition), and relinked_media_node moves to the facade.
 
-**Status:** open
+**Status:** resolved
 
 **Files:**
 - `src/synesthesia_machine/nodes/input/video.py`
@@ -16,8 +16,14 @@
 - `src/synesthesia_machine/persistence/__init__.py`
 
 **Acceptance:**
-- [ ] A new source = declare, not four-module hunt
-- [ ] Port-name contract shared by worker and definitions
-- [ ] Media-reference knowledge lives with the node
-- [ ] Facade discipline restored (ui import fixed)
-- [ ] Targeted tests pass; `uv run check` green; no unrelated diff
+- [x] A new source = declare, not four-module hunt
+- [x] Port-name contract shared by worker and definitions
+- [x] Media-reference knowledge lives with the node
+- [x] Facade discipline restored (ui import fixed)
+**Plan:**
+- `nodes/base.py`: new `SourceOutputContract` (declares the port ids a source's published frame maps to, validated against the definition's outputs); `NodeDefinition` gains optional `media_parameter_id` (string parameter carrying the media file reference), `source_outputs`, and `source_config_builder` (parameters → typed source config).
+- `nodes/input/video.py` / `camera.py`: declare the contract (video: `file_path` media parameter; camera: none) and the existing `build_*_source_config` builders.
+- `persistence/media_relink.py`: `media_parameter_id(type_id)` lookup derived from the input definitions' declarations; `find_missing_media` / `relinked_media_node` use it instead of hardcoding LOAD_VIDEO + "file_path". `graph_io.py` media-path helpers likewise; `relinked_media_node` exported from the `persistence` facade; `ui/commands/graph_commands.py` imports from the facade.
+- `runtime/in_process_engine.py`: factory protocols take the typed config object (no field re-enumeration, no parallel raw parameter reads); default factories map config → service constructor; `_create_source` is builder-driven (a source without a declared builder fails loudly instead of falling through to video); `_reusable_source_ids` tests `execution_kind is SOURCE`; the graph worker resolves each tick's port keys from the active plan's declared `source_outputs` (a source without a contract fails loudly instead of orphaning outputs).
+- `runtime/midi_export.py`: `_ExportVideoSourceFactory` takes the config object.
+- [x] Targeted tests pass; `uv run check` green; no unrelated diff
