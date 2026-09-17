@@ -4,7 +4,7 @@
 
 **Solution:** Import through the synesthesia_machine.nodes facade everywhere (media takes ResetReason from contracts); make the Fourier shape cache private with behaviour-level tests through process outputs (or a small introspection protocol if a consumer ever needs it); and let the boundary tests enforce the facade rule so the drift cannot return.
 
-**Status:** open
+**Status:** resolved
 
 **Files:**
 - `src/synesthesia_machine/graph/compiler.py`
@@ -23,4 +23,8 @@
 - [ ] Base.py becomes a movable module
 - [ ] Seam stays protocol-only
 - [ ] Media no longer depends on nodes at all
+
 - [ ] Targeted tests pass; `uv run check` green; no unrelated diff
+# Answer
+
+Shipped: every import outside `nodes/` now goes through the `synesthesia_machine.nodes` facade or a subpackage facade — graph/compiler, runtime/{execution_plan, scheduler, engine_facade, in_process_engine, midi_export, engine_server}, app/registry, ui/midi_export, and ui/canvas migrated off `nodes.base`/`nodes.registry`/`nodes.composition`; the facade additionally exports `create_builtin_registry` and `MidiOutputStatusProvider`. media/video_source and media/camera_source take `ResetReason` from contracts, so media has zero node imports. FourierRuntime's shape cache is private (`_cache`) behind a read-only `shape_cache` property (the small introspection surface the tests use); test_fourier asserts through it. New boundary test `test_external_node_imports_use_facades` (mutation-verified to fire) freezes the rule so the drift cannot return; base.py is now a movable internal module.

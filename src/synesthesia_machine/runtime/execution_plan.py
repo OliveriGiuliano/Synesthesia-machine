@@ -7,7 +7,7 @@ from types import MappingProxyType
 from uuid import UUID
 
 from synesthesia_machine.contracts.runtime_values import ParameterValue, PortType
-from synesthesia_machine.nodes.base import NodeDefinition, ParameterSpec, ParameterUpdateMode
+from synesthesia_machine.nodes import NodeDefinition, ParameterSpec, ParameterUpdateMode
 
 
 class ScalarConversion(StrEnum):

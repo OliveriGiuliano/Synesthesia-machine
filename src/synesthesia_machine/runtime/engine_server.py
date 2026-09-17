@@ -68,7 +68,7 @@ from synesthesia_machine.diagnostics.logging_setup import (
     configure_logging,
 )
 from synesthesia_machine.graph.model import GraphSnapshot
-from synesthesia_machine.nodes.composition import create_builtin_registry
+from synesthesia_machine.nodes import create_builtin_registry
 from synesthesia_machine.runtime.in_process_engine import InProcessEngineClient
 from synesthesia_machine.runtime.preview_channel import SharedMemoryPreviewWriter
 

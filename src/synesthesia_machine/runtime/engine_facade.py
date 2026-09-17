@@ -10,8 +10,7 @@ from synesthesia_machine.contracts.engine_client import MidiOutputStatus, NodeMe
 from synesthesia_machine.contracts.runtime_values import FrameContext, RuntimeValue
 from synesthesia_machine.graph.compiler import CompilationResult, GraphCompiler
 from synesthesia_machine.graph.model import GraphSnapshot
-from synesthesia_machine.nodes.base import ResetReason
-from synesthesia_machine.nodes.registry import NodeRegistry
+from synesthesia_machine.nodes import NodeRegistry, ResetReason
 from synesthesia_machine.runtime.execution_plan import ExecutionPlan, PortKey
 from synesthesia_machine.runtime.scheduler import ProfilingHook, Scheduler, TickResult, TimingHook
 

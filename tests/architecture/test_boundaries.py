@@ -156,3 +156,34 @@ def test_forbidden_package_import_directions() -> None:
             context = "type-only import " if type_only else ""
             violations.append(f"{name}/{file}: {context}imports {module}")
     assert not violations, "forbidden import direction:\n" + "\n".join(violations)
+
+
+def test_external_node_imports_use_facades() -> None:
+    """Packages outside ``nodes`` may only import the package or subpackage facades.
+
+    Importing ``nodes.base`` / ``nodes.registry`` (or any other internal module)
+    freezes those module paths as public API and breaks future reorganizations
+    (master architecture 17.2).
+    """
+
+    subpackages = {
+        path.name
+        for path in (ROOT / "nodes").iterdir()
+        if path.is_dir() and (path / "__init__.py").is_file()
+    }
+    allowed = {"synesthesia_machine.nodes"} | {
+        f"synesthesia_machine.nodes.{name}" for name in subpackages
+    }
+    violations: list[str] = []
+    for name, path in _package_dirs().items():
+        if name == "nodes":
+            continue
+        for module, file, _ in _imports(path):
+            if not module.startswith("synesthesia_machine.nodes."):
+                continue
+            if module in allowed:
+                continue
+            violations.append(f"{name}/{file}: imports {module}")
+    assert not violations, (
+        "node imports outside the package must go through the facade:\n" + "\n".join(violations)
+    )

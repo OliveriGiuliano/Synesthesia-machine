@@ -14,14 +14,14 @@ from synesthesia_machine.contracts import (
 )
 from synesthesia_machine.contracts.runtime_values import ParameterValue, PortType
 from synesthesia_machine.graph.model import ConnectionModel, GraphSnapshot, NodeModel
-from synesthesia_machine.nodes.base import (
+from synesthesia_machine.nodes import (
     ArrayTypeVariable,
     CachePolicy,
     ExecutionKind,
     NodeDefinition,
+    NodeRegistry,
     TypeVariable,
 )
-from synesthesia_machine.nodes.registry import NodeRegistry
 from synesthesia_machine.runtime.execution_plan import (
     CompiledNode,
     ExecutionPlan,

@@ -50,7 +50,7 @@ from synesthesia_machine.graph import (
     tidy_boxes,
 )
 from synesthesia_machine.nodes import NodeDefinition
-from synesthesia_machine.nodes.input.video import LOAD_VIDEO_TYPE_ID
+from synesthesia_machine.nodes.input import LOAD_VIDEO_TYPE_ID
 from synesthesia_machine.ui.commands import PREVIEW_VISIBLE_KEY
 from synesthesia_machine.ui.graphics import (
     ConnectionGraphicsItem,

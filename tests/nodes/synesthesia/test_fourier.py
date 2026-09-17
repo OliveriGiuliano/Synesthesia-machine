@@ -242,9 +242,9 @@ def test_shape_cache_reuses_for_every_non_map_setting() -> None:
     runtime = FourierRuntime(NODE)
     channel = _sinusoid(horizontal_cycles=4)
     _runtime_state(runtime, channel)
-    assert runtime.cache.misses == 1
-    assert runtime.cache.hits == 0
-    first_key = runtime.cache.key
+    assert runtime.shape_cache.misses == 1
+    assert runtime.shape_cache.hits == 0
+    first_key = runtime.shape_cache.key
 
     _runtime_state(
         runtime,
@@ -263,9 +263,9 @@ def test_shape_cache_reuses_for_every_non_map_setting() -> None:
         minimum_velocity=10,
         maximum_velocity=110,
     )
-    assert runtime.cache.key == first_key
-    assert runtime.cache.misses == 1
-    assert runtime.cache.hits == 1
+    assert runtime.shape_cache.key == first_key
+    assert runtime.shape_cache.misses == 1
+    assert runtime.shape_cache.hits == 1
 
 
 @pytest.mark.parametrize(
@@ -286,26 +286,26 @@ def test_shape_cache_invalidates_for_each_map_key_field(
 ) -> None:
     runtime = FourierRuntime(NODE)
     _runtime_state(runtime, _sinusoid(horizontal_cycles=4))
-    first_key = runtime.cache.key
+    first_key = runtime.shape_cache.key
 
     _runtime_state(runtime, changed_channel, **overrides)
 
-    assert runtime.cache.key != first_key
-    assert runtime.cache.misses == 2
-    assert runtime.cache.hits == 0
+    assert runtime.shape_cache.key != first_key
+    assert runtime.shape_cache.misses == 2
+    assert runtime.shape_cache.hits == 0
 
 
 @pytest.mark.parametrize("reason", list(ResetReason))
 def test_every_lifecycle_reset_and_close_release_the_shape_cache(reason: ResetReason) -> None:
     runtime = FourierRuntime(NODE)
     _runtime_state(runtime, _sinusoid(horizontal_cycles=4))
-    assert runtime.cache.has_entry
+    assert runtime.shape_cache.has_entry
     runtime.reset(reason)
-    assert not runtime.cache.has_entry
-    assert runtime.cache.key is None
+    assert not runtime.shape_cache.has_entry
+    assert runtime.shape_cache.key is None
     _runtime_state(runtime, _sinusoid(horizontal_cycles=4))
     runtime.close()
-    assert not runtime.cache.has_entry
+    assert not runtime.shape_cache.has_entry
 
 
 def test_runtime_clock_error_is_recoverable_without_populating_cache() -> None:
@@ -317,7 +317,7 @@ def test_runtime_clock_error_is_recoverable_without_populating_cache() -> None:
             _context(),
         )
     assert captured.value.code == "invalid_fourier"
-    assert not runtime.cache.has_entry
+    assert not runtime.shape_cache.has_entry
 
 
 def test_scheduler_no_data_suppresses_fourier_invocation() -> None:

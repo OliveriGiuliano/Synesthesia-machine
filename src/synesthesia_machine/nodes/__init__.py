@@ -6,6 +6,7 @@ from synesthesia_machine.nodes.base import (
     ExecutionKind,
     ExpectedNodeError,
     InputPortSpec,
+    MidiOutputStatusProvider,
     NoDataRuntime,
     NodeDefinition,
     NodeExecutionError,
@@ -25,6 +26,7 @@ from synesthesia_machine.nodes.base import (
     VariadicInputSpec,
     require_same_clock,
 )
+from synesthesia_machine.nodes.composition import create_builtin_registry
 from synesthesia_machine.nodes.migrations import (
     NodeMigration,
     NodeMigrationResult,
@@ -39,6 +41,7 @@ __all__ = [
     "ExecutionKind",
     "ExpectedNodeError",
     "InputPortSpec",
+    "MidiOutputStatusProvider",
     "NoDataRuntime",
     "NodeDefinition",
     "NodeExecutionError",
@@ -60,6 +63,7 @@ __all__ = [
     "StatelessRuntime",
     "TypeVariable",
     "VariadicInputSpec",
+    "create_builtin_registry",
     "migrate_node_data",
     "require_same_clock",
 ]

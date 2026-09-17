@@ -37,8 +37,7 @@ from synesthesia_machine.media.camera_source import CameraSourceService
 from synesthesia_machine.media.source_config import CameraSourceConfig, VideoSourceConfig
 from synesthesia_machine.media.source_frame import PresentedSourceFrame
 from synesthesia_machine.media.video_source import VideoSourceService
-from synesthesia_machine.nodes.base import ExecutionKind, ResetReason
-from synesthesia_machine.nodes.registry import NodeRegistry
+from synesthesia_machine.nodes import ExecutionKind, NodeRegistry, ResetReason
 from synesthesia_machine.runtime.device_catalogue import (
     DeviceCatalogueService,
     SystemDeviceCatalogueService,

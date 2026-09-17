@@ -26,10 +26,9 @@ from PySide6.QtWidgets import (
 from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.graph.model import GraphSnapshot
 from synesthesia_machine.midi import NullDebugSynth, NullMidiOutputService
-from synesthesia_machine.nodes import ExecutionKind
+from synesthesia_machine.nodes import ExecutionKind, NodeRegistry
 from synesthesia_machine.nodes.input import LOAD_CAMERA_TYPE_ID, LOAD_VIDEO_TYPE_ID
 from synesthesia_machine.nodes.output import GENERATE_AUDIO_TYPE_ID, SEND_MIDI_TYPE_ID
-from synesthesia_machine.nodes.registry import NodeRegistry
 from synesthesia_machine.runtime import MidiExportError, run_midi_export
 from synesthesia_machine.ui.translations import tr, trf
 

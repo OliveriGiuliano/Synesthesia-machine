@@ -19,6 +19,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from synesthesia_machine.contracts import (
+    ResetReason,
     SourceState,
     SourceStatus,
 )
@@ -27,7 +28,6 @@ from synesthesia_machine.media.source_frame import (
     build_outage_frame,
     build_presented_image_frame,
 )
-from synesthesia_machine.nodes.base import ResetReason
 
 _DEVICE_ID = re.compile(r"^opencv:(0|[1-9][0-9]*)$")
 _NANOSECONDS_PER_SECOND = 1_000_000_000

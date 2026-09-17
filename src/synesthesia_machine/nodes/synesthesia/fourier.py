@@ -142,20 +142,26 @@ class FourierRuntime(PureFunctionRuntime):
     """Own the shape-dependent map cache without making output history-dependent."""
 
     def __init__(self, node_id: UUID) -> None:
-        self.cache = FourierShapeCache()
+        self._cache = FourierShapeCache()
         super().__init__(
             node_id,
-            processor=partial(_fourier_process, cache=self.cache),
+            processor=partial(_fourier_process, cache=self._cache),
             error_code="invalid_fourier",
             exceptions=(KeyError, TypeError, ValueError),
         )
 
+    @property
+    def shape_cache(self) -> FourierShapeCache:
+        """Read-only view of the shape cache for diagnostics and tests."""
+
+        return self._cache
+
     def reset(self, reason: ResetReason) -> None:
         del reason
-        self.cache.clear()
+        self._cache.clear()
 
     def close(self) -> None:
-        self.cache.clear()
+        self._cache.clear()
 
 
 def fourier_to_midi_state(

@@ -23,6 +23,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from synesthesia_machine.contracts import (
+    ResetReason,
     SourceState,
     SourceStatus,
 )
@@ -31,7 +32,6 @@ from synesthesia_machine.media.source_frame import (
     build_presented_image_frame,
 )
 from synesthesia_machine.media_path import normalize_media_path
-from synesthesia_machine.nodes.base import ResetReason
 
 _NANOSECONDS_PER_SECOND = 1_000_000_000
 _DEFAULT_DECODE_QUEUE_SIZE = 2

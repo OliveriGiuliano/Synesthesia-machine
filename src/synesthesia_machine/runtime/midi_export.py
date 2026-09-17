@@ -45,10 +45,9 @@ from synesthesia_machine.media.video_source import (
 )
 from synesthesia_machine.midi import diff_midi_states
 from synesthesia_machine.midi.smf import MidiExportEvent
-from synesthesia_machine.nodes.base import ExecutionKind
+from synesthesia_machine.nodes import ExecutionKind, NodeRegistry
 from synesthesia_machine.nodes.input import LOAD_CAMERA_TYPE_ID, LOAD_VIDEO_TYPE_ID
 from synesthesia_machine.nodes.output import GENERATE_AUDIO_TYPE_ID, SEND_MIDI_TYPE_ID
-from synesthesia_machine.nodes.registry import NodeRegistry
 from synesthesia_machine.runtime.execution_plan import ExecutionPlan, PortKey
 from synesthesia_machine.runtime.in_process_engine import (
     InProcessEngineClient,

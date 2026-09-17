@@ -25,7 +25,7 @@ from synesthesia_machine.contracts.runtime_values import (
     ValueArray,
     clock_id_of,
 )
-from synesthesia_machine.nodes.base import (
+from synesthesia_machine.nodes import (
     ExecutionKind,
     ExpectedNodeError,
     MidiOutputStatusProvider,
