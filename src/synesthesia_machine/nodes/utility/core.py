@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from typing import cast
 
+from synesthesia_machine.contracts import JsonObject
 from synesthesia_machine.contracts.runtime_values import (
     FrameContext,
     ParameterValue,
@@ -23,13 +25,31 @@ from synesthesia_machine.nodes.base import (
     StatelessRuntime,
     TypeVariable,
 )
-from synesthesia_machine.nodes.migrations import migrate_number_v0_to_v1
+from synesthesia_machine.nodes.migrations import migration_parameters
 from synesthesia_machine.nodes.registry import NodeRegistry
 from synesthesia_machine.nodes.utility.dynamic import create_dynamic_definitions
 from synesthesia_machine.nodes.utility.midi import create_midi_utility_definitions
 from synesthesia_machine.nodes.utility.scalar_bridges import create_scalar_bridge_definitions
 
 T = TypeVariable("T")
+
+
+def migrate_number_v0_to_v1(data: JsonObject) -> JsonObject:
+    migrated = deepcopy(data)
+    parameters = migration_parameters(migrated)
+    legacy_value = parameters.pop("value", None)
+    if isinstance(legacy_value, int) and not isinstance(legacy_value, bool):
+        parameters.setdefault("number_type", "INT")
+        parameters.setdefault("int_value", legacy_value)
+    elif isinstance(legacy_value, float):
+        parameters.setdefault("number_type", "FLOAT")
+        parameters.setdefault("float_value", legacy_value)
+    elif "int_value" in parameters:
+        parameters.setdefault("number_type", "INT")
+    else:
+        parameters.setdefault("number_type", "FLOAT")
+    migrated["implementation_version"] = 1
+    return migrated
 
 
 class NumberRuntime(StatelessRuntime):

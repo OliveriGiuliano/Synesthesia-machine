@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
 from typing import cast
 from uuid import UUID
 
@@ -23,6 +24,7 @@ from synesthesia_machine.contracts import (
     FrameContext,
     FrameProvenance,
     ImageFrame,
+    JsonObject,
     ParameterValue,
     PortType,
     RuntimeValue,
@@ -35,6 +37,7 @@ from synesthesia_machine.nodes import (
     TypeVariable,
 )
 from synesthesia_machine.nodes.base import PureFunctionProcessor
+from synesthesia_machine.nodes.migrations import migration_parameters
 
 IMAGE_OR_CHANNEL = TypeVariable("IMAGE_OR_CHANNEL", frozenset({PortType.IMAGE, PortType.CHANNEL}))
 
@@ -247,6 +250,30 @@ def dynamic_image_channel_resolver(
     return IMAGE_OR_CHANNEL
 
 
+def rewrite_colour_space_target(data: JsonObject) -> JsonObject:
+    """Rewrite the retired RGBA target to the SRGB default."""
+    parameters = migration_parameters(data)
+    if parameters.get("target_colour_space") == "RGBA":
+        parameters["target_colour_space"] = "SRGB"
+    return data
+
+
+def rewrite_channel_selection(data: JsonObject) -> None:
+    """Rewrite the retired CHANNEL_4 selection to the COLOUR default."""
+    parameters = migration_parameters(data)
+    if parameters.get("channels") == "CHANNEL_4":
+        parameters["channels"] = "COLOUR"
+
+
+def migrate_adjustment_channel_selection_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Channel-selection v2 dropped the unreachable CHANNEL_4 target."""
+
+    migrated = deepcopy(data)
+    rewrite_channel_selection(migrated)
+    migrated["implementation_version"] = 2
+    return migrated
+
+
 __all__ = [
     "IMAGE_OR_CHANNEL",
     "AdjustmentProcessor",
@@ -262,5 +289,8 @@ __all__ = [
     "dynamic_image_channel_resolver",
     "dynamic_number",
     "image_source",
+    "migrate_adjustment_channel_selection_v1_to_v2",
     "restore_frame_type",
+    "rewrite_channel_selection",
+    "rewrite_colour_space_target",
 ]

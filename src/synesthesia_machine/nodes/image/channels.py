@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from typing import cast
 
 from synesthesia_machine.contracts import (
@@ -12,6 +13,7 @@ from synesthesia_machine.contracts import (
     FrameContext,
     FrameProvenance,
     ImageFrame,
+    JsonObject,
     NoData,
     ParameterValue,
     PortType,
@@ -37,10 +39,28 @@ from synesthesia_machine.nodes import (
     ParameterUpdateMode,
     StatelessRuntime,
 )
-from synesthesia_machine.nodes.migrations import (
-    migrate_combine_channels_v1_to_v2,
-    migrate_separate_channels_v1_to_v2,
-)
+from synesthesia_machine.nodes.image.runtime_support import rewrite_colour_space_target
+
+
+def migrate_separate_channels_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Separate Channels v2 dropped the unreachable fourth (alpha) output.
+
+    Sources never carry an alpha channel; the ``channel_4`` socket removal
+    and any saved connections to it live in the v3 -> v4 graph migration.
+    """
+
+    migrated = deepcopy(data)
+    migrated["implementation_version"] = 2
+    return migrated
+
+
+def migrate_combine_channels_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Combine Channels v2 dropped the fourth input and the RGBA target."""
+
+    migrated = deepcopy(data)
+    rewrite_colour_space_target(migrated)
+    migrated["implementation_version"] = 2
+    return migrated
 
 
 class BlendImagesRuntime(StatelessRuntime):

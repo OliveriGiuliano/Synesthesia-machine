@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import replace
 from uuid import UUID
 
-from synesthesia_machine.contracts import (
-    ParameterValue,
-    PortType,
-)
+from synesthesia_machine.contracts import JsonObject, ParameterValue, PortType
 from synesthesia_machine.media import build_video_source_config
 from synesthesia_machine.media.video_source import inspect_video
 from synesthesia_machine.media_path import normalize_media_path
@@ -24,16 +22,32 @@ from synesthesia_machine.nodes.base import (
     ParameterUpdateMode,
     SourceOutputContract,
 )
-from synesthesia_machine.nodes.migrations import (
-    migrate_load_video_v0_to_v1,
-    migrate_load_video_v1_to_v2,
-)
+from synesthesia_machine.nodes.migrations import migration_parameters
 
 LOAD_VIDEO_TYPE_ID = "synmachine.input.load_video"
 
 _LOOP_TIMESTAMP_IDS = frozenset({"loop_start_s", "loop_end_s"})
 _DURATION_CACHE_MAX_ENTRIES = 128
 _video_duration_cache: dict[tuple[str, int, int], float | None] = {}
+
+
+def migrate_load_video_v0_to_v1(data: JsonObject) -> JsonObject:
+    migrated = deepcopy(data)
+    parameters = migration_parameters(migrated)
+    if "file_path" not in parameters and "path" in parameters:
+        parameters["file_path"] = parameters.pop("path")
+    migrated["implementation_version"] = 1
+    return migrated
+
+
+def migrate_load_video_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Load Video v2 adds the optional loop start/end timestamps (seconds)."""
+    migrated = deepcopy(data)
+    parameters = migration_parameters(migrated)
+    parameters.setdefault("loop_start_s", 0.0)
+    parameters.setdefault("loop_end_s", 0.0)
+    migrated["implementation_version"] = 2
+    return migrated
 
 
 class LoadVideoRuntime(NoDataRuntime):

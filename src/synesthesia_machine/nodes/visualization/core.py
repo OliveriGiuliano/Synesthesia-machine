@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 
+from synesthesia_machine.contracts import JsonObject
 from synesthesia_machine.contracts.runtime_values import (
     FrameContext,
     ParameterValue,
@@ -19,14 +21,33 @@ from synesthesia_machine.nodes.base import (
     ParameterSpec,
     StatelessRuntime,
 )
-from synesthesia_machine.nodes.migrations import (
-    migrate_channel_display_v1_to_v2,
-    migrate_display_image_data_v1_to_v2,
-)
+from synesthesia_machine.nodes.migrations import migration_parameters
 
 DISPLAY_IMAGE_DATA_TYPE_ID = "synmachine.visualization.display_image_data"
 CHANNEL_DISPLAY_TYPE_ID = "synmachine.visualization.channel_display"
 NOTE_VISUALIZER_TYPE_ID = "synmachine.visualization.note_visualizer"
+
+
+def migrate_display_image_data_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Drop the preview cadence/cap params now fixed in the preview broker."""
+
+    migrated = deepcopy(data)
+    parameters = migration_parameters(migrated)
+    parameters.pop("preview_fps", None)
+    parameters.pop("max_dimension", None)
+    migrated["implementation_version"] = 2
+    return migrated
+
+
+def migrate_channel_display_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Drop the preview cadence/cap params now fixed in the preview broker."""
+
+    migrated = deepcopy(data)
+    parameters = migration_parameters(migrated)
+    parameters.pop("preview_fps", None)
+    parameters.pop("max_dimension", None)
+    migrated["implementation_version"] = 2
+    return migrated
 
 
 class _VisualizerRuntime(StatelessRuntime):

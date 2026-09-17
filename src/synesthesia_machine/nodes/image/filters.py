@@ -53,11 +53,9 @@ from synesthesia_machine.nodes.image.runtime_support import (
     combined_parameter_validator,
     dynamic_image_channel_resolver,
     dynamic_number,
-)
-from synesthesia_machine.nodes.migrations import (
-    NodeMigration,
     migrate_adjustment_channel_selection_v1_to_v2,
 )
+from synesthesia_machine.nodes.migrations import NodeMigration
 
 
 class ThresholdRuntime(StatelessRuntime):

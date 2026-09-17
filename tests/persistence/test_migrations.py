@@ -16,17 +16,23 @@ from tools.validate_graphs import validate_paths
 from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.graph import GraphCompiler
 from synesthesia_machine.nodes import migrate_node_data
-from synesthesia_machine.nodes.migrations import (
-    migrate_adjustment_channel_selection_v1_to_v2,
-    migrate_change_colour_space_v1_to_v2,
-    migrate_channel_display_v1_to_v2,
+from synesthesia_machine.nodes.image.adjustments import (
     migrate_clamp_v1_to_v2,
-    migrate_combine_channels_v1_to_v2,
-    migrate_display_image_data_v1_to_v2,
     migrate_hue_v1_to_v2,
     migrate_invert_colour_v1_to_v2,
+)
+from synesthesia_machine.nodes.image.channels import (
+    migrate_combine_channels_v1_to_v2,
     migrate_separate_channels_v1_to_v2,
-    migrate_statistics_v1_to_v2,
+)
+from synesthesia_machine.nodes.image.runtime_support import (
+    migrate_adjustment_channel_selection_v1_to_v2,
+)
+from synesthesia_machine.nodes.image.utilities import migrate_change_colour_space_v1_to_v2
+from synesthesia_machine.nodes.utility.dynamic import migrate_statistics_v1_to_v2
+from synesthesia_machine.nodes.visualization.core import (
+    migrate_channel_display_v1_to_v2,
+    migrate_display_image_data_v1_to_v2,
 )
 from synesthesia_machine.persistence import GraphPersistenceError, graph_from_json
 from synesthesia_machine.persistence.schemas import (

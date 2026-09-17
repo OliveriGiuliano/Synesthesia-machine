@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
 from typing import cast
 from uuid import UUID
 
@@ -12,6 +13,7 @@ import numpy as np
 from synesthesia_machine.contracts import (
     ChannelFrame,
     ImageFrame,
+    JsonObject,
     ParameterValue,
     PortType,
     RuntimeValue,
@@ -51,14 +53,50 @@ from synesthesia_machine.nodes.image.runtime_support import (
     combined_parameter_validator,
     dynamic_image_channel_resolver,
     dynamic_number,
-)
-from synesthesia_machine.nodes.migrations import (
-    NodeMigration,
     migrate_adjustment_channel_selection_v1_to_v2,
-    migrate_clamp_v1_to_v2,
-    migrate_hue_v1_to_v2,
-    migrate_invert_colour_v1_to_v2,
+    rewrite_channel_selection,
 )
+from synesthesia_machine.nodes.migrations import NodeMigration, migration_parameters
+
+
+def migrate_hue_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Normalize legacy hue turns into the new single-turn literal range."""
+
+    migrated = deepcopy(data)
+    parameters = migration_parameters(migrated)
+    turns = parameters.get("turns")
+    if not isinstance(turns, bool) and isinstance(turns, (int, float)):
+        # Legacy turns may be an int literal, but the v2 turns parameter is a
+        # strict float; normalise to float so it passes validation, and wrap
+        # finite out-of-range values into the single-turn range so the user's
+        # hue is not silently lost or rejected.
+        turns_value = float(turns)
+        if math.isfinite(turns_value) and not 0.0 <= turns_value <= 1.0:
+            turns_value = turns_value % 1.0
+        parameters["turns"] = turns_value
+    migrated["implementation_version"] = 2
+    return migrated
+
+
+def migrate_invert_colour_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Invert Colour v2 dropped the alpha-inversion parameter."""
+
+    migrated = deepcopy(data)
+    parameters = migration_parameters(migrated)
+    parameters.pop("invert_alpha", None)
+    migrated["implementation_version"] = 2
+    return migrated
+
+
+def migrate_clamp_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Clamp v2 dropped the alpha parameters and the CHANNEL_4 target."""
+
+    migrated = deepcopy(data)
+    parameters = migration_parameters(migrated)
+    parameters.pop("include_alpha", None)
+    rewrite_channel_selection(migrated)
+    migrated["implementation_version"] = 2
+    return migrated
 
 
 def _factory(processor: AdjustmentProcessor, error_code: str) -> Callable[[UUID], NodeRuntime]:
@@ -73,9 +111,7 @@ def _selection(parameters: Mapping[str, ParameterValue]) -> ChannelSelection:
 
 
 def _brightness(
-    image: ImageFrame,
-    inputs: Mapping[str, RuntimeValue],
-    parameters: Mapping[str, ParameterValue],
+    image: ImageFrame, inputs: Mapping[str, RuntimeValue], parameters: Mapping[str, ParameterValue]
 ) -> ImageFrame:
     return brightness_image(
         image, dynamic_number(inputs, parameters, "offset"), _selection(parameters)
@@ -83,9 +119,7 @@ def _brightness(
 
 
 def _contrast(
-    image: ImageFrame,
-    inputs: Mapping[str, RuntimeValue],
-    parameters: Mapping[str, ParameterValue],
+    image: ImageFrame, inputs: Mapping[str, RuntimeValue], parameters: Mapping[str, ParameterValue]
 ) -> ImageFrame:
     return contrast_image(
         image,
@@ -116,9 +150,7 @@ def _clamp(
 
 
 def _colour_levels(
-    image: ImageFrame,
-    inputs: Mapping[str, RuntimeValue],
-    parameters: Mapping[str, ParameterValue],
+    image: ImageFrame, inputs: Mapping[str, RuntimeValue], parameters: Mapping[str, ParameterValue]
 ) -> ImageFrame:
     return colour_levels_image(
         image,
@@ -132,34 +164,26 @@ def _colour_levels(
 
 
 def _hue(
-    image: ImageFrame,
-    inputs: Mapping[str, RuntimeValue],
-    parameters: Mapping[str, ParameterValue],
+    image: ImageFrame, inputs: Mapping[str, RuntimeValue], parameters: Mapping[str, ParameterValue]
 ) -> ImageFrame:
     return hue_image(image, dynamic_number(inputs, parameters, "turns"))
 
 
 def _saturation(
-    image: ImageFrame,
-    inputs: Mapping[str, RuntimeValue],
-    parameters: Mapping[str, ParameterValue],
+    image: ImageFrame, inputs: Mapping[str, RuntimeValue], parameters: Mapping[str, ParameterValue]
 ) -> ImageFrame:
     return saturation_image(image, dynamic_number(inputs, parameters, "factor"))
 
 
 def _invert(
-    image: ImageFrame,
-    inputs: Mapping[str, RuntimeValue],
-    parameters: Mapping[str, ParameterValue],
+    image: ImageFrame, inputs: Mapping[str, RuntimeValue], parameters: Mapping[str, ParameterValue]
 ) -> ImageFrame:
     del inputs, parameters
     return invert_colour_image(image, invert_alpha=False)
 
 
 def _stretch(
-    image: ImageFrame,
-    inputs: Mapping[str, RuntimeValue],
-    parameters: Mapping[str, ParameterValue],
+    image: ImageFrame, inputs: Mapping[str, RuntimeValue], parameters: Mapping[str, ParameterValue]
 ) -> ImageFrame:
     del inputs
     return stretch_contrast_image(
@@ -174,9 +198,7 @@ def _stretch(
 
 
 def _gamma(
-    image: ImageFrame,
-    inputs: Mapping[str, RuntimeValue],
-    parameters: Mapping[str, ParameterValue],
+    image: ImageFrame, inputs: Mapping[str, RuntimeValue], parameters: Mapping[str, ParameterValue]
 ) -> ImageFrame:
     return gamma_image(image, dynamic_number(inputs, parameters, "gamma"), _selection(parameters))
 

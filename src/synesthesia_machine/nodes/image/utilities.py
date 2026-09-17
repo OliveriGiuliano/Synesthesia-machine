@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from typing import cast
 
 from synesthesia_machine.contracts import (
     ColorSpace,
     FrameContext,
     ImageFrame,
+    JsonObject,
     ParameterValue,
     PortType,
     RuntimeValue,
@@ -22,7 +24,16 @@ from synesthesia_machine.nodes import (
     ParameterSpec,
     StatelessRuntime,
 )
-from synesthesia_machine.nodes.migrations import migrate_change_colour_space_v1_to_v2
+from synesthesia_machine.nodes.image.runtime_support import rewrite_colour_space_target
+
+
+def migrate_change_colour_space_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Change Colour Space v2 no longer offers RGBA as a target."""
+
+    migrated = deepcopy(data)
+    rewrite_colour_space_target(migrated)
+    migrated["implementation_version"] = 2
+    return migrated
 
 
 class ChangeColourSpaceRuntime(StatelessRuntime):

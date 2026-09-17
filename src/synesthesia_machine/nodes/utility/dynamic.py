@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from collections import deque
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from copy import deepcopy
 from threading import Lock
 from typing import cast
 from uuid import UUID
@@ -16,6 +17,7 @@ from synesthesia_machine.contracts import (
     ChannelFrame,
     FrameContext,
     ImageFrame,
+    JsonObject,
     NodeMemoryDiagnostic,
     ParameterValue,
     PortType,
@@ -38,12 +40,23 @@ from synesthesia_machine.nodes import (
     TypeVariable,
     VariadicInputSpec,
 )
-from synesthesia_machine.nodes.migrations import migrate_statistics_v1_to_v2
 
 _DYNAMIC_TYPES = frozenset({PortType.FLOAT, PortType.INT, PortType.IMAGE, PortType.CHANNEL})
 _BUFFER_MEMORY_LIMIT_BYTES = 256 * 1024 * 1024
 T = TypeVariable("T", _DYNAMIC_TYPES)
 T_ARRAY = ArrayTypeVariable("T", _DYNAMIC_TYPES)
+
+
+def migrate_statistics_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Statistics v2 replaced its single ``values`` input with variadic sockets.
+
+    No parameter payload changed; the input-port rename lives in the v2 -> v3
+    graph migration, so this step only advances the implementation version.
+    """
+
+    migrated = deepcopy(data)
+    migrated["implementation_version"] = 2
+    return migrated
 
 
 class DifferenceRuntime(StatelessRuntime):
@@ -706,10 +719,7 @@ def _require_matching_descriptors(values: Sequence[ImageFrame | ChannelFrame]) -
         )
 
 
-def _same_descriptor(
-    first: ImageFrame | ChannelFrame,
-    second: ImageFrame | ChannelFrame,
-) -> bool:
+def _same_descriptor(first: ImageFrame | ChannelFrame, second: ImageFrame | ChannelFrame) -> bool:
     if type(first) is not type(second) or first.data.shape != second.data.shape:
         return False
     if first.context.clock_id != second.context.clock_id:
