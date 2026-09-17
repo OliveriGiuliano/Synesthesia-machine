@@ -37,7 +37,8 @@ from synesthesia_machine.graph import (
     ValidationSeverity,
 )
 from synesthesia_machine.ui.parameter_editors import create_parameter_editor, parameter_tooltip
-from synesthesia_machine.ui.theme import Theme, node_category_color, port_color_name
+from synesthesia_machine.ui.preview_families import pill_family, theme_token
+from synesthesia_machine.ui.theme import Theme, node_category_color
 from synesthesia_machine.ui.tooltips import format_tooltip
 from synesthesia_machine.ui.translations import tr
 from synesthesia_machine.ui.view_models import (
@@ -372,7 +373,7 @@ class PortGraphicsItem(QGraphicsObject):
         widget: QWidget | None = None,
     ) -> None:
         del option, widget
-        color = self.theme.color(port_color_name(self.view_model.type_name))
+        color = self.theme.color(theme_token(self.view_model.type_name))
         if self.compatible is False:
             color = self.theme.color("disabled")
         pen = QPen(self.theme.color("selection") if self.compatible else color)
@@ -952,12 +953,8 @@ class ConnectionGraphicsItem(QGraphicsObject):
         return self.mapRectToScene(body)
 
     def _pill_family(self) -> str:
-        type_name = self.view_model.type_name
-        if type_name in ("INT", "FLOAT"):
-            return "scalar"
-        if type_name in ("IMAGE", "CHANNEL"):
-            return type_name.lower()
-        return ""
+        family = pill_family(self.view_model.type_name)
+        return family.value if family is not None else ""
 
     def _pill_padding(self) -> float:
         return self._PILL_PADDING if self._pill_family() == "scalar" else self._PILL_THUMB_PADDING
@@ -1066,9 +1063,7 @@ class ConnectionGraphicsItem(QGraphicsObject):
         widget: QWidget | None = None,
     ) -> None:
         del option, widget
-        color_name = (
-            "error" if self.view_model.issues else port_color_name(self.view_model.type_name)
-        )
+        color_name = "error" if self.view_model.issues else theme_token(self.view_model.type_name)
         pen = QPen(
             self.theme.color("selection") if self.isSelected() else self.theme.color(color_name)
         )

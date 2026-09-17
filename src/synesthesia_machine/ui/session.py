@@ -27,11 +27,6 @@ from synesthesia_machine.graph import (
     randomize_graph_parameters,
 )
 from synesthesia_machine.nodes import NodeDefinition, NodeRegistry
-from synesthesia_machine.nodes.visualization import (
-    CHANNEL_DISPLAY_TYPE_ID,
-    DISPLAY_IMAGE_DATA_TYPE_ID,
-    NOTE_VISUALIZER_TYPE_ID,
-)
 from synesthesia_machine.persistence import (
     ClipboardFragment,
     copy_fragment,
@@ -59,11 +54,12 @@ from synesthesia_machine.ui.commands import (
     SetConnectionPreviewCommand,
     SetParameterCommand,
 )
+from synesthesia_machine.ui.preview_families import visualizer_type_ids
 from synesthesia_machine.ui.translations import tr, trf
 from synesthesia_machine.ui.view_models import GraphViewModel, ParameterViewModel, project_graph
 
-_IMAGE_VISUALIZER_TYPE_IDS = frozenset({DISPLAY_IMAGE_DATA_TYPE_ID, CHANNEL_DISPLAY_TYPE_ID})
-_NOTE_VISUALIZER_TYPE_IDS = frozenset({NOTE_VISUALIZER_TYPE_ID})
+_IMAGE_VISUALIZER_TYPE_IDS = visualizer_type_ids("image")
+_NOTE_VISUALIZER_TYPE_IDS = visualizer_type_ids("note")
 
 
 class DocumentSession(QObject):

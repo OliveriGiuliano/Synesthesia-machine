@@ -63,11 +63,6 @@ from synesthesia_machine.graph import (
     generate_random_graph,
 )
 from synesthesia_machine.nodes import ExecutionKind, NodeRegistry
-from synesthesia_machine.nodes.visualization import (
-    CHANNEL_DISPLAY_TYPE_ID,
-    DISPLAY_IMAGE_DATA_TYPE_ID,
-    NOTE_VISUALIZER_TYPE_ID,
-)
 from synesthesia_machine.persistence import (
     GraphPersistenceError,
     RelinkMatch,
@@ -99,6 +94,7 @@ from synesthesia_machine.ui.midi_export import (
     midi_export_failure_text,
     midi_export_tooltip,
 )
+from synesthesia_machine.ui.preview_families import display_visualizer, visualizer_type_ids
 from synesthesia_machine.ui.preview_router import PreviewRouter, PumpedPreviews
 from synesthesia_machine.ui.previews import (
     ImagePreviewPanel,
@@ -1120,14 +1116,10 @@ class MainWindow(QMainWindow):
         model = self.session.document.connection(value)
         if connection is None or model is None:
             return
-        visualizers = {
-            "IMAGE": (DISPLAY_IMAGE_DATA_TYPE_ID, "image", self.image_preview_dock),
-            "CHANNEL": (CHANNEL_DISPLAY_TYPE_ID, "channel", self.image_preview_dock),
-            "MIDI_STATE": (NOTE_VISUALIZER_TYPE_ID, "midi", self.note_preview_dock),
-        }
-        target = visualizers.get(connection.type_name)
+        target = display_visualizer(connection.type_name)
         if target is not None:
-            type_id, input_port, dock = target
+            type_id, input_port, dock_key = target
+            dock = {"image": self.image_preview_dock, "note": self.note_preview_dock}[dock_key]
             destination = self.session.document.node(model.destination_node_id)
             position = destination.position if destination is not None else (0.0, 0.0)
             self.session.undo_stack.beginMacro(tr("Inspect connection"))
@@ -1384,10 +1376,9 @@ class MainWindow(QMainWindow):
     def _image_visualizer_source_keys(
         snapshot: GraphSnapshot,
     ) -> frozenset[tuple[UUID, str]]:
+        image_visualizer_ids = visualizer_type_ids("image")
         visualizer_ids = {
-            node.id
-            for node in snapshot.nodes
-            if node.type_id in {DISPLAY_IMAGE_DATA_TYPE_ID, CHANNEL_DISPLAY_TYPE_ID}
+            node.id for node in snapshot.nodes if node.type_id in image_visualizer_ids
         }
         return frozenset(
             (connection.source_node_id, connection.source_port_id)

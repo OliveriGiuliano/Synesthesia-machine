@@ -237,19 +237,3 @@ def node_category_color(category: str) -> QColor:
         colour = QColor.fromHsv(hue, 105, 225)
     _CATEGORY_COLOR_CACHE[category] = colour
     return colour
-
-
-def port_color_name(type_name: str) -> str:
-    """Map stable type names to theme token names, not literal colours."""
-
-    names = {
-        "FLOAT": "float_port",
-        "INT": "int_port",
-        "BOOL": "bool_port",
-        "STRING": "string_port",
-        "COLOR": "color_port",
-        "IMAGE": "image_port",
-        "CHANNEL": "channel_port",
-        "MIDI": "midi_port",
-    }
-    return names.get(type_name, "generic_port")
