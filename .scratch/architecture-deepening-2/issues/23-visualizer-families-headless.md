@@ -8,7 +8,7 @@
 
 **Blocked by:** 21
 
-**Status:** open
+**Status:** resolved
 
 **Files:**
 - `src/synesthesia_machine/nodes/visualization/core.py`
@@ -17,8 +17,8 @@
 - `src/synesthesia_machine/ui/demand_roots.py`
 
 **Acceptance:**
-- [ ] Domain invariant has a headless owner
-- [ ] UI becomes consumer, not inventor
-- [ ] Testable in tests/graph and tests/nodes
-- [ ] Editor and validator stop disagreeing silently
-- [ ] Targeted tests pass; `uv run check` green; no unrelated diff
+- [x] Domain invariant has a headless owner
+- [x] UI becomes consumer, not inventor
+- [x] Testable in tests/graph and tests/nodes
+- [x] Editor and validator stop disagreeing silently
+- [x] Targeted tests pass; `uv run check` green; no unrelated diff
