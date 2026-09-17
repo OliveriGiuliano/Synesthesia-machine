@@ -28,13 +28,13 @@ from synesthesia_machine.nodes.migrations import (
     migrate_separate_channels_v1_to_v2,
     migrate_statistics_v1_to_v2,
 )
-from synesthesia_machine.persistence import (
-    GraphPersistenceError,
-    graph_from_json,
+from synesthesia_machine.persistence import GraphPersistenceError, graph_from_json
+from synesthesia_machine.persistence.schemas import (
+    JsonObject,
+    JsonValue,
     migrate_v2_to_v3,
     migrate_v3_to_v4,
 )
-from synesthesia_machine.persistence.schemas import JsonObject, JsonValue
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "compatibility" / "migrations"
 

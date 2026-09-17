@@ -9,8 +9,11 @@ silently accept an unbounded or dangling payload.
 ## Public imports
 
 Use `synesthesia_machine.persistence` for `graph_to_data`, `graph_to_json`,
-`graph_from_data`, `graph_from_json`, `save_graph`, `load_graph`, migration functions,
-`GRAPH_SCHEMA_VERSION`, and `GraphPersistenceError`.
+`graph_from_data`, `graph_from_json`, `save_graph`, `load_graph`,
+`migrate_graph_data`, `GRAPH_SCHEMA_VERSION`, `GraphPersistenceError`, the
+clipboard fragment helpers, and the media-relink helpers. Per-step migration
+functions and the schema ``TypedDict``s are module-internal: import them from
+``synesthesia_machine.persistence.schemas`` in tests.
 
 ## Dependency direction
 

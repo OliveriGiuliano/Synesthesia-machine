@@ -31,17 +31,7 @@ from synesthesia_machine.persistence.media_relink import (
 )
 from synesthesia_machine.persistence.schemas import (
     GRAPH_SCHEMA_VERSION,
-    ConnectionSchemaV1,
-    GraphSchemaV1,
-    GroupSchemaV1,
-    JsonObject,
-    JsonValue,
-    NodeSchemaV1,
     migrate_graph_data,
-    migrate_v0_to_v1,
-    migrate_v1_to_v2,
-    migrate_v2_to_v3,
-    migrate_v3_to_v4,
 )
 
 __all__ = [
@@ -51,14 +41,8 @@ __all__ = [
     "MEDIA_FINGERPRINT_KEY",
     "MEDIA_SIZE_KEY",
     "ClipboardFragment",
-    "ConnectionSchemaV1",
     "GraphPersistenceError",
-    "GraphSchemaV1",
-    "GroupSchemaV1",
-    "JsonObject",
-    "JsonValue",
     "MissingMediaReference",
-    "NodeSchemaV1",
     "RelinkMatch",
     "RelinkVerification",
     "copy_fragment",
@@ -72,10 +56,6 @@ __all__ = [
     "load_graph",
     "media_fingerprint",
     "migrate_graph_data",
-    "migrate_v0_to_v1",
-    "migrate_v1_to_v2",
-    "migrate_v2_to_v3",
-    "migrate_v3_to_v4",
     "relinked_media_node",
     "remap_fragment",
     "save_graph",

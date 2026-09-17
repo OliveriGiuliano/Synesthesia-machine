@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 from uuid import UUID
 
 from synesthesia_machine.graph import GraphSnapshot
-from synesthesia_machine.persistence.graph_io import save_graph, write_text_atomically
+from synesthesia_machine.persistence.graph_io import (
+    graph_document_id,
+    save_graph,
+    write_text_atomically,
+)
 
 RECOVERY_MANIFEST_VERSION = 1
 
@@ -80,6 +85,25 @@ class AutosaveStore:
             explicit_path = self._read_explicit_path(document_id, path)
             records.append(RecoveryRecord(document_id, path, modified_time_ns, explicit_path))
         return tuple(sorted(records, key=lambda item: item.modified_time_ns, reverse=True))
+
+    def explicit_path_for(
+        self, record: RecoveryRecord, recent_paths: Sequence[Path]
+    ) -> Path | None:
+        """Resolve which explicit path owns a recovery record.
+
+        Records written with a manifest keep the path the manifest recorded,
+        so startup recovery never re-parses graph payloads. Pre-manifest
+        records (or manifests without a path) fall back to matching recent
+        files by document ID through a lightweight payload read instead of a
+        full graph load.
+        """
+
+        if record.explicit_path is not None:
+            return record.explicit_path
+        for path in recent_paths:
+            if graph_document_id(path) == record.document_id:
+                return path
+        return None
 
     def discard(self, document_id: UUID) -> None:
         self.path_for(document_id).unlink(missing_ok=True)

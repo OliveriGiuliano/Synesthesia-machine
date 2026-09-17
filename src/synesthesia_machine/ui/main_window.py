@@ -74,10 +74,9 @@ from synesthesia_machine.persistence import (
     find_missing_media,
     fragment_from_json,
     fragment_to_json,
-    load_graph,
     verify_relink_candidate,
 )
-from synesthesia_machine.persistence.autosave import AutosaveStore, RecoveryRecord
+from synesthesia_machine.persistence.autosave import AutosaveStore
 from synesthesia_machine.runtime import EngineSession
 from synesthesia_machine.ui.actions import ActionRegistry, ActionSpec
 from synesthesia_machine.ui.application_settings import (
@@ -1933,7 +1932,7 @@ class MainWindow(QMainWindow):
     @Slot()
     def _offer_recovery(self) -> None:
         for record in self.autosave_store.discover():
-            explicit_path = self._explicit_path_for(record)
+            explicit_path = self.autosave_store.explicit_path_for(record, self._recent_paths)
             if not record.is_newer_than(explicit_path):
                 continue
             choice = QMessageBox.warning(
@@ -1965,18 +1964,6 @@ class MainWindow(QMainWindow):
                 return
             self.statusBar().showMessage(trf("Recovered {name}", name=record.path.name), 5000)
             return
-
-    def _explicit_path_for(self, record: RecoveryRecord) -> Path | None:
-        if record.explicit_path is not None:
-            return record.explicit_path
-        for path in self._recent_paths:
-            try:
-                snapshot = load_graph(path, self.registry)
-            except (GraphPersistenceError, OSError, ValueError):
-                continue
-            if snapshot.document_id == record.document_id:
-                return path
-        return None
 
     def _load_recent_paths(self) -> list[Path]:
         return self.settings_store.load_recent_files(self.preferences.recent_file_limit)

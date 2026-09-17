@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
 import os
 import shutil
 import tempfile
@@ -13,7 +12,6 @@ from pathlib import Path
 from typing import cast
 from uuid import UUID
 
-from synesthesia_machine.contracts import ColorValue, NumericMatrix
 from synesthesia_machine.graph import (
     ConnectionModel,
     GraphSnapshot,
@@ -24,6 +22,12 @@ from synesthesia_machine.graph import (
 )
 from synesthesia_machine.media_path import normalize_media_path
 from synesthesia_machine.nodes import NodeRegistry, migrate_node_data
+from synesthesia_machine.persistence.literals import (
+    LiteralDecodeError,
+    literal_mapping,
+    literal_mapping_to_data,
+    number,
+)
 from synesthesia_machine.persistence.media_relink import (
     MEDIA_ABSOLUTE_FALLBACK_KEY,
     MEDIA_FINGERPRINT_KEY,
@@ -37,7 +41,6 @@ from synesthesia_machine.persistence.schemas import (
     GraphSchemaV1,
     GroupSchemaV1,
     JsonObject,
-    JsonValue,
     NodeSchemaV1,
     migrate_graph_data,
 )
@@ -78,7 +81,7 @@ def graph_to_data(snapshot: GraphSnapshot) -> GraphSchemaV1:
             _group_to_data(group)
             for group in sorted(snapshot.groups, key=lambda item: str(item.id))
         ],
-        document_settings=_literal_mapping_to_data(snapshot.document_settings),
+        document_settings=literal_mapping_to_data(snapshot.document_settings),
         ui_state={},
     )
 
@@ -294,6 +297,33 @@ def load_graph(path: str | Path, registry: NodeRegistry) -> GraphSnapshot:
     return _with_resolved_media_paths(snapshot, source.parent)
 
 
+def graph_document_id(path: str | Path) -> UUID | None:
+    """Return the document ID recorded in a graph file, without full validation.
+
+    Reads only what identifying a document requires: the byte limit, the JSON
+    parse, schema migration, and the ``document_id`` field. Node types,
+    connections, and media references are not validated, so matching recovery
+    records against recent files stays cheap. Returns ``None`` when the file
+    is missing, unreadable, or does not record a document ID.
+    """
+
+    source = Path(path).expanduser().resolve()
+    try:
+        with source.open("rb") as graph_file:
+            content = graph_file.read(MAX_GRAPH_JSON_BYTES + 1)
+    except OSError:
+        return None
+    if len(content) > MAX_GRAPH_JSON_BYTES:
+        return None
+    try:
+        value = cast(object, json.loads(content.decode("utf-8")))
+        data = _expect_object(value, "$")
+        migrated = migrate_graph_data(data)
+        return UUID(_expect_str(migrated.get("document_id"), "$.document_id"))
+    except (GraphPersistenceError, ValueError, RecursionError):
+        return None
+
+
 def _with_resolved_media_paths(snapshot: GraphSnapshot, graph_directory: Path) -> GraphSnapshot:
     """Resolve persisted relative media paths against the graph file's directory."""
 
@@ -386,8 +416,8 @@ def _node_to_data(node: NodeModel) -> NodeSchemaV1:
         implementation_version=node.implementation_version,
         position=[node.position[0], node.position[1]],
         size=None if node.size is None else [node.size[0], node.size[1]],
-        parameters=_literal_mapping_to_data(node.parameters),
-        ui_state=_literal_mapping_to_data(node.ui_state),
+        parameters=literal_mapping_to_data(node.parameters),
+        ui_state=literal_mapping_to_data(node.ui_state),
         user_label=node.user_label,
         collapsed=node.collapsed,
     )
@@ -400,7 +430,7 @@ def _connection_to_data(connection: ConnectionModel) -> ConnectionSchemaV1:
         source_port_id=connection.source_port_id,
         destination_node_id=str(connection.destination_node_id),
         destination_port_id=connection.destination_port_id,
-        ui_state=_literal_mapping_to_data(connection.ui_state),
+        ui_state=literal_mapping_to_data(connection.ui_state),
     )
 
 
@@ -593,75 +623,21 @@ def _expect_pair(value: object, path: str) -> tuple[float, float]:
 
 
 def _expect_number(value: object, path: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise GraphPersistenceError("invalid_type", "Expected number", path)
     try:
-        result = float(value)
-    except OverflowError as error:
-        raise GraphPersistenceError("invalid_number", "Expected finite number", path) from error
-    if not math.isfinite(result):
-        raise GraphPersistenceError("invalid_number", "Expected finite number", path)
-    return result
+        return number(value, path)
+    except LiteralDecodeError as error:
+        raise _literal_failure(error) from error
 
 
 def _expect_literal_mapping(value: object, path: str) -> dict[str, LiteralValue]:
-    data = _expect_object(value, path)
-    return {key: _expect_literal(item, f"{path}.{key}") for key, item in data.items()}
-
-
-def _expect_literal(value: object, path: str) -> LiteralValue:
-    if value is None or isinstance(value, (str, bool, int)):
-        return value
-    if isinstance(value, float) and math.isfinite(value):
-        return value
-    if isinstance(value, list):
-        return _expect_numeric_matrix(cast(object, value), path)
-    if isinstance(value, dict):
-        data = _expect_object(cast(object, value), path)
-        _require_exact_keys(data, {"$type", "r", "g", "b", "a"}, path)
-        if _expect_str(data["$type"], f"{path}.$type") != "COLOR":
-            raise GraphPersistenceError(
-                "invalid_literal", "Unknown structured literal type", f"{path}.$type"
-            )
-        try:
-            return ColorValue(
-                _expect_number(data["r"], f"{path}.r"),
-                _expect_number(data["g"], f"{path}.g"),
-                _expect_number(data["b"], f"{path}.b"),
-                _expect_number(data["a"], f"{path}.a"),
-            )
-        except ValueError as error:
-            raise GraphPersistenceError("invalid_literal", str(error), path) from error
-    raise GraphPersistenceError("invalid_literal", "Expected a finite JSON literal", path)
-
-
-def _expect_numeric_matrix(value: object, path: str) -> NumericMatrix:
-    rows = _expect_list(value, path)
-    parsed_rows: list[tuple[float, ...]] = []
-    for row_index, row in enumerate(rows):
-        raw_row = _expect_list(row, f"{path}[{row_index}]")
-        parsed_rows.append(
-            tuple(
-                _expect_number(item, f"{path}[{row_index}][{column_index}]")
-                for column_index, item in enumerate(raw_row)
-            )
-        )
     try:
-        return NumericMatrix(tuple(parsed_rows))
-    except (TypeError, ValueError) as error:
-        raise GraphPersistenceError("invalid_literal", str(error), path) from error
+        return literal_mapping(value, path)
+    except LiteralDecodeError as error:
+        raise _literal_failure(error) from error
 
 
-def _literal_mapping_to_data(values: Mapping[str, LiteralValue]) -> dict[str, JsonValue]:
-    return {key: _literal_to_data(value) for key, value in sorted(values.items())}
-
-
-def _literal_to_data(value: LiteralValue) -> JsonValue:
-    if isinstance(value, ColorValue):
-        return {"$type": "COLOR", "r": value.r, "g": value.g, "b": value.b, "a": value.a}
-    if isinstance(value, NumericMatrix):
-        return [list(row) for row in value.rows]
-    return value
+def _literal_failure(error: LiteralDecodeError) -> GraphPersistenceError:
+    return GraphPersistenceError(error.kind, error.message, error.path)
 
 
 def _require_exact_keys(data: Mapping[str, object], expected: set[str], path: str) -> None:

@@ -104,9 +104,9 @@ def test_clipboard_numeric_matrix_round_trips_as_nested_arrays() -> None:
     [
         ([], "at least one row"),
         ([[1.0], [2.0, 3.0]], "equal lengths"),
-        ([[1.0, True]], "must be a number"),
-        ([[10**1000]], "must be finite"),
-        ([1.0, 2.0], "must be an array"),
+        ([[1.0, True]], "Expected number"),
+        ([[10**1000]], "Expected finite number"),
+        ([1.0, 2.0], "Expected JSON array"),
     ],
 )
 def test_clipboard_rejects_malformed_numeric_matrices(matrix: object, message: str) -> None:
