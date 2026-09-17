@@ -108,20 +108,30 @@ class FastForwardPlaybackClock:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._now_ns = 0
+        self._wake_event = threading.Event()
+        self._stop_event = threading.Event()
+
+    @property
+    def wake_event(self) -> threading.Event:
+        return self._wake_event
+
+    @property
+    def stop_event(self) -> threading.Event:
+        return self._stop_event
 
     def monotonic_ns(self) -> int:
         with self._lock:
             return self._now_ns
 
-    def wait(self, wake_event: threading.Event, timeout_s: float | None) -> bool:
+    def wait(self, event: threading.Event, timeout_s: float | None) -> bool:
         if timeout_s is None:
             deadline = time.monotonic() + _POLL_INTERVAL_S
-            while not wake_event.is_set() and time.monotonic() < deadline:
+            while not event.is_set() and time.monotonic() < deadline:
                 time.sleep(0.001)
-            return wake_event.is_set()
+            return event.is_set()
         with self._lock:
             self._now_ns += max(0, round(timeout_s * 1_000_000_000))
-        return wake_event.is_set()
+        return event.is_set()
 
 
 class _ExportVideoSourceFactory:

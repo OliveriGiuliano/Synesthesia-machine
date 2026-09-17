@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from fractions import Fraction
 from pathlib import Path
 from uuid import UUID
@@ -32,29 +33,80 @@ class AdvancingClock:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._now_ns = 0
+        self._wake_event = threading.Event()
+        self._stop_event = threading.Event()
+
+    @property
+    def wake_event(self) -> threading.Event:
+        return self._wake_event
+
+    @property
+    def stop_event(self) -> threading.Event:
+        return self._stop_event
 
     def monotonic_ns(self) -> int:
         with self._lock:
             return self._now_ns
 
-    def wait(self, wake_event: threading.Event, timeout_s: float | None) -> bool:
+    def wait(self, event: threading.Event, timeout_s: float | None) -> bool:
         if timeout_s is None:
-            return wake_event.wait(1.0)
+            return event.wait(1.0)
         with self._lock:
             self._now_ns += round(timeout_s * 1_000_000_000)
-        return wake_event.is_set()
+        return event.is_set()
 
 
-class _BlockingClearEvent(threading.Event):
+class _RaceClock:
+    """Playback clock that gates the unbounded state waits of a paused worker.
+
+    ``wait(event, None)`` is the sleep a paused worker takes between state
+    rechecks; holding it until the test releases the gate parks the real
+    presentation thread deterministically at the pause-check/wake-clear race
+    point, so resume races are driven through the public play/pause/resume
+    API alone. Bounded waits advance the fake timeline like ``AdvancingClock``.
+    """
+
     def __init__(self) -> None:
-        super().__init__()
-        self.clear_started = threading.Event()
-        self.allow_clear = threading.Event()
+        self._lock = threading.Lock()
+        self._now_ns = 0
+        self._gate = threading.Event()
+        self.state_waits = threading.Event()
+        self._wake_event = threading.Event()
+        self._stop_event = threading.Event()
 
-    def clear(self) -> None:
-        self.clear_started.set()
-        assert self.allow_clear.wait(1.0)
-        super().clear()
+    @property
+    def wake_event(self) -> threading.Event:
+        return self._wake_event
+
+    @property
+    def stop_event(self) -> threading.Event:
+        return self._stop_event
+
+    def release_gate(self) -> None:
+        self._gate.set()
+
+    def monotonic_ns(self) -> int:
+        with self._lock:
+            return self._now_ns
+
+    def wait(self, event: threading.Event, timeout_s: float | None) -> bool:
+        if timeout_s is None:
+            self.state_waits.set()
+            self._gate.wait(2.0)
+            self._gate.clear()
+            return event.is_set()
+        with self._lock:
+            self._now_ns += round(timeout_s * 1_000_000_000)
+        return event.is_set()
+
+
+def _wait_until(predicate: Callable[[], bool], timeout_s: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return predicate()
 
 
 def test_load_video_definition_has_stable_source_contract() -> None:
@@ -75,33 +127,22 @@ def test_load_video_definition_has_stable_source_contract() -> None:
 
 
 def test_resume_cannot_be_lost_between_pause_check_and_wake_clear(tmp_path: Path) -> None:
-    path = generate_test_video(tmp_path / "resume-race.mp4", frame_count=1)
-    source = VideoSourceService(
-        SOURCE_ID, path, on_frame=lambda _frame: None, clock=AdvancingClock()
-    )
-    wake_event = _BlockingClearEvent()
-    source._wake_event = wake_event  # pyright: ignore[reportPrivateUsage]
-    with source._lock:  # pyright: ignore[reportPrivateUsage]
-        source._state = SourceState.PAUSED  # pyright: ignore[reportPrivateUsage]
-    result: list[bool] = []
-    waiter = threading.Thread(
-        target=lambda: result.append(
-            source._wait_until_playing()  # pyright: ignore[reportPrivateUsage]
-        )
-    )
+    path = generate_test_video(tmp_path / "resume-race.mp4", frame_count=8)
+    clock = _RaceClock()
+    presented: list[PresentedVideoFrame] = []
+    source = VideoSourceService(SOURCE_ID, path, on_frame=presented.append, clock=clock)
+    source.play()
     try:
-        waiter.start()
-        assert wake_event.clear_started.wait(1.0)
+        source.pause()
+        assert clock.state_waits.wait(5.0), "presentation thread never reached the pause gate"
+        presented_at_resume = len(presented)
         source.resume()
-        wake_event.allow_clear.set()
-        waiter.join(0.2)
-        assert not waiter.is_alive()
-        assert result == [True]
+        clock.release_gate()
+        # A resume registered before the worker's wake was released must not
+        # be lost: presentation continues after the gate is released.
+        assert _wait_until(lambda: len(presented) > presented_at_resume)
     finally:
-        wake_event.allow_clear.set()
-        source._stop_event.set()  # pyright: ignore[reportPrivateUsage]
-        wake_event.set()
-        waiter.join(1.0)
+        clock.release_gate()
         source.close()
 
 

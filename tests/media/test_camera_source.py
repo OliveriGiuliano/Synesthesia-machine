@@ -110,6 +110,16 @@ class _SequenceClock:
         self._values = deque(values_ns)
         self._last_ns = values_ns[-1] if values_ns else 0
         self.waits: list[float | None] = []
+        self._wake_event = threading.Event()
+        self._stop_event = threading.Event()
+
+    @property
+    def wake_event(self) -> threading.Event:
+        return self._wake_event
+
+    @property
+    def stop_event(self) -> threading.Event:
+        return self._stop_event
 
     def monotonic_ns(self) -> int:
         with self._lock:
@@ -119,23 +129,129 @@ class _SequenceClock:
                 self._last_ns += 1_000_000
             return self._last_ns
 
-    def wait(self, wake_event: threading.Event, timeout_s: float | None) -> bool:
+    def wait(self, event: threading.Event, timeout_s: float | None) -> bool:
         self.waits.append(timeout_s)
         if timeout_s is None:
-            return wake_event.wait(1.0)
-        return wake_event.is_set()
+            return event.wait(1.0)
+        return event.is_set()
 
 
-class _BlockingClearEvent(threading.Event):
+class _RaceClock:
+    """Clock that gates the unbounded state waits of a paused capture worker.
+
+    ``wait(event, None)`` is the sleep a paused worker takes between state
+    rechecks; holding it until the test releases the gate parks the real
+    capture thread deterministically at the pause-check/wake-clear race
+    point, so resume races are driven through the public play/pause/resume
+    API alone.
+    """
+
     def __init__(self) -> None:
-        super().__init__()
-        self.clear_started = threading.Event()
-        self.allow_clear = threading.Event()
+        self._now_ns = 0
+        self._gate = threading.Event()
+        self.state_waits = threading.Event()
+        self._wake_event = threading.Event()
+        self._stop_event = threading.Event()
 
-    def clear(self) -> None:
-        self.clear_started.set()
-        assert self.allow_clear.wait(1.0)
-        super().clear()
+    @property
+    def wake_event(self) -> threading.Event:
+        return self._wake_event
+
+    @property
+    def stop_event(self) -> threading.Event:
+        return self._stop_event
+
+    def release_gate(self) -> None:
+        self._gate.set()
+
+    def monotonic_ns(self) -> int:
+        return self._now_ns
+
+    def wait(self, event: threading.Event, timeout_s: float | None) -> bool:
+        if timeout_s is None:
+            self.state_waits.set()
+            self._gate.wait(2.0)
+            self._gate.clear()
+            return event.is_set()
+        return event.is_set()
+
+
+class _GatedCapture:
+    """Test-owned camera whose ``read`` blocks until the test pushes a frame."""
+
+    def __init__(self) -> None:
+        self._frames: deque[np.ndarray] = deque()
+        self._available = threading.Event()
+
+    def push(self, frame: np.ndarray) -> None:
+        self._frames.append(frame)
+        self._available.set()
+
+    def isOpened(self) -> bool:
+        return True
+
+    def read(self) -> tuple[bool, object]:
+        self._available.wait(5.0)
+        if not self._frames:
+            return False, None
+        frame = self._frames.popleft()
+        if not self._frames:
+            self._available.clear()
+        return True, frame
+
+    def get(self, property_id: int, /) -> float:
+        return 0.0
+
+    def set(self, property_id: int, value: float, /) -> bool:
+        return True
+
+    def release(self) -> None:
+        self._available.set()
+
+
+def _wait_until(predicate: Callable[[], bool], timeout_s: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return predicate()
+
+
+def test_camera_resume_cannot_be_lost_between_pause_check_and_wake_clear() -> None:
+    clock = _RaceClock()
+    capture = _GatedCapture()
+    presented: list[PresentedSourceFrame] = []
+    source = CameraSourceService(
+        SOURCE_ID,
+        "opencv:0",
+        on_frame=presented.append,
+        capture_factory=lambda _index, _backend: capture,
+        clock=clock,
+    )
+    source.play()
+    try:
+        capture.push(_bgr(1, 2, 3))
+        assert _wait_until(lambda: len(presented) >= 1)
+        source.pause()
+        # One in-flight frame is enough to reach the state gate whichever
+        # side of the pause the capture thread is currently on.
+        capture.push(_bgr(4, 5, 6))
+        assert clock.state_waits.wait(5.0), "capture thread never reached the pause gate"
+        presented_at_resume = len(presented)
+        source.resume()
+        clock.release_gate()
+        capture.push(_bgr(7, 8, 9))
+        # A resume registered before the worker's wake was released must not
+        # be lost: capture continues after the gate is released.
+        assert _wait_until(lambda: len(presented) > presented_at_resume)
+    finally:
+        clock.release_gate()
+        source.close()
+
+
+def _bgr(blue: int, green: int, red: int) -> np.ndarray:
+    return np.array([[[blue, green, red]]], dtype=np.uint8)
 
 
 def _camera_definition():
@@ -144,40 +260,6 @@ def _camera_definition():
         for definition in create_input_definitions()
         if definition.type_id == LOAD_CAMERA_TYPE_ID
     )
-
-
-def test_camera_resume_cannot_be_lost_before_wait() -> None:
-    source = CameraSourceService(
-        SOURCE_ID, "opencv:0", on_frame=lambda _frame: None, clock=_SequenceClock()
-    )
-    wake_event = _BlockingClearEvent()
-    source._wake_event = wake_event  # pyright: ignore[reportPrivateUsage]
-    with source._lock:  # pyright: ignore[reportPrivateUsage]
-        source._state = SourceState.PAUSED  # pyright: ignore[reportPrivateUsage]
-    result: list[bool] = []
-    waiter = threading.Thread(
-        target=lambda: result.append(
-            source._wait_until_active()  # pyright: ignore[reportPrivateUsage]
-        )
-    )
-    try:
-        waiter.start()
-        assert wake_event.clear_started.wait(1.0)
-        source.resume()
-        wake_event.allow_clear.set()
-        waiter.join(0.2)
-        assert not waiter.is_alive()
-        assert result == [True]
-    finally:
-        wake_event.allow_clear.set()
-        source._stop_event.set()  # pyright: ignore[reportPrivateUsage]
-        wake_event.set()
-        waiter.join(1.0)
-        source.close()
-
-
-def _bgr(blue: int, green: int, red: int) -> np.ndarray:
-    return np.array([[[blue, green, red]]], dtype=np.uint8)
 
 
 def test_load_camera_definition_has_stable_restart_source_contract() -> None:

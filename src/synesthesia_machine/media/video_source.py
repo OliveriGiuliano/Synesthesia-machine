@@ -39,19 +39,41 @@ _DEFAULT_MAX_DECODE_FAILURES = 3
 
 
 class PlaybackClock(Protocol):
-    """Injectable monotonic clock and interruptible wait used by PTS pacing."""
+    """Injectable monotonic clock and interruptible wait used by PTS pacing.
+
+    The clock also owns the service's wake/stop synchronization events so
+    tests can inject controllable primitives without touching service state.
+    """
+
+    @property
+    def wake_event(self) -> threading.Event: ...
+
+    @property
+    def stop_event(self) -> threading.Event: ...
 
     def monotonic_ns(self) -> int: ...
 
-    def wait(self, wake_event: threading.Event, timeout_s: float | None) -> bool: ...
+    def wait(self, event: threading.Event, timeout_s: float | None) -> bool: ...
 
 
 class SystemPlaybackClock:
+    def __init__(self) -> None:
+        self._wake_event = threading.Event()
+        self._stop_event = threading.Event()
+
+    @property
+    def wake_event(self) -> threading.Event:
+        return self._wake_event
+
+    @property
+    def stop_event(self) -> threading.Event:
+        return self._stop_event
+
     def monotonic_ns(self) -> int:
         return time.perf_counter_ns()
 
-    def wait(self, wake_event: threading.Event, timeout_s: float | None) -> bool:
-        return wake_event.wait(timeout_s)
+    def wait(self, event: threading.Event, timeout_s: float | None) -> bool:
+        return event.wait(timeout_s)
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,8 +261,10 @@ class VideoSourceService:
 
         self._lock = threading.RLock()
         self._decode_queue: queue.Queue[_DecodeItem] = queue.Queue(decode_queue_size)
-        self._stop_event = threading.Event()
-        self._wake_event = threading.Event()
+        # The injected clock owns the worker synchronization events; tests
+        # gain controllable primitives without reaching into service state.
+        self._stop_event = self._clock.stop_event
+        self._wake_event = self._clock.wake_event
         self._timeline = PtsPlaybackTimeline(playback_speed)
         self._decode_thread: threading.Thread | None = None
         self._presentation_thread: threading.Thread | None = None

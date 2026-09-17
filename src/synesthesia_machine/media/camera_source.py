@@ -66,17 +66,41 @@ class CameraCapture(Protocol):
 
 
 class CameraClock(Protocol):
+    """Injectable monotonic clock and interruptible wait for capture pacing.
+
+    The clock also owns the service's wake/stop synchronization events so
+    tests can inject controllable primitives without touching service state.
+    """
+
+    @property
+    def wake_event(self) -> threading.Event: ...
+
+    @property
+    def stop_event(self) -> threading.Event: ...
+
     def monotonic_ns(self) -> int: ...
 
-    def wait(self, wake_event: threading.Event, timeout_s: float | None) -> bool: ...
+    def wait(self, event: threading.Event, timeout_s: float | None) -> bool: ...
 
 
 class SystemCameraClock:
+    def __init__(self) -> None:
+        self._wake_event = threading.Event()
+        self._stop_event = threading.Event()
+
+    @property
+    def wake_event(self) -> threading.Event:
+        return self._wake_event
+
+    @property
+    def stop_event(self) -> threading.Event:
+        return self._stop_event
+
     def monotonic_ns(self) -> int:
         return time.perf_counter_ns()
 
-    def wait(self, wake_event: threading.Event, timeout_s: float | None) -> bool:
-        return wake_event.wait(timeout_s)
+    def wait(self, event: threading.Event, timeout_s: float | None) -> bool:
+        return event.wait(timeout_s)
 
 
 @dataclass(frozen=True, slots=True)
@@ -319,8 +343,10 @@ class CameraSourceService:
         self._reconnect_max_s = reconnect_max_s
 
         self._lock = threading.RLock()
-        self._stop_event = threading.Event()
-        self._wake_event = threading.Event()
+        # The injected clock owns the worker synchronization events; tests
+        # gain controllable primitives without reaching into service state.
+        self._stop_event = self._clock.stop_event
+        self._wake_event = self._clock.wake_event
         self._thread: threading.Thread | None = None
         self._capture: CameraCapture | None = None
         self._state = SourceState.READY
