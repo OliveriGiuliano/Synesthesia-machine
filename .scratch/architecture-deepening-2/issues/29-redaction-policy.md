@@ -4,15 +4,15 @@
 
 **Solution:** Keep the public signature; factor the sanitizers into a declared per-artifact-kind strategy table inside the module (every artifact kind must name its strategy), and drop the exported raw sanitizer from the facade or document it as an escape hatch for arbitrary JSON.
 
-**Status:** open
+**Status:** resolved
 
 **Files:**
 - `src/synesthesia_machine/diagnostics/bundle.py`
 - `tests/diagnostics/test_bundles.py`
 
 **Acceptance:**
-- [ ] Privacy knowledge in one place
-- [ ] New artifact must declare its strategy
-- [ ] Strategy table exhaustively testable
-- [ ] README promise becomes true
-- [ ] Targeted tests pass; `uv run check` green; no unrelated diff
+- [x] Privacy knowledge in one place
+- [x] New artifact must declare its strategy
+- [x] Strategy table exhaustively testable
+- [x] README promise becomes true
+- [x] Targeted tests pass; `uv run check` green; no unrelated diff

@@ -8,7 +8,7 @@ import os
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
-from enum import Enum
+from enum import Enum, StrEnum
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import cast
 from uuid import UUID
@@ -50,6 +50,35 @@ _PATH_TOKEN_PATTERN = re.compile(
 )
 
 
+class RedactionStrategy(StrEnum):
+    """How a bundle artifact is sanitized when the bundle is redacted.
+
+    These name the three historical sanitizers so the per-artifact policy
+    below declares *which* strategy each artifact kind uses, instead of
+    :func:`create_diagnostic_bundle` choosing one ad hoc per member.
+    """
+
+    NONE = "none"
+    PATH_FIELDS = "path_fields"
+    PATH_TOKENS = "path_tokens"
+    LOG_LINES = "log_lines"
+
+
+# The bundle's redaction policy: every JSON member it writes names exactly one
+# strategy, so a new artifact kind cannot ship without deciding how it is
+# sanitized. The log family is a set of text members rather than one JSON
+# member, so it declares its strategy separately.
+ARTIFACT_REDACTION: Mapping[str, RedactionStrategy] = {
+    "hardware.json": RedactionStrategy.PATH_FIELDS,
+    "dependencies.json": RedactionStrategy.NONE,
+    "graph.json": RedactionStrategy.PATH_FIELDS,
+    "engine_metrics.json": RedactionStrategy.PATH_TOKENS,
+    "node_profiles.json": RedactionStrategy.PATH_TOKENS,
+    "manifest.json": RedactionStrategy.NONE,
+}
+LOG_REDACTION = RedactionStrategy.LOG_LINES
+
+
 @dataclass(frozen=True, slots=True)
 class DiagnosticBundleResult:
     path: Path
@@ -78,24 +107,25 @@ def create_diagnostic_bundle(
     hardware_snapshot = hardware or collect_hardware_snapshot()
     try:
         with ZipFile(temporary, "w", compression=ZIP_DEFLATED) as archive:
-            hardware_data: object = asdict(hardware_snapshot)
-            if not include_paths:
-                hardware_data = redact_sensitive_paths(hardware_data)
+            hardware_data = _redact_artifact(
+                "hardware.json", asdict(hardware_snapshot), include_paths
+            )
             _write_json(archive, "hardware.json", hardware_data, included)
-            _write_json(archive, "dependencies.json", dependency_versions(), included)
-            graph_data: object = graph_to_data(graph)
-            if not include_paths:
-                graph_data = redact_sensitive_paths(graph_data)
+            dependencies_data = _redact_artifact(
+                "dependencies.json", dependency_versions(), include_paths
+            )
+            _write_json(archive, "dependencies.json", dependencies_data, included)
+            graph_data = _redact_artifact("graph.json", graph_to_data(graph), include_paths)
             _write_json(archive, "graph.json", graph_data, included)
-            metrics_data: object = {} if engine_metrics is None else asdict(engine_metrics)
-            profiles_data: object = [asdict(profile) for profile in node_profiles]
-            if not include_paths:
-                # Live metrics carry raw tracebacks and profiles may embed path
-                # text, so redact path tokens inside every string value; only
-                # an explicit keep-paths export writes these members raw.
-                metrics_data = _redact_path_tokens(metrics_data)
-                profiles_data = _redact_path_tokens(profiles_data)
+            metrics_data = _redact_artifact(
+                "engine_metrics.json",
+                {} if engine_metrics is None else asdict(engine_metrics),
+                include_paths,
+            )
             _write_json(archive, "engine_metrics.json", metrics_data, included)
+            profiles_data = _redact_artifact(
+                "node_profiles.json", [asdict(profile) for profile in node_profiles], include_paths
+            )
             _write_json(archive, "node_profiles.json", profiles_data, included)
             for name, content in _bounded_logs(logs_directory, include_paths=include_paths):
                 archive.writestr(name, content)
@@ -108,7 +138,8 @@ def create_diagnostic_bundle(
                 "log_files_included": log_count,
                 "frames_included": False,
             }
-            _write_json(archive, "manifest.json", manifest, included)
+            manifest_data = _redact_artifact("manifest.json", manifest, include_paths)
+            _write_json(archive, "manifest.json", manifest_data, included)
         temporary.replace(output)
     finally:
         temporary.unlink(missing_ok=True)
@@ -126,7 +157,13 @@ def dependency_versions() -> dict[str, str]:
 
 
 def redact_sensitive_paths(value: object) -> object:
-    """Return a JSON-shaped copy with path fields and absolute path strings removed."""
+    """Return a JSON-shaped copy with path fields and absolute path strings removed.
+
+    This is the :attr:`RedactionStrategy.PATH_FIELDS` sanitizer, the strategy the
+    bundle applies to its hardware and graph members. It is exported as the escape
+    hatch for redacting path-shaped keys and absolute values from arbitrary JSON; the
+    diagnostic bundle's per-artifact selection lives in ``ARTIFACT_REDACTION``.
+    """
 
     if isinstance(value, Mapping):
         result: dict[str, object] = {}
@@ -165,7 +202,7 @@ def _bounded_logs(
     for index, path in enumerate(candidates, start=1):
         raw = path.read_bytes()[-MAX_LOG_BYTES:]
         text = raw.decode("utf-8", errors="replace")
-        if not include_paths:
+        if not include_paths and LOG_REDACTION is RedactionStrategy.LOG_LINES:
             text = _redact_log_lines(text)
         logs.append((f"logs/{index:02d}-{path.name}", text))
     return tuple(logs)
@@ -195,6 +232,23 @@ def _redact_path_tokens(value: object) -> object:
     if isinstance(value, (list, tuple)):
         items = cast("Sequence[object]", value)
         return [_redact_path_tokens(item) for item in items]
+    return value
+
+
+def _redact_artifact(name: str, value: object, include_paths: bool) -> object:
+    """Apply ``name``'s declared redaction strategy unless paths are kept.
+
+    The strategy lookup runs even when paths are kept, so a member the bundle
+    writes but never declared in ``ARTIFACT_REDACTION`` raises here instead of
+    leaking unredacted.
+    """
+    strategy = ARTIFACT_REDACTION[name]
+    if include_paths or strategy is RedactionStrategy.NONE:
+        return value
+    if strategy is RedactionStrategy.PATH_FIELDS:
+        return redact_sensitive_paths(value)
+    if strategy is RedactionStrategy.PATH_TOKENS:
+        return _redact_path_tokens(value)
     return value
 
 
@@ -235,7 +289,10 @@ def _is_absolute_path(value: str) -> bool:
 
 
 __all__ = [
+    "ARTIFACT_REDACTION",
+    "LOG_REDACTION",
     "DiagnosticBundleResult",
+    "RedactionStrategy",
     "create_diagnostic_bundle",
     "dependency_versions",
     "redact_sensitive_paths",

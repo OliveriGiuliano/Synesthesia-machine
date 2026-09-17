@@ -7,13 +7,19 @@ from pathlib import Path
 from uuid import UUID
 from zipfile import ZipFile
 
+import pytest
+
 from synesthesia_machine.contracts import EngineMetrics, EngineState, NodeExecutionError
 from synesthesia_machine.diagnostics import (
+    ARTIFACT_REDACTION,
+    LOG_REDACTION,
     NvidiaSnapshot,
+    RedactionStrategy,
     collect_hardware_snapshot,
     create_diagnostic_bundle,
     redact_sensitive_paths,
 )
+from synesthesia_machine.diagnostics.bundle import _redact_artifact
 from synesthesia_machine.graph import GraphDocument
 from synesthesia_machine.persistence.media_relink import MEDIA_ABSOLUTE_FALLBACK_KEY
 
@@ -63,6 +69,30 @@ def test_recursive_redaction_covers_path_fields_and_absolute_values() -> None:
     assert redacted["nested"] == {MEDIA_ABSOLUTE_FALLBACK_KEY: "<redacted>"}
     assert redacted["ordinary"] == "keep me"
     assert redacted["absolute_without_path_key"] == "<redacted>"
+
+
+def test_artifact_redaction_table_declares_a_strategy_per_member() -> None:
+    # The policy is one declared table: every JSON member the bundle writes names
+    # exactly one strategy, and the log family declares its own.
+    expected_members = {
+        "hardware.json",
+        "dependencies.json",
+        "graph.json",
+        "engine_metrics.json",
+        "node_profiles.json",
+        "manifest.json",
+    }
+    assert set(ARTIFACT_REDACTION) == expected_members
+    assert all(strategy is not None for strategy in ARTIFACT_REDACTION.values())
+    assert LOG_REDACTION is RedactionStrategy.LOG_LINES
+
+
+def test_redaction_dispatch_rejects_undeclared_artifact_member() -> None:
+    # The policy lookup runs even in keep-paths mode, so an artifact member that
+    # never declared a strategy fails loudly instead of leaking unredacted.
+    for keep_paths in (False, True):
+        with pytest.raises(KeyError):
+            _redact_artifact("undeclared.json", {"file_path": "/home/artist/clip.mp4"}, keep_paths)
 
 
 def test_bundle_is_bounded_redacted_and_contains_no_frames(tmp_path: Path) -> None:
