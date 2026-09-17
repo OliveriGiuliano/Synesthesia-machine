@@ -70,8 +70,8 @@ from synesthesia_machine.diagnostics.logging_setup import (
     ENGINE_LOGGER_NAME,
     configure_logging,
 )
+from synesthesia_machine.graph.model import GraphSnapshot
 from synesthesia_machine.nodes.composition import create_builtin_registry
-from synesthesia_machine.runtime.graph_payload import payload_to_snapshot
 from synesthesia_machine.runtime.in_process_engine import InProcessEngineClient
 from synesthesia_machine.runtime.preview_channel import SharedMemoryPreviewWriter
 
@@ -400,7 +400,7 @@ class EngineServer:
             )
         if isinstance(command, ActivateGraph):
             activation = self._engine.activate(
-                payload_to_snapshot(command.snapshot),
+                GraphSnapshot.from_payload(command.snapshot),
                 demand_roots=command.demand_roots,
                 reset_reason=command.reset_reason,
             )

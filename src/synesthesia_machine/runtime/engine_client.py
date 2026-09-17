@@ -74,7 +74,6 @@ from synesthesia_machine.contracts.engine_messages import (
 )
 from synesthesia_machine.graph.model import GraphSnapshot
 from synesthesia_machine.runtime.engine_server import engine_server_main
-from synesthesia_machine.runtime.graph_payload import snapshot_to_payload
 from synesthesia_machine.runtime.preview_channel import SharedMemoryPreviewReader
 
 DEFAULT_REQUEST_TIMEOUT_S = 3.0
@@ -503,7 +502,7 @@ class ProcessEngineClient:
             ActivateGraph(
                 uuid4().hex,
                 snapshot.revision,
-                snapshot_to_payload(snapshot),
+                snapshot.to_payload(),
                 demand_roots,
                 reset_reason,
             ),

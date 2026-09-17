@@ -17,11 +17,10 @@ from synesthesia_machine.contracts import (
     PortType,
     freeze_uint8_preview,
 )
-from synesthesia_machine.graph import GraphCompiler, GraphDocument
+from synesthesia_machine.graph import GraphCompiler, GraphDocument, GraphSnapshot
 from synesthesia_machine.nodes import ExecutionKind, ResetReason
 from synesthesia_machine.nodes.registry import NodeRegistry
 from synesthesia_machine.runtime import Scheduler
-from synesthesia_machine.runtime.graph_payload import payload_to_snapshot, snapshot_to_payload
 
 
 def test_preview_contracts_are_compact_immutable_and_deterministic() -> None:
@@ -52,7 +51,7 @@ def test_graph_snapshot_payload_round_trips_numeric_matrix_parameters() -> None:
         parameters={"kernel": kernel},
     )
 
-    restored = payload_to_snapshot(snapshot_to_payload(document.snapshot()))
+    restored = GraphSnapshot.from_payload(document.snapshot().to_payload())
 
     node = restored.node(node_id)
     assert node is not None

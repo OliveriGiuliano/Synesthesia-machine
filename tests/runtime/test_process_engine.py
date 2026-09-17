@@ -31,7 +31,6 @@ from synesthesia_machine.runtime import EngineProtocolError, ProcessEngineClient
 from synesthesia_machine.runtime import engine_client as engine_client_module
 from synesthesia_machine.runtime import engine_server as engine_server_module
 from synesthesia_machine.runtime.engine_server import EngineServer
-from synesthesia_machine.runtime.graph_payload import snapshot_to_payload
 
 
 def _wait_until(predicate: Callable[[], bool], *, timeout_s: float = 3.0) -> bool:
@@ -352,7 +351,7 @@ def test_server_forwards_activate_reset_reason_to_child_engine() -> None:
     command = ActivateGraph(
         "request",
         snapshot.revision,
-        snapshot_to_payload(snapshot),
+        snapshot.to_payload(),
         reset_reason=ResetReason.ENGINE_RESTARTED,
     )
 

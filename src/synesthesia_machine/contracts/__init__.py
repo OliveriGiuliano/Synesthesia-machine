@@ -65,7 +65,8 @@ from synesthesia_machine.contracts.engine_messages import (
     TransportAction,
     TransportCommand,
     ValuePreviewsPublished,
-    WaitUntilIdle,
+    WireConnection,
+    WireNode,
     WriteSharedFrame,
 )
 from synesthesia_machine.contracts.json import JsonObject, JsonValue
@@ -182,7 +183,8 @@ __all__ = [
     "ValueArray",
     "ValuePreview",
     "ValuePreviewsPublished",
-    "WaitUntilIdle",
+    "WireConnection",
+    "WireNode",
     "WriteSharedFrame",
     "clock_id_of",
     "freeze_uint8_preview",

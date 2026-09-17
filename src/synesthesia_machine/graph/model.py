@@ -9,7 +9,12 @@ from enum import StrEnum
 from types import MappingProxyType
 from uuid import UUID, uuid4
 
-from synesthesia_machine.contracts import LiteralValue
+from synesthesia_machine.contracts import (
+    GraphSnapshotPayload,
+    LiteralValue,
+    WireConnection,
+    WireNode,
+)
 
 
 def _empty_literals() -> dict[str, LiteralValue]:
@@ -38,6 +43,39 @@ class NodeModel:
             raise ValueError(msg)
         object.__setattr__(self, "parameters", _freeze_literals(self.parameters))
         object.__setattr__(self, "ui_state", _freeze_literals(self.ui_state))
+
+    def to_wire(self) -> WireNode:
+        """Convert to the process-safe wire form of this node.
+
+        Mappings stay with the model they map: a field added to ``NodeModel``
+        must be extended here (and in ``from_wire``) in the same file.
+        """
+        return WireNode(
+            self.id,
+            self.type_id,
+            self.implementation_version,
+            tuple(sorted(self.parameters.items())),
+            self.position,
+            self.size,
+            self.user_label,
+            self.collapsed,
+            tuple(sorted(self.ui_state.items())),
+        )
+
+    @classmethod
+    def from_wire(cls, wire: WireNode) -> NodeModel:
+        """Reconstruct a node from its process-safe wire form."""
+        return cls(
+            id=wire.node_id,
+            type_id=wire.type_id,
+            implementation_version=wire.implementation_version,
+            parameters=dict(wire.parameters),
+            position=wire.position,
+            size=wire.size,
+            user_label=wire.user_label,
+            collapsed=wire.collapsed,
+            ui_state=dict(wire.ui_state),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +106,29 @@ class ConnectionModel:
                 self.destination_node_id,
                 self.destination_port_id,
             )
+        )
+
+    def to_wire(self) -> WireConnection:
+        """Convert to the process-safe wire form of this connection."""
+        return WireConnection(
+            self.id,
+            self.source_node_id,
+            self.source_port_id,
+            self.destination_node_id,
+            self.destination_port_id,
+            tuple(sorted(self.ui_state.items())),
+        )
+
+    @classmethod
+    def from_wire(cls, wire: WireConnection) -> ConnectionModel:
+        """Reconstruct a connection from its process-safe wire form."""
+        return cls(
+            id=wire.connection_id,
+            source_node_id=wire.source_node_id,
+            source_port_id=wire.source_port_id,
+            destination_node_id=wire.destination_node_id,
+            destination_port_id=wire.destination_port_id,
+            ui_state=dict(wire.ui_state),
         )
 
 
@@ -119,6 +180,39 @@ class GraphSnapshot:
 
     def node(self, node_id: UUID) -> NodeModel | None:
         return next((node for node in self.nodes if node.id == node_id), None)
+
+    def to_payload(self) -> GraphSnapshotPayload:
+        """Convert to the process-safe wire form of this snapshot.
+
+        Groups are intentionally excluded from the wire payload: they are
+        editor-only organization data that the engine never consumes, so the
+        payload carries exactly the execution-relevant structure (ADR-0005).
+        The exclusion is pinned by tests/graph/test_wire_parity.py.
+        """
+        return GraphSnapshotPayload(
+            document_id=self.document_id,
+            revision=self.revision,
+            nodes=tuple(node.to_wire() for node in self.nodes),
+            connections=tuple(connection.to_wire() for connection in self.connections),
+            document_settings=tuple(sorted(self.document_settings.items())),
+        )
+
+    @classmethod
+    def from_payload(cls, payload: GraphSnapshotPayload) -> GraphSnapshot:
+        """Reconstruct a snapshot from its wire form.
+
+        The payload does not carry groups; the result has none (see
+        ``to_payload``).
+        """
+        return cls(
+            document_id=payload.document_id,
+            revision=payload.revision,
+            nodes=tuple(NodeModel.from_wire(node) for node in payload.nodes),
+            connections=tuple(
+                ConnectionModel.from_wire(connection) for connection in payload.connections
+            ),
+            document_settings=dict(payload.document_settings),
+        )
 
 
 class GraphDocument:
