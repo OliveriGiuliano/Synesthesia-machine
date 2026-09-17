@@ -27,9 +27,11 @@ from synesthesia_machine.nodes.base import (
 )
 from synesthesia_machine.nodes.migrations import migration_parameters
 from synesthesia_machine.nodes.registry import NodeRegistry
-from synesthesia_machine.nodes.utility.dynamic import create_dynamic_definitions
+from synesthesia_machine.nodes.utility.analysis import create_analysis_definitions
 from synesthesia_machine.nodes.utility.midi import create_midi_utility_definitions
 from synesthesia_machine.nodes.utility.scalar_bridges import create_scalar_bridge_definitions
+from synesthesia_machine.nodes.utility.temporal import create_temporal_definitions
+from synesthesia_machine.nodes.utility.transform import create_transform_definitions
 
 T = TypeVariable("T")
 
@@ -391,6 +393,8 @@ def create_utility_registry() -> NodeRegistry:
         ),
         *create_midi_utility_definitions(),
         *create_scalar_bridge_definitions(),
-        *create_dynamic_definitions(),
+        *create_temporal_definitions(),
+        *create_analysis_definitions(),
+        *create_transform_definitions(),
     )
     return NodeRegistry(definitions)

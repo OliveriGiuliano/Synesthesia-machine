@@ -89,7 +89,7 @@ def _scheduler(
     node_ids: tuple[UUID, ...] = (HOLD_ID,),
     node_clock_id: UUID | None = SOURCE_ID,
 ) -> Scheduler:
-    definition = create_temporal_definitions()[0]
+    definition = next(d for d in create_temporal_definitions() if d.type_id == HOLD_IMAGE_TYPE_ID)
     parameters, errors = definition.parameter_values(
         {"delay_frames": delay_frames, "memory_limit_mb": memory_limit_mb}
     )
@@ -147,7 +147,7 @@ def _facade_tick(facade: EngineFacade, image: ImageFrame):
 
 
 def test_hold_image_metadata_is_exact_and_registered_last() -> None:
-    definition = create_temporal_definitions()[0]
+    definition = next(d for d in create_temporal_definitions() if d.type_id == HOLD_IMAGE_TYPE_ID)
     parameters = definition.parameters
 
     assert definition.type_id == HOLD_IMAGE_TYPE_ID

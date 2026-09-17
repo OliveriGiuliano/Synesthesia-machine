@@ -178,6 +178,33 @@ def create_temporal_definitions() -> tuple[NodeDefinition, ...]:
 
     return (
         NodeDefinition(
+            POSTERIZE_TIME_TYPE_ID,
+            1,
+            "Posterize Time",
+            "Image / Utility",
+            "Updates the picture only every few frames and holds it in between, like a lower "
+            "frame rate.",
+            (InputPortSpec("image", "Image", PortType.IMAGE),),
+            (OutputPortSpec("image", "Image", PortType.IMAGE),),
+            (
+                ParameterSpec(
+                    "interval_frames",
+                    "Interval frames",
+                    PortType.INT,
+                    2,
+                    help_text=(
+                        "Number of frames between updates; the output only changes once every N "
+                        "frames."
+                    ),
+                    minimum=1,
+                    maximum=600,
+                ),
+            ),
+            ExecutionKind.STATEFUL,
+            PosterizeTimeRuntime,
+            aliases=("temporal posterize", "frame sample and hold", "time quantize"),
+        ),
+        NodeDefinition(
             HOLD_IMAGE_TYPE_ID,
             1,
             "Hold Image",
@@ -218,33 +245,6 @@ def create_temporal_definitions() -> tuple[NodeDefinition, ...]:
             ExecutionKind.STATEFUL,
             HoldImageRuntime,
             aliases=("delay image", "previous frame", "frame history"),
-        ),
-        NodeDefinition(
-            POSTERIZE_TIME_TYPE_ID,
-            1,
-            "Posterize Time",
-            "Image / Utility",
-            "Updates the picture only every few frames and holds it in between, like a lower "
-            "frame rate.",
-            (InputPortSpec("image", "Image", PortType.IMAGE),),
-            (OutputPortSpec("image", "Image", PortType.IMAGE),),
-            (
-                ParameterSpec(
-                    "interval_frames",
-                    "Interval frames",
-                    PortType.INT,
-                    2,
-                    help_text=(
-                        "Number of frames between updates; the output only changes once every N "
-                        "frames."
-                    ),
-                    minimum=1,
-                    maximum=600,
-                ),
-            ),
-            ExecutionKind.STATEFUL,
-            PosterizeTimeRuntime,
-            aliases=("temporal posterize", "frame sample and hold", "time quantize"),
         ),
     )
 

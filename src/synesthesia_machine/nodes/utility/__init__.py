@@ -1,10 +1,7 @@
 """Built-in scalar, MIDI-state, and channel bridge utility nodes."""
 
+from synesthesia_machine.nodes.utility.analysis import create_analysis_definitions
 from synesthesia_machine.nodes.utility.core import create_utility_registry
-from synesthesia_machine.nodes.utility.dynamic import (
-    create_difference_definitions,
-    create_dynamic_definitions,
-)
 from synesthesia_machine.nodes.utility.midi import (
     MIDI_MERGE_TYPE_ID,
     MULTIPLY_VELOCITY_TYPE_ID,
@@ -18,6 +15,8 @@ from synesthesia_machine.nodes.utility.midi import (
     transpose_midi_state,
 )
 from synesthesia_machine.nodes.utility.scalar_bridges import create_scalar_bridge_definitions
+from synesthesia_machine.nodes.utility.temporal import create_temporal_definitions
+from synesthesia_machine.nodes.utility.transform import create_transform_definitions
 
 __all__ = [
     "MIDI_MERGE_TYPE_ID",
@@ -26,10 +25,11 @@ __all__ = [
     "MidiMergeRuntime",
     "MultiplyVelocityRuntime",
     "TransposeRuntime",
-    "create_difference_definitions",
-    "create_dynamic_definitions",
+    "create_analysis_definitions",
     "create_midi_utility_definitions",
     "create_scalar_bridge_definitions",
+    "create_temporal_definitions",
+    "create_transform_definitions",
     "create_utility_registry",
     "merge_midi_states",
     "multiply_velocity",

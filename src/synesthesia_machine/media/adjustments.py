@@ -400,6 +400,43 @@ def _stretch_values(
     return np.where(finite, stretched, values).astype(np.float32, copy=False)
 
 
+def normalize_array(
+    data: NDArray[np.float32],
+    *,
+    data_minimum: float | None,
+    data_maximum: float | None,
+    output_minimum: float = 0.0,
+    output_maximum: float = 1.0,
+) -> NDArray[np.float32]:
+    # NaN-safe bounds avoid the full-frame finite gather the old code paid on
+    # every call: a couple of C-level reduction passes replace the mask +
+    # gather + reduce sequence, and min/max of the same value set are
+    # bit-identical. Data containing infinities falls back to the strict
+    # finite-only bounds so the documented behavior is preserved.
+    has_finite = bool(data.size and np.isfinite(data).any())
+    if data_minimum is None:
+        if has_finite:
+            data_minimum = float(np.nanmin(data))
+            if not math.isfinite(data_minimum):
+                data_minimum = float(np.min(data[np.isfinite(data)]))
+        else:
+            data_minimum = 0.0
+    if data_maximum is None:
+        if has_finite:
+            data_maximum = float(np.nanmax(data))
+            if not math.isfinite(data_maximum):
+                data_maximum = float(np.max(data[np.isfinite(data)]))
+        else:
+            data_maximum = 0.0
+    if data_maximum == data_minimum:
+        return np.full_like(data, output_minimum, dtype=np.float32)
+    with np.errstate(invalid="ignore", over="ignore"):
+        result = output_minimum + (data - data_minimum) * (
+            (output_maximum - output_minimum) / (data_maximum - data_minimum)
+        )
+    return np.asarray(result, dtype=np.float32)
+
+
 __all__ = [
     "ConstantChannelPolicy",
     "NearZeroPolicy",
@@ -414,6 +451,7 @@ __all__ = [
     "hue_image",
     "invert_colour_image",
     "multiply_scalar_image",
+    "normalize_array",
     "opacity_image",
     "saturation_image",
     "stretch_contrast_image",

@@ -7,6 +7,8 @@ from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import cast
 
+import numpy as np
+
 from synesthesia_machine.contracts import (
     ChannelFrame,
     ColorSpace,
@@ -26,8 +28,10 @@ from synesthesia_machine.media import (
     color_space_descriptor,
     combine_channels,
     image_to_luminance,
+    normalize_array,
     separate_image_channels,
 )
+from synesthesia_machine.media.image_common import frame_like
 from synesthesia_machine.nodes import (
     ExecutionKind,
     ExpectedNodeError,
@@ -161,6 +165,32 @@ def _required_combine_inputs(parameters: Mapping[str, ParameterValue]) -> Sequen
     )
 
 
+class DifferenceRuntime(StatelessRuntime):
+    def process(
+        self,
+        inputs: Mapping[str, RuntimeValue],
+        parameters: Mapping[str, ParameterValue],
+        context: FrameContext,
+    ) -> Mapping[str, RuntimeValue]:
+        del context
+        first = cast(ImageFrame, inputs["a"])
+        second = cast(ImageFrame, inputs["b"])
+        if first.data.shape != second.data.shape:
+            raise ExpectedNodeError("difference_shape", "Difference inputs must have equal shapes")
+        if (
+            first.color_space != second.color_space
+            or first.channel_names != second.channel_names
+            or first.alpha_mode != second.alpha_mode
+        ):
+            raise ExpectedNodeError(
+                "difference_descriptor", "Difference inputs must use matching image descriptors"
+            )
+        result = np.abs(first.data - second.data)
+        if cast(bool, parameters["normalize"]):
+            result = normalize_array(result, data_minimum=None, data_maximum=None)
+        return {"image": frame_like(first, result)}
+
+
 def create_channel_definitions() -> tuple[NodeDefinition, ...]:
     """Return Batch 5 definitions in their persistent catalogue order."""
 
@@ -207,6 +237,30 @@ def create_channel_definitions() -> tuple[NodeDefinition, ...]:
         ),
     )
     return (
+        NodeDefinition(
+            "synmachine.image.difference",
+            1,
+            "Difference",
+            "Image / Compositing",
+            "Shows only what is different between two images. Identical areas become black.",
+            (
+                InputPortSpec("a", "A", PortType.IMAGE),
+                InputPortSpec("b", "B", PortType.IMAGE),
+            ),
+            (OutputPortSpec("image", "Difference", PortType.IMAGE),),
+            (
+                ParameterSpec(
+                    "normalize",
+                    "Normalize",
+                    PortType.BOOL,
+                    False,
+                    help_text="When on, the difference is scaled to use the full 0 to 1 range.",
+                ),
+            ),
+            ExecutionKind.STATELESS,
+            DifferenceRuntime,
+            aliases=("image difference", "absolute difference", "diff"),
+        ),
         NodeDefinition(
             "synmachine.image.blend_images",
             1,

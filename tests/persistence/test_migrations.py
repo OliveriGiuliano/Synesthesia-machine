@@ -29,7 +29,7 @@ from synesthesia_machine.nodes.image.runtime_support import (
     migrate_adjustment_channel_selection_v1_to_v2,
 )
 from synesthesia_machine.nodes.image.utilities import migrate_change_colour_space_v1_to_v2
-from synesthesia_machine.nodes.utility.dynamic import migrate_statistics_v1_to_v2
+from synesthesia_machine.nodes.utility.analysis import migrate_statistics_v1_to_v2
 from synesthesia_machine.nodes.visualization.core import (
     migrate_channel_display_v1_to_v2,
     migrate_display_image_data_v1_to_v2,
