@@ -1,22 +1,24 @@
 """Bounded preview transport across the UI/engine process boundary.
 
-The engine publishes the latest preview frame for each producing port through a
-small ``PreviewTransport`` interface; the UI polls it. Two adapters implement
-the interface:
+The engine broker writes the latest preview frame for each producing port
+into a small producer-face ``PreviewTransport``; the UI consumes frames
+through the matching face of the same adapter:
 
 - ``InMemoryPreviewTransport`` — in-process direct handoff. A bounded
   latest-frame store shared between the engine worker thread and the UI in a
-  single process; no shared memory is involved.
+  single process; no shared memory is involved. One object serves both faces.
 - the shared-memory sequence-lock pair (``SharedMemoryPreviewWriter`` for the
   child engine, ``SharedMemoryPreviewReader`` for the UI). The UI owns
   sequence-locked slots and the child attaches and writes, so a preview frame
   crosses the process boundary without ever copying full-resolution data.
+  The writer's slot state machine (announce/attach/ready/clear) lives in this
+  module; the broker's activation clear reaches it through the transport.
 
-Both adapters share the sequence-lock slot layout, the slot lifetime
+Both placements share the sequence-lock slot layout, the slot lifetime
 (create/attach/close/unlink), and the "latest frame wins" recycling, so a
-maintainer changes the protocol in one place and it applies identically whether
-the engine runs in-process or in the spawned child. The module is Qt-free and
-is imported by both processes.
+maintainer changes the protocol in one place and it applies identically
+whether the engine runs in-process or in the spawned child. The module is
+Qt-free and is imported by both processes.
 """
 
 from __future__ import annotations
@@ -50,31 +52,22 @@ def preview_slot_size(width: int, height: int, channels: int) -> int:
 
 
 class PreviewTransport(Protocol):
-    """Seam between the engine publisher and the UI consumer for image previews.
+    """Producer face of the preview seam: the engine broker writes into it.
 
-    Implementations are adapters for one process-placement: in-process direct
-    (``InMemoryPreviewTransport``) or the shared-memory sequence-lock pair
-    (``SharedMemoryPreviewWriter`` / ``SharedMemoryPreviewReader``). The
-    publisher stores or writes the latest frame per producing port; the
-    consumer polls for frames newer than its sequence thresholds.
+    Adapters: ``InMemoryPreviewTransport`` (in-process direct handoff, which
+    is also the UI's consumer) and ``SharedMemoryPreviewWriter`` (the child's
+    face of the shared-memory sequence-lock pair; the UI consumes through
+    ``SharedMemoryPreviewReader``). The consumer face (``poll_images`` /
+    ``peek_sequences``) is not part of this protocol: producer-only adapters
+    retain no readable image store, and the UI never publishes.
     """
 
     def publish_image(self, owner_id: UUID, source_port_id: str, preview: ImagePreview) -> None:
         """Store or write the latest frame for one producing port."""
         ...
 
-    def poll_images(
-        self, after_sequences: Mapping[PreviewSlotKey, int] | None = None
-    ) -> tuple[ImagePreview, ...]:
-        """Return frames newer than the per-key sequence thresholds, ordered."""
-        ...
-
-    def peek_sequences(self) -> Mapping[PreviewSlotKey, int]:
-        """Return the newest committed sequence per key without copying a frame."""
-        ...
-
     def clear(self) -> None:
-        """Drop all retained previews (e.g. after activation or a stop)."""
+        """Drop all retained previews and slot state (e.g. after activation)."""
         ...
 
     def close(self) -> None:
@@ -353,10 +346,6 @@ class SharedMemoryPreviewReader:
             previous.close()
         return replacement
 
-    def publish_image(self, owner_id: UUID, source_port_id: str, preview: ImagePreview) -> None:
-        # The UI face never publishes; present for the uniform interface.
-        return None
-
     def poll_images(
         self, after_sequences: Mapping[PreviewSlotKey, int] | None = None
     ) -> tuple[ImagePreview, ...]:
@@ -524,15 +513,6 @@ class SharedMemoryPreviewWriter:
 
         with self._lock:
             return any(not ready for ready in self._slot_ready.values())
-
-    def poll_images(
-        self, after_sequences: Mapping[PreviewSlotKey, int] | None = None
-    ) -> tuple[ImagePreview, ...]:
-        # The child face never polls; the UI reads via SharedMemoryPreviewReader.
-        return ()
-
-    def peek_sequences(self) -> Mapping[PreviewSlotKey, int]:
-        return {}
 
     def clear(self) -> None:
         with self._lock:

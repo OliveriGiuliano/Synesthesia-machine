@@ -151,3 +151,39 @@ def test_publisher_handshake_poll_keeps_going_until_slots_settle() -> None:
         assert engine.poll_calls >= 2  # safety polls kept the handshake alive
     finally:
         publisher.close()
+
+
+def test_publisher_activation_and_shutdown_do_not_clear_writer_state() -> None:
+    # The broker's apply is the single activation clear site: the publisher
+    # only records the revision (and stops its loop at shutdown), so an
+    # announced-but-unresolved slot survives a revision change and keeps the
+    # handshake safety poll alive.
+    publisher, engine, _, _ = _make_publisher(_StubEngine(), _CollectingQueue())
+    writer = publisher._writer  # pyright: ignore[reportPrivateUsage]
+    writer.publish_image(  # pyright: ignore[reportPrivateUsage]
+        OWNER_ID,
+        "image",
+        ImagePreview(
+            OWNER_ID,
+            "image",
+            1,
+            1,
+            2,
+            2,
+            3,
+            freeze_uint8_preview(np.full((2, 2, 3), 1, dtype=np.uint8)),
+        ),
+    )
+    writer.take_pending_announcements()  # pyright: ignore[reportPrivateUsage]
+    assert writer.pending_handshake()
+
+    publisher.graph_activated(2)
+    assert writer.pending_handshake()
+
+    publisher.start()
+    try:
+        time.sleep(0.3)
+        assert engine.poll_calls >= 2
+    finally:
+        publisher.close()
+    assert writer.pending_handshake()

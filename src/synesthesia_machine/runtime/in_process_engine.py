@@ -52,6 +52,7 @@ from synesthesia_machine.runtime.execution_plan import CompiledNode, ExecutionPl
 from synesthesia_machine.runtime.preview_channel import InMemoryPreviewTransport, PreviewTransport
 from synesthesia_machine.runtime.previews import (
     PreviewBroker,
+    _LatestPreviewWorker,  # type: ignore[reportPrivateUsage]  # ADR-0009 worker lives with the broker
     _PreviewConfiguration,  # type: ignore[reportPrivateUsage]  # null broker returns the real type
 )
 from synesthesia_machine.runtime.profiling import RuntimeProfiler
@@ -144,92 +145,6 @@ class SourceMailboxMetrics:
     dropped_before_processing: int
     processing_latency_ms: float
     frame_age_ms: float
-
-
-@dataclass(frozen=True, slots=True)
-class _PreviewJob:
-    generation: int
-    result: TickResult
-
-
-class _LatestPreviewWorker:
-    """Convert only the newest completed tick without blocking graph execution."""
-
-    def __init__(self, broker: PreviewBroker) -> None:
-        self._broker = broker
-        self._condition = threading.Condition()
-        self._pending: _PreviewJob | None = None
-        self._busy = False
-        self._closed = False
-        self._last_error: str | None = None
-        self._thread = threading.Thread(
-            target=self._run,
-            name="in-process-preview-worker",
-            daemon=True,
-        )
-        self._thread.start()
-
-    @property
-    def last_error(self) -> str | None:
-        with self._condition:
-            return self._last_error
-
-    def submit(self, result: TickResult) -> None:
-        job = _PreviewJob(self._broker.generation, result)
-        with self._condition:
-            if self._closed:
-                return
-            self._pending = job
-            self._condition.notify()
-
-    def wait_until_idle(self, timeout_s: float) -> bool:
-        deadline = time.monotonic() + max(0.0, timeout_s)
-        with self._condition:
-            while self._pending is not None or self._busy:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0.0:
-                    return False
-                self._condition.wait(remaining)
-            return True
-
-    def reset_error(self) -> None:
-        with self._condition:
-            self._last_error = None
-
-    def close(self) -> None:
-        with self._condition:
-            if self._closed:
-                return
-            self._closed = True
-            self._pending = None
-            self._condition.notify_all()
-        if self._thread is not threading.current_thread():
-            self._thread.join(timeout=5.0)
-            if self._thread.is_alive():
-                raise TimeoutError("Preview worker did not stop within 5 seconds")
-
-    def _run(self) -> None:
-        while True:
-            with self._condition:
-                while self._pending is None and not self._closed:
-                    self._condition.wait()
-                if self._closed:
-                    self._busy = False
-                    self._condition.notify_all()
-                    return
-                job = self._pending
-                self._pending = None
-                self._busy = True
-            assert job is not None
-            try:
-                self._broker.publish(job.result, expected_generation=job.generation)
-            except Exception as error:
-                with self._condition:
-                    self._last_error = str(error)
-            finally:
-                with self._condition:
-                    self._busy = False
-                    self._condition.notify_all()
 
 
 class _NoPreviewBroker:

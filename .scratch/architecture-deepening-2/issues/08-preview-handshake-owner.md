@@ -6,7 +6,7 @@
 
 **Blocked by:** 07
 
-**Status:** open
+**Status:** resolved
 
 **Files:**
 - `src/synesthesia_machine/runtime/preview_channel.py`
@@ -15,8 +15,8 @@
 - `src/synesthesia_machine/runtime/in_process_engine.py`
 
 **Acceptance:**
-- [ ] ADR-0009 generation stamping lives in one file
-- [ ] Activation clears the writer exactly once
-- [ ] Protocol methods match real adapter behaviour
-- [ ] Double-clear race surface disappears
-- [ ] Targeted tests pass; `uv run check` green; no unrelated diff
+- [x] ADR-0009 generation stamping lives in one file
+- [x] Activation clears the writer exactly once
+- [x] Protocol methods match real adapter behaviour
+- [x] Double-clear race surface disappears
+- [x] Targeted tests pass; `uv run check` green; no unrelated diff

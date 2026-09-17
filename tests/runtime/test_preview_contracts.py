@@ -16,6 +16,7 @@ from synesthesia_machine.contracts import (
     FrameContext,
     FrameProvenance,
     ImageFrame,
+    ImagePreview,
     MidiNoteKey,
     MidiStateFrame,
     PortType,
@@ -387,4 +388,38 @@ def test_stamped_stale_publication_is_rejected_before_conversion() -> None:
     )
 
     assert calls == 0
+
+
+class _CountingClearTransport:
+    """Producer-only transport that records its clear/close calls."""
+
+    def __init__(self) -> None:
+        self.clears = 0
+        self.closes = 0
+
+    def publish_image(self, owner_id: UUID, source_port_id: str, preview: ImagePreview) -> None:
+        del owner_id, source_port_id, preview
+
+    def clear(self) -> None:
+        self.clears += 1
+
+    def close(self) -> None:
+        self.closes += 1
+
+
+def test_broker_is_the_single_transport_clear_site() -> None:
+    transport = _CountingClearTransport()
+    broker = PreviewBroker(transport=transport)
+    plan = _image_plan()
+
+    broker.apply(broker.prepare(plan))
+    assert transport.clears == 1
+    broker.apply(broker.prepare(plan))
+    assert transport.clears == 2
+    broker.clear()
+    assert transport.clears == 3
+
+    # A producer-only transport retains no readable image store, so the
+    # broker's image poll degrades to empty instead of inventing a no-op
+    # consumer face on the adapter.
     assert broker.poll_images() == ()

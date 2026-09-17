@@ -144,7 +144,13 @@ def classify_remote_error(error: BaseException) -> RemoteErrorKind:
 
 
 class _EventPublisher:
-    """Publish heartbeats/compact previews without blocking command dispatch or graph work."""
+    """Dumb wake/drain loop: heartbeats and compact previews.
+
+    It never clears preview state: the preview broker's activation clear is
+    the single clear site for the transport (and the writer it backs), and
+    the publisher only drives the writer's announce handshake and ships the
+    compact previews, without blocking command dispatch or graph work.
+    """
 
     def __init__(
         self,
@@ -184,7 +190,6 @@ class _EventPublisher:
     def graph_activated(self, graph_revision: int) -> None:
         with self._lock:
             self._graph_revision = graph_revision
-            self._writer.clear()
 
     def configure_slot(self, descriptor: PreviewSlotDescriptor, graph_revision: int) -> None:
         with self._lock:
@@ -199,8 +204,6 @@ class _EventPublisher:
         self._stop.set()
         if self._thread is not threading.current_thread():
             self._thread.join(timeout=2.0)
-        with self._lock:
-            self._writer.clear()
 
     def _run(self) -> None:
         next_heartbeat = 0.0
@@ -210,9 +213,12 @@ class _EventPublisher:
             if now >= next_heartbeat:
                 self._publish_heartbeat()
                 next_heartbeat = now + self._heartbeat_interval_s
-            # Iterating without the lock races graph_activated's clear():
-            # a RuntimeError there kills this thread and heartbeats stop
-            # forever, pinning the parent's state at UNRESPONSIVE.
+            # The lock pairs with graph_activated's revision write: the
+            # broker's activation clear (dispatch thread) and this thread's
+            # writer drain each hold the writer's own lock, so they cannot
+            # interleave mid-operation; a RuntimeError here would kill this
+            # thread and heartbeats would stop forever, pinning the parent's
+            # state at UNRESPONSIVE.
             with self._lock:
                 handshake_pending = self._writer.pending_handshake()
             if self._preview_wake.is_set() or (handshake_pending and now >= next_handshake_poll):
