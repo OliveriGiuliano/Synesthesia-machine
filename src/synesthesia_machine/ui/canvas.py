@@ -51,7 +51,6 @@ from synesthesia_machine.graph import (
 )
 from synesthesia_machine.nodes import NodeDefinition
 from synesthesia_machine.nodes.input import LOAD_VIDEO_TYPE_ID
-from synesthesia_machine.ui.commands import PREVIEW_VISIBLE_KEY
 from synesthesia_machine.ui.graphics import (
     ConnectionGraphicsItem,
     GroupGraphicsItem,
@@ -133,7 +132,7 @@ class GraphScene(QGraphicsScene):
         force_node_rebuild = large_graph_mode != self._large_graph_mode
         self._large_graph_mode = large_graph_mode
 
-        groups = {group.id: group for group in self.session.document.groups}
+        groups = {group.id: group for group in view_model.groups}
         for group_id, item in tuple(self.group_items.items()):
             if group_id not in groups or item.model != groups[group_id]:
                 self.removeItem(item)
@@ -308,16 +307,19 @@ class GraphScene(QGraphicsScene):
             item.set_image_preview(None)
 
     def _connection_preview_visible(self, connection_id: UUID) -> bool:
-        connection = self.session.document.connection(connection_id)
-        if connection is None:
-            return True
-        return bool(connection.ui_state.get(PREVIEW_VISIBLE_KEY, True))
+        for connection in self.session.view_model.connections:
+            if connection.connection_id == connection_id:
+                return connection.preview_visible
+        # Absent connections are treated as visible, mirroring the projection.
+        return True
 
     def _sync_connection_preview_visibility(self) -> None:
+        visibilities = {
+            connection.connection_id: connection.preview_visible
+            for connection in self.session.view_model.connections
+        }
         for item in self.connection_items.values():
-            item.set_preview_visible(
-                self._connection_preview_visible(item.view_model.connection_id)
-            )
+            item.set_preview_visible(visibilities.get(item.view_model.connection_id, True))
 
     @Slot(object)
     def _on_toggle_preview(self, connection_id: UUID) -> None:

@@ -62,7 +62,7 @@ from synesthesia_machine.graph import (
     ValidationIssue,
     generate_random_graph,
 )
-from synesthesia_machine.nodes import ExecutionKind, NodeRegistry
+from synesthesia_machine.nodes import NodeRegistry
 from synesthesia_machine.persistence import (
     GraphPersistenceError,
     RelinkMatch,
@@ -106,7 +106,7 @@ from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.theme import DEFAULT_THEME, Theme
 from synesthesia_machine.ui.translations import set_language, tr, trf
 from synesthesia_machine.ui.transport import resolve_transport_target
-from synesthesia_machine.ui.view_models import PortViewModel
+from synesthesia_machine.ui.view_models import GraphViewModel, PortViewModel
 from synesthesia_machine.ui.widgets import (
     InspectorPanel,
     NodeLibrary,
@@ -779,12 +779,7 @@ class MainWindow(QMainWindow):
         self.engine_bridge.restart()
 
     def _transport_target(self) -> UUID | None:
-        sources = tuple(
-            node.id
-            for node in self.session.document.nodes
-            if (definition := self.registry.get(node.type_id)) is not None
-            and definition.execution_kind is ExecutionKind.SOURCE
-        )
+        sources = tuple(node.node_id for node in self.session.view_model.nodes if node.is_source)
         resolution = resolve_transport_target(sources, self.scene.selected_node_ids())
         if resolution.target is None:
             self.statusBar().showMessage(tr(resolution.message), 4000)
@@ -1183,14 +1178,14 @@ class MainWindow(QMainWindow):
         name = path.name if path is not None else tr("Untitled")
         self.setWindowTitle(f"{name}[*] — Synesthesia Machine {__version__}")
         self.setWindowModified(self.session.is_dirty)
-        snapshot = self.session.document.snapshot()
-        self._image_dock_preview_sources = self._image_visualizer_source_keys(snapshot)
+        view_model = self.session.view_model
+        self._image_dock_preview_sources = self._image_visualizer_source_keys(view_model)
         self._node_count.setText(
             trf(
                 "{nodes} node(s) · {cables} cable(s) · {groups} group/comment(s)",
-                nodes=len(snapshot.nodes),
-                cables=len(snapshot.connections),
-                groups=len(snapshot.groups),
+                nodes=len(view_model.nodes),
+                cables=len(view_model.connections),
+                groups=len(view_model.groups),
             )
         )
         errors = len(self.session.report.errors)
@@ -1261,10 +1256,7 @@ class MainWindow(QMainWindow):
         cache_key = self.session.revision
         if self._source_node_ids_key is not cache_key:
             self._source_node_ids = tuple(
-                node.id
-                for node in self.session.document.nodes
-                if (definition := self.registry.get(node.type_id)) is not None
-                and definition.execution_kind is ExecutionKind.SOURCE
+                node.node_id for node in self.session.view_model.nodes if node.is_source
             )
             eligible, reason = midi_export_eligibility(
                 self.session.document.snapshot(),
@@ -1360,29 +1352,27 @@ class MainWindow(QMainWindow):
         )
 
     def _runtime_demand_roots(self, snapshot: GraphSnapshot) -> tuple[UUID, ...]:
-        connection_preview_types = {
-            connection.connection_id: connection.type_name
-            for connection in self.session.view_model.connections
-        }
+        # The callback contract passes the current snapshot; the session's
+        # view model is the authoritative projection of the same revision, so
+        # the demand policy reads it and never re-derives conventions here.
+        del snapshot
         return compute_demand_roots(
-            snapshot,
-            self.registry,
-            connection_preview_types,
+            self.session.view_model,
             image_dock_visible=self.image_preview_dock.isVisible(),
             note_dock_visible=self.note_preview_dock.isVisible(),
         )
 
     @staticmethod
     def _image_visualizer_source_keys(
-        snapshot: GraphSnapshot,
+        view: GraphViewModel,
     ) -> frozenset[tuple[UUID, str]]:
         image_visualizer_ids = visualizer_type_ids("image")
         visualizer_ids = {
-            node.id for node in snapshot.nodes if node.type_id in image_visualizer_ids
+            node.node_id for node in view.nodes if node.type_id in image_visualizer_ids
         }
         return frozenset(
             (connection.source_node_id, connection.source_port_id)
-            for connection in snapshot.connections
+            for connection in view.connections
             if connection.destination_node_id in visualizer_ids
         )
 

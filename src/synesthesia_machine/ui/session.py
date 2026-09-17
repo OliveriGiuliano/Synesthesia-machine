@@ -35,7 +35,6 @@ from synesthesia_machine.persistence import (
     save_graph,
 )
 from synesthesia_machine.ui.commands import (
-    PREVIEW_VISIBLE_KEY,
     AddConnectionCommand,
     AddGroupCommand,
     AddNodeCommand,
@@ -389,10 +388,13 @@ class DocumentSession(QObject):
         )
 
     def set_connection_preview_visible(self, connection_id: UUID, visible: bool) -> None:
-        connection = self.document.connection(connection_id)
-        if connection is None:
-            return
-        if bool(connection.ui_state.get(PREVIEW_VISIBLE_KEY, True)) == visible:
+        # Compare against the published projection so the absent-means-True rule
+        # is interpreted in exactly one place (project_graph).
+        connection_view = next(
+            (view for view in self.view_model.connections if view.connection_id == connection_id),
+            None,
+        )
+        if connection_view is None or connection_view.preview_visible == visible:
             return
         self.push(
             SetConnectionPreviewCommand(

@@ -1,4 +1,10 @@
-"""Immutable projections from graph-domain values to editor rendering data."""
+"""Immutable projections from graph-domain values to editor rendering data.
+
+The projection is the single place that interprets editor conventions for
+renderers and the runtime: the absent-means-True ``preview_visible`` rule and
+each node's execution kind. Consumers (scene, window, demand policy) read the
+projection and never re-read raw ``ui_state`` or re-consult the registry.
+"""
 
 from __future__ import annotations
 
@@ -11,16 +17,19 @@ from synesthesia_machine.graph import (
     CompilationResult,
     GraphCompiler,
     GraphSnapshot,
+    GroupModel,
     LiteralValue,
     ValidationIssue,
     ValidationReport,
 )
 from synesthesia_machine.nodes import (
+    ExecutionKind,
     NodeDefinition,
     NodeRegistry,
     ParameterGroupSpec,
     ParameterSpec,
 )
+from synesthesia_machine.ui.connection_state import PREVIEW_VISIBLE_KEY
 from synesthesia_machine.ui.translations import tr
 
 
@@ -52,6 +61,7 @@ class ParameterGroupViewModel:
 class NodeViewModel:
     node_id: UUID
     type_id: str
+    execution_kind: ExecutionKind
     title: str
     category: str
     description: str
@@ -63,6 +73,12 @@ class NodeViewModel:
     issues: tuple[ValidationIssue, ...]
     collapsed: bool
 
+    @property
+    def is_source(self) -> bool:
+        """True when the node feeds the engine each source tick."""
+
+        return self.execution_kind is ExecutionKind.SOURCE
+
 
 @dataclass(frozen=True, slots=True)
 class ConnectionViewModel:
@@ -73,12 +89,15 @@ class ConnectionViewModel:
     destination_port_id: str
     type_name: str
     issues: tuple[ValidationIssue, ...]
+    #: True unless the user hid the connection's live preview pill.
+    preview_visible: bool = True
 
 
 @dataclass(frozen=True, slots=True)
 class GraphViewModel:
     nodes: tuple[NodeViewModel, ...]
     connections: tuple[ConnectionViewModel, ...]
+    groups: tuple[GroupModel, ...]
 
 
 def _projected_parameter_spec(
@@ -206,6 +225,7 @@ def project_graph(
             NodeViewModel(
                 node.id,
                 node.type_id,
+                definition.execution_kind,
                 node.user_label or tr(definition.display_name),
                 # Keep the category untranslated: it is a stable palette key
                 # (node_category_color) as well as a display string; display
@@ -233,10 +253,13 @@ def project_graph(
                 (connection.source_node_id, connection.source_port_id), "GENERIC"
             ),
             tuple(connection_issues.get(connection.id, ())),
+            # The absent-means-True preview rule is interpreted here, once;
+            # renderers and the demand policy read the published flag.
+            bool(connection.ui_state.get(PREVIEW_VISIBLE_KEY, True)),
         )
         for connection in snapshot.connections
     )
-    return GraphViewModel(tuple(nodes), connections)
+    return GraphViewModel(tuple(nodes), connections, tuple(snapshot.groups))
 
 
 def _type_name(
