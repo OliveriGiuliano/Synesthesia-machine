@@ -17,6 +17,7 @@ import sounddevice as sd
 from numpy.typing import NDArray
 
 from synesthesia_machine.contracts import DeviceDescriptor, DeviceKind, MidiStateFrame
+from synesthesia_machine.midi.state_diff import diff_midi_states
 
 
 class SynthWaveform(StrEnum):
@@ -314,24 +315,34 @@ class DebugSynth:
 
     def _reconcile(self, desired: _DesiredSnapshot) -> None:
         by_key = desired.velocity_by_key
+        # Voice entry and exit come from the shared desired-state diff: a
+        # voice whose key is absent (or zero-velocity) in the new desired
+        # state releases; a note with no voice enters one.
+        held = {
+            int(self._keys[voice])
+            for voice in range(len(self._keys))
+            if self._stages[voice] != self._INACTIVE
+        }
+        diff = diff_midi_states(
+            held, {key: velocity for key, velocity in by_key.items() if velocity > 0}
+        )
+        removed = set(diff.removed)
         for voice in range(len(self._keys)):
             if self._stages[voice] == self._INACTIVE:
                 continue
-            velocity = by_key.get(int(self._keys[voice]), 0)
-            if velocity == 0:
+            key = int(self._keys[voice])
+            if key in removed:
                 self._stages[voice] = self._RELEASE
             else:
-                self._velocities[voice] = velocity / 127.0
+                self._velocities[voice] = by_key[key] / 127.0
                 if self._stages[voice] == self._RELEASE:
                     self._stages[voice] = self._ATTACK
 
-        for key, note, velocity in desired.notes:
-            if self._find_voice(key) is not None:
-                continue
+        for key, velocity in diff.added:
             voice = self._select_voice(desired)
             self._age_counter += 1
             self._keys[voice] = key
-            self._notes[voice] = note
+            self._notes[voice] = key % 128
             self._velocities[voice] = velocity / 127.0
             self._phases[voice] = 0.0
             self._envelopes[voice] = 0.0

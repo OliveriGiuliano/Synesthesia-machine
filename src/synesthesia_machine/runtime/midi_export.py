@@ -43,6 +43,7 @@ from synesthesia_machine.media.video_source import (
     VideoSourceService,
     inspect_video,
 )
+from synesthesia_machine.midi import diff_midi_states
 from synesthesia_machine.midi.smf import MidiExportEvent
 from synesthesia_machine.nodes.base import ExecutionKind
 from synesthesia_machine.nodes.input import LOAD_CAMERA_TYPE_ID, LOAD_VIDEO_TYPE_ID
@@ -457,17 +458,18 @@ def _diff_to_events(
     for entries in collected.values():
         previous: dict[MidiNoteKey, int] = {}
         for time_s, state in sorted(entries, key=lambda item: item[0]):
+            # The export declares the on/off-only policy of ADR-0016/0019:
+            # a zero-velocity desired note is off, so it is excluded before
+            # the shared diff and velocity changes of held notes are
+            # deliberately not projected to events.
             current: dict[MidiNoteKey, int] = {
                 key: velocity for key, velocity in state.notes.items() if velocity > 0
             }
-            for key, velocity in current.items():
-                if key not in previous:
-                    events.append(
-                        MidiExportEvent(time_s, "note_on", key.channel, key.note, velocity)
-                    )
-            for key in previous:
-                if key not in current:
-                    events.append(MidiExportEvent(time_s, "note_off", key.channel, key.note, 0))
+            diff = diff_midi_states(previous, current)
+            for key, velocity in diff.added:
+                events.append(MidiExportEvent(time_s, "note_on", key.channel, key.note, velocity))
+            for key in diff.removed:
+                events.append(MidiExportEvent(time_s, "note_off", key.channel, key.note, 0))
             previous = current
         # The source clock resets on end-of-video, panicking the MIDI outputs:
         # everything still sounding stops at the end of the timeline.

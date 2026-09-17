@@ -4,7 +4,7 @@
 
 **Solution:** A pure diff_midi_states(previous, current) -> (note_offs, note_ons_with_velocity) primitive in the midi package; the output service layers its velocity policies on top, the export explicitly projects the diff to on/off (making the ADR policy a declared choice), and the debug synth reuses the add/remove diff for voice entry/exit.
 
-**Status:** open
+**Status:** resolved
 
 **Files:**
 - `src/synesthesia_machine/midi/state_diff.py (new)`
@@ -13,8 +13,8 @@
 - `src/synesthesia_machine/midi/debug_synth.py`
 
 **Acceptance:**
-- [ ] One diff, three callers
-- [ ] Export policy declared, not accidental
-- [ ] Velocity semantics change in one file
-- [ ] AGENTS.md rule stays true: only the output service emits wire messages
-- [ ] Targeted tests pass; `uv run check` green; no unrelated diff
+- [x] One diff, three callers
+- [x] Export policy declared, not accidental
+- [x] Velocity semantics change in one file
+- [x] AGENTS.md rule stays true: only the output service emits wire messages
+- [x] Targeted tests pass; `uv run check` green; no unrelated diff

@@ -21,6 +21,7 @@ from synesthesia_machine.contracts import (
     MidiOutputConnectionState,
     MidiStateFrame,
 )
+from synesthesia_machine.midi.state_diff import diff_midi_states
 
 
 class VelocityUpdatePolicy(StrEnum):
@@ -648,29 +649,29 @@ class MidiOutputService:
         with self._status_lock:
             sent = dict(self._sent)
 
-        # Dict iteration order is stable and message order across distinct
-        # keys is not part of the MIDI contract, so no re-sort happens here;
-        # the off/on list split still keeps note-off before note-on for every
-        # retrigged key.
+        diff = diff_midi_states(sent, desired)
+        removed = set(diff.removed)
+        # One pass over the previous state keeps the message order the
+        # service always produced: leaving and retrigged keys in previous
+        # order for the note-offs, entering keys in current order for the
+        # note-ons, with every note-off before every note-on.
         note_offs: list[MidiNoteKey] = []
-        note_ons: list[tuple[MidiNoteKey, int]] = []
+        retrigged_ons: list[tuple[MidiNoteKey, int]] = []
         for key, old_velocity in sent.items():
-            new_velocity = desired.get(key)
-            if new_velocity is None:
+            if key in removed:
                 note_offs.append(key)
                 continue
+            new_velocity = desired[key]
             if new_velocity == old_velocity or (
                 abs(new_velocity - old_velocity) < configuration.velocity_change_threshold
             ):
                 continue
             if configuration.velocity_policy is VelocityUpdatePolicy.RETRIGGER:
                 note_offs.append(key)
-                note_ons.append((key, new_velocity))
+                retrigged_ons.append((key, new_velocity))
             elif configuration.velocity_policy is VelocityUpdatePolicy.REPEAT_NOTE_ON:
-                note_ons.append((key, new_velocity))
-        for key, velocity in desired.items():
-            if key not in sent:
-                note_ons.append((key, velocity))
+                retrigged_ons.append((key, new_velocity))
+        note_ons: list[tuple[MidiNoteKey, int]] = [*retrigged_ons, *diff.added]
 
         for key in note_offs:
             if not self._send(MidiMessage.note_off(key)):

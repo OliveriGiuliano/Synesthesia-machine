@@ -42,6 +42,7 @@ from synesthesia_machine.midi.smf import (
     MidiExportEvent,
     encode_standard_midi_file,
 )
+from synesthesia_machine.midi.state_diff import MidiStateDiff, diff_midi_states
 
 __all__ = [
     "BUILTIN_SCALE_REGISTRY",
@@ -61,6 +62,7 @@ __all__ = [
     "MidiOutputServiceProtocol",
     "MidiPortUnavailableError",
     "MidiServiceStatus",
+    "MidiStateDiff",
     "MidoRtMidiBackend",
     "MockMidiOutputBackend",
     "MockMidiOutputPort",
@@ -72,6 +74,7 @@ __all__ = [
     "SynthConfiguration",
     "SynthWaveform",
     "VelocityUpdatePolicy",
+    "diff_midi_states",
     "encode_standard_midi_file",
     "enumerate_audio_output_devices",
     "enumerate_midi_output_devices",
