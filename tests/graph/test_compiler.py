@@ -278,6 +278,75 @@ def test_compiler_exposes_resolved_types_for_invalid_graphs() -> None:
     assert invalid_result.resolved_types[(NODE_A, "value", True)] is PortType.IMAGE
 
 
+def test_validate_matches_compile_report_without_plan_construction() -> None:
+    """validate() runs the same deterministic pipeline and must agree with
+    compile() on the report, for both valid and invalid graphs."""
+
+    registry = NodeRegistry(
+        (
+            make_tv_image_producer(),
+            make_definition(
+                "test.image_sink", input_type=PortType.IMAGE, output_type=PortType.IMAGE
+            ),
+            make_definition("test.floaty", input_type=PortType.IMAGE, output_type=PortType.IMAGE),
+        )
+    )
+    compiler = GraphCompiler(registry)
+
+    valid = GraphDocument(document_id=DOCUMENT_ID)
+    source = valid.add_node("test.tv_image_producer", node_id=NODE_A)
+    sink = valid.add_node("test.image_sink", node_id=NODE_B)
+    valid.add_connection(source, "value", sink, "value")
+    valid_snapshot = valid.snapshot()
+    assert compiler.validate(valid_snapshot) == compiler.compile(valid_snapshot).report
+    assert compiler.validate(valid_snapshot).is_valid
+
+    invalid = GraphDocument(document_id=DOCUMENT_ID)
+    source = invalid.add_node("test.tv_image_producer", node_id=NODE_A)
+    sink = invalid.add_node("test.image_sink", node_id=NODE_B)
+    invalid.add_connection(source, "value", sink, "value")
+    invalid.add_node("test.floaty", node_id=NODE_C)
+    invalid_snapshot = invalid.snapshot()
+    assert compiler.validate(invalid_snapshot) == compiler.compile(invalid_snapshot).report
+    assert compiler.validate(invalid_snapshot).is_valid is False
+
+
+def test_resolved_type_lookup_is_strict_about_port_keys() -> None:
+    registry = NodeRegistry(
+        (
+            make_tv_image_producer(),
+            make_definition(
+                "test.image_sink", input_type=PortType.IMAGE, output_type=PortType.IMAGE
+            ),
+        )
+    )
+    document = GraphDocument(document_id=DOCUMENT_ID)
+    source = document.add_node("test.tv_image_producer", node_id=NODE_A)
+    sink = document.add_node("test.image_sink", node_id=NODE_B)
+    document.add_connection(source, "value", sink, "value")
+    result = GraphCompiler(registry).compile(document.snapshot())
+
+    assert result.resolved_type(NODE_A, "value", is_output=True) is PortType.IMAGE
+    # A known port queried on the wrong side is a loud error, not a fallback.
+    with pytest.raises(KeyError):
+        result.resolved_type(NODE_A, "value", is_output=False)
+    with pytest.raises(KeyError):
+        result.resolved_type(NODE_A, "no_such_port", is_output=True)
+
+
+def test_unsettled_type_variable_records_explicit_none_entry() -> None:
+    """A known port whose type variable cannot be settled gets an explicit
+    ``None`` entry, so callers can distinguish it from a wrong key."""
+
+    registry = NodeRegistry((make_tv_image_producer(),))
+    document = GraphDocument(document_id=DOCUMENT_ID)
+    document.add_node("test.tv_image_producer", node_id=NODE_A)
+    result = GraphCompiler(registry).compile(document.snapshot())
+    assert result.report.is_valid is False
+    assert "unresolved_generic_type" in _codes(result)
+    assert result.resolved_type(NODE_A, "value", is_output=True) is None
+
+
 def _codes(result: CompilationResult) -> set[str]:
     return {issue.code for issue in result.report.errors}
 

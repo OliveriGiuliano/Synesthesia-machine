@@ -4,7 +4,13 @@
 
 **Solution:** Expose GraphCompiler.validate() -> ValidationReport running the same deterministic stage pipeline without plan construction; add a named resolved_type(node_id, port_id, is_output) accessor so the tuple convention dies in both files; move the pure layout-algorithm tests from tests/ui to tests/graph where the testing playbook puts them.
 
-**Status:** open
+- [x] Validation is a named testable concept
+- [x] Compatibility checks compare reports, not discarded plans
+- [x] Wrong port key becomes an error, not a fallback
+- [x] Tests sit where the playbook says
+- [x] Targeted tests pass; `uv run check` green; no unrelated diff
+
+**Status:** resolved
 
 **Files:**
 - `src/synesthesia_machine/graph/compiler.py`
@@ -12,10 +18,3 @@
 - `src/synesthesia_machine/graph/random_graph.py`
 - `src/synesthesia_machine/ui/view_models.py`
 - `tests/ui/test_layout_commands.py -> tests/graph/`
-
-**Acceptance:**
-- [ ] Validation is a named testable concept
-- [ ] Compatibility checks compare reports, not discarded plans
-- [ ] Wrong port key becomes an error, not a fallback
-- [ ] Tests sit where the playbook says
-- [ ] Targeted tests pass; `uv run check` green; no unrelated diff

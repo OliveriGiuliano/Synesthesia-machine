@@ -165,9 +165,9 @@ def generate_random_graph(
         (node.id for node in document.nodes),
         generator,
     )
-    compilation = GraphCompiler(registry).compile(snapshot)
-    if not compilation.report.is_valid:
-        details = "; ".join(issue.message for issue in compilation.report.errors)
+    report = GraphCompiler(registry).validate(snapshot)
+    if not report.is_valid:
+        details = "; ".join(issue.message for issue in report.errors)
         raise RuntimeError(f"Random graph generation produced an invalid graph: {details}")
     return snapshot
 
@@ -202,7 +202,7 @@ def randomize_graph_nodes(
     if missing:
         raise KeyError(f"Unknown selected node: {min(missing, key=str)}")
     compiler = GraphCompiler(registry)
-    if not compiler.compile(snapshot).report.is_valid:
+    if not compiler.validate(snapshot).is_valid:
         raise ValueError("Randomize Nodes requires a valid graph")
 
     generator = random.Random(seed)
@@ -249,7 +249,7 @@ def _randomize_graph_parameters(
     if not targets:
         return snapshot
     compiler = GraphCompiler(registry)
-    require_valid = compiler.compile(snapshot).report.is_valid
+    require_valid = compiler.validate(snapshot).is_valid
     for _attempt in range(128):
         nodes = tuple(
             _randomized_node(node, registry.require(node.type_id), generator)
@@ -260,7 +260,7 @@ def _randomize_graph_parameters(
         candidate = replace(snapshot, nodes=nodes)
         if candidate.nodes == snapshot.nodes:
             continue
-        if not require_valid or compiler.compile(candidate).report.is_valid:
+        if not require_valid or compiler.validate(candidate).is_valid:
             return candidate
     return snapshot
 
@@ -422,7 +422,7 @@ def _replace_node_set(
             nodes=(*untouched_nodes, *replacement_nodes),
             connections=connections,
         )
-        if compiler.compile(candidate).report.is_valid:
+        if compiler.validate(candidate).is_valid:
             return candidate, frozenset(id_map.values())
 
     # A valid graph can always be structurally replaced with fresh IDs while retaining its
@@ -543,7 +543,7 @@ def _insert_random_node(
                     ),
                 ),
             )
-            if compiler.compile(candidate).report.is_valid:
+            if compiler.validate(candidate).is_valid:
                 return candidate, node_id
     return None
 
@@ -582,7 +582,7 @@ def _add_random_standalone_node(
             generator,
         )
         candidate = replace(snapshot, nodes=(*snapshot.nodes, node))
-        if compiler.compile(candidate).report.is_valid:
+        if compiler.validate(candidate).is_valid:
             return candidate, node_id
     return None
 
@@ -625,7 +625,7 @@ def _remove_random_node(
             nodes=tuple(node for node in snapshot.nodes if node.id != node_id),
             connections=retained_connections,
         )
-        if compiler.compile(without_node).report.is_valid:
+        if compiler.validate(without_node).is_valid:
             return without_node, node_id
 
         if len(incoming) != 1 or not outgoing:
@@ -645,7 +645,7 @@ def _remove_random_node(
             without_node,
             connections=(*retained_connections, *bypass_connections),
         )
-        if compiler.compile(bypassed).report.is_valid:
+        if compiler.validate(bypassed).is_valid:
             return bypassed, node_id
     return None
 

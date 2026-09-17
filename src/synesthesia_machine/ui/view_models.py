@@ -106,7 +106,6 @@ def project_graph(
     # graph is otherwise invalid (plan is None). Projecting those keeps type-variable
     # ports' resolved identity (e.g. an IMAGE link) stable while an unrelated
     # authoring error blocks the plan, so link pills are not dropped or re-typed.
-    resolved_types: Mapping[tuple[UUID, str, bool], PortType] = compilation.resolved_types
     incoming = {
         (connection.destination_node_id, connection.destination_port_id)
         for connection in snapshot.connections
@@ -120,7 +119,7 @@ def project_graph(
             connection_issues.setdefault(issue.connection_id, []).append(issue)
 
     nodes: list[NodeViewModel] = []
-    type_names: dict[tuple[UUID, str, bool], str] = {}
+    output_type_names: dict[tuple[UUID, str], str] = {}
     for node in snapshot.nodes:
         definition = registry.require(node.type_id)
         parameters, _ = definition.parameter_values(node.parameters)
@@ -134,9 +133,7 @@ def project_graph(
                 node.id,
                 port.id,
                 tr(port.label),
-                resolved_types[(node.id, port.id, False)].value
-                if (node.id, port.id, False) in resolved_types
-                else _type_name(definition, port.id, False, parameters),
+                _port_type_name(compilation, definition, parameters, node.id, port.id, False),
                 False,
                 connected=(node.id, port.id) in incoming,
             )
@@ -162,20 +159,19 @@ def project_graph(
                 node.id,
                 port.id,
                 tr(port.label),
-                resolved_types[(node.id, port.id, True)].value
-                if (node.id, port.id, True) in resolved_types
-                else _type_name(definition, port.id, True, parameters),
+                _port_type_name(compilation, definition, parameters, node.id, port.id, True),
                 True,
             )
             for port in definition.outputs
         )
-        for port in (*inputs, *connectable, *outputs):
-            type_names[(node.id, port.port_id, port.is_output)] = port.type_name
+        for port in outputs:
+            output_type_names[(node.id, port.port_id)] = port.type_name
         primary_input_type = next(
             (
-                resolved_types[(node.id, port.id, False)]
+                resolved
                 for port in definition.inputs
-                if (node.id, port.id, False) in resolved_types
+                if (resolved := compilation.resolved_type(node.id, port.id, is_output=False))
+                is not None
             ),
             None,
         )
@@ -230,7 +226,9 @@ def project_graph(
             connection.source_port_id,
             connection.destination_node_id,
             connection.destination_port_id,
-            type_names.get((connection.source_node_id, connection.source_port_id, True), "GENERIC"),
+            output_type_names.get(
+                (connection.source_node_id, connection.source_port_id), "GENERIC"
+            ),
             tuple(connection_issues.get(connection.id, ())),
         )
         for connection in snapshot.connections
@@ -248,3 +246,24 @@ def _type_name(
     if isinstance(expression, PortType):
         return expression.value
     return expression.name
+
+
+def _port_type_name(
+    compilation: CompilationResult,
+    definition: NodeDefinition,
+    parameters: Mapping[str, ParameterValue],
+    node_id: UUID,
+    port_id: str,
+    is_output: bool,
+) -> str:
+    """Settled type name for a port, falling back to the declared expression name.
+
+    The lookup goes through :meth:`CompilationResult.resolved_type`, so a wrong
+    port key raises instead of silently degrading to the declared name; ``None``
+    (a known port whose type variable stayed unsettled) falls back.
+    """
+
+    resolved = compilation.resolved_type(node_id, port_id, is_output=is_output)
+    if resolved is not None:
+        return resolved.value
+    return _type_name(definition, port_id, is_output, parameters)

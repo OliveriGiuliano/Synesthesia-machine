@@ -35,11 +35,32 @@ from synesthesia_machine.runtime.execution_plan import (
 class CompilationResult:
     report: ValidationReport
     plan: ExecutionPlan | None
-    # Concrete type settled by inference for every resolvable port. Populated even
-    # when the graph is invalid (plan is None), so dependents (e.g. the view-model
-    # projection) keep type-variable ports' resolved identity while an unrelated
-    # authoring error prevents a full plan.
-    resolved_types: Mapping[tuple[UUID, str, bool], PortType]
+    # Concrete type settled by inference for every port of every known node.
+    # Populated even when the graph is invalid (plan is None), so dependents
+    # (e.g. the view-model projection) keep type-variable ports' resolved
+    # identity while an unrelated authoring error prevents a full plan. A
+    # ``None`` value marks a port whose type variable could not be settled;
+    # every other port of a known node has an entry, so querying a wrong
+    # port key through :meth:`resolved_type` raises instead of degrading
+    # silently.
+    resolved_types: Mapping[tuple[UUID, str, bool], PortType | None]
+
+    def resolved_type(self, node_id: UUID, port_id: str, *, is_output: bool) -> PortType | None:
+        """Named lookup for a port's settled type.
+
+        Raises ``KeyError`` for a port that was never recorded (unknown node
+        or port, or a direction that side does not have) so a wrong key is a
+        loud error; returns ``None`` only for a known port whose type
+        variable stayed unsettled.
+        """
+
+        key = (node_id, port_id, is_output)
+        try:
+            return self.resolved_types[key]
+        except KeyError:
+            side = "output" if is_output else "input"
+            message = f"no {side}-side type recorded for port {port_id!r} of node {node_id}"
+            raise KeyError(message) from None
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +147,44 @@ class _TypeGroups:
         return frozenset(candidates)
 
 
+def _settled_type(
+    resolved_types: Mapping[tuple[UUID, str, bool], PortType | None],
+    key: tuple[UUID, str, bool],
+) -> PortType:
+    """Plan-construction view of the resolved-type table.
+
+    A plan is only built for valid reports, where every referenced port has a
+    settled type; a ``None`` entry here means the invariant was violated.
+    """
+
+    value = resolved_types[key]
+    if value is None:
+        msg = f"plan construction hit unsettled port {key[1]} of node {key[0]}"
+        raise RuntimeError(msg)
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class _Analysis:
+    """Intermediate values of the deterministic validation pipeline.
+
+    Shared by :meth:`GraphCompiler.compile` (which adds plan construction)
+    and :meth:`GraphCompiler.validate` (which stops at the report), so the
+    two entry points cannot drift apart.
+    """
+
+    report: ValidationReport
+    nodes: Mapping[UUID, NodeModel]
+    definitions: Mapping[UUID, NodeDefinition]
+    parameters: Mapping[UUID, Mapping[str, ParameterValue]]
+    connections: tuple[ConnectionModel, ...]
+    resolved_types: Mapping[tuple[UUID, str, bool], PortType | None]
+    order: tuple[UUID, ...]
+    clocks: Mapping[UUID, UUID | None]
+    roots: frozenset[UUID]
+    demanded: frozenset[UUID]
+
+
 class GraphCompiler:
     def __init__(self, registry: NodeRegistry) -> None:
         self._registry = registry
@@ -136,45 +195,80 @@ class GraphCompiler:
         *,
         demand_roots: Iterable[UUID] | None = None,
     ) -> CompilationResult:
-        issues: list[ValidationIssue] = []
-        node_by_id = self._unique_nodes(snapshot, issues)
-        definitions, parameters = self._resolve_definitions(node_by_id, issues)
-        connections = self._validate_connections(snapshot, node_by_id, definitions, issues)
-        self._validate_cardinality(connections, issues)
-        resolved_types = self._resolve_types(connections, definitions, parameters, issues)
-        order = self._topological_order(node_by_id, connections, issues)
-        self._validate_required_inputs(connections, definitions, parameters, issues)
-        clocks = self._analyze_clocks(order, definitions, connections, issues)
-        roots = self._resolve_demand_roots(
-            node_by_id, definitions, connections, demand_roots, issues
-        )
-        demanded = self._upstream_reachable(roots, connections)
-
-        report = ValidationReport(tuple(issues))
-        if not report.is_valid:
-            return CompilationResult(report=report, plan=None, resolved_types=resolved_types)
+        analysis = self._analyze(snapshot, demand_roots)
+        if not analysis.report.is_valid:
+            return CompilationResult(
+                report=analysis.report,
+                plan=None,
+                resolved_types=analysis.resolved_types,
+            )
 
         compiled_nodes = tuple(
             self._compile_node(
-                node_by_id[node_id],
-                definitions[node_id],
-                parameters[node_id],
-                connections,
-                resolved_types,
-                clocks[node_id],
-                node_id in demanded,
+                analysis.nodes[node_id],
+                analysis.definitions[node_id],
+                analysis.parameters[node_id],
+                analysis.connections,
+                analysis.resolved_types,
+                analysis.clocks[node_id],
+                node_id in analysis.demanded,
             )
-            for node_id in order
+            for node_id in analysis.order
         )
         return CompilationResult(
-            report=report,
+            report=analysis.report,
             plan=ExecutionPlan(
                 document_id=snapshot.document_id,
                 graph_revision=snapshot.revision,
                 nodes=compiled_nodes,
-                demand_roots=frozenset(roots),
+                demand_roots=analysis.roots,
             ),
+            resolved_types=analysis.resolved_types,
+        )
+
+    def validate(
+        self,
+        snapshot: GraphSnapshot,
+        *,
+        demand_roots: Iterable[UUID] | None = None,
+    ) -> ValidationReport:
+        """Run the full deterministic validation pipeline without plan construction.
+
+        The report is byte-for-byte the one :meth:`compile` would produce; callers that
+        only ask "is this graph valid?" (precondition checks, prospective-connection
+        queries, randomization acceptance loops) avoid building an ``ExecutionPlan``.
+        """
+
+        return self._analyze(snapshot, demand_roots).report
+
+    def _analyze(
+        self,
+        snapshot: GraphSnapshot,
+        demand_roots: Iterable[UUID] | None,
+    ) -> _Analysis:
+        issues: list[ValidationIssue] = []
+        nodes = self._unique_nodes(snapshot, issues)
+        definitions, parameters = self._resolve_definitions(nodes, issues)
+        connections = self._validate_connections(snapshot, nodes, definitions, issues)
+        self._validate_cardinality(connections, issues)
+        resolved_types = self._resolve_types(connections, definitions, parameters, issues)
+        order = self._topological_order(nodes, connections, issues)
+        self._validate_required_inputs(connections, definitions, parameters, issues)
+        clocks = self._analyze_clocks(order, definitions, connections, issues)
+        roots = self._resolve_demand_roots(nodes, definitions, connections, demand_roots, issues)
+        demanded = self._upstream_reachable(roots, connections)
+
+        return _Analysis(
+            report=ValidationReport(tuple(issues)),
+            nodes=nodes,
+            definitions=definitions,
+            parameters=parameters,
+            connections=connections,
             resolved_types=resolved_types,
+            order=order,
+            clocks=clocks,
+            roots=frozenset(roots),
+            demanded=demanded,
         )
 
     def connection_compatibility(
@@ -230,7 +324,7 @@ class GraphCompiler:
             if baseline_identities is None:
                 base = replace(snapshot, connections=retained)
                 baseline_identities = {
-                    _issue_identity(issue) for issue in self.compile(base).report.issues
+                    _issue_identity(issue) for issue in self.validate(base).issues
                 }
                 baseline_cache[retained] = baseline_identities
             candidate = ConnectionModel(
@@ -247,7 +341,7 @@ class GraphCompiler:
             prospective = replace(snapshot, connections=(*retained, candidate))
             new_errors = tuple(
                 issue
-                for issue in self.compile(prospective).report.errors
+                for issue in self.validate(prospective).errors
                 if _issue_identity(issue) not in baseline_identities
             )
             results[endpoint] = ConnectionCompatibility(
@@ -388,7 +482,7 @@ class GraphCompiler:
                 issues.append(
                     _error(
                         "input_cardinality",
-                        f"Input {port_id!r} accepts one connection, got {len(incoming)}",
+                        f"Input {port_id} accepts one connection, got {len(incoming)}",
                         node_id,
                         port_id=port_id,
                     )
@@ -400,19 +494,25 @@ class GraphCompiler:
         definitions: Mapping[UUID, NodeDefinition],
         parameters: Mapping[UUID, Mapping[str, ParameterValue]],
         issues: list[ValidationIssue],
-    ) -> dict[tuple[UUID, str, bool], PortType]:
+    ) -> dict[tuple[UUID, str, bool], PortType | None]:
         groups = _TypeGroups()
         expressions: dict[tuple[UUID, str, bool], PortType | TypeVariable | ArrayTypeVariable] = {}
+        next_only: set[tuple[UUID, str, bool]] = set()
         connected_inputs: dict[UUID, set[str]] = defaultdict(set)
         for connection in connections:
             connected_inputs[connection.destination_node_id].add(connection.destination_port_id)
         for node_id, definition in definitions.items():
             node_parameters = parameters.get(node_id, {})
-            for port in definition.input_ports(connected_inputs[node_id]):
+            base_ids = {port.id for port in definition.input_ports(connected_inputs[node_id])}
+            for port in definition.input_ports(
+                connected_inputs[node_id], include_next_variadic=True
+            ):
                 expression = definition.port_type(
                     port.id, is_output=False, parameters=node_parameters
                 )
                 expressions[(node_id, port.id, False)] = expression
+                if port.id not in base_ids:
+                    next_only.add((node_id, port.id, False))
                 if isinstance(expression, (TypeVariable, ArrayTypeVariable)):
                     groups.add((node_id, expression.name), expression.allowed_types)
             for parameter in definition.parameters:
@@ -443,7 +543,7 @@ class GraphCompiler:
                 assert isinstance(destination, (TypeVariable, ArrayTypeVariable))
                 groups.constrain(destination_key, _base_type(source, destination))
 
-        resolved: dict[tuple[UUID, str, bool], PortType] = {}
+        resolved: dict[tuple[UUID, str, bool], PortType | None] = {}
         for port_key, expression in expressions.items():
             if isinstance(expression, PortType):
                 resolved[port_key] = expression
@@ -453,23 +553,27 @@ class GraphCompiler:
             value_type = groups.resolve(variable_key)
             if incompatible:
                 names = ", ".join(sorted(item.value for item in incompatible))
-                issues.append(
-                    _error(
-                        "generic_type_conflict",
-                        f"Type variable {expression.name} has incompatible constraints: {names}",
-                        port_key[0],
-                        port_id=port_key[1],
+                if port_key not in next_only:
+                    issues.append(
+                        _error(
+                            "generic_type_conflict",
+                            f"Incompatible constraints on type variable {expression.name}: {names}",
+                            port_key[0],
+                            port_id=port_key[1],
+                        )
                     )
-                )
+                resolved[port_key] = None
             elif value_type is None:
-                issues.append(
-                    _error(
-                        "unresolved_generic_type",
-                        f"Type variable {expression.name} could not be resolved",
-                        port_key[0],
-                        port_id=port_key[1],
+                if port_key not in next_only:
+                    issues.append(
+                        _error(
+                            "unresolved_generic_type",
+                            f"Type variable {expression.name} could not be resolved",
+                            port_key[0],
+                            port_id=port_key[1],
+                        )
                     )
-                )
+                resolved[port_key] = None
             else:
                 resolved[port_key] = (
                     _array_type(value_type)
@@ -653,7 +757,7 @@ class GraphCompiler:
         definition: NodeDefinition,
         parameters: Mapping[str, ParameterValue],
         connections: tuple[ConnectionModel, ...],
-        resolved_types: Mapping[tuple[UUID, str, bool], PortType],
+        resolved_types: Mapping[tuple[UUID, str, bool], PortType | None],
         clock_id: UUID | None,
         is_demanded: bool,
     ) -> CompiledNode:
@@ -667,10 +771,10 @@ class GraphCompiler:
             connection = incoming.get(port_id)
             if connection is None:
                 continue
-            source_type = resolved_types[
-                (connection.source_node_id, connection.source_port_id, True)
-            ]
-            destination_type = resolved_types[(node.id, port_id, False)]
+            source_type = _settled_type(
+                resolved_types, (connection.source_node_id, connection.source_port_id, True)
+            )
+            destination_type = _settled_type(resolved_types, (node.id, port_id, False))
             conversion = (
                 ScalarConversion.INT_TO_FLOAT
                 if source_type is PortType.INT and destination_type is PortType.FLOAT
@@ -681,11 +785,12 @@ class GraphCompiler:
                 conversion=conversion,
             )
         input_types = {
-            port_id: resolved_types[(node.id, port_id, False)]
+            port_id: _settled_type(resolved_types, (node.id, port_id, False))
             for port_id in _input_socket_ids(definition, incoming)
         }
         output_types = {
-            port.id: resolved_types[(node.id, port.id, True)] for port in definition.outputs
+            port.id: _settled_type(resolved_types, (node.id, port.id, True))
+            for port in definition.outputs
         }
         is_static = clock_id is None and definition.cache_policy is not CachePolicy.NEVER
         return CompiledNode(

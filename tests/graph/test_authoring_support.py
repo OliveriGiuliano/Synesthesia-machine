@@ -12,6 +12,7 @@ from synesthesia_machine.graph import (
     GraphDocument,
     GraphSnapshot,
     NodeModel,
+    ValidationReport,
 )
 from synesthesia_machine.nodes.utility import create_utility_registry
 
@@ -119,11 +120,12 @@ def test_connection_query_rejects_new_cycle_but_tolerates_incomplete_graph() -> 
     assert "graph_cycle" in {issue.code for issue in result.issues}
 
 
-def test_batch_connection_query_compiles_shared_baseline_once() -> None:
+def test_batch_connection_query_validates_shared_baseline_once() -> None:
     class _CountingCompiler(GraphCompiler):
         def __init__(self) -> None:
             super().__init__(create_utility_registry())
             self.compile_count = 0
+            self.validate_count = 0
 
         def compile(
             self,
@@ -133,6 +135,15 @@ def test_batch_connection_query_compiles_shared_baseline_once() -> None:
         ) -> CompilationResult:
             self.compile_count += 1
             return super().compile(snapshot, demand_roots=demand_roots)
+
+        def validate(
+            self,
+            snapshot: GraphSnapshot,
+            *,
+            demand_roots: Iterable[UUID] | None = None,
+        ) -> ValidationReport:
+            self.validate_count += 1
+            return super().validate(snapshot, demand_roots=demand_roots)
 
     compiler = _CountingCompiler()
     document = GraphDocument()
@@ -149,7 +160,10 @@ def test_batch_connection_query_compiles_shared_baseline_once() -> None:
     results = compiler.connection_compatibilities(document.snapshot(), candidates)
 
     assert all(results[candidate].accepted for candidate in candidates)
-    assert compiler.compile_count == 3
+    # The identical baseline is validated once and shared; each candidate is
+    # validated on its own, and no plan is ever constructed.
+    assert compiler.validate_count == 3
+    assert compiler.compile_count == 0
 
 
 def test_connection_query_offers_first_edge_into_undersized_midi_family() -> None:
