@@ -8,6 +8,7 @@ dialog, which is exactly the seam the extraction created.
 
 from __future__ import annotations
 
+from concurrent.futures import Executor, Future
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,23 @@ from synesthesia_machine.ui.document_lifecycle import (
     ReplacementDecision,
 )
 from synesthesia_machine.ui.session import DocumentSession
+
+
+class _InlineExecutor(Executor):
+    """concurrent.futures.Executor that runs submit() on the calling thread.
+
+    Injected into the autosave controller in tests so recovery discards and
+    saves settle before the call that queued them returns; assertions on the
+    store then observe settled state instead of racing a worker thread.
+    """
+
+    def submit(self, fn, /, *args, **kwargs) -> Future:
+        future = Future()
+        try:
+            future.set_result(fn(*args, **kwargs))
+        except BaseException as error:
+            future.set_exception(error)
+        return future
 
 
 class ScriptedHost:
@@ -79,7 +97,9 @@ class LifecycleEnv:
         )
         self.autosave_store = AutosaveStore(tmp_path / "data" / "recovery")
         self.session = DocumentSession(create_utility_registry())
-        self.autosave_controller = AutosaveController(self.autosave_store, session=self.session)
+        self.autosave_controller = AutosaveController(
+            self.autosave_store, session=self.session, executor=_InlineExecutor()
+        )
         self.controller = DocumentLifecycleController(
             host=host,
             session=self.session,

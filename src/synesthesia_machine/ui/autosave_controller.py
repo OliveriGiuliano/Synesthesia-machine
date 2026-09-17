@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,13 +39,18 @@ class AutosaveController(QObject):
         store: AutosaveStore,
         parent: QObject | None = None,
         session: DocumentSession | None = None,
+        executor: Executor | None = None,
     ) -> None:
         super().__init__(parent)
         self._store = store
         self._session = session
-        self._executor = ThreadPoolExecutor(
-            max_workers=1,
-            thread_name_prefix="synmachine-ui-autosave",
+        self._executor = (
+            executor
+            if executor is not None
+            else ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="synmachine-ui-autosave",
+            )
         )
         self._future: Future[object] | None = None
         self._current: _AutosaveRequest | None = None
