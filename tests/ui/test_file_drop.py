@@ -178,7 +178,7 @@ def test_graph_file_drop_not_accepted_when_the_open_is_cancelled(
     # The OS drag session must only be told the drop succeeded when the
     # open flow committed; a cancelled replacement leaves the current
     # document untouched and the drop unaccepted.
-    from synesthesia_machine.ui.main_window import _ReplacementDecision
+    from synesthesia_machine.ui.document_lifecycle import ReplacementDecision
 
     document = GraphDocument()
     document.add_node("synmachine.utility.number", position=(55.0, 65.0))
@@ -186,7 +186,7 @@ def test_graph_file_drop_not_accepted_when_the_open_is_cancelled(
     save_graph(graph_path, document.snapshot(), retain_backup=False)
 
     monkeypatch.setattr(
-        window, "_confirm_document_replacement", lambda: _ReplacementDecision.CANCEL
+        window.document_lifecycle, "confirm_replacement", lambda: ReplacementDecision.CANCEL
     )
     mime = _mime_with_file(graph_path)
     event = QDropEvent(

@@ -11,10 +11,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import suppress
-from enum import Enum, auto
 from functools import partial
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 from uuid import UUID
 
 from PySide6.QtCore import (
@@ -26,7 +25,7 @@ from PySide6.QtCore import (
     QTimer,
     Slot,
 )
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
+from PySide6.QtGui import QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -38,6 +37,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QToolBar,
     QToolButton,
+    QWidget,
 )
 
 from synesthesia_machine import __version__
@@ -64,14 +64,13 @@ from synesthesia_machine.graph import (
 )
 from synesthesia_machine.nodes import NodeRegistry, PreviewDock
 from synesthesia_machine.persistence import (
-    GraphPersistenceError,
     RelinkMatch,
     find_missing_media,
     fragment_from_json,
     fragment_to_json,
     verify_relink_candidate,
 )
-from synesthesia_machine.persistence.autosave import AutosaveStore
+from synesthesia_machine.persistence.autosave import AutosaveStore, RecoveryRecord
 from synesthesia_machine.runtime import EngineSession, midi_export_eligibility
 from synesthesia_machine.ui.actions import ActionRegistry, ActionSpec
 from synesthesia_machine.ui.application_settings import (
@@ -82,6 +81,10 @@ from synesthesia_machine.ui.application_settings import (
 from synesthesia_machine.ui.autosave_controller import AutosaveController
 from synesthesia_machine.ui.canvas import GraphScene, GraphView
 from synesthesia_machine.ui.demand_roots import compute_demand_roots
+from synesthesia_machine.ui.document_lifecycle import (
+    DocumentLifecycleController,
+    ReplacementDecision,
+)
 from synesthesia_machine.ui.engine_bridge import (
     EngineBridge,
     EngineBridgeState,
@@ -116,12 +119,6 @@ from synesthesia_machine.ui.widgets import (
 
 CLIPBOARD_MIME_TYPE = "application/x-synesthesia-graph-fragment+json"
 GRAPH_FILE_FILTER = "Synesthesia Machine Graph (*.synmachine.json *.json)"
-
-
-class _ReplacementDecision(Enum):
-    PROCEED = auto()
-    DISCARD = auto()
-    CANCEL = auto()
 
 
 def _clipboard_mime_data() -> QMimeData | None:
@@ -169,7 +166,14 @@ class MainWindow(QMainWindow):
         self.note_preview_panel = NotePreviewPanel(self)
         self.profiler_panel = ProfilerPanel(self)
         self.recent_menu = QMenu(tr("Open &Recent"), self)
-        self._recent_paths = self._load_recent_paths()
+        self.document_lifecycle = DocumentLifecycleController(
+            host=self,
+            session=self.session,
+            settings_store=self.settings_store,
+            autosave_store=self.autosave_store,
+            autosave_controller=self.autosave_controller,
+            recent_file_limit=lambda: self.preferences.recent_file_limit,
+        )
         self._image_dock_preview_sources: frozenset[tuple[UUID, str]] = frozenset()
         self._engine_closed = False
         self._engine_failure_signature: tuple[object, ...] | None = None
@@ -250,7 +254,7 @@ class MainWindow(QMainWindow):
         self._restore_window_state()
         # Profiling is opt-in every launch even when an older saved layout left the dock visible.
         self.profiler_dock.hide()
-        self._refresh_recent_menu()
+        self.document_lifecycle.refresh_recent_menu()
         self._refresh_document_ui()
         self._refresh_selection_ui()
         self._preview_timer.start()
@@ -259,7 +263,7 @@ class MainWindow(QMainWindow):
         # The owned timer is cancelled with the window; users can refresh immediately from the menu.
         self._device_refresh_timer.start()
         if offer_recovery:
-            QTimer.singleShot(0, self._offer_recovery)
+            QTimer.singleShot(0, self.document_lifecycle.offer_recovery)
 
     def _create_docks(self) -> None:
         self.library_dock = QDockWidget(tr("Node Library"), self)
@@ -700,7 +704,7 @@ class MainWindow(QMainWindow):
         # (dirty-document confirmation, recovery handling, recent files, status).
         self.view.openGraphFileRequested.connect(self._open_graph_file_from_drop)
         self.library.nodeActivated.connect(self._add_library_node)
-        self._autosave_timer.timeout.connect(self._autosave)
+        self._autosave_timer.timeout.connect(self.document_lifecycle.autosave_now)
         # The activation timer's timeout is owned by the bridge's clock.
         self._preview_timer.timeout.connect(self._poll_previews)
         self.image_preview_dock.visibilityChanged.connect(self._on_image_preview_visibility_changed)
@@ -786,14 +790,7 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def new_document(self) -> None:
-        previous_id = self.session.document.document_id
-        decision = self._confirm_document_replacement()
-        if decision is _ReplacementDecision.CANCEL:
-            return
-        self.session.new_document()
-        if decision is _ReplacementDecision.DISCARD:
-            self._discard_recovery(previous_id)
-        self.statusBar().showMessage(tr("Created new graph"), 3000)
+        self.document_lifecycle.new_document()
 
     @Slot()
     def randomize_parameters(self) -> None:
@@ -830,8 +827,8 @@ class MainWindow(QMainWindow):
         selected = self.scene.selected_node_ids()
         if not selected:
             previous_id = self.session.document.document_id
-            decision = self._confirm_document_replacement()
-            if decision is _ReplacementDecision.CANCEL:
+            decision = self.document_lifecycle.confirm_replacement()
+            if decision is ReplacementDecision.CANCEL:
                 return
             try:
                 snapshot = generate_random_graph(self.registry)
@@ -839,8 +836,8 @@ class MainWindow(QMainWindow):
                 self._show_error("Could not generate random graph", str(error))
                 return
             self.session.replace_with_snapshot(snapshot)
-            if decision is _ReplacementDecision.DISCARD:
-                self._discard_recovery(previous_id)
+            if decision is ReplacementDecision.DISCARD:
+                self.document_lifecycle.discard_recovery(previous_id)
             self.scene.select_node_ids(set())
             QTimer.singleShot(0, self.view.frame_all)
             self.statusBar().showMessage(
@@ -876,37 +873,10 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def open_document(self) -> None:
-        selected, _ = QFileDialog.getOpenFileName(self, tr("Open Graph"), "", tr(GRAPH_FILE_FILTER))
-        if selected:
-            self.open_path(Path(selected))
+        self.document_lifecycle.open_interactive()
 
     def open_path(self, path: Path) -> bool:
-        previous_id = self.session.document.document_id
-        decision = self._confirm_document_replacement()
-        if decision is _ReplacementDecision.CANCEL:
-            return False
-        try:
-            self.session.open_document(path)
-        except (GraphPersistenceError, OSError, ValueError) as error:
-            self._show_error("Could not open graph", str(error))
-            return False
-        if decision is _ReplacementDecision.DISCARD:
-            self._discard_recovery(previous_id)
-        self._remember_recent(path)
-        missing_count = len(find_missing_media(self.session.document.snapshot()))
-        if missing_count:
-            self.statusBar().showMessage(
-                trf(
-                    "Opened {name} · {count} missing media file(s); "
-                    "use File → Locate Missing Media",
-                    name=path.name,
-                    count=missing_count,
-                ),
-                8000,
-            )
-        else:
-            self.statusBar().showMessage(trf("Opened {name}", name=path.name), 4000)
-        return True
+        return self.document_lifecycle.open_path(path)
 
     @Slot(Path)
     def _open_graph_file_from_drop(self, path: Path) -> None:
@@ -967,36 +937,11 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def save_document(self) -> bool:
-        if self.session.current_path is None:
-            return self.save_document_as()
-        return self._save_to_path(self.session.current_path)
+        return self.document_lifecycle.save()
 
     @Slot()
     def save_document_as(self) -> bool:
-        initial = str(
-            self.session.current_path or Path.home() / f"{tr('Untitled')}.synmachine.json"
-        )
-        selected, _ = QFileDialog.getSaveFileName(
-            self, tr("Save Graph"), initial, tr(GRAPH_FILE_FILTER)
-        )
-        if not selected:
-            return False
-        path = Path(selected)
-        if not path.suffix:
-            path = path.with_suffix(".synmachine.json")
-        return self._save_to_path(path)
-
-    def _save_to_path(self, path: Path) -> bool:
-        document_id = self.session.document.document_id
-        try:
-            saved = self.session.save(path)
-        except (OSError, ValueError) as error:
-            self._show_error("Could not save graph", str(error))
-            return False
-        self._discard_recovery(document_id)
-        self._remember_recent(saved)
-        self.statusBar().showMessage(trf("Saved {name}", name=saved.name), 4000)
-        return True
+        return self.document_lifecycle.save_as()
 
     @Slot()
     def copy_selection(self) -> None:
@@ -1862,15 +1807,6 @@ class MainWindow(QMainWindow):
         if self.session.is_dirty:
             self._autosave_timer.start()
 
-    @Slot()
-    def _autosave(self) -> None:
-        if not self.session.is_dirty:
-            return
-        self.autosave_controller.request(
-            self.session.document.snapshot(),
-            explicit_path=self.session.current_path,
-        )
-
     @Slot(object)
     def _on_autosave_saved(self, path: object) -> None:
         if isinstance(path, Path):
@@ -1882,102 +1818,6 @@ class MainWindow(QMainWindow):
     @Slot(object)
     def _on_autosave_failed(self, error: object) -> None:
         self.statusBar().showMessage(trf("Autosave failed: {error}", error=error), 5000)
-
-    def _discard_recovery(self, document_id: UUID) -> None:
-        self.autosave_controller.discard(document_id)
-
-    def _confirm_document_replacement(self) -> _ReplacementDecision:
-        if not self.session.is_dirty:
-            return _ReplacementDecision.PROCEED
-        self._autosave()
-        choice = QMessageBox.warning(
-            self,
-            tr("Unsaved graph"),
-            tr("Save changes before continuing?"),
-            QMessageBox.StandardButton.Save
-            | QMessageBox.StandardButton.Discard
-            | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Save,
-        )
-        if choice == QMessageBox.StandardButton.Save:
-            return (
-                _ReplacementDecision.PROCEED
-                if self.save_document()
-                else _ReplacementDecision.CANCEL
-            )
-        if choice == QMessageBox.StandardButton.Discard:
-            return _ReplacementDecision.DISCARD
-        return _ReplacementDecision.CANCEL
-
-    @Slot()
-    def _offer_recovery(self) -> None:
-        for record in self.autosave_store.discover():
-            explicit_path = self.autosave_store.explicit_path_for(record, self._recent_paths)
-            if not record.is_newer_than(explicit_path):
-                continue
-            choice = QMessageBox.warning(
-                self,
-                tr("Recover autosaved graph"),
-                trf(
-                    "A newer autosave was found. Restore it now?\n\nRecovery: {name}",
-                    name=record.path.name,
-                )
-                + (
-                    trf("\nOriginal: {path}", path=explicit_path)
-                    if explicit_path is not None
-                    else ""
-                ),
-                QMessageBox.StandardButton.Open
-                | QMessageBox.StandardButton.Discard
-                | QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Open,
-            )
-            if choice == QMessageBox.StandardButton.Discard:
-                self._discard_recovery(record.document_id)
-                continue
-            if choice != QMessageBox.StandardButton.Open:
-                return
-            try:
-                self.session.recover_document(record.path, explicit_path=explicit_path)
-            except (GraphPersistenceError, OSError, ValueError) as error:
-                self._show_error("Could not recover graph", str(error))
-                return
-            self.statusBar().showMessage(trf("Recovered {name}", name=record.path.name), 5000)
-            return
-
-    def _load_recent_paths(self) -> list[Path]:
-        return self.settings_store.load_recent_files(self.preferences.recent_file_limit)
-
-    def _remember_recent(self, path: Path) -> None:
-        self._recent_paths = self.settings_store.remember_recent(
-            path,
-            self._recent_paths,
-            self.preferences.recent_file_limit,
-        )
-        self._refresh_recent_menu()
-
-    def _refresh_recent_menu(self) -> None:
-        self.recent_menu.clear()
-        if not self._recent_paths:
-            empty = QAction(tr("No recent graphs"), self.recent_menu)
-            empty.setEnabled(False)
-            self.recent_menu.addAction(empty)
-            return
-        for index, path in enumerate(self._recent_paths, start=1):
-            action = QAction(f"&{index} {path.name}", self.recent_menu)
-            action.setToolTip(str(path))
-            action.triggered.connect(partial(self.open_path, path))
-            self.recent_menu.addAction(action)
-        self.recent_menu.addSeparator()
-        clear_action = QAction(tr("&Clear Recent Graphs"), self.recent_menu)
-        clear_action.triggered.connect(self._clear_recent)
-        self.recent_menu.addAction(clear_action)
-
-    @Slot()
-    def _clear_recent(self) -> None:
-        self._recent_paths = []
-        self.settings_store.clear_recent()
-        self._refresh_recent_menu()
 
     def _snapshot_default_shortcuts(self) -> None:
         """Capture each action's built-in shortcut before user overrides apply."""
@@ -2028,12 +1868,11 @@ class MainWindow(QMainWindow):
             enabled=preferences.grid_snap_enabled,
             spacing=preferences.grid_size,
         )
-        self._recent_paths = self._recent_paths[: preferences.recent_file_limit]
-        self.settings.setValue("recentFiles", [str(path) for path in self._recent_paths])
+        self.document_lifecycle.truncate_recent_to(preferences.recent_file_limit)
         if language_changed:
             self._retranslate_ui()
         else:
-            self._refresh_recent_menu()
+            self.document_lifecycle.refresh_recent_menu()
 
     def _retranslate_ui(self) -> None:
         """Apply a new English/French preference without rebuilding the document session."""
@@ -2078,7 +1917,7 @@ class MainWindow(QMainWindow):
         self.profiler_panel.retranslate()
         self._engine_status.setAccessibleName(tr("Engine runtime status"))
         self.statusBar().showMessage(tr("Ready"))
-        self._refresh_recent_menu()
+        self.document_lifecycle.refresh_recent_menu()
         self._refresh_document_ui()
         self._refresh_selection_ui()
 
@@ -2166,11 +2005,71 @@ class MainWindow(QMainWindow):
         job.close()
         self.statusBar().showMessage(midi_export_failure_text(code, detail), 8000)
 
+    # -- DocumentLifecycleHost ---------------------------------------------
+    # MainWindow implements the lifecycle host protocol: it supplies the
+    # dialogs, the recent menu, status messages, and the autosave trigger, so
+    # every lifecycle behaviour is testable offscreen against a scripted host.
+
+    @property
+    def lifecycle_dialog_parent(self) -> QWidget:
+        return self
+
+    def lifecycle_status(self, text: str, timeout_ms: int) -> None:
+        self.statusBar().showMessage(text, timeout_ms)
+
+    def lifecycle_error(self, title: str, detail: str) -> None:
+        self._show_error(title, detail)
+
+    def choose_lifecycle_file(self, mode: Literal["open", "save"], initial: str) -> str:
+        if mode == "open":
+            selected, _ = QFileDialog.getOpenFileName(
+                self, tr("Open Graph"), initial, tr(GRAPH_FILE_FILTER)
+            )
+            return selected
+        selected, _ = QFileDialog.getSaveFileName(
+            self, tr("Save Graph"), initial, tr(GRAPH_FILE_FILTER)
+        )
+        return selected
+
+    def recent_menu_target(self) -> QMenu:
+        return self.recent_menu
+
+    def confirm_unsaved_changes(self) -> QMessageBox.StandardButton:
+        return QMessageBox.warning(
+            self,
+            tr("Unsaved graph"),
+            tr("Save changes before continuing?"),
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save,
+        )
+
+    def confirm_recovery(
+        self, record: RecoveryRecord, explicit_path: Path | None
+    ) -> QMessageBox.StandardButton:
+        return QMessageBox.warning(
+            self,
+            tr("Recover autosaved graph"),
+            trf(
+                "A newer autosave was found. Restore it now?\n\nRecovery: {name}",
+                name=record.path.name,
+            )
+            + (trf("\nOriginal: {path}", path=explicit_path) if explicit_path is not None else ""),
+            QMessageBox.StandardButton.Open
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Open,
+        )
+
+    def autosave_now(self) -> None:
+        self.document_lifecycle.autosave_now()
+
     def closeEvent(self, event: QCloseEvent) -> None:
-        decision = self._confirm_document_replacement()
-        if decision is not _ReplacementDecision.CANCEL:
-            if decision is _ReplacementDecision.DISCARD:
-                self._discard_recovery(self.session.document.document_id)
+        decision = self.document_lifecycle.confirm_replacement()
+        if decision is not ReplacementDecision.CANCEL:
+            if decision is ReplacementDecision.DISCARD:
+                self.document_lifecycle.discard_recovery(self.session.document.document_id)
             job = self._midi_export_job
             if job is not None:
                 # Stop the export worker before the shell goes down; the join is

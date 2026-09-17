@@ -147,6 +147,16 @@ class ApplicationSettingsStore:
         self.settings.remove("recentFiles")
         self.settings.sync()
 
+    def truncate_recent_files(self, limit: int) -> None:
+        """Persist the stored list capped at a (possibly lowered) display limit."""
+
+        raw: object = self.settings.value("recentFiles", [])
+        if not isinstance(raw, list):
+            return
+        kept = [value for value in cast(list[object], raw) if isinstance(value, str)][:limit]
+        self.settings.setValue("recentFiles", kept)
+        self.settings.sync()
+
 
 class PreferencesDialog(QDialog):
     def __init__(

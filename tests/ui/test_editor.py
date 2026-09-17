@@ -1265,12 +1265,12 @@ def test_recovery_offer_restores_dirty_session_and_explicit_save_discards_recove
         lambda *args, **kwargs: QMessageBox.StandardButton.Open,
     )
 
-    window._offer_recovery()
+    window.document_lifecycle.offer_recovery()
     assert window.session.document.node(node_id) is not None
     assert window.session.is_dirty
 
     explicit = tmp_path / "recovered.synmachine.json"
-    assert window._save_to_path(explicit)
+    assert window.document_lifecycle.save_to_path(explicit)
     assert explicit.exists()
     assert not recovery_path.exists()
     assert not window.session.is_dirty

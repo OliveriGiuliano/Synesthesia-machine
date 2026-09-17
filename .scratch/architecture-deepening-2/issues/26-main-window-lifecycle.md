@@ -6,7 +6,7 @@
 
 **Blocked by:** 05, 24
 
-**Status:** open
+**Status:** resolved
 
 **Files:**
 - `src/synesthesia_machine/ui/main_window.py`
@@ -14,8 +14,8 @@
 - `src/synesthesia_machine/ui/README.md`
 
 **Acceptance:**
-- [ ] Each behaviour testable offscreen, without the window
-- [ ] Lifecycle bugs stop landing in the compositor
-- [ ] The hot spot gets a shrinkage path
-- [ ] Docs stop misrouting future agents
-- [ ] Targeted tests pass; `uv run check` green; no unrelated diff
+- [x] Each behaviour testable offscreen, without the window
+- [x] Lifecycle bugs stop landing in the compositor
+- [x] The hot spot gets a shrinkage path
+- [x] Docs stop misrouting future agents
+- [x] Targeted tests pass; `uv run check` green; no unrelated diff
