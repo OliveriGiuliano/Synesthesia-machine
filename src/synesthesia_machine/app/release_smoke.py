@@ -44,6 +44,21 @@ class SmokeCheck:
     detail: str
 
 
+@dataclass(frozen=True, slots=True)
+class SmokeCheckSpec:
+    """One declared release-smoke check: its name and how to run it.
+
+    ``build`` receives the smoke run's scratch root and the optional H.264 video
+    path and returns the check's :class:`SmokeCheck`, owning its status policy.
+    The H.264 entry is a normal (conditional) member of the registry, so the
+    report order is the order of :data:`SMOKE_CHECKS` rather than a positional
+    special case.
+    """
+
+    name: str
+    build: Callable[[Path, Path | None], SmokeCheck]
+
+
 class _MemoryAudioStream:
     def __init__(self, callback: AudioCallback) -> None:
         self.callback = callback
@@ -243,6 +258,57 @@ def _run_optional_check(name: str, operation: Callable[[], tuple[str, str]]) -> 
         return SmokeCheck(name, "failed", f"{type(error).__name__}: {error}")
 
 
+def _build_h264_mp4_decode(root: Path, video: Path | None) -> SmokeCheck:
+    if video is None:
+        return SmokeCheck("h264_mp4_decode", "failed", "no test video supplied")
+    return _run_check("h264_mp4_decode", lambda: _decode_h264(video))
+
+
+# The ordered release-smoke registry: the single place that names the checks and
+# their report order. :func:`run_packaged_smoke` and the test suite both target
+# it by name instead of the private check functions.
+SMOKE_CHECKS: tuple[SmokeCheckSpec, ...] = (
+    SmokeCheckSpec(
+        "create_save_open_graph",
+        lambda root, _video: _run_check("create_save_open_graph", lambda: _graph_round_trip(root)),
+    ),
+    SmokeCheckSpec("h264_mp4_decode", _build_h264_mp4_decode),
+    SmokeCheckSpec(
+        "camera_enumeration_capture",
+        lambda _root, _video: _run_optional_check("camera_enumeration_capture", _camera_probe),
+    ),
+    SmokeCheckSpec(
+        "midi_enumeration_mock_send",
+        lambda _root, _video: _run_check("midi_enumeration_mock_send", _midi_probe),
+    ),
+    SmokeCheckSpec(
+        "debug_audio", lambda _root, _video: _run_optional_check("debug_audio", _audio_probe)
+    ),
+    SmokeCheckSpec(
+        "engine_crash_restart",
+        lambda root, _video: _run_check("engine_crash_restart", lambda: _engine_restart(root)),
+    ),
+    SmokeCheckSpec(
+        "autosave_recovery_diagnostics",
+        lambda root, _video: _run_check(
+            "autosave_recovery_diagnostics", lambda: _autosave_and_diagnostics(root)
+        ),
+    ),
+)
+
+
+def smoke_check(name: str) -> SmokeCheckSpec:
+    """Return the declared release-smoke check named ``name``.
+
+    This is the public seam the test suite targets by name; it raises for a name
+    that is not in :data:`SMOKE_CHECKS` instead of silently running nothing.
+    """
+    for spec in SMOKE_CHECKS:
+        if spec.name == name:
+            return spec
+    raise KeyError(f"unknown release-smoke check {name!r}")
+
+
 def run_packaged_smoke(
     report_path: str | Path,
     *,
@@ -254,24 +320,10 @@ def run_packaged_smoke(
     output.parent.mkdir(parents=True, exist_ok=True)
     paths = ApplicationPaths.for_current_user()
     paths.ensure_exists()
+    video_path = None if h264_video is None else Path(h264_video).expanduser().resolve()
     with tempfile.TemporaryDirectory(prefix="synmachine-release-smoke-") as temporary:
         root = Path(temporary)
-        checks = [
-            _run_check("create_save_open_graph", lambda: _graph_round_trip(root)),
-            _run_optional_check("camera_enumeration_capture", _camera_probe),
-            _run_check("midi_enumeration_mock_send", _midi_probe),
-            _run_optional_check("debug_audio", _audio_probe),
-            _run_check("engine_crash_restart", lambda: _engine_restart(root)),
-            _run_check(
-                "autosave_recovery_diagnostics",
-                lambda: _autosave_and_diagnostics(root),
-            ),
-        ]
-        if h264_video is None:
-            checks.insert(1, SmokeCheck("h264_mp4_decode", "failed", "no test video supplied"))
-        else:
-            video_path = Path(h264_video).expanduser().resolve()
-            checks.insert(1, _run_check("h264_mp4_decode", lambda: _decode_h264(video_path)))
+        checks = tuple(spec.build(root, video_path) for spec in SMOKE_CHECKS)
 
     passed = all(check.status != "failed" for check in checks)
     payload = {
@@ -289,4 +341,4 @@ def run_packaged_smoke(
     return 0 if passed else 1
 
 
-__all__ = ["SmokeCheck", "run_packaged_smoke"]
+__all__ = ["SMOKE_CHECKS", "SmokeCheck", "SmokeCheckSpec", "run_packaged_smoke", "smoke_check"]

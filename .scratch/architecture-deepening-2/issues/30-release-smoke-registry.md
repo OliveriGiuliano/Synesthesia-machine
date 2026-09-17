@@ -4,15 +4,15 @@
 
 **Solution:** Represent the checks as an ordered registry of named, public check factories; run_packaged_smoke keeps its exact interface and the h264 check becomes a normal conditional entry; tests target the registry by name.
 
-**Status:** open
+**Status:** resolved
 
 **Files:**
 - `src/synesthesia_machine/app/release_smoke.py`
 - `tests/packaging/test_release.py`
 
 **Acceptance:**
-- [ ] Public seam instead of private-name coupling
-- [ ] The h264 slot is a declared conditional
-- [ ] Renames caught by the type checker
-- [ ] Report ordering lives with the checks
-- [ ] Targeted tests pass; `uv run check` green; no unrelated diff
+- [x] Public seam instead of private-name coupling
+- [x] The h264 slot is a declared conditional
+- [x] Renames caught by the type checker
+- [x] Report ordering lives with the checks
+- [x] Targeted tests pass; `uv run check` green; no unrelated diff

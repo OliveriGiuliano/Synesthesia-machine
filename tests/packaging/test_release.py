@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import struct
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -85,27 +86,44 @@ def test_bootstrap_removes_release_only_arguments_from_qt() -> None:
     ]
 
 
+def _fake_smoke_registry() -> tuple[release_smoke.SmokeCheckSpec, ...]:
+    """Build a SMOKE_CHECKS stand-in whose checks report fixed outcomes.
+
+    The H.264 entry keeps its conditional: with no video it reports the missing
+    video as a failure, so the report still fails closed in a no-video run.
+    """
+    outcomes = {
+        "create_save_open_graph": ("passed", "graph ok"),
+        "camera_enumeration_capture": ("skipped", "no camera"),
+        "midi_enumeration_mock_send": ("passed", "midi ok"),
+        "debug_audio": ("passed", "audio ok"),
+        "engine_crash_restart": ("passed", "engine ok"),
+        "autosave_recovery_diagnostics": ("passed", "recovery ok"),
+    }
+
+    def build(name: str) -> Callable[[Path, Path | None], release_smoke.SmokeCheck]:
+        if name == "h264_mp4_decode":
+            return lambda _root, video: release_smoke.SmokeCheck(
+                name,
+                "failed" if video is None else "passed",
+                "no test video supplied" if video is None else "h264 ok",
+            )
+        status, detail = outcomes[name]
+        return lambda _root, _video: release_smoke.SmokeCheck(name, status, detail)
+
+    return tuple(
+        release_smoke.SmokeCheckSpec(spec.name, build(spec.name))
+        for spec in release_smoke.SMOKE_CHECKS
+    )
+
+
 def test_packaged_smoke_report_fails_closed_and_records_skips(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    monkeypatch.setattr(release_smoke, "_graph_round_trip", lambda _root: "graph ok")
-    monkeypatch.setattr(release_smoke, "_decode_h264", lambda _path: "h264 ok")
-    monkeypatch.setattr(
-        release_smoke,
-        "_camera_probe",
-        lambda: ("skipped", "no camera"),
-    )
-    monkeypatch.setattr(release_smoke, "_midi_probe", lambda: "midi ok")
-    monkeypatch.setattr(release_smoke, "_audio_probe", lambda: ("passed", "audio ok"))
-    monkeypatch.setattr(release_smoke, "_engine_restart", lambda _root: "engine ok")
-    monkeypatch.setattr(
-        release_smoke,
-        "_autosave_and_diagnostics",
-        lambda _root: "recovery ok",
-    )
+    monkeypatch.setattr(release_smoke, "SMOKE_CHECKS", _fake_smoke_registry())
     report_path = tmp_path / "report.json"
 
     assert release_smoke.run_packaged_smoke(report_path, h264_video=tmp_path / "video.mp4") == 0
@@ -123,7 +141,7 @@ def test_packaged_smoke_report_fails_closed_and_records_skips(
 
 
 def test_release_smoke_graph_round_trip_uses_current_schema_and_compiles(tmp_path: Path) -> None:
-    detail = release_smoke._graph_round_trip(tmp_path)  # pyright: ignore[reportPrivateUsage]
+    detail = release_smoke.smoke_check("create_save_open_graph").build(tmp_path, None).detail
 
     assert detail == "saved, opened, and compiled 1 node"
 
