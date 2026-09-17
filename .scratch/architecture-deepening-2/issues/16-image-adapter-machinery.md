@@ -4,7 +4,7 @@
 
 **Solution:** Grow the 395-byte runtime_support.py into the shared adapter module: the image-or-channel runtime base, the factory/number helpers, validators, and the channel-bridge helpers; filters, adjustments, and dimensions import it and keep only their per-node algorithm and definition.
 
-**Status:** open
+**Status:** resolved
 
 **Files:**
 - `src/synesthesia_machine/nodes/image/runtime_support.py`
@@ -18,3 +18,7 @@
 - [ ] Adapter tests get one home
 - [ ] Rule changes stop tripling
 - [ ] Targeted tests pass; `uv run check` green; no unrelated diff
+
+# Answer
+
+Shipped: `runtime_support.py` is now the single home of the image-or-channel adapter machinery — `IMAGE_OR_CHANNEL`, the `FilterProcessor`/`AdjustmentProcessor` aliases, `FilterRuntime`/`AdjustmentRuntime`, `image_source`, `as_colour_image`/`as_value_image`, `restore_frame_type`, `channel_like`, `dynamic_number`, `channel_selection_parameter`, `combined_parameter_validator`, and `dynamic_image_channel_resolver`. filters.py, adjustments.py, and dimensions.py import it and keep only their per-node algorithms and definitions (net −366 lines across the three families). The `AdjustmentProcessor` alias keeps its intentionally loose `Callable[..., ImageSource]` form so mixed image/channel processor signatures stay type-compatible. New test home `tests/nodes/image/test_runtime_support.py` (14 tests) covers the adapters, both runtimes, and the shared validators.

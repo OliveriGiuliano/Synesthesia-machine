@@ -11,12 +11,10 @@ import numpy as np
 
 from synesthesia_machine.contracts import (
     ChannelFrame,
-    FrameContext,
     ImageFrame,
     ParameterValue,
     PortType,
     RuntimeValue,
-    read_only_float32,
 )
 from synesthesia_machine.media import (
     ChannelSelection,
@@ -38,15 +36,21 @@ from synesthesia_machine.media import (
 )
 from synesthesia_machine.nodes import (
     ExecutionKind,
-    ExpectedNodeError,
     InputPortSpec,
     NodeDefinition,
     NodeRuntime,
     OutputPortSpec,
     ParameterEditorHint,
     ParameterSpec,
-    StatelessRuntime,
-    TypeVariable,
+)
+from synesthesia_machine.nodes.image.runtime_support import (
+    AdjustmentProcessor,
+    AdjustmentRuntime,
+    channel_like,
+    channel_selection_parameter,
+    combined_parameter_validator,
+    dynamic_image_channel_resolver,
+    dynamic_number,
 )
 from synesthesia_machine.nodes.migrations import (
     NodeMigration,
@@ -56,52 +60,12 @@ from synesthesia_machine.nodes.migrations import (
     migrate_invert_colour_v1_to_v2,
 )
 
-IMAGE_OR_CHANNEL = TypeVariable("IMAGE_OR_CHANNEL", frozenset({PortType.IMAGE, PortType.CHANNEL}))
-
-type AdjustmentProcessor = Callable[..., ImageFrame | ChannelFrame]
-
-
-class AdjustmentRuntime(StatelessRuntime):
-    def __init__(
-        self,
-        node_id: UUID,
-        processor: AdjustmentProcessor,
-        error_code: str,
-    ) -> None:
-        super().__init__(node_id)
-        self._processor = processor
-        self._error_code = error_code
-
-    def process(
-        self,
-        inputs: Mapping[str, RuntimeValue],
-        parameters: Mapping[str, ParameterValue],
-        context: FrameContext,
-    ) -> Mapping[str, RuntimeValue]:
-        del context
-        try:
-            source = inputs["image"]
-            if not isinstance(source, (ImageFrame, ChannelFrame)):
-                raise TypeError(f"Expected image or channel, got {type(source).__name__}")
-            result = self._processor(source, inputs, parameters)
-        except ValueError as error:
-            raise ExpectedNodeError(self._error_code, str(error)) from error
-        return {"image": result}
-
 
 def _factory(processor: AdjustmentProcessor, error_code: str) -> Callable[[UUID], NodeRuntime]:
     def create(node_id: UUID) -> NodeRuntime:
         return AdjustmentRuntime(node_id, processor, error_code)
 
     return create
-
-
-def _number(
-    inputs: Mapping[str, RuntimeValue],
-    parameters: Mapping[str, ParameterValue],
-    parameter_id: str,
-) -> float:
-    return cast(float, inputs.get(parameter_id, parameters[parameter_id]))
 
 
 def _selection(parameters: Mapping[str, ParameterValue]) -> ChannelSelection:
@@ -113,7 +77,9 @@ def _brightness(
     inputs: Mapping[str, RuntimeValue],
     parameters: Mapping[str, ParameterValue],
 ) -> ImageFrame:
-    return brightness_image(image, _number(inputs, parameters, "offset"), _selection(parameters))
+    return brightness_image(
+        image, dynamic_number(inputs, parameters, "offset"), _selection(parameters)
+    )
 
 
 def _contrast(
@@ -123,8 +89,8 @@ def _contrast(
 ) -> ImageFrame:
     return contrast_image(
         image,
-        _number(inputs, parameters, "factor"),
-        _number(inputs, parameters, "pivot"),
+        dynamic_number(inputs, parameters, "factor"),
+        dynamic_number(inputs, parameters, "pivot"),
         _selection(parameters),
     )
 
@@ -135,15 +101,15 @@ def _clamp(
     parameters: Mapping[str, ParameterValue],
 ) -> ImageFrame | ChannelFrame:
     if isinstance(image, ChannelFrame):
-        minimum = _number(inputs, parameters, "minimum")
-        maximum = _number(inputs, parameters, "maximum")
+        minimum = dynamic_number(inputs, parameters, "minimum")
+        maximum = dynamic_number(inputs, parameters, "maximum")
         if maximum < minimum:
             raise ValueError("clamp maximum must be greater than or equal to minimum")
-        return _channel_like(image, np.clip(image.data, minimum, maximum))
+        return channel_like(image, np.clip(image.data, minimum, maximum))
     return clamp_image(
         image,
-        _number(inputs, parameters, "minimum"),
-        _number(inputs, parameters, "maximum"),
+        dynamic_number(inputs, parameters, "minimum"),
+        dynamic_number(inputs, parameters, "maximum"),
         _selection(parameters),
         include_alpha=False,
     )
@@ -156,11 +122,11 @@ def _colour_levels(
 ) -> ImageFrame:
     return colour_levels_image(
         image,
-        input_black=_number(inputs, parameters, "input_black"),
-        input_white=_number(inputs, parameters, "input_white"),
-        gamma=_number(inputs, parameters, "gamma"),
-        output_black=_number(inputs, parameters, "output_black"),
-        output_white=_number(inputs, parameters, "output_white"),
+        input_black=dynamic_number(inputs, parameters, "input_black"),
+        input_white=dynamic_number(inputs, parameters, "input_white"),
+        gamma=dynamic_number(inputs, parameters, "gamma"),
+        output_black=dynamic_number(inputs, parameters, "output_black"),
+        output_white=dynamic_number(inputs, parameters, "output_white"),
         selection=_selection(parameters),
     )
 
@@ -170,7 +136,7 @@ def _hue(
     inputs: Mapping[str, RuntimeValue],
     parameters: Mapping[str, ParameterValue],
 ) -> ImageFrame:
-    return hue_image(image, _number(inputs, parameters, "turns"))
+    return hue_image(image, dynamic_number(inputs, parameters, "turns"))
 
 
 def _saturation(
@@ -178,7 +144,7 @@ def _saturation(
     inputs: Mapping[str, RuntimeValue],
     parameters: Mapping[str, ParameterValue],
 ) -> ImageFrame:
-    return saturation_image(image, _number(inputs, parameters, "factor"))
+    return saturation_image(image, dynamic_number(inputs, parameters, "factor"))
 
 
 def _invert(
@@ -212,7 +178,7 @@ def _gamma(
     inputs: Mapping[str, RuntimeValue],
     parameters: Mapping[str, ParameterValue],
 ) -> ImageFrame:
-    return gamma_image(image, _number(inputs, parameters, "gamma"), _selection(parameters))
+    return gamma_image(image, dynamic_number(inputs, parameters, "gamma"), _selection(parameters))
 
 
 def _add_scalar(
@@ -221,8 +187,12 @@ def _add_scalar(
     parameters: Mapping[str, ParameterValue],
 ) -> ImageFrame | ChannelFrame:
     if isinstance(image, ChannelFrame):
-        return _channel_like(image, image.data + np.float32(_number(inputs, parameters, "value")))
-    return add_scalar_image(image, _number(inputs, parameters, "value"), _selection(parameters))
+        return channel_like(
+            image, image.data + np.float32(dynamic_number(inputs, parameters, "value"))
+        )
+    return add_scalar_image(
+        image, dynamic_number(inputs, parameters, "value"), _selection(parameters)
+    )
 
 
 def _multiply_scalar(
@@ -231,9 +201,11 @@ def _multiply_scalar(
     parameters: Mapping[str, ParameterValue],
 ) -> ImageFrame | ChannelFrame:
     if isinstance(image, ChannelFrame):
-        return _channel_like(image, image.data * np.float32(_number(inputs, parameters, "value")))
+        return channel_like(
+            image, image.data * np.float32(dynamic_number(inputs, parameters, "value"))
+        )
     return multiply_scalar_image(
-        image, _number(inputs, parameters, "value"), _selection(parameters)
+        image, dynamic_number(inputs, parameters, "value"), _selection(parameters)
     )
 
 
@@ -243,43 +215,22 @@ def _divide_scalar(
     parameters: Mapping[str, ParameterValue],
 ) -> ImageFrame | ChannelFrame:
     if isinstance(image, ChannelFrame):
-        denominator = _number(inputs, parameters, "value")
+        denominator = dynamic_number(inputs, parameters, "value")
         epsilon = cast(float, parameters["epsilon"])
         policy = NearZeroPolicy(cast(str, parameters["near_zero_policy"]))
         if abs(denominator) < epsilon:
             if policy is NearZeroPolicy.ERROR:
                 raise ValueError("division scalar is near zero")
             if policy is NearZeroPolicy.REPLACE_WITH_ZERO:
-                return _channel_like(image, np.zeros_like(image.data))
+                return channel_like(image, np.zeros_like(image.data))
             denominator = math.copysign(epsilon, denominator if denominator else 1.0)
-        return _channel_like(image, image.data / np.float32(denominator))
+        return channel_like(image, image.data / np.float32(denominator))
     return divide_scalar_image(
         image,
-        _number(inputs, parameters, "value"),
+        dynamic_number(inputs, parameters, "value"),
         _selection(parameters),
         near_zero_policy=NearZeroPolicy(cast(str, parameters["near_zero_policy"])),
         epsilon=cast(float, parameters["epsilon"]),
-    )
-
-
-def _channel_parameter() -> ParameterSpec:
-    return ParameterSpec(
-        "channels",
-        "Channels",
-        PortType.STRING,
-        ChannelSelection.COLOUR.value,
-        help_text=(
-            "Chooses which channels receive the change: Colour affects the colour channels, All "
-            "channels affects every channel, and Channel 1 to 3 affect only that channel."
-        ),
-        # Sources never carry a fourth (alpha) channel, so CHANNEL_4 is not
-        # offered as a selectable target.
-        choices=tuple(
-            selection.value
-            for selection in ChannelSelection
-            if selection is not ChannelSelection.CHANNEL_4
-        ),
-        applicable_input_types=(PortType.IMAGE,),
     )
 
 
@@ -357,27 +308,6 @@ def _validate_positive(
     return validate
 
 
-def _combined_validator(
-    parameter_specs: tuple[ParameterSpec, ...],
-    validator: Callable[[Mapping[str, ParameterValue]], Sequence[str]] | None,
-) -> Callable[[Mapping[str, ParameterValue]], Sequence[str]]:
-    float_parameter_ids = tuple(
-        parameter.id for parameter in parameter_specs if parameter.value_type is PortType.FLOAT
-    )
-
-    def validate(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
-        finite_errors = tuple(
-            f"{parameter_id} must be finite"
-            for parameter_id in float_parameter_ids
-            if not math.isfinite(cast(float, parameters[parameter_id]))
-        )
-        if finite_errors:
-            return finite_errors
-        return () if validator is None else validator(parameters)
-
-    return validate
-
-
 def _definition(
     type_id: str,
     display_name: str,
@@ -403,17 +333,10 @@ def _definition(
         ExecutionKind.STATELESS,
         _factory(processor, f"invalid_{type_id.rsplit('.', 1)[1]}"),
         aliases=aliases,
-        parameter_validator=_combined_validator(parameters, validator),
-        port_type_resolver=_dynamic_image_channel_type if dynamic else None,
+        parameter_validator=combined_parameter_validator(parameters, validator),
+        port_type_resolver=dynamic_image_channel_resolver if dynamic else None,
         migrations=migrations or {},
     )
-
-
-def _dynamic_image_channel_type(
-    port_id: str, is_output: bool, parameters: Mapping[str, ParameterValue]
-) -> TypeVariable:
-    del port_id, is_output, parameters
-    return IMAGE_OR_CHANNEL
 
 
 def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
@@ -433,7 +356,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
                         "darken the image."
                     ),
                 ),
-                _channel_parameter(),
+                channel_selection_parameter(),
             ),
             _brightness,
             aliases=("exposure offset", "lighten", "darken"),
@@ -460,7 +383,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
                     0.5,
                     help_text="Value that stays fixed while the rest is scaled around it.",
                 ),
-                _channel_parameter(),
+                channel_selection_parameter(),
             ),
             _contrast,
             implementation_version=2,
@@ -484,7 +407,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
                     1.0,
                     help_text="Highest allowed value; pixels above it are lowered to this value.",
                 ),
-                _channel_parameter(),
+                channel_selection_parameter(),
             ),
             _clamp,
             validator=_validate_clamp,
@@ -532,7 +455,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
                     1.0,
                     help_text="Value the white point is mapped to.",
                 ),
-                _channel_parameter(),
+                channel_selection_parameter(),
             ),
             _colour_levels,
             aliases=("levels", "black point", "white point"),
@@ -649,7 +572,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
                     ),
                     choices=tuple(policy.value for policy in ConstantChannelPolicy),
                 ),
-                _channel_parameter(),
+                channel_selection_parameter(),
             ),
             _stretch,
             aliases=("normalize", "auto levels", "dynamic range"),
@@ -673,7 +596,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
                     ),
                     minimum=1e-6,
                 ),
-                _channel_parameter(),
+                channel_selection_parameter(),
             ),
             _gamma,
             validator=_validate_positive("gamma"),
@@ -692,7 +615,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
                     0.0,
                     help_text="Number added to every pixel of the selected channels.",
                 ),
-                _channel_parameter(),
+                channel_selection_parameter(),
             ),
             _add_scalar,
             aliases=("image offset",),
@@ -712,7 +635,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
                     1.0,
                     help_text="Number every pixel of the selected channels is multiplied by.",
                 ),
-                _channel_parameter(),
+                channel_selection_parameter(),
             ),
             _multiply_scalar,
             aliases=("image scale",),
@@ -750,7 +673,7 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
                     help_text="Smallest value that counts as nonzero for the near-zero policy.",
                     minimum=1e-12,
                 ),
-                _channel_parameter(),
+                channel_selection_parameter(),
             ),
             _divide_scalar,
             aliases=("image ratio",),
@@ -759,17 +682,6 @@ def create_adjustment_definitions() -> tuple[NodeDefinition, ...]:
             implementation_version=2,
             migrations={1: migrate_adjustment_channel_selection_v1_to_v2},
         ),
-    )
-
-
-def _channel_like(channel: ChannelFrame, data: np.ndarray) -> ChannelFrame:
-    return ChannelFrame(
-        read_only_float32(np.asarray(data, dtype=np.float32)),
-        channel.semantic,
-        channel.nominal_min,
-        channel.nominal_max,
-        channel.cyclic,
-        channel.context,
     )
 
 

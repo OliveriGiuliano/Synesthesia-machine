@@ -2,25 +2,18 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Callable, Mapping, Sequence
 from typing import cast
 from uuid import UUID
 
-import numpy as np
-
 from synesthesia_machine.contracts import (
-    AlphaMode,
     ChannelFrame,
-    ColorSpace,
     FrameContext,
-    FrameProvenance,
     ImageFrame,
     NumericMatrix,
     ParameterValue,
     PortType,
     RuntimeValue,
-    read_only_float32,
 )
 from synesthesia_machine.media import (
     BorderMode,
@@ -52,58 +45,19 @@ from synesthesia_machine.nodes import (
     ParameterEditorHint,
     ParameterSpec,
     StatelessRuntime,
-    TypeVariable,
+)
+from synesthesia_machine.nodes.image.runtime_support import (
+    FilterProcessor,
+    FilterRuntime,
+    channel_selection_parameter,
+    combined_parameter_validator,
+    dynamic_image_channel_resolver,
+    dynamic_number,
 )
 from synesthesia_machine.nodes.migrations import (
     NodeMigration,
     migrate_adjustment_channel_selection_v1_to_v2,
 )
-
-IMAGE_OR_CHANNEL = TypeVariable("IMAGE_OR_CHANNEL", frozenset({PortType.IMAGE, PortType.CHANNEL}))
-
-type FilterProcessor = Callable[
-    [
-        ImageFrame,
-        Mapping[str, RuntimeValue],
-        Mapping[str, ParameterValue],
-        FrameContext,
-    ],
-    ImageFrame,
-]
-
-
-class FilterRuntime(StatelessRuntime):
-    def __init__(self, node_id: UUID, processor: FilterProcessor, error_code: str) -> None:
-        super().__init__(node_id)
-        self._processor = processor
-        self._error_code = error_code
-
-    def process(
-        self,
-        inputs: Mapping[str, RuntimeValue],
-        parameters: Mapping[str, ParameterValue],
-        context: FrameContext,
-    ) -> Mapping[str, RuntimeValue]:
-        try:
-            source = inputs["image"]
-            if not isinstance(source, (ImageFrame, ChannelFrame)):
-                raise TypeError(f"Expected image or channel, got {type(source).__name__}")
-            # The COLOUR override is only meaningful for a single-channel source;
-            # build the throwaway parameter copy lazily so the common ImageFrame
-            # path passes the compiled parameter mapping through untouched.
-            if isinstance(source, ChannelFrame) and "channels" in parameters:
-                effective_parameters = dict(parameters)
-                effective_parameters["channels"] = ChannelSelection.COLOUR.value
-                result = self._processor(
-                    _as_image(source, self.node_id), inputs, effective_parameters, context
-                )
-            else:
-                result = self._processor(
-                    _as_image(source, self.node_id), inputs, parameters, context
-                )
-        except (TypeError, ValueError) as error:
-            raise ExpectedNodeError(self._error_code, str(error)) from error
-        return {"image": _restore_type(source, result)}
 
 
 class ThresholdRuntime(StatelessRuntime):
@@ -118,8 +72,8 @@ class ThresholdRuntime(StatelessRuntime):
             result = threshold_channel(
                 cast(ChannelFrame, inputs["channel"]),
                 mode=ThresholdMode(cast(str, parameters["mode"])),
-                threshold=_number(inputs, parameters, "threshold"),
-                maximum=_number(inputs, parameters, "maximum"),
+                threshold=dynamic_number(inputs, parameters, "threshold"),
+                maximum=dynamic_number(inputs, parameters, "maximum"),
             )
         except (TypeError, ValueError) as error:
             raise ExpectedNodeError("invalid_threshold", str(error)) from error
@@ -161,14 +115,6 @@ def _threshold_factory(node_id: UUID) -> NodeRuntime:
 
 def _canny_factory(node_id: UUID) -> NodeRuntime:
     return CannyRuntime(node_id)
-
-
-def _number(
-    inputs: Mapping[str, RuntimeValue],
-    parameters: Mapping[str, ParameterValue],
-    parameter_id: str,
-) -> float:
-    return cast(float, inputs.get(parameter_id, parameters[parameter_id]))
 
 
 def _gaussian_blur(
@@ -340,27 +286,6 @@ def _border_parameter() -> ParameterSpec:
     )
 
 
-def _channel_parameter() -> ParameterSpec:
-    return ParameterSpec(
-        "channels",
-        "Channels",
-        PortType.STRING,
-        ChannelSelection.COLOUR.value,
-        help_text=(
-            "Chooses which channels receive the change: Colour affects the colour channels, All "
-            "channels affects every channel, and Channel 1 to 3 affect only that channel."
-        ),
-        # Sources never carry a fourth (alpha) channel, so CHANNEL_4 is not
-        # offered as a selectable target.
-        choices=tuple(
-            selection.value
-            for selection in ChannelSelection
-            if selection is not ChannelSelection.CHANNEL_4
-        ),
-        applicable_input_types=(PortType.IMAGE,),
-    )
-
-
 def _float_parameter(
     parameter_id: str,
     label: str,
@@ -475,27 +400,6 @@ def _validate_positive(
     return validate
 
 
-def _combined_validator(
-    parameter_specs: tuple[ParameterSpec, ...],
-    validator: Callable[[Mapping[str, ParameterValue]], Sequence[str]] | None,
-) -> Callable[[Mapping[str, ParameterValue]], Sequence[str]]:
-    float_parameter_ids = tuple(
-        parameter.id for parameter in parameter_specs if parameter.value_type is PortType.FLOAT
-    )
-
-    def validate(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
-        finite_errors = tuple(
-            f"{parameter_id} must be finite"
-            for parameter_id in float_parameter_ids
-            if not math.isfinite(cast(float, parameters[parameter_id]))
-        )
-        if finite_errors:
-            return finite_errors
-        return () if validator is None else validator(parameters)
-
-    return validate
-
-
 def _definition(
     type_id: str,
     display_name: str,
@@ -520,17 +424,10 @@ def _definition(
         ExecutionKind.STATELESS,
         _factory(processor, f"invalid_{type_id.rsplit('.', 1)[1]}"),
         aliases=aliases,
-        parameter_validator=_combined_validator(parameters, validator),
-        port_type_resolver=_dynamic_image_channel_type,
+        parameter_validator=combined_parameter_validator(parameters, validator),
+        port_type_resolver=dynamic_image_channel_resolver,
         migrations=migrations or {},
     )
-
-
-def _dynamic_image_channel_type(
-    port_id: str, is_output: bool, parameters: Mapping[str, ParameterValue]
-) -> TypeVariable:
-    del port_id, is_output, parameters
-    return IMAGE_OR_CHANNEL
 
 
 def create_filter_definitions() -> tuple[NodeDefinition, ...]:
@@ -658,7 +555,7 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
                 "When on, the seed advances each frame so the noise pattern changes over time."
             ),
         ),
-        _channel_parameter(),
+        channel_selection_parameter(),
     )
     posterize_parameters = (
         ParameterSpec(
@@ -678,7 +575,7 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
             True,
             help_text="When on, values outside 0 to 1 are clamped before they are quantized.",
         ),
-        _channel_parameter(),
+        channel_selection_parameter(),
     )
     threshold_parameters = (
         ParameterSpec(
@@ -941,7 +838,7 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
             ExecutionKind.STATELESS,
             _threshold_factory,
             aliases=("binary", "cutoff"),
-            parameter_validator=_combined_validator(threshold_parameters, None),
+            parameter_validator=combined_parameter_validator(threshold_parameters, None),
         ),
         NodeDefinition(
             "synmachine.image.canny",
@@ -955,7 +852,7 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
             ExecutionKind.STATELESS,
             _canny_factory,
             aliases=("edges", "edge detection"),
-            parameter_validator=_combined_validator(canny_parameters, _validate_canny),
+            parameter_validator=combined_parameter_validator(canny_parameters, _validate_canny),
         ),
         _definition(
             "synmachine.image.convolve",
@@ -1002,35 +899,6 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
             aliases=("soften", "blur"),
             validator=_validate_positive("sigma"),
         ),
-    )
-
-
-def _as_image(value: ImageFrame | ChannelFrame, node_id: UUID) -> ImageFrame:
-    if isinstance(value, ImageFrame):
-        return value
-    replicated = np.repeat(value.data[..., None], 3, axis=2)
-    return ImageFrame(
-        read_only_float32(replicated),
-        ColorSpace.LINEAR_RGB,
-        ("R", "G", "B"),
-        AlphaMode.NONE,
-        value.context,
-        FrameProvenance(node_id, "channel_adapter"),
-    )
-
-
-def _restore_type(
-    source: ImageFrame | ChannelFrame, result: ImageFrame
-) -> ImageFrame | ChannelFrame:
-    if isinstance(source, ImageFrame):
-        return result
-    return ChannelFrame(
-        read_only_float32(result.data[..., 0]),
-        source.semantic,
-        source.nominal_min,
-        source.nominal_max,
-        source.cyclic,
-        source.context,
     )
 
 

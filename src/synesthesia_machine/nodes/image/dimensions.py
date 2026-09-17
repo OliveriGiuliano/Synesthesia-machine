@@ -6,17 +6,13 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import cast
-from uuid import UUID
 
 import numpy as np
 
 from synesthesia_machine.contracts import (
-    AlphaMode,
     ChannelFrame,
-    ColorSpace,
     ColorValue,
     FrameContext,
-    FrameProvenance,
     ImageFrame,
     ParameterValue,
     PortType,
@@ -44,10 +40,13 @@ from synesthesia_machine.nodes import (
     ParameterEditorHint,
     ParameterSpec,
     StatelessRuntime,
-    TypeVariable,
 )
-
-IMAGE_OR_CHANNEL = TypeVariable("IMAGE_OR_CHANNEL", frozenset({PortType.IMAGE, PortType.CHANNEL}))
+from synesthesia_machine.nodes.image.runtime_support import (
+    as_value_image,
+    dynamic_image_channel_resolver,
+    image_source,
+    restore_frame_type,
+)
 
 
 class ResizeRuntime(StatelessRuntime):
@@ -59,9 +58,9 @@ class ResizeRuntime(StatelessRuntime):
     ) -> Mapping[str, RuntimeValue]:
         del context
         try:
-            source = _image_or_channel(inputs["image"])
+            source = image_source(inputs["image"])
             result = resize_image(
-                _as_image(source, self.node_id),
+                as_value_image(source, self.node_id),
                 cast(int, inputs.get("width", parameters["width"])),
                 cast(int, inputs.get("height", parameters["height"])),
                 preserve_aspect=cast(bool, parameters["preserve_aspect"]),
@@ -70,7 +69,7 @@ class ResizeRuntime(StatelessRuntime):
             )
         except ValueError as error:
             raise ExpectedNodeError("invalid_resize", str(error)) from error
-        return {"image": _restore_type(source, result)}
+        return {"image": restore_frame_type(source, result)}
 
 
 class CropRuntime(StatelessRuntime):
@@ -82,7 +81,7 @@ class CropRuntime(StatelessRuntime):
     ) -> Mapping[str, RuntimeValue]:
         del context
         try:
-            source = _image_or_channel(inputs["image"])
+            source = image_source(inputs["image"])
             if isinstance(source, ChannelFrame):
                 result: ImageFrame | ChannelFrame = _crop_channel(source, parameters)
             else:
@@ -110,13 +109,13 @@ class FlipRuntime(StatelessRuntime):
     ) -> Mapping[str, RuntimeValue]:
         del context
         try:
-            source = _image_or_channel(inputs["image"])
+            source = image_source(inputs["image"])
             result = flip_image(
-                _as_image(source, self.node_id), FlipMode(cast(str, parameters["mode"]))
+                as_value_image(source, self.node_id), FlipMode(cast(str, parameters["mode"]))
             )
         except ValueError as error:
             raise ExpectedNodeError("invalid_flip", str(error)) from error
-        return {"image": _restore_type(source, result)}
+        return {"image": restore_frame_type(source, result)}
 
 
 class RotateRuntime(StatelessRuntime):
@@ -128,9 +127,9 @@ class RotateRuntime(StatelessRuntime):
     ) -> Mapping[str, RuntimeValue]:
         del context
         try:
-            source = _image_or_channel(inputs["image"])
+            source = image_source(inputs["image"])
             result = rotate_image(
-                _as_image(source, self.node_id),
+                as_value_image(source, self.node_id),
                 angle_degrees=cast(float, inputs.get("angle_degrees", parameters["angle_degrees"])),
                 centre_x=cast(float, inputs.get("centre_x", parameters["centre_x"])),
                 centre_y=cast(float, inputs.get("centre_y", parameters["centre_y"])),
@@ -141,7 +140,7 @@ class RotateRuntime(StatelessRuntime):
             )
         except ValueError as error:
             raise ExpectedNodeError("invalid_rotation", str(error)) from error
-        return {"image": _restore_type(source, result)}
+        return {"image": restore_frame_type(source, result)}
 
 
 def _validate_crop(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
@@ -250,7 +249,7 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
             ),
             ExecutionKind.STATELESS,
             ResizeRuntime,
-            port_type_resolver=_dynamic_image_channel_type,
+            port_type_resolver=dynamic_image_channel_resolver,
             aliases=("scale", "image size", "resample"),
         ),
         NodeDefinition(
@@ -333,7 +332,7 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
             aliases=("trim", "bounds", "roi"),
             parameter_validator=_validate_crop,
             parameter_editor_resolver=_crop_parameter_editor,
-            port_type_resolver=_dynamic_image_channel_type,
+            port_type_resolver=dynamic_image_channel_resolver,
         ),
         NodeDefinition(
             "synmachine.image.flip",
@@ -356,7 +355,7 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
             ExecutionKind.STATELESS,
             FlipRuntime,
             aliases=("mirror", "reverse"),
-            port_type_resolver=_dynamic_image_channel_type,
+            port_type_resolver=dynamic_image_channel_resolver,
         ),
         NodeDefinition(
             "synmachine.image.rotate",
@@ -449,50 +448,8 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
             ExecutionKind.STATELESS,
             RotateRuntime,
             aliases=("turn", "angle", "transform"),
-            port_type_resolver=_dynamic_image_channel_type,
+            port_type_resolver=dynamic_image_channel_resolver,
         ),
-    )
-
-
-def _dynamic_image_channel_type(
-    port_id: str, is_output: bool, parameters: Mapping[str, ParameterValue]
-) -> TypeVariable:
-    del port_id, is_output, parameters
-    return IMAGE_OR_CHANNEL
-
-
-def _image_or_channel(value: object) -> ImageFrame | ChannelFrame:
-    if isinstance(value, (ImageFrame, ChannelFrame)):
-        return value
-    raise TypeError(f"Expected image or channel, got {type(value).__name__}")
-
-
-def _as_image(value: ImageFrame | ChannelFrame, node_id: UUID) -> ImageFrame:
-    if isinstance(value, ImageFrame):
-        return value
-    return ImageFrame(
-        read_only_float32(value.data[..., None]),
-        ColorSpace.LINEAR_RGB,
-        ("value",),
-        AlphaMode.NONE,
-        value.context,
-        FrameProvenance(node_id, "channel_adapter"),
-    )
-
-
-def _restore_type(
-    source: ImageFrame | ChannelFrame, result: ImageFrame
-) -> ImageFrame | ChannelFrame:
-    if isinstance(source, ImageFrame):
-        return result
-    data = result.data[..., 0]
-    return ChannelFrame(
-        read_only_float32(data),
-        source.semantic,
-        source.nominal_min,
-        source.nominal_max,
-        source.cyclic,
-        source.context,
     )
 
 
