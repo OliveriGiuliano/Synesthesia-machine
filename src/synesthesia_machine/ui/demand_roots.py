@@ -5,21 +5,17 @@ projection. The function is pure and Qt-free, so the policy is testable without
 a main window or the engine; the editor feeds it the view model it already
 projects for rendering, and the projection owns the preview-visibility and
 execution-kind interpretations, so this module never re-reads raw ui_state or
-consult the registry.
+consult the registry. The display-visualizer families are headless node
+metadata (``NodeDefinition.preview_family``), not a local type-id table.
 """
 
 from __future__ import annotations
 
 from uuid import UUID
 
-from synesthesia_machine.nodes import ExecutionKind
-from synesthesia_machine.ui.preview_families import (
-    pill_type_names,
-    visualizer_type_ids,
-)
+from synesthesia_machine.nodes import ExecutionKind, PreviewDock
+from synesthesia_machine.ui.preview_families import pill_type_names
 from synesthesia_machine.ui.view_models import GraphViewModel
-
-NOTE_VISUALIZER_TYPE_IDS = visualizer_type_ids("note")
 
 
 def compute_demand_roots(
@@ -41,10 +37,10 @@ def compute_demand_roots(
         if node.execution_kind is ExecutionKind.SINK:
             roots.add(node.node_id)
         elif node.execution_kind is ExecutionKind.VISUALIZER:
-            # Note visualizers feed their own dock. Image/channel display nodes
-            # remain the demand anchors for the preview dock; link pills are
-            # anchored on producers instead (see below).
-            if node.type_id in NOTE_VISUALIZER_TYPE_IDS:
+            # Note visualizers feed their own dock; other display visualizers
+            # anchor the image preview dock. The family comes from the
+            # headless node metadata, not a local type-id table.
+            if node.preview_dock is PreviewDock.NOTE:
                 if note_dock_visible:
                     roots.add(node.node_id)
             elif image_dock_visible:

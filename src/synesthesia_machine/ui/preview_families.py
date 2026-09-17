@@ -1,15 +1,23 @@
-"""Preview-family taxonomy: one mapping from resolved port types to previews.
+"""Preview-family presentation taxonomy.
 
-Every UI consumer that reacts to the payload type of a connection — the canvas
-link pills, the image/note preview docks, the display visualizers that a
-connection can feed, and the port theme tokens — consults this module instead
-of re-encoding the mapping as string literals. Adding a new payload family is
-one entry in :data:`FAMILIES` (plus a theme token if it has one); no consumer
-code changes.
+Which preview dock a display visualizer feeds and the
+one-visualizer-per-dock rule are headless metadata on the node definitions
+(:mod:`synesthesia_machine.nodes.visualization`). This module owns the UI
+side of each family: which canvas link pills render, which display
+visualizer node a connection can be attached to, which window dock receives
+its live previews, and which theme token colours its ports.
+
+Every UI consumer that reacts to the payload type of a connection — the
+canvas link pills, the image/note preview docks, the display visualizers a
+connection can feed, and the port theme tokens — consults this module
+instead of re-encoding the mapping as string literals. Adding a new payload
+family is one entry in :data:`FAMILIES` (plus a theme token if it has one);
+no consumer code changes.
 
 The module is Qt-free: it maps type names to family identifiers, node type
-ids, input port ids, and theme token names. Qt widgets (the docks themselves)
-are resolved from the family's ``dock`` key by the window that owns them.
+ids, input port ids, and theme token names. Qt widgets (the docks
+themselves) are resolved from the family's ``dock`` key by the window that
+owns them.
 """
 
 from __future__ import annotations
@@ -22,6 +30,18 @@ from synesthesia_machine.nodes.visualization import (
     DISPLAY_IMAGE_DATA_TYPE_ID,
     NOTE_VISUALIZER_TYPE_ID,
 )
+
+__all__ = [
+    "FAMILIES",
+    "THEME_TOKENS",
+    "PreviewFamily",
+    "PreviewFamilySpec",
+    "display_visualizer",
+    "pill_family",
+    "pill_type_names",
+    "preview_family",
+    "theme_token",
+]
 
 
 class PreviewFamily(StrEnum):
@@ -129,31 +149,7 @@ def display_visualizer(type_name: str) -> tuple[str, str, str] | None:
     return (spec.display_visualizer_type_id, spec.visualizer_input_port, spec.dock or "")
 
 
-def visualizer_type_ids(dock: str) -> frozenset[str]:
-    """Display-visualizer node type ids that feed the named window dock."""
-
-    return frozenset(
-        spec.display_visualizer_type_id
-        for spec in FAMILIES.values()
-        if spec.dock == dock and spec.display_visualizer_type_id is not None
-    )
-
-
 def theme_token(type_name: str) -> str:
     """Theme token name for a port type; ``generic_port`` for unknown types."""
 
     return THEME_TOKENS.get(type_name, "generic_port")
-
-
-__all__ = [
-    "FAMILIES",
-    "THEME_TOKENS",
-    "PreviewFamily",
-    "PreviewFamilySpec",
-    "display_visualizer",
-    "pill_family",
-    "pill_type_names",
-    "preview_family",
-    "theme_token",
-    "visualizer_type_ids",
-]

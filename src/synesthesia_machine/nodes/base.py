@@ -327,6 +327,18 @@ class ExecutionKind(StrEnum):
     VISUALIZER = "VISUALIZER"
 
 
+class PreviewDock(StrEnum):
+    """The window preview dock a display visualizer feeds.
+
+    The editor keeps one display visualizer per dock: adding one removes
+    the dock's incumbent (e.g. a channel display takes the image dock's
+    slot from an image display).
+    """
+
+    IMAGE = "image"
+    NOTE = "note"
+
+
 class CachePolicy(StrEnum):
     AUTO = "AUTO"
     NEVER = "NEVER"
@@ -509,6 +521,7 @@ class NodeDefinition:
     media_parameter_id: str | None = None
     source_outputs: SourceOutputContract | None = None
     source_config_builder: SourceConfigBuilder | None = None
+    preview_dock: PreviewDock | None = None
 
     def __post_init__(self) -> None:
         if not _TYPE_ID.fullmatch(self.type_id):

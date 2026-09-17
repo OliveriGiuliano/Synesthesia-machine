@@ -27,6 +27,7 @@ from synesthesia_machine.graph import (
     randomize_graph_parameters,
 )
 from synesthesia_machine.nodes import NodeDefinition, NodeRegistry
+from synesthesia_machine.nodes.visualization import visualizer_replacement_type_ids
 from synesthesia_machine.persistence import (
     ClipboardFragment,
     copy_fragment,
@@ -53,12 +54,8 @@ from synesthesia_machine.ui.commands import (
     SetConnectionPreviewCommand,
     SetParameterCommand,
 )
-from synesthesia_machine.ui.preview_families import visualizer_type_ids
 from synesthesia_machine.ui.translations import tr, trf
 from synesthesia_machine.ui.view_models import GraphViewModel, ParameterViewModel, project_graph
-
-_IMAGE_VISUALIZER_TYPE_IDS = visualizer_type_ids("image")
-_NOTE_VISUALIZER_TYPE_IDS = visualizer_type_ids("note")
 
 
 class DocumentSession(QObject):
@@ -245,7 +242,7 @@ class DocumentSession(QObject):
         replaced_node_ids = {
             existing.id
             for existing in self.document.nodes
-            if existing.type_id in _visualizer_type_ids_for(type_id)
+            if existing.type_id in visualizer_replacement_type_ids(self.registry, type_id)
         }
         self.push(
             AddNodeCommand(
@@ -690,11 +687,3 @@ class DocumentSession(QObject):
     @Slot(bool)
     def _on_clean_changed(self, clean: bool) -> None:
         self.dirtyChanged.emit(not clean)
-
-
-def _visualizer_type_ids_for(type_id: str) -> frozenset[str]:
-    if type_id in _IMAGE_VISUALIZER_TYPE_IDS:
-        return _IMAGE_VISUALIZER_TYPE_IDS
-    if type_id in _NOTE_VISUALIZER_TYPE_IDS:
-        return _NOTE_VISUALIZER_TYPE_IDS
-    return frozenset()

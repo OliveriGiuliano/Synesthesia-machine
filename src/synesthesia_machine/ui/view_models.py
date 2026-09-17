@@ -28,6 +28,7 @@ from synesthesia_machine.nodes import (
     NodeRegistry,
     ParameterGroupSpec,
     ParameterSpec,
+    PreviewDock,
 )
 from synesthesia_machine.ui.connection_state import PREVIEW_VISIBLE_KEY
 from synesthesia_machine.ui.translations import tr
@@ -62,6 +63,7 @@ class NodeViewModel:
     node_id: UUID
     type_id: str
     execution_kind: ExecutionKind
+    preview_dock: PreviewDock | None
     title: str
     category: str
     description: str
@@ -226,6 +228,7 @@ def project_graph(
                 node.id,
                 node.type_id,
                 definition.execution_kind,
+                definition.preview_dock,
                 node.user_label or tr(definition.display_name),
                 # Keep the category untranslated: it is a stable palette key
                 # (node_category_color) as well as a display string; display

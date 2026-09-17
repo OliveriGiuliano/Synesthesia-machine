@@ -2,8 +2,8 @@
 
 The view model is the single surface renderers and the demand policy read:
 these tests pin the published fields — the preview-visibility rule, each
-node's execution kind, and the group list — so consumers never re-interpret
-raw ui_state or re-scan the document and registry.
+node's execution kind and preview dock, and the group list — so consumers
+never re-interpret raw ui_state or re-scan the document and registry.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from synesthesia_machine.graph import GraphCompiler, GraphDocument, GroupKind
-from synesthesia_machine.nodes import ExecutionKind
+from synesthesia_machine.nodes import ExecutionKind, PreviewDock
 from synesthesia_machine.nodes.composition import create_builtin_registry
 from synesthesia_machine.ui.connection_state import PREVIEW_VISIBLE_KEY
 from synesthesia_machine.ui.view_models import project_graph
@@ -64,6 +64,20 @@ def test_execution_kind_and_is_source_are_published_on_the_node_view() -> None:
     assert by_id[source_id].is_source
     assert by_id[display_id].execution_kind is ExecutionKind.VISUALIZER
     assert not by_id[display_id].is_source
+
+
+def test_preview_dock_is_published_on_the_node_view() -> None:
+    document = GraphDocument()
+    image_id = document.add_node("synmachine.visualization.display_image_data")
+    note_id = document.add_node("synmachine.visualization.note_visualizer")
+    number_id = document.add_node("synmachine.utility.number")
+
+    view = _view_model(document)
+    by_id = {node.node_id: node for node in view.nodes}
+
+    assert by_id[image_id].preview_dock is PreviewDock.IMAGE
+    assert by_id[note_id].preview_dock is PreviewDock.NOTE
+    assert by_id[number_id].preview_dock is None
 
 
 def test_groups_are_published_on_the_graph_view() -> None:

@@ -62,7 +62,7 @@ from synesthesia_machine.graph import (
     ValidationIssue,
     generate_random_graph,
 )
-from synesthesia_machine.nodes import NodeRegistry
+from synesthesia_machine.nodes import NodeRegistry, PreviewDock
 from synesthesia_machine.persistence import (
     GraphPersistenceError,
     RelinkMatch,
@@ -94,7 +94,7 @@ from synesthesia_machine.ui.midi_export import (
     midi_export_failure_text,
     midi_export_tooltip,
 )
-from synesthesia_machine.ui.preview_families import display_visualizer, visualizer_type_ids
+from synesthesia_machine.ui.preview_families import display_visualizer
 from synesthesia_machine.ui.preview_router import PreviewRouter, PumpedPreviews
 from synesthesia_machine.ui.previews import (
     ImagePreviewPanel,
@@ -1366,9 +1366,8 @@ class MainWindow(QMainWindow):
     def _image_visualizer_source_keys(
         view: GraphViewModel,
     ) -> frozenset[tuple[UUID, str]]:
-        image_visualizer_ids = visualizer_type_ids("image")
         visualizer_ids = {
-            node.node_id for node in view.nodes if node.type_id in image_visualizer_ids
+            node.node_id for node in view.nodes if node.preview_dock is PreviewDock.IMAGE
         }
         return frozenset(
             (connection.source_node_id, connection.source_port_id)

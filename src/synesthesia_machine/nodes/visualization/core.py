@@ -19,6 +19,7 @@ from synesthesia_machine.nodes.base import (
     InputPortSpec,
     NodeDefinition,
     ParameterSpec,
+    PreviewDock,
     StatelessRuntime,
 )
 from synesthesia_machine.nodes.migrations import migration_parameters
@@ -112,6 +113,7 @@ def create_visualization_definitions() -> tuple[NodeDefinition, ...]:
             ExecutionKind.VISUALIZER,
             _VisualizerRuntime,
             cache_policy=CachePolicy.NEVER,
+            preview_dock=PreviewDock.IMAGE,
             aliases=("image preview", "view image", "monitor image"),
             migrations={1: migrate_display_image_data_v1_to_v2},
         ),
@@ -158,6 +160,7 @@ def create_visualization_definitions() -> tuple[NodeDefinition, ...]:
             ExecutionKind.VISUALIZER,
             _VisualizerRuntime,
             cache_policy=CachePolicy.NEVER,
+            preview_dock=PreviewDock.IMAGE,
             aliases=("channel preview", "view channel", "monitor channel"),
             migrations={1: migrate_channel_display_v1_to_v2},
         ),
@@ -173,6 +176,7 @@ def create_visualization_definitions() -> tuple[NodeDefinition, ...]:
             ExecutionKind.VISUALIZER,
             _VisualizerRuntime,
             cache_policy=CachePolicy.NEVER,
+            preview_dock=PreviewDock.NOTE,
             aliases=("midi preview", "piano", "notes"),
         ),
     )

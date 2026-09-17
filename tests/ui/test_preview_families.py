@@ -1,14 +1,17 @@
-"""Tests for the preview-family taxonomy.
+"""Tests for the preview-family presentation taxonomy.
 
-The taxonomy is the single mapping from resolved port type names to preview
-families, display visualizers, docks, and theme tokens; these tests pin the
-whole table so a consumer can never drift from it.
+The taxonomy maps resolved port types to preview families, display
+visualizers, docks, and theme tokens; the headless rule it must agree with
+is the preview dock declared by each display visualizer (see the nodes
+package). These tests pin the UI table and keep it consistent with that
+headless metadata.
 """
 
 from __future__ import annotations
 
 import pytest
 
+from synesthesia_machine.nodes.composition import create_builtin_registry
 from synesthesia_machine.nodes.visualization import (
     CHANNEL_DISPLAY_TYPE_ID,
     DISPLAY_IMAGE_DATA_TYPE_ID,
@@ -22,7 +25,6 @@ from synesthesia_machine.ui.preview_families import (
     pill_type_names,
     preview_family,
     theme_token,
-    visualizer_type_ids,
 )
 
 
@@ -73,18 +75,21 @@ def test_display_visualizer_targets_are_the_family_visualizers() -> None:
     assert display_visualizer("BOOL") is None
 
 
-def test_visualizer_type_ids_are_grouped_by_dock() -> None:
-    assert visualizer_type_ids("image") == frozenset(
-        {DISPLAY_IMAGE_DATA_TYPE_ID, CHANNEL_DISPLAY_TYPE_ID}
-    )
-    assert visualizer_type_ids("note") == frozenset({NOTE_VISUALIZER_TYPE_ID})
-    assert visualizer_type_ids("unknown dock") == frozenset()
+def test_ui_visualizer_choices_match_the_headless_docks() -> None:
+    """The display visualizer the UI attaches must feed the family's dock.
 
+    The one-visualizer-per-dock rule is headless node metadata; this keeps
+    the UI's presentation table from drifting away from it.
+    """
 
-def test_theme_tokens_cover_all_port_types_with_a_generic_fallback() -> None:
-    assert theme_token("FLOAT") == "float_port"
-    assert theme_token("INT") == "int_port"
-    assert theme_token("BOOL") == "bool_port"
+    from synesthesia_machine.nodes import PreviewDock
+    from synesthesia_machine.nodes.visualization import visualizer_dock
+
+    registry = create_builtin_registry()
+    for spec in FAMILIES.values():
+        if spec.display_visualizer_type_id is None or spec.dock is None:
+            continue
+        assert visualizer_dock(registry, spec.display_visualizer_type_id) is PreviewDock(spec.dock)
     assert theme_token("STRING") == "string_port"
     assert theme_token("COLOR") == "color_port"
     assert theme_token("IMAGE") == "image_port"
