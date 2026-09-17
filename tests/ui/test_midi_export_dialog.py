@@ -161,7 +161,7 @@ def test_export_failure_shows_the_translated_failure_text(
 def test_looping_video_source_stays_eligible_for_export(
     video_window: MainWindow, tmp_path: Path
 ) -> None:
-    from synesthesia_machine.ui.midi_export import midi_export_eligibility
+    from synesthesia_machine.runtime import midi_export_eligibility
 
     session = video_window.session
     source = session.add_node(

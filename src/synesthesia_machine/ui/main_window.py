@@ -72,7 +72,7 @@ from synesthesia_machine.persistence import (
     verify_relink_candidate,
 )
 from synesthesia_machine.persistence.autosave import AutosaveStore
-from synesthesia_machine.runtime import EngineSession
+from synesthesia_machine.runtime import EngineSession, midi_export_eligibility
 from synesthesia_machine.ui.actions import ActionRegistry, ActionSpec
 from synesthesia_machine.ui.application_settings import (
     ApplicationSettingsStore,
@@ -90,7 +90,6 @@ from synesthesia_machine.ui.engine_bridge import (
 from synesthesia_machine.ui.engine_task_runner import QtEngineTaskRunner, QtUiClock
 from synesthesia_machine.ui.midi_export import (
     MidiExportJob,
-    midi_export_eligibility,
     midi_export_failure_text,
     midi_export_tooltip,
 )

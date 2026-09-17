@@ -25,6 +25,7 @@ if TYPE_CHECKING:
         MidiExportError,
         MidiExportProgress,
         MidiExportResult,
+        midi_export_eligibility,
         run_midi_export,
     )
     from synesthesia_machine.runtime.preview_channel import (
@@ -64,6 +65,7 @@ __all__ = [
     "SharedMemoryPreviewWriter",
     "TickObserver",
     "TickResult",
+    "midi_export_eligibility",
     "run_midi_export",
 ]
 
@@ -97,11 +99,18 @@ def __getattr__(name: str) -> object:
             "LatestFrameGraphWorker": LatestFrameGraphWorker,
             "TickObserver": TickObserver,
         }[name]
-    if name in {"MidiExportError", "MidiExportProgress", "MidiExportResult", "run_midi_export"}:
+    if name in {
+        "MidiExportError",
+        "MidiExportProgress",
+        "MidiExportResult",
+        "midi_export_eligibility",
+        "run_midi_export",
+    }:
         from synesthesia_machine.runtime.midi_export import (
             MidiExportError,
             MidiExportProgress,
             MidiExportResult,
+            midi_export_eligibility,
             run_midi_export,
         )
 
@@ -109,6 +118,7 @@ def __getattr__(name: str) -> object:
             "MidiExportError": MidiExportError,
             "MidiExportProgress": MidiExportProgress,
             "MidiExportResult": MidiExportResult,
+            "midi_export_eligibility": midi_export_eligibility,
             "run_midi_export": run_midi_export,
         }[name]
     if name == "PreviewBroker":

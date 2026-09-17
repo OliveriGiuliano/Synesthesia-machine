@@ -218,3 +218,89 @@ def test_export_drains_the_worker_mailbox_before_collecting(
     result = run_midi_export(document.snapshot(), registry=registry)
     assert drains, "exporter must drain the worker mailbox before collecting samples"
     assert result.events
+
+
+def test_eligibility_accepts_a_valid_video_midi_graph(export_env) -> None:
+    from synesthesia_machine.runtime import midi_export_eligibility
+
+    video, registry = export_env
+    document = _video_pitch_midi_document(video)
+    assert midi_export_eligibility(document.snapshot(), registry, graph_valid=True) == (
+        True,
+        "",
+    )
+
+
+def test_eligibility_reports_invalid_graphs_even_when_rules_pass(export_env) -> None:
+    from synesthesia_machine.runtime import midi_export_eligibility
+
+    video, registry = export_env
+    document = _video_pitch_midi_document(video)
+    assert midi_export_eligibility(document.snapshot(), registry, graph_valid=False) == (
+        False,
+        "invalid_graph",
+    )
+
+
+def test_eligibility_reports_missing_sources_and_outputs(export_env) -> None:
+    from synesthesia_machine.runtime import midi_export_eligibility
+
+    _video, registry = export_env
+
+    empty = GraphDocument()
+    assert midi_export_eligibility(empty.snapshot(), registry) == (False, "no_source")
+
+    no_output = GraphDocument()
+    no_output.add_node(
+        "synmachine.input.load_video",
+        implementation_version=2,
+        parameters={"file_path": str(export_env[0])},
+    )
+    assert midi_export_eligibility(no_output.snapshot(), registry) == (
+        False,
+        "no_midi_output",
+    )
+
+
+def test_eligibility_reports_camera_and_missing_media_sources(export_env) -> None:
+    from synesthesia_machine.runtime import midi_export_eligibility
+
+    video, registry = export_env
+
+    camera = _video_pitch_midi_document(video)
+    camera.add_node("synmachine.input.load_camera")
+    assert midi_export_eligibility(camera.snapshot(), registry) == (False, "camera_source")
+
+    broken = GraphDocument()
+    broken.add_node(
+        "synmachine.input.load_video",
+        implementation_version=2,
+        parameters={"file_path": str(video.parent / "absent.mp4")},
+    )
+    broken.add_node("synmachine.output.send_midi")
+    assert midi_export_eligibility(broken.snapshot(), registry) == (False, "missing_media")
+
+
+def test_eligibility_and_the_exporter_share_one_scan(export_env) -> None:
+    """When the rules say the export can start, the exporter agrees.
+
+    Both consult the same node scan: an eligible graph must not fail
+    validation, and a rule failure must be visible before the engine
+    starts.
+    """
+
+    from synesthesia_machine.runtime import midi_export_eligibility
+
+    video, registry = export_env
+    document = _video_pitch_midi_document(video)
+    assert midi_export_eligibility(document.snapshot(), registry) == (True, "")
+    result = run_midi_export(document.snapshot(), registry=registry)
+    assert result.events
+
+    camera = _video_pitch_midi_document(video)
+    camera.add_node("synmachine.input.load_camera")
+    snapshot = camera.snapshot()
+    assert midi_export_eligibility(snapshot, registry) == (False, "camera_source")
+    with pytest.raises(MidiExportError) as excinfo:
+        run_midi_export(snapshot, registry=registry)
+    assert excinfo.value.code == "camera_source"

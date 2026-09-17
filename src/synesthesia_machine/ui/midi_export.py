@@ -26,54 +26,11 @@ from PySide6.QtWidgets import (
 from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.graph.model import GraphSnapshot
 from synesthesia_machine.midi import NullDebugSynth, NullMidiOutputService
-from synesthesia_machine.nodes import ExecutionKind, NodeRegistry
-from synesthesia_machine.nodes.input import LOAD_CAMERA_TYPE_ID, LOAD_VIDEO_TYPE_ID
-from synesthesia_machine.nodes.output import GENERATE_AUDIO_TYPE_ID, SEND_MIDI_TYPE_ID
 from synesthesia_machine.runtime import MidiExportError, run_midi_export
 from synesthesia_machine.ui.translations import tr, trf
 
 if TYPE_CHECKING:
     from synesthesia_machine.ui.main_window import MainWindow
-
-
-def midi_export_eligibility(
-    snapshot: GraphSnapshot,
-    registry: NodeRegistry,
-    *,
-    graph_valid: bool,
-) -> tuple[bool, str]:
-    """Why the Export MIDI action is (not) usable, as a stable reason code."""
-
-    saw_source = False
-    all_video = True
-    missing_media = False
-    has_midi_output = False
-    for node in snapshot.nodes:
-        definition = registry.get(node.type_id)
-        if definition is None:
-            continue
-        if definition.type_id in (SEND_MIDI_TYPE_ID, GENERATE_AUDIO_TYPE_ID):
-            has_midi_output = True
-        if definition.execution_kind is not ExecutionKind.SOURCE:
-            continue
-        saw_source = True
-        if definition.type_id == LOAD_CAMERA_TYPE_ID:
-            all_video = False
-        elif definition.type_id == LOAD_VIDEO_TYPE_ID:
-            file_path = node.parameters.get("file_path")
-            if not (isinstance(file_path, str) and file_path and Path(file_path).is_file()):
-                missing_media = True
-    if not saw_source:
-        return False, "no_source"
-    if not all_video:
-        return False, "camera_source"
-    if missing_media:
-        return False, "missing_media"
-    if not has_midi_output:
-        return False, "no_midi_output"
-    if not graph_valid:
-        return False, "invalid_graph"
-    return True, ""
 
 
 _MIDI_EXPORT_FAILURE_TEXTS = {
@@ -107,6 +64,7 @@ def midi_export_tooltip(reason: str) -> str:
         "no_source": tr("Add a Load Video source to export MIDI."),
         "camera_source": tr("Camera sources cannot be exported: use only Load Video sources."),
         "missing_media": tr("Locate the missing video file to export MIDI."),
+        "unsupported_source": tr("A source type in the graph cannot be exported."),
         "no_midi_output": tr("Add a Send MIDI or Generate Audio node to export MIDI."),
     }.get(reason, "")
 
@@ -292,7 +250,6 @@ __all__ = [
     "MidiExportJob",
     "MidiExportOverlay",
     "MidiExportSignals",
-    "midi_export_eligibility",
     "midi_export_failure_text",
     "midi_export_tooltip",
 ]

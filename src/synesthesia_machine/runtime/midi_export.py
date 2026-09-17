@@ -252,14 +252,21 @@ def _int_parameter(node: NodeModel, parameter_id: str, default: int) -> int:
     return value
 
 
-def _validate_export_inputs(
+def _scan_export_nodes(
     snapshot: GraphSnapshot, *, registry: NodeRegistry
-) -> tuple[list[_SourceFrameCount], list[UUID]]:
-    """Return (video sources, MIDI output node IDs) or raise a stable-coded error."""
+) -> tuple[list[_SourceFrameCount], list[UUID], bool, tuple[str, str] | None]:
+    """One walk of the graph collecting the facts an export needs.
+
+    Returns (video sources, MIDI output node ids, saw a source at all, first
+    per-source problem in node order as a (code, message) pair). Both the
+    eligibility check and the export-time validation consume these facts so
+    the menu state and the exporter can never disagree about the rules.
+    """
 
     sources: list[_SourceFrameCount] = []
     midi_output_ids: list[UUID] = []
     saw_source = False
+    first_problem: tuple[str, str] | None = None
     for node in snapshot.nodes:
         definition = registry.get(node.type_id)
         if definition is None:
@@ -271,21 +278,24 @@ def _validate_export_inputs(
             continue
         saw_source = True
         if definition.type_id == LOAD_CAMERA_TYPE_ID:
-            raise MidiExportError(
+            first_problem = first_problem or (
                 "camera_source",
                 "Exporting needs a finite timeline: camera sources cannot be exported.",
             )
+            continue
         if definition.type_id != LOAD_VIDEO_TYPE_ID:
-            raise MidiExportError(
+            first_problem = first_problem or (
                 "unsupported_source",
                 f"Source type {definition.type_id!r} cannot be exported.",
             )
+            continue
         file_path = str(node.parameters.get("file_path", ""))
         if not file_path or not Path(file_path).is_file():
-            raise MidiExportError(
+            first_problem = first_problem or (
                 "missing_media",
                 f"Load Video {definition.display_name} points to a file that cannot be read.",
             )
+            continue
         sources.append(
             _SourceFrameCount(
                 node.id,
@@ -296,6 +306,44 @@ def _validate_export_inputs(
                 end_s=_float_parameter(node, "loop_end_s", 0.0),
             )
         )
+    return sources, midi_output_ids, saw_source, first_problem
+
+
+def midi_export_eligibility(
+    snapshot: GraphSnapshot,
+    registry: NodeRegistry,
+    *,
+    graph_valid: bool = True,
+) -> tuple[bool, str]:
+    """Why the graph can (not) be exported to MIDI, as a stable reason code.
+
+    Shares the rule set :func:`run_midi_export` enforces (same codes, same
+    scan) plus the graph-valid precondition that only the editor knows.
+    Returns ``(True, "")`` when the export can start.
+    """
+
+    _, midi_output_ids, saw_source, first_problem = _scan_export_nodes(snapshot, registry=registry)
+    if not saw_source:
+        return False, "no_source"
+    if first_problem is not None:
+        return False, first_problem[0]
+    if not midi_output_ids:
+        return False, "no_midi_output"
+    if not graph_valid:
+        return False, "invalid_graph"
+    return True, ""
+
+
+def _validate_export_inputs(
+    snapshot: GraphSnapshot, *, registry: NodeRegistry
+) -> tuple[list[_SourceFrameCount], list[UUID]]:
+    """Return (video sources, MIDI output node IDs) or raise a stable-coded error."""
+
+    sources, midi_output_ids, saw_source, first_problem = _scan_export_nodes(
+        snapshot, registry=registry
+    )
+    if first_problem is not None:
+        raise MidiExportError(first_problem[0], first_problem[1])
     if not saw_source:
         raise MidiExportError("no_source", "The graph has no source node to simulate.")
     if not midi_output_ids:
