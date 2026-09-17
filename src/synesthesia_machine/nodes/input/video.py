@@ -7,9 +7,8 @@ from copy import deepcopy
 from dataclasses import replace
 from uuid import UUID
 
-from synesthesia_machine.contracts import JsonObject, ParameterValue, PortType
+from synesthesia_machine.contracts import JsonObject, ParameterValue, PortType, SourceStatus
 from synesthesia_machine.media import build_video_source_config
-from synesthesia_machine.media.video_source import inspect_video
 from synesthesia_machine.media_path import normalize_media_path
 from synesthesia_machine.nodes.base import (
     CachePolicy,
@@ -27,8 +26,6 @@ from synesthesia_machine.nodes.migrations import migration_parameters
 LOAD_VIDEO_TYPE_ID = "synmachine.input.load_video"
 
 _LOOP_TIMESTAMP_IDS = frozenset({"loop_start_s", "loop_end_s"})
-_DURATION_CACHE_MAX_ENTRIES = 128
-_video_duration_cache: dict[tuple[str, int, int], float | None] = {}
 
 
 def migrate_load_video_v0_to_v1(data: JsonObject) -> JsonObject:
@@ -57,31 +54,6 @@ class LoadVideoRuntime(NoDataRuntime):
         super().__init__(node_id, ("image", "processed_index"))
 
 
-def _video_region_duration(file_path: str, stream_index: int) -> float | None:
-    """Cached playback duration for one video file/stream pair.
-
-    The editor resolver calls this on every re-projection, so the container
-    is only re-opened when the file's mtime (or the stream choice) changes.
-    """
-
-    try:
-        source_path = normalize_media_path(file_path)
-        key = (str(source_path), int(source_path.stat().st_mtime_ns), stream_index)
-    except (OSError, ValueError):
-        return None
-    if key in _video_duration_cache:
-        return _video_duration_cache[key]
-    if len(_video_duration_cache) >= _DURATION_CACHE_MAX_ENTRIES:
-        _video_duration_cache.clear()
-    duration: float | None
-    try:
-        duration = inspect_video(source_path, stream_index=stream_index).duration_s
-    except Exception:
-        duration = None
-    _video_duration_cache[key] = duration
-    return duration
-
-
 def _validate_load_video(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
     start = parameters.get("loop_start_s")
     end = parameters.get("loop_end_s")
@@ -91,21 +63,25 @@ def _validate_load_video(parameters: Mapping[str, ParameterValue]) -> Sequence[s
 
 
 def _load_video_parameter_editor(
-    spec: ParameterSpec, values: Mapping[str, ParameterValue]
+    spec: ParameterSpec,
+    values: Mapping[str, ParameterValue],
+    status: SourceStatus | None,
 ) -> ParameterSpec:
     """Bound the loop timestamp editors to the video's real time range.
 
-    With a resolvable file the sliders stop at the video's duration; the
-    start timestamp additionally stops at a concrete loop end.
+    The bound is the duration the engine published for this node's source
+    (ADR-0023); the resolver itself performs no file I/O. The start
+    timestamp additionally stops at a concrete loop end.
     """
 
     if spec.id not in _LOOP_TIMESTAMP_IDS:
         return spec
     file_path = values.get("file_path")
-    stream_index = values.get("stream_index")
-    if not isinstance(file_path, str) or not file_path or not isinstance(stream_index, int):
+    if not isinstance(file_path, str) or not file_path or status is None:
         return spec
-    duration = _video_region_duration(file_path, stream_index)
+    if str(normalize_media_path(status.file_path)) != str(normalize_media_path(file_path)):
+        return spec
+    duration = status.duration_s
     if duration is None:
         return spec
     maximum = float(duration)

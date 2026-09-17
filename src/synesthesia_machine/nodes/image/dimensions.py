@@ -17,6 +17,7 @@ from synesthesia_machine.contracts import (
     ParameterValue,
     PortType,
     RuntimeValue,
+    SourceStatus,
     read_only_float32,
 )
 from synesthesia_machine.media import (
@@ -164,9 +165,13 @@ _CROP_BOUND_IDS = frozenset({"left", "top", "right", "bottom"})
 
 
 def _crop_parameter_editor(
-    spec: ParameterSpec, values: Mapping[str, ParameterValue]
+    spec: ParameterSpec,
+    values: Mapping[str, ParameterValue],
+    status: SourceStatus | None,
 ) -> ParameterSpec:
     """Present normalized crop bounds as 0..1 sliders; pixel bounds stay plain fields."""
+
+    del status
     if spec.id not in _CROP_BOUND_IDS:
         return spec
     if (

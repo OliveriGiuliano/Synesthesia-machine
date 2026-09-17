@@ -6,7 +6,7 @@
 
 **ADR:** Requires a new ADR either way: either blessing the bounded header probe or recording the redesign — the current state is an unrecorded compromise.
 
-**Status:** open
+**Status:** resolved
 
 **Files:**
 - `src/synesthesia_machine/nodes/input/video.py`
@@ -15,6 +15,10 @@
 - `docs/adr/ (new ADR if the probe is blessed)`
 
 **Acceptance:**
+
+# Answer
+
+Shipped (duration arrives as data; ADR-0023 records the redesign, resolving the unrecorded compromise with ADR-0005): `ParameterEditorResolver` is now the pure `(spec, values, source_status) -> spec` protocol. The UI keeps the latest `SourceStatus` values (main window forwards engine telemetry to the session, which gates re-projection on the editor-relevant fields file+duration so per-tick cursor movement is a no-op) and passes the matching status into `project_graph`. The Load Video resolver bounds its loop sliders with the engine-published `status.duration_s` when the status file matches the configured file; the PyAV header probe, its module-level cache, and the mtime key are gone from the definition layer, and `inspect_video` stays in `media` as the engine process's probe. Crop's mode-presentation resolver conforms to the uniform signature. New tests: tests/nodes/input/test_video.py (bounds from published duration, loop-end clamp, file mismatch/missing duration/missing file stay unbounded, resolver never probes the filesystem) and updated crop-resolver call sites.
 - [ ] Definition stays a testable value object
 - [ ] UI thread performs no file I/O
 - [ ] Cache + probe vanish if duration arrives as data

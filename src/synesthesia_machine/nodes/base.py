@@ -15,6 +15,7 @@ from synesthesia_machine.contracts.engine_client import (
     MidiOutputStatus,
     NodeMemoryDiagnostic,
     ResetReason,
+    SourceStatus,
 )
 from synesthesia_machine.contracts.engine_client import (
     NodeExecutionError as NodeExecutionError,
@@ -450,7 +451,7 @@ type PortTypeResolver = Callable[[str, bool, Mapping[str, ParameterValue]], Port
 type RequiredInputResolver = Callable[[Mapping[str, ParameterValue]], Sequence[str]]
 type ParameterValidator = Callable[[Mapping[str, ParameterValue]], Sequence[str]]
 type ParameterEditorResolver = Callable[
-    [ParameterSpec, Mapping[str, ParameterValue]], ParameterSpec
+    [ParameterSpec, Mapping[str, ParameterValue], SourceStatus | None], ParameterSpec
 ]
 
 

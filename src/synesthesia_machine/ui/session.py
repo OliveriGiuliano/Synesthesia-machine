@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -11,7 +11,7 @@ from weakref import ref
 from PySide6.QtCore import QObject, Signal, Slot
 from PySide6.QtGui import QUndoCommand, QUndoStack
 
-from synesthesia_machine.contracts import DeviceCatalogue, DeviceKind
+from synesthesia_machine.contracts import DeviceCatalogue, DeviceKind, SourceStatus
 from synesthesia_machine.graph import (
     CompilationResult,
     ConnectionModel,
@@ -79,6 +79,7 @@ class DocumentSession(QObject):
     def __init__(self, registry: NodeRegistry, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self.registry = registry
+        self._source_statuses: dict[UUID, SourceStatus] = {}
         self.compiler = GraphCompiler(registry)
         self.document = GraphDocument()
         self.undo_stack = QUndoStack(self)
@@ -640,7 +641,35 @@ class DocumentSession(QObject):
             self.registry,
             self.report,
             compilation=self._compilation,
+            source_statuses=self._source_statuses or None,
         )
+
+    def set_source_statuses(self, statuses: Sequence[SourceStatus]) -> None:
+        """Remember the engine's source statuses for editor projection.
+
+        Only the editor-relevant fields (file, duration) gate a re-projection:
+        the time cursor moves every telemetry tick and must not re-project the
+        whole view model (ADR-0023).
+        """
+
+        latest = {status.node_id: status for status in statuses}
+        digest = {
+            node_id: (status.file_path, status.duration_s) for node_id, status in latest.items()
+        }
+        if digest == {
+            node_id: (status.file_path, status.duration_s)
+            for node_id, status in self._source_statuses.items()
+        }:
+            return
+        self._source_statuses = latest
+        self._view_model = project_graph(
+            self.document.snapshot(),
+            self.registry,
+            self.report,
+            compilation=self._compilation,
+            source_statuses=latest,
+        )
+        self.changed.emit()
 
     def _refresh(self, *, runtime_changed: bool = True, recompile: bool = True) -> None:
         # Compile and project from the current document state; every command

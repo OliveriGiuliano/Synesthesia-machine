@@ -1507,6 +1507,7 @@ class MainWindow(QMainWindow):
             return
         sources = state.source_statuses
         midi_outputs = state.midi_output_statuses
+        self.session.set_source_statuses(sources)
         self.inspector.set_memory_diagnostic(state.diagnostic)
         self.inspector.set_source_statuses(sources)
         source_text = ", ".join(tr(status.state.value) for status in sources) or tr("no source")

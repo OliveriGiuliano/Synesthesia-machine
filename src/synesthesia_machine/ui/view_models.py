@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from uuid import UUID
 
-from synesthesia_machine.contracts import ParameterValue, PortType
+from synesthesia_machine.contracts import ParameterValue, PortType, SourceStatus
 from synesthesia_machine.graph import (
     CompilationResult,
     GraphCompiler,
@@ -85,12 +85,13 @@ def _projected_parameter_spec(
     definition: NodeDefinition,
     parameter: ParameterSpec,
     parameters: Mapping[str, ParameterValue],
+    status: SourceStatus | None = None,
 ) -> ParameterSpec:
     """Localise a parameter spec, then apply the node's mode-dependent editor intent."""
 
     spec = replace(parameter, label=tr(parameter.label), help_text=tr(parameter.help_text))
     if definition.parameter_editor_resolver is not None:
-        spec = definition.parameter_editor_resolver(spec, parameters)
+        spec = definition.parameter_editor_resolver(spec, parameters, status)
     return spec
 
 
@@ -100,6 +101,7 @@ def project_graph(
     report: ValidationReport,
     *,
     compilation: CompilationResult | None = None,
+    source_statuses: Mapping[UUID, SourceStatus] | None = None,
 ) -> GraphViewModel:
     compilation = compilation or GraphCompiler(registry).compile(snapshot)
     # The compiler settles a concrete type for every resolvable port even when the
@@ -122,6 +124,7 @@ def project_graph(
     output_type_names: dict[tuple[UUID, str], str] = {}
     for node in snapshot.nodes:
         definition = registry.require(node.type_id)
+        status = source_statuses.get(node.id) if source_statuses is not None else None
         parameters, _ = definition.parameter_values(node.parameters)
         connected_port_ids = {
             connection.destination_port_id
@@ -177,7 +180,7 @@ def project_graph(
         )
         parameter_rows = tuple(
             ParameterViewModel(
-                _projected_parameter_spec(definition, parameter, parameters),
+                _projected_parameter_spec(definition, parameter, parameters, status),
                 node.parameters.get(parameter.id, parameter.default),
                 (node.id, parameter.id) in incoming,
             )

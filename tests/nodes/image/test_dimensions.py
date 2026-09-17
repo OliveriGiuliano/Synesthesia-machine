@@ -54,12 +54,12 @@ def test_crop_bound_editors_are_sliders_in_normalized_mode() -> None:
     for bound_id in ("left", "top", "right", "bottom"):
         spec = definition.parameter(bound_id)
         assert spec is not None
-        resolved = resolver(spec, values)
+        resolved = resolver(spec, values, None)
         assert (resolved.minimum, resolved.maximum) == (0.0, 1.0)
         assert resolved.editor_hint is ParameterEditorHint.SLIDER
     mode = definition.parameter("coordinate_mode")
     assert mode is not None
-    assert resolver(mode, values) is mode
+    assert resolver(mode, values, None) is mode
 
 
 def test_crop_bound_editors_are_plain_fields_in_pixels_mode() -> None:
@@ -71,10 +71,10 @@ def test_crop_bound_editors_are_plain_fields_in_pixels_mode() -> None:
     for bound_id in ("left", "top", "right", "bottom"):
         spec = definition.parameter(bound_id)
         assert spec is not None
-        assert resolver(spec, values) is spec
+        assert resolver(spec, values, None) is spec
     mode = definition.parameter("coordinate_mode")
     assert mode is not None
-    assert resolver(mode, values) is mode
+    assert resolver(mode, values, None) is mode
 
 
 @pytest.mark.parametrize("type_id", BATCH1_IDS)
