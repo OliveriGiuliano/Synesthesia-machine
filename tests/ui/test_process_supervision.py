@@ -431,7 +431,7 @@ def test_stopped_engine_skips_redundant_periodic_refreshes(
         window._refresh_engine_status()  # pyright: ignore[reportPrivateUsage]
         settle_refresh()
         assert metrics_calls == 1
-        assert window._engine_known_stopped is True  # pyright: ignore[reportPrivateUsage]
+        assert window.engine_session.is_known_stopped() is True
 
         # A stopped engine publishes no data: the repeated ticks keep the cheap
         # liveness check but submit no further metrics round trips.

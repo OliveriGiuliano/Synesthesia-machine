@@ -4,7 +4,7 @@
 
 **Solution:** Make EngineSession the production session driver: EngineBridge becomes a Qt shell (task runner, debounce clock, state publication) delegating session semantics to it; MainWindow drops the private known-stopped cache and error-dedup policy in favour of a normalized status view published by the bridge; profiling and diagnostic reads move through the task pool.
 
-**Status:** open
+**Status:** resolved
 
 **Files:**
 - `src/synesthesia_machine/runtime/engine_session.py`
@@ -14,8 +14,20 @@
 - `src/synesthesia_machine/app/bootstrap.py`
 
 **Acceptance:**
-- [ ] Tested path becomes the production path
-- [ ] ADR-0013/0020 semantics live in one Qt-free module
-- [ ] Hung child can no longer block the event loop
-- [ ] A second bridge consumer (kiosk, tools) stops re-deriving policy
-- [ ] Targeted tests pass; `uv run check` green; no unrelated diff
+- [x] Tested path becomes the production path
+- [x] ADR-0013/0020 semantics live in one Qt-free module
+- [x] Hung child can no longer block the event loop
+- [x] A second bridge consumer (kiosk, tools) stops re-deriving policy
+- [x] Targeted tests pass; `uv run check` green; no unrelated diff
+
+## Comments
+
+- 2026-09-17: Implemented. `EngineSession` (runtime, Qt-free) is now the production
+  driver: `EngineBridge` is the Qt shell (task pool, 100 ms debounce clock,
+  state publication, preview routing) and delegates cursors, the folded
+  six-state connection machine, the known-stopped cache, transport, and the
+  ADR-0013/0020 restart policy to the session. `MainWindow` dropped its private
+  `_engine_known_stopped` cache; `PreviewRouter` is the stateless routing policy
+  over one pumped batch. `poll_status` keeps a client-reported crash status so
+  the UI renders exit code and crash-log detail. Full suite (1224 passed),
+  `uv run check`, and the offscreen smoke test are green.

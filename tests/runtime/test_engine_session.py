@@ -461,7 +461,9 @@ def test_restart_reports_rejected_graph() -> None:
 def test_restart_reports_restart_failure() -> None:
     client = _FakeEngineClient(restart_error=RuntimeError("spawn failed"))
     session = EngineSession(client)
-    assert session.restart() == RestartOutcome(False, "restart_failed")
+    result = session.restart()
+    assert (result.ok, result.reason) == (False, "restart_failed")
+    assert result.detail == "spawn failed"
 
 
 def test_restart_reports_rebuild_failure() -> None:
@@ -470,7 +472,9 @@ def test_restart_reports_rebuild_failure() -> None:
     session.activate(_snapshot())
     client.restart_result = None
     client.activate_error = RuntimeError("ipc broken")
-    assert session.restart() == RestartOutcome(False, "rebuild_failed")
+    result = session.restart()
+    assert (result.ok, result.reason) == (False, "rebuild_failed")
+    assert result.detail == "ipc broken"
 
 
 def test_restart_resets_preview_cursors_on_replaced_engine() -> None:
@@ -494,7 +498,9 @@ def test_failed_restart_keeps_preview_cursors() -> None:
     )
     session = EngineSession(client)
     assert len(session.next_image_previews()) == 1
-    assert session.restart() == RestartOutcome(False, "restart_failed")
+    result = session.restart()
+    assert (result.ok, result.reason) == (False, "restart_failed")
+    assert result.detail == "spawn failed"
     # The old engine still owns its preview state: cursors stay advanced.
     assert session.next_image_previews() == ()
 
@@ -553,3 +559,61 @@ def test_restart_outcome_rejects_inconsistent_values() -> None:
         RestartOutcome(True, "bogus")
     with pytest.raises(ValueError, match="must match"):
         RestartOutcome(True, "rejected")
+
+
+def test_poll_status_folds_machine_and_returns_status() -> None:
+    client = _FakeEngineClient()
+    session = EngineSession(client)
+    state, status = session.poll_status()
+    assert state is EngineConnectionState.CONNECTED
+    assert status is not None
+    assert status.connection_state is EngineConnectionState.CONNECTED
+    # A stale heartbeat folds CONNECTED to UNRESPONSIVE; the status still arrives.
+    client.last_heartbeat_offset_s = 5.0
+    state, status = session.poll_status()
+    assert state is EngineConnectionState.UNRESPONSIVE
+    assert status is not None
+    # An unreachable client folds to CRASHED without a status.
+    client.status_error = RuntimeError("ipc down")
+    state, status = session.poll_status()
+    assert state is EngineConnectionState.CRASHED
+    assert status is None
+
+
+def test_poll_status_closed_session_polls_nothing() -> None:
+    client = _FakeEngineClient()
+    session = EngineSession(client)
+    session.close()
+    state, status = session.poll_status()
+    assert state is EngineConnectionState.CLOSED
+    assert status is None
+    assert "status" not in client.calls
+
+
+def test_per_family_cursor_clears_re_serve_only_their_family() -> None:
+    client = _FakeEngineClient(
+        image_previews=(_image_preview(SOURCE_A, "output", 1),),
+        value_previews=(_value_preview(SOURCE_A, "output", 1),),
+        note_previews=(_note_preview(SOURCE_A, 1),),
+    )
+    session = EngineSession(client)
+    assert len(session.next_image_previews()) == 1
+    assert len(session.next_value_previews()) == 1
+    assert len(session.next_note_previews()) == 1
+    assert session.next_image_previews() == ()
+    assert session.next_value_previews() == ()
+    assert session.next_note_previews() == ()
+
+    session.clear_note_cursors()
+    assert session.next_image_previews() == ()
+    assert session.next_value_previews() == ()
+    assert len(session.next_note_previews()) == 1
+    session.clear_image_cursors()
+    assert len(session.next_image_previews()) == 1
+    assert session.next_note_previews() == ()
+    session.clear_value_cursors()
+    assert len(session.next_value_previews()) == 1
+    session.clear_preview_cursors()
+    assert len(session.next_image_previews()) == 1
+    assert len(session.next_value_previews()) == 1
+    assert len(session.next_note_previews()) == 1

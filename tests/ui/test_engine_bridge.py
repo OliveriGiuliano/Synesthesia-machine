@@ -33,6 +33,7 @@ from synesthesia_machine.contracts.engine_client import (
 )
 from synesthesia_machine.graph import ValidationReport
 from synesthesia_machine.graph.model import GraphSnapshot
+from synesthesia_machine.runtime import EngineSession
 from synesthesia_machine.ui.engine_bridge import (
     EngineBridge,
     EngineBridgeState,
@@ -241,8 +242,9 @@ def _harness(
     messages: list[tuple[str, int]] = []
     runner = _SyncRunner()
     clock = _ScriptedClock()
+    session = EngineSession(client)
     bridge = EngineBridge(
-        client,
+        session,
         demand_roots_for=lambda _snapshot: demand_roots,
         task_runner=runner,
         clock=clock,

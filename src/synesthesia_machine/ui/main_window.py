@@ -48,7 +48,6 @@ from synesthesia_machine.contracts import (
     EngineClient,
     EngineConnectionState,
     EngineMetrics,
-    EngineState,
     EngineStatus,
     MidiOutputConnectionState,
     NodeProfile,
@@ -79,6 +78,7 @@ from synesthesia_machine.persistence import (
     verify_relink_candidate,
 )
 from synesthesia_machine.persistence.autosave import AutosaveStore, RecoveryRecord
+from synesthesia_machine.runtime import EngineSession
 from synesthesia_machine.ui.actions import ActionRegistry, ActionSpec
 from synesthesia_machine.ui.application_settings import (
     ApplicationSettingsStore,
@@ -182,7 +182,6 @@ class MainWindow(QMainWindow):
         self._source_error_signature: tuple[tuple[UUID, str], ...] = ()
         self._midi_error_signature: tuple[tuple[UUID, str, tuple[str, ...]], ...] = ()
         self._runtime_error_signature: tuple[tuple[UUID, str, str], ...] = ()
-        self._engine_known_stopped = False
         self._midi_eligibility: tuple[bool, str] | None = None
         self._midi_eligibility_key: object | None = None
         self._source_node_ids: tuple[UUID, ...] = ()
@@ -209,15 +208,17 @@ class MainWindow(QMainWindow):
         self._device_refresh_timer = QTimer(self)
         self._device_refresh_timer.setSingleShot(True)
         self._device_refresh_timer.setInterval(1500)
-        # The engine bridge owns the client and every engine behaviour the
-        # window drives: transport, activation (debounced through the window's
-        # one-shot timer), the preview pump (its per-port cursors live in the
-        # preview router), and status/telemetry.
+        # The engine bridge owns the engine session (the Qt-free module that
+        # drives the engine client: preview cursors, the folded connection
+        # state machine, the known-stopped cache, the restart policy) and the
+        # Qt-facing dispatch over the task pool; the window only composes the
+        # state the bridge publishes.
         self._engine_task_runner = QtEngineTaskRunner(self)
         self._engine_tasks_inflight = self._engine_task_runner.inflight
         self.preview_router = PreviewRouter()
+        self.engine_session = EngineSession(engine_client)
         self.engine_bridge = EngineBridge(
-            engine_client,
+            self.engine_session,
             demand_roots_for=self._runtime_demand_roots,
             task_runner=self._engine_task_runner,
             clock=QtUiClock(self._activation_timer),
@@ -771,16 +772,16 @@ class MainWindow(QMainWindow):
     def restart_engine(self) -> None:
         # A restart is the heaviest engine IPC (stop handshake, child
         # spawn, start handshake, re-activation) and runs on the engine
-        # task pool; the UI thread only snapshots the document and updates
-        # the status bar.
+        # task pool; the UI thread only updates the status bar. The engine
+        # session rebuilds the last valid graph — never a possibly-broken
+        # current draft (ADR-0013/0020 policy).
         if self._engine_closed:
             return
         if "restart" in self._engine_tasks_inflight:
             return
-        snapshot = self.session.document.snapshot()
         self.action_registry.require("restart_engine").setEnabled(False)
         self.statusBar().showMessage(tr("Restarting engine…"))
-        self.engine_bridge.restart(snapshot)
+        self.engine_bridge.restart()
 
     def _transport_target(self) -> UUID | None:
         sources = tuple(
@@ -1346,8 +1347,8 @@ class MainWindow(QMainWindow):
 
     def _apply_engine_activation(self, activation: EngineActivation) -> None:
         # A (re)activation may have started, stopped, or failed the engine;
-        # force the next status tick to re-learn the real state.
-        self._engine_known_stopped = False
+        # the session dropped its known-stopped cache on activation, so the
+        # next status tick re-learns the real state.
         if activation.activated:
             self._clear_runtime_previews()
             self.statusBar().showMessage(
@@ -1451,17 +1452,18 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _refresh_engine_status(self) -> None:
-        # The cheap status() liveness check runs on the UI thread through the
-        # bridge; the heavy metrics round trip goes to the engine task pool.
+        # The cheap status liveness check runs on the UI thread through the
+        # bridge (a local fold in the process client, no IPC); the heavy
+        # metrics round trip goes to the engine task pool.
         if self._engine_closed:
             return
         self.engine_bridge.refresh_status()
-        status = self.engine_bridge.state.status
-        if status is None:
+        state = self.engine_bridge.state
+        if state.status is None:
             return
-        if status.connection_state is EngineConnectionState.RESTARTING:
+        if state.connection_state is EngineConnectionState.RESTARTING:
             return
-        if status.connection_state in {
+        if state.connection_state in {
             EngineConnectionState.CRASHED,
             EngineConnectionState.UNRESPONSIVE,
         }:
@@ -1469,15 +1471,14 @@ class MainWindow(QMainWindow):
         selected_nodes = self.scene.selected_node_ids()
         selected_node = next(iter(selected_nodes)) if len(selected_nodes) == 1 else None
         if (
-            self._engine_known_stopped
-            and status.connection_state is EngineConnectionState.CONNECTED
+            state.known_stopped
+            and state.connection_state is EngineConnectionState.CONNECTED
             and selected_node is None
         ):
             # A stopped engine publishes no data, and the cheap liveness check
             # above still catches crash and heartbeat timeouts. Skipping the
             # periodic metrics round trip keeps the UI thread free for editing.
             return
-        self._engine_known_stopped = False
         self.engine_bridge.refresh_telemetry(selected_node)
 
     def _render_engine_status(self, status: EngineStatus) -> None:
@@ -1488,12 +1489,10 @@ class MainWindow(QMainWindow):
         }
         restart.setEnabled(failed)
         if failed:
-            self._engine_known_stopped = False
             self._show_engine_failure(status)
             return
         self._engine_failure_signature = None
         if status.connection_state is EngineConnectionState.RESTARTING:
-            self._engine_known_stopped = False
             self._engine_status.setText(tr("Engine RESTARTING"))
 
     def _apply_engine_telemetry(self, state: EngineBridgeState) -> None:
@@ -1602,7 +1601,6 @@ class MainWindow(QMainWindow):
         # costs only the string comparison.
         if self._engine_status.text() != summary:
             self._engine_status.setText(summary)
-        self._engine_known_stopped = metrics.state is EngineState.STOPPED
 
     def _apply_device_catalogue(self, catalogue: DeviceCatalogue) -> None:
         self.session.set_device_catalogue(catalogue)
@@ -1619,14 +1617,12 @@ class MainWindow(QMainWindow):
 
     def _apply_engine_restart(self, outcome: EngineRestartOutcome) -> None:
         if outcome.outcome != "restart_failed":
-            # The child was replaced: forget its previews and the
-            # failure signature, and drop the "known stopped" cache
-            # (a pre-crash metrics refresh could still hold it True)
-            # so the final refresh below re-learns the real state
+            # The child was replaced: forget its previews and the failure
+            # signature; the session dropped its "known stopped" cache on
+            # restart, so the final refresh below re-learns the real state
             # instead of skipping it.
             self._clear_runtime_previews()
             self._engine_failure_signature = None
-            self._engine_known_stopped = False
         if outcome.outcome == "restart_failed":
             self.statusBar().showMessage(
                 trf("Engine restart failed: {error}", error=outcome.detail), 8000
@@ -1679,9 +1675,9 @@ class MainWindow(QMainWindow):
         ):
             self._rendered_last_transport = state.last_transport
             # A transport command changes engine run state outside of an
-            # activation; drop the "known stopped" cache so the periodic
-            # refresh resumes instead of showing a stale STOPPED status.
-            self._engine_known_stopped = False
+            # activation; the session dropped its "known stopped" cache with
+            # it, so the periodic refresh resumes instead of showing a stale
+            # STOPPED status.
             self.statusBar().showMessage(
                 trf(
                     "{verb} source {source}",
@@ -1704,9 +1700,9 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(tr("All outputs silenced"), timeout_ms)
             return
         # Every task failure changes engine run state outside of an
-        # activation; drop the "known stopped" cache so the periodic refresh
-        # resumes instead of showing a stale STOPPED status.
-        self._engine_known_stopped = False
+        # activation; the session dropped its "known stopped" cache with it,
+        # so the periodic refresh resumes instead of showing a stale STOPPED
+        # status.
         if message == "activation_failed":
             self.statusBar().showMessage(tr("Engine activation failed"), timeout_ms)
         elif message == "devices_refreshing":

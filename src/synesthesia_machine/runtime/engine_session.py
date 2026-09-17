@@ -64,10 +64,12 @@ _RESTART_REASONS = ("ok", "rejected", "restart_failed", "rebuild_failed")
 @dataclass(frozen=True, slots=True)
 class RestartOutcome:
     """A completed engine restart: ``ok``, ``rejected``, ``restart_failed``,
-    or ``rebuild_failed``."""
+    or ``rebuild_failed``; the two failure outcomes carry the exception
+    detail so a UI can surface it."""
 
     ok: bool
     reason: str = "ok"
+    detail: str = ""
 
     def __post_init__(self) -> None:
         if self.reason not in _RESTART_REASONS:
@@ -137,11 +139,23 @@ class EngineSession:
             self._note_sequences[preview.owner_id] = preview.sequence
         return previews
 
+    def clear_image_cursors(self) -> None:
+        """Forget the image preview cursors (e.g. the image dock was hidden)."""
+        self._image_sequences.clear()
+
+    def clear_value_cursors(self) -> None:
+        """Forget the value preview cursors."""
+        self._value_sequences.clear()
+
+    def clear_note_cursors(self) -> None:
+        """Forget the note preview cursors (e.g. the note dock was hidden)."""
+        self._note_sequences.clear()
+
     def clear_preview_cursors(self) -> None:
         """Forget every preview cursor so the next poll re-serves each port."""
-        self._image_sequences.clear()
-        self._value_sequences.clear()
-        self._note_sequences.clear()
+        self.clear_image_cursors()
+        self.clear_value_cursors()
+        self.clear_note_cursors()
 
     def clear_previews(self) -> None:
         """Clear the engine-side preview store and the session's cursors."""
@@ -150,35 +164,43 @@ class EngineSession:
 
     # -- connection state --------------------------------------------------
 
-    def connection_state(self) -> EngineConnectionState:
-        """Fold the client's status into the six-state connection machine.
+    def poll_status(self) -> tuple[EngineConnectionState, EngineStatus | None]:
+        """One status round trip folded into the six-state connection machine.
 
-        A closed session reports CLOSED without polling; an unreachable
-        client folds to CRASHED; a CONNECTED engine whose last heartbeat is
-        stale folds to UNRESPONSIVE.  Failure and restart states drop the
-        known-stopped cache so the next tick re-learns the real state.
+        Returns the folded connection state and the raw status; the status is
+        ``None`` when a closed session or an unreachable client (an IPC
+        error) folded the state to CLOSED/CRASHED, and a client that *reports*
+        a crash keeps its status (exit code, crash log path) so the UI can
+        render it.  A closed session reports CLOSED without polling; a
+        CONNECTED engine whose last heartbeat is stale folds to UNRESPONSIVE.
+        Failure and restart states drop the known-stopped cache so the next
+        tick re-learns the real state.
         """
         if self._closed:
-            state = EngineConnectionState.CLOSED
+            return EngineConnectionState.CLOSED, None
+        try:
+            status = self._client.status()
+        except (RuntimeError, TimeoutError):
+            status = None
+            state = EngineConnectionState.CRASHED
         else:
-            try:
-                status = self._client.status()
-            except (RuntimeError, TimeoutError):
-                state = EngineConnectionState.CRASHED
-            else:
-                state = status.connection_state
-                if (
-                    state is EngineConnectionState.CONNECTED
-                    and status.last_heartbeat_monotonic_ns is not None
-                    and (
-                        time.monotonic_ns() - status.last_heartbeat_monotonic_ns
-                        > _HEARTBEAT_TIMEOUT_S * 1_000_000_000
-                    )
-                ):
-                    state = EngineConnectionState.UNRESPONSIVE
+            state = status.connection_state
+            if (
+                state is EngineConnectionState.CONNECTED
+                and status.last_heartbeat_monotonic_ns is not None
+                and (
+                    time.monotonic_ns() - status.last_heartbeat_monotonic_ns
+                    > _HEARTBEAT_TIMEOUT_S * 1_000_000_000
+                )
+            ):
+                state = EngineConnectionState.UNRESPONSIVE
         if state in _STOP_CACHE_DROP_STATES:
             self._known_stopped = False
-        return state
+        return state, status
+
+    def connection_state(self) -> EngineConnectionState:
+        """The folded six-state connection state (see :meth:`poll_status`)."""
+        return self.poll_status()[0]
 
     def is_known_stopped(self) -> bool:
         """Whether the engine is known to be stopped ("don't re-poll" cache).
@@ -265,16 +287,16 @@ class EngineSession:
         self._known_stopped = False
         try:
             activation = self._client.restart()
-        except (RuntimeError, TimeoutError):
-            return RestartOutcome(ok=False, reason="restart_failed")
+        except (RuntimeError, TimeoutError) as error:
+            return RestartOutcome(ok=False, reason="restart_failed", detail=str(error))
         self.clear_preview_cursors()
         if activation is None and self._last_snapshot is not None:
             try:
                 activation = self._client.activate(
                     self._last_snapshot, demand_roots=self._last_demand_roots
                 )
-            except (RuntimeError, TimeoutError):
-                return RestartOutcome(ok=False, reason="rebuild_failed")
+            except (RuntimeError, TimeoutError) as error:
+                return RestartOutcome(ok=False, reason="rebuild_failed", detail=str(error))
         if activation is not None and not activation.activated:
             return RestartOutcome(ok=False, reason="rejected")
         return RestartOutcome(ok=True, reason="ok")

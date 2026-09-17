@@ -336,24 +336,24 @@ def test_transport_commands_invalidate_known_stopped_cache(
     source_a = window.session.add_node("synmachine.input.load_video", (0.0, 0.0))
     client.statuses[source_a] = _source_status(source_a)
 
-    window._engine_known_stopped = True
+    window.engine_session._known_stopped = True  # pyright: ignore[reportPrivateUsage]
     window.play()
     _wait_for_engine_tasks(window)
     assert client.calls[-1] == ("play", source_a)
-    assert window._engine_known_stopped is False
+    assert window.engine_session.is_known_stopped() is False
 
-    window._engine_known_stopped = True
+    window.engine_session._known_stopped = True  # pyright: ignore[reportPrivateUsage]
     client.statuses[source_a] = _source_status(source_a, SourceState.PAUSED)
     window.play()
     _wait_for_engine_tasks(window)
     assert client.calls[-1] == ("resume", source_a)
-    assert window._engine_known_stopped is False
+    assert window.engine_session.is_known_stopped() is False
 
-    window._engine_known_stopped = True
+    window.engine_session._known_stopped = True  # pyright: ignore[reportPrivateUsage]
     window.stop()
     _wait_for_engine_tasks(window)
     assert client.calls[-1] == ("stop", source_a)
-    assert window._engine_known_stopped is False
+    assert window.engine_session.is_known_stopped() is False
 
 
 def test_successful_restart_invalidate_known_stopped_cache(
@@ -367,10 +367,10 @@ def test_successful_restart_invalidate_known_stopped_cache(
     del client
     window.session.add_node("synmachine.utility.number", (0.0, 0.0))
 
-    window._engine_known_stopped = True
+    window.engine_session._known_stopped = True  # pyright: ignore[reportPrivateUsage]
     window.restart_engine()
     _wait_for_engine_tasks(window)
-    assert window._engine_known_stopped is False
+    assert window.engine_session.is_known_stopped() is False
 
 
 def test_transport_toolbar_has_named_visible_hover_press_controls_and_click_feedback(
@@ -427,8 +427,8 @@ def test_preview_and_metrics_polling_update_ui_with_sequence_coalescing(
     assert window.image_preview_panel.image_widget.isVisible()
     assert window.note_preview_panel.note_widget.isVisible()
     assert "sequence 1" in window.image_preview_panel.image_caption.text()
-    assert window.preview_router.image_sequences == {(source_id, "image"): 1}
-    assert window.preview_router.note_sequences == {NOTE_NODE: 1}
+    assert window.engine_session._image_sequences == {(source_id, "image"): 1}  # pyright: ignore[reportPrivateUsage]
+    assert window.engine_session._note_sequences == {NOTE_NODE: 1}  # pyright: ignore[reportPrivateUsage]
     assert "42 ticks" in window._engine_status.text()
     assert "3 dropped" in window._engine_status.text()
     assert "Input / processed / preview: 0.0 / 29.5 / 0.0 FPS" in (window._engine_status.toolTip())
@@ -481,9 +481,9 @@ def test_successful_activation_clears_all_stale_runtime_previews(
     window.scene.set_connection_image_preview(source_id, "image", thumbnail)
     window.image_preview_panel.show_preview(image_preview)
     window.note_preview_panel.show_preview(note_preview)
-    window.preview_router.image_sequences[(source_id, "image")] = 1
-    window.preview_router.note_sequences[NOTE_NODE] = 1
-    window.preview_router.value_sequences[(number_id, "value")] = 1
+    window.engine_session._image_sequences[(source_id, "image")] = 1  # pyright: ignore[reportPrivateUsage]
+    window.engine_session._note_sequences[NOTE_NODE] = 1  # pyright: ignore[reportPrivateUsage]
+    window.engine_session._value_sequences[(number_id, "value")] = 1  # pyright: ignore[reportPrivateUsage]
 
     window._apply_engine_activation(
         EngineActivation(window.session.document.revision, ValidationReport(), True)
@@ -493,9 +493,9 @@ def test_successful_activation_clears_all_stale_runtime_previews(
     assert window.scene.connection_items[image_connection]._image is None
     assert window.image_preview_panel.image_widget.latest_preview is None
     assert window.note_preview_panel.note_widget.latest_preview is None
-    assert window.preview_router.image_sequences == {}
-    assert window.preview_router.note_sequences == {}
-    assert window.preview_router.value_sequences == {}
+    assert window.engine_session._image_sequences == {}  # pyright: ignore[reportPrivateUsage]
+    assert window.engine_session._note_sequences == {}  # pyright: ignore[reportPrivateUsage]
+    assert window.engine_session._value_sequences == {}  # pyright: ignore[reportPrivateUsage]
 
 
 def test_node_drag_release_preserves_live_connection_pills(

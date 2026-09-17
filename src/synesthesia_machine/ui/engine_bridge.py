@@ -1,27 +1,34 @@
 """Deep engine-orchestration seam: the EngineBridge.
 
 The editor drives the engine through one module. The bridge owns the
-``EngineClient`` handle, the preview pump (the per-port sequence cursors live
-in the injected :class:`~synesthesia_machine.ui.preview_router.PreviewRouter`),
-transport dispatch, graph-activation scheduling with its debounce, and
-status/telemetry normalisation. The main window becomes a thin compositor: it
-forwards user intents to the bridge and renders the state the bridge publishes.
+:class:`~synesthesia_machine.runtime.engine_session.EngineSession` — the
+Qt-free module that drives the engine client: per-port preview sequence
+cursors, the folded six-state connection machine, the "engine is known
+stopped" cache, and the restart-outcome mapping (the ADR-0013/0020
+policies). On top of it the bridge owns the Qt-facing concerns: transport
+and telemetry dispatch over the injected task runner, graph-activation
+scheduling with its debounce, and status normalisation. The main window
+becomes a thin compositor: it forwards user intents to the bridge and
+renders the state the bridge publishes.
 
-The module is testable headlessly. Everything that would normally rely on the Qt
-event loop — running an engine operation off the UI thread, and the timed
-activation debounce — is injected as a small protocol, so a test supplies a
-synchronous task runner and a scripted clock and drives the bridge directly
-without a ``QMainWindow`` or ``qWait`` timing. The preview pump itself is driven
-by the compositor's timer (it needs the note dock's visibility flag the window
-holds), so the bridge exposes a single ``pump_previews_once`` step rather than
-owning that timer; the step asks the injected preview router to poll, and the
-compositor applies the router's routing decision to the scene and panels.
+The module is testable headlessly. Everything that would normally rely on
+the Qt event loop — running an engine operation off the UI thread, and the
+timed activation debounce — is injected as a small protocol, so a test
+supplies a synchronous task runner and a scripted clock and drives the
+bridge directly without a ``QMainWindow`` or ``qWait`` timing. The preview
+pump itself is driven by the compositor's timer (it needs the note dock's
+visibility flag the window holds), so the bridge exposes a single
+``pump_previews_once`` step rather than owning that timer; the step asks
+the session for the previews newer than its cursors and hands the batch to
+the injected preview router, and the compositor applies the router's
+routing decision to the scene and panels.
 
 The bridge publishes two kinds of output. Rich results (activation reports,
-telemetry, device catalogues, profiles, restart/transport outcomes) are folded
-into the published :class:`EngineBridgeState` so the compositor renders typed
-data; payload-free events (task failures, the "refreshing devices" notice) go
-through ``on_status_message`` as a stable key plus a status-bar timeout.
+telemetry, device catalogues, profiles, restart/transport outcomes) are
+folded into the published :class:`EngineBridgeState` so the compositor
+renders typed data; payload-free events (task failures, the "refreshing
+devices" notice) go through ``on_status_message`` as a stable key plus a
+status-bar timeout.
 """
 
 from __future__ import annotations
@@ -34,7 +41,6 @@ from uuid import UUID
 from synesthesia_machine.contracts.engine_client import (
     DeviceCatalogue,
     EngineActivation,
-    EngineClient,
     EngineConnectionState,
     EngineMetrics,
     EngineState,
@@ -45,6 +51,7 @@ from synesthesia_machine.contracts.engine_client import (
     SourceState,
     SourceStatus,
 )
+from synesthesia_machine.runtime import EngineSession
 from synesthesia_machine.ui.preview_router import PreviewRouter, PumpedPreviews
 
 if TYPE_CHECKING:
@@ -123,6 +130,9 @@ class EngineBridgeState:
     The ``last_*`` fields carry the most recent settled result of each task
     family; a publish reuses the previous instance until a new result lands, so
     the compositor tells new events from stale state by object identity.
+    ``known_stopped`` mirrors the session's "engine is stopped, skip the
+    metrics round trip" cache so the compositor's periodic tick can reuse the
+    optimization without keeping a private copy.
     """
 
     connection_state: EngineConnectionState
@@ -137,16 +147,17 @@ class EngineBridgeState:
     last_activation: EngineActivation | None = None
     last_transport: TransportOutcome | None = None
     last_restart: EngineRestartOutcome | None = None
+    known_stopped: bool = False
 
 
 class EngineBridge:
-    """Owns the engine client and every behaviour the editor uses to drive it."""
+    """Owns the engine session and every behaviour the editor uses to drive it."""
 
     ACTIVATION_DEBOUNCE_MS = 100
 
     def __init__(
         self,
-        client: EngineClient,
+        session: EngineSession,
         *,
         demand_roots_for: Callable[[GraphSnapshot], tuple[UUID, ...]],
         task_runner: EngineTaskRunner,
@@ -156,7 +167,7 @@ class EngineBridge:
         on_state: Callable[[EngineBridgeState], None],
         on_status_message: Callable[[str, int], None],
     ) -> None:
-        self._client = client
+        self._session = session
         self._demand_roots_for = demand_roots_for
         self._task_runner = task_runner
         self._clock = clock
@@ -186,13 +197,13 @@ class EngineBridge:
         return self._state
 
     def close(self) -> None:
-        """Cancel the pending activation and close the underlying client."""
+        """Cancel the pending activation and close the session (and its client)."""
         if self._closed:
             return
         self._closed = True
         self._pending_activation = None
         self._clock.cancel(self._flush)
-        self._client.close()
+        self._session.close()
 
     # -- activation (debounced) -------------------------------------------
 
@@ -222,12 +233,14 @@ class EngineBridge:
         snapshot, demand_roots = pending
         self._submit(
             "activation",
-            lambda: self._client.activate(snapshot, demand_roots=demand_roots),
+            lambda: self._session.activate(snapshot, demand_roots=demand_roots),
         )
 
     def _apply_activation(self, activation: EngineActivation) -> None:
         self._state = replace(self._state, last_activation=activation)
         if activation.activated:
+            # The session reset its preview cursors on activation; the new
+            # engine generation re-serves every port from scratch.
             self.clear_runtime_previews()
             self._on_status_message("activated", 3000)
         else:
@@ -235,14 +248,14 @@ class EngineBridge:
             # The engine kept running previews mapped/retained while it was
             # active; forget them client-side so the next poll cannot re-show
             # the last frame as if the engine were still producing.
-            self._client.clear_previews()
+            self._session.clear_previews()
             self._on_status_message("activation_rejected", 5000)
         self._publish_state()
 
     # -- transport ---------------------------------------------------------
 
     def play(self, source_node_id: UUID | None = None) -> None:
-        self._submit("transport", lambda: self._client.play(source_node_id))
+        self._submit("transport", lambda: self._session.play(source_node_id))
 
     def play_or_resume(self, source_node_id: UUID | None = None) -> None:
         """Play the targeted source, resuming it first if it is paused.
@@ -258,16 +271,16 @@ class EngineBridge:
         self._submit("transport", lambda: self._load_play(source_node_id))
 
     def _load_play(self, target: UUID) -> TransportOutcome:
-        statuses = self._client.source_status(target)
+        statuses = self._session.source_status(target)
         if statuses and statuses[0].state is SourceState.PAUSED:
-            self._client.resume(target)
+            self._session.resume(target)
             return TransportOutcome("Resumed", target)
-        self._client.play(target)
+        self._session.play(target)
         return TransportOutcome("Playing", target)
 
     def pause(self, source_node_id: UUID | None = None) -> None:
         if source_node_id is None:
-            self._submit("transport", lambda: self._client.pause(source_node_id))
+            self._submit("transport", lambda: self._session.pause(source_node_id))
             return
         self._submit(
             "transport",
@@ -276,7 +289,7 @@ class EngineBridge:
 
     def stop_source(self, source_node_id: UUID | None = None) -> None:
         if source_node_id is None:
-            self._submit("transport", lambda: self._client.stop(source_node_id))
+            self._submit("transport", lambda: self._session.stop(source_node_id))
             return
         self._submit(
             "transport",
@@ -285,7 +298,7 @@ class EngineBridge:
 
     def reload(self, source_node_id: UUID | None = None) -> None:
         if source_node_id is None:
-            self._submit("transport", lambda: self._client.reload(source_node_id))
+            self._submit("transport", lambda: self._session.reload(source_node_id))
             return
         self._submit(
             "transport",
@@ -293,89 +306,79 @@ class EngineBridge:
         )
 
     def seek(self, source_node_id: UUID, source_time_s: float) -> None:
-        self._submit("transport", lambda: self._client.seek(source_node_id, source_time_s))
+        self._submit("transport", lambda: self._session.seek(source_node_id, source_time_s))
 
     def _transport_command(self, method: str, verb: str, target: UUID) -> TransportOutcome:
-        getattr(self._client, method)(target)
+        getattr(self._session, method)(target)
         return TransportOutcome(verb, target)
 
     def panic(self) -> None:
-        self._submit("panic", lambda: self._client.panic())
+        self._submit("panic", lambda: self._session.panic())
 
-    def restart(self, snapshot: GraphSnapshot) -> None:
-        """Restart the engine and rebuild the given graph if it was not active."""
-        self._submit("restart", lambda: self._load_restart(snapshot))
+    def restart(self) -> None:
+        """Restart the engine through the session.
 
-    def _load_restart(self, snapshot: GraphSnapshot) -> EngineRestartOutcome:
-        try:
-            activation = self._client.restart()
-        except (RuntimeError, TimeoutError) as error:
-            return EngineRestartOutcome("restart_failed", str(error))
-        if activation is None and snapshot.nodes:
-            try:
-                activation = self._client.activate(snapshot)
-            except (RuntimeError, TimeoutError) as error:
-                return EngineRestartOutcome("rebuild_failed", str(error))
-        if activation is not None and not activation.activated:
-            return EngineRestartOutcome("rejected")
-        return EngineRestartOutcome("ok")
+        The session rebuilds the last *valid* (accepted) graph — never a
+        possibly-broken current draft — which is the ADR-0013/0020
+        restart policy.
+        """
+        self._submit("restart", self._load_restart)
+
+    def _load_restart(self) -> EngineRestartOutcome:
+        outcome = self._session.restart()
+        return EngineRestartOutcome(outcome=outcome.reason, detail=outcome.detail)
 
     # -- preview pump ------------------------------------------------------
 
-    def pump_previews_once(self, *, note_visible: bool) -> None:
-        """Poll the preview ports and hand the batch to the compositor callback.
-
-        Driven by the compositor's timer (which supplies the note dock's
-        visibility flag); the injected preview router owns the per-port
-        sequence cursors.
-        """
-        if self._closed:
-            return
-        pumped = self._preview_router.poll(self._client, note_visible=note_visible)
-        if pumped is None:
-            return
-        self._on_previews(pumped)
-
     def note_preview_hidden(self) -> None:
         """Drop the note cursors when the note dock is hidden."""
-        self._preview_router.clear_note_cursors()
+        self._session.clear_note_cursors()
 
     def image_preview_hidden(self) -> None:
         """Drop the image cursors when the image dock is hidden."""
-        self._preview_router.clear_image_cursors()
+        self._session.clear_image_cursors()
 
     def clear_runtime_previews(self) -> None:
-        self._preview_router.clear_cursors()
+        self._session.clear_preview_cursors()
 
     # -- status / telemetry ------------------------------------------------
 
     def refresh_status(self) -> None:
-        """Poll the connection state + publish it (driven by the compositor timer)."""
+        """Poll the folded connection state + publish it (compositor timer).
+
+        The status read is one round trip folded into the six-state machine
+        by the session; an unreachable child folds to CRASHED (status ``None``)
+        instead of raising.
+        """
         if self._closed:
             return
-        try:
-            status = self._client.status()
-        except (RuntimeError, TimeoutError):
-            return
-        self._state = replace(
-            self._state,
-            status=status,
-            connection_state=status.connection_state,
-        )
+        state, status = self._session.poll_status()
+        self._state = replace(self._state, connection_state=state)
+        if status is not None:
+            self._state = replace(self._state, status=status)
         self._publish_state()
 
     def refresh_telemetry(self, selected_node_id: UUID | None = None) -> None:
         """Collect metrics, source/MIDI statuses, and (optionally) one node's
-        memory diagnostic on the task pool, then publish them as state."""
+        memory diagnostic on the task pool, then publish them as state.
+
+        A global refresh (no selected node) is skipped while the session knows
+        the engine is stopped: a stopped engine publishes no data, and the
+        cheap status liveness check still catches crashes and stale heartbeats.
+        """
+        if self._closed:
+            return
+        if selected_node_id is None and self._session.is_known_stopped():
+            return
         self._submit("refresh", lambda: self._load_telemetry(selected_node_id))
 
     def _load_telemetry(self, selected_node_id: UUID | None) -> _TelemetrySnapshot:
-        metrics = self._client.metrics()
-        sources = self._client.source_status()
-        midi_outputs = self._client.midi_output_status()
+        metrics = self._session.metrics()
+        sources = self._session.source_status()
+        midi_outputs = self._session.midi_output_status()
         diagnostic = None
         if selected_node_id is not None:
-            diagnostics = self._client.node_memory_diagnostics(selected_node_id)
+            diagnostics = self._session.node_memory_diagnostics(selected_node_id)
             diagnostic = diagnostics[0] if diagnostics else None
         return metrics, sources, midi_outputs, diagnostic
 
@@ -383,6 +386,7 @@ class EngineBridge:
         metrics, sources, midi_outputs, diagnostic = result
         self._state = replace(
             self._state,
+            engine_state=metrics.state,
             metrics=metrics,
             source_statuses=sources,
             midi_output_statuses=midi_outputs,
@@ -399,27 +403,49 @@ class EngineBridge:
         if self._closed:
             return None, ()
         try:
-            return self._client.metrics(), self._client.node_profiles()
+            return self._session.metrics(), self._session.node_profiles()
         except (RuntimeError, TimeoutError):
             return None, ()
 
-    # -- runtime profiling (lightweight UI-thread IPC) ---------------------
+    def pump_previews_once(self, *, note_visible: bool) -> None:
+        """Poll the preview ports and hand the batch to the compositor callback.
 
-    def set_profiling_enabled(self, enabled: bool) -> None:
-        self._client.set_profiling_enabled(enabled)
-
-    def reset_profiling(self) -> None:
-        self._client.reset_profiling()
-
-    def refresh_profiles(self) -> None:
-        """Poll the per-node profiles on the calling thread and publish them."""
+        Driven by the compositor's timer (which supplies the note dock's
+        visibility flag); the engine session owns the per-port sequence
+        cursors, and the note family is not pumped while the note dock is
+        hidden. A failed poll (e.g. the engine transport closing) skips the
+        tick without touching any published state.
+        """
         if self._closed:
             return
         try:
-            profiles = self._client.node_profiles()
+            note_previews = self._session.next_note_previews() if note_visible else ()
+            pumped = PumpedPreviews(
+                image_previews=self._session.next_image_previews(),
+                value_previews=self._session.next_value_previews(),
+                note_previews=note_previews,
+            )
         except (RuntimeError, TimeoutError):
             return
-        self.publish_node_profiles(tuple(profiles))
+        self._on_previews(pumped)
+
+    # -- runtime profiling ---------------------------------------------------
+
+    def set_profiling_enabled(self, enabled: bool) -> None:
+        self._session.set_profiling_enabled(enabled)
+
+    def reset_profiling(self) -> None:
+        self._session.reset_profiling()
+
+    def refresh_profiles(self) -> None:
+        """Poll the per-node profiles on the task pool and publish them.
+
+        The read is one IPC round trip; running it off the UI thread keeps a
+        hung child from stalling the event loop on the 250 ms profiler tick.
+        """
+        if self._closed:
+            return
+        self._submit("profiles", self._session.node_profiles)
 
     # -- devices -----------------------------------------------------------
 
@@ -437,7 +463,7 @@ class EngineBridge:
 
     def request_device_catalogue(self, *, force_refresh: bool = False) -> None:
         submitted = self._submit(
-            "devices", lambda: self._client.device_catalogue(force_refresh=force_refresh)
+            "devices", lambda: self._session.device_catalogue(force_refresh=force_refresh)
         )
         if submitted and force_refresh:
             self._on_status_message("devices_refreshing", 3000)
@@ -471,6 +497,8 @@ class EngineBridge:
             self._publish_state()
         elif kind == "refresh":
             self._apply_telemetry(cast("_TelemetrySnapshot", result))
+        elif kind == "profiles" and isinstance(result, tuple):
+            self.publish_node_profiles(cast("tuple[NodeProfile, ...]", result))
         elif kind == "panic":
             self._on_status_message("panic_ok", 3000)
         else:
@@ -496,4 +524,7 @@ class EngineBridge:
     # -- helpers -----------------------------------------------------------
 
     def _publish_state(self) -> None:
+        # Every publish carries the session's live known-stopped cache, so the
+        # compositor's tick never reasons from a private copy of it.
+        self._state = replace(self._state, known_stopped=self._session.is_known_stopped())
         self._on_state(self._state)
