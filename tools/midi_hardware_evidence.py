@@ -149,7 +149,7 @@ def run_evidence(
         if note_off.active_note_count != 0 or note_off.last_error is not None:
             raise RuntimeError(f"MIDI explicit note-off did not clear tracked state: {note_off!r}")
 
-        service.panic(2.0)
+        service.panic(timeout_s=2.0)
         panic_completed = True
         _require_idle(service, "CC123 panic")
         panic = service.status()
@@ -158,7 +158,7 @@ def run_evidence(
     finally:
         if not panic_completed:
             with suppress(Exception):
-                service.panic(2.0)
+                service.panic(timeout_s=2.0)
         service.close()
         close_completed = True
 

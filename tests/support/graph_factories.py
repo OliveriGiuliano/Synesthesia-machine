@@ -98,7 +98,9 @@ def make_definition(
     )
 
 
-def frame_context(*, clock_id: UUID, tick_index: int = 1) -> FrameContext:
+def frame_context(
+    *, clock_id: UUID, tick_index: int = 1, publish_generation: int = 0
+) -> FrameContext:
     return FrameContext(
         clock_id=clock_id,
         tick_index=tick_index,
@@ -107,6 +109,7 @@ def frame_context(*, clock_id: UUID, tick_index: int = 1) -> FrameContext:
         received_monotonic_ns=tick_index,
         deadline_monotonic_ns=None,
         is_realtime=False,
+        publish_generation=publish_generation,
     )
 
 

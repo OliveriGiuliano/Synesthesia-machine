@@ -346,7 +346,7 @@ class NodeRuntime(Protocol):
 
 @runtime_checkable
 class PanicCapableRuntime(Protocol):
-    def panic(self) -> None: ...
+    def panic(self, publish_generation: int) -> None: ...
 
 
 @runtime_checkable

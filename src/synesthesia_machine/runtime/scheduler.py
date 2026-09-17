@@ -278,10 +278,10 @@ class Scheduler:
             runtime.reset(reason)
         self._static_cache.clear()
 
-    def panic(self) -> None:
+    def panic(self, publish_generation: int = 0) -> None:
         for runtime in self._runtimes.values():
             if isinstance(runtime, PanicCapableRuntime):
-                runtime.panic()
+                runtime.panic(publish_generation)
 
     def midi_output_status(
         self, output_node_id: UUID | None = None

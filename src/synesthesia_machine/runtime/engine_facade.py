@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from uuid import UUID
 
 from synesthesia_machine.contracts.engine_client import MidiOutputStatus, NodeMemoryDiagnostic
@@ -47,6 +47,10 @@ class EngineFacade:
         self._profiling_hook = profiling_hook
         self._plan: ExecutionPlan | None = None
         self._scheduler: Scheduler | None = None
+        # Monotonic across scheduler replacements: plan changes can preserve
+        # node runtimes, so their panic watermarks must stay comparable with
+        # the generations of ticks from both the old and the new plan.
+        self._publish_generation = 0
 
     @property
     def active_plan(self) -> ExecutionPlan | None:
@@ -137,6 +141,11 @@ class EngineFacade:
     ) -> TickResult:
         if self._scheduler is None:
             raise RuntimeError("No valid graph plan is active")
+        # Stamp the tick with the engine's publish generation so panic-capable
+        # sinks can reject states generated before a panic by comparing
+        # generations instead of wall-clock instants (ADR-0022).
+        self._publish_generation += 1
+        context = replace(context, publish_generation=self._publish_generation)
         return self._scheduler.execute_tick(context, source_values=source_values)
 
     def reset_source(self, source_node_id: UUID, reason: ResetReason) -> None:
@@ -149,7 +158,7 @@ class EngineFacade:
 
     def panic(self) -> None:
         if self._scheduler is not None:
-            self._scheduler.panic()
+            self._scheduler.panic(self._publish_generation)
 
     def midi_output_status(
         self, output_node_id: UUID | None = None

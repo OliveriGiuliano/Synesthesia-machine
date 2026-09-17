@@ -81,12 +81,14 @@ class GenerateAudioRuntime:
             ) from error
         return {}
 
-    def panic(self) -> None:
-        self._service.panic()
+    def panic(self, publish_generation: int) -> None:
+        self._service.panic(publish_generation)
 
     def reset(self, reason: ResetReason) -> None:
+        # A reset has no in-flight tick to invalidate, so it panics with the
+        # no-watermark default instead of a publish generation.
         del reason
-        self.panic()
+        self._service.panic()
 
     def close(self) -> None:
         self._service.close()
@@ -183,7 +185,7 @@ class _DebugAudioOutputService:
             self._pending = _AudioCommand(self._generation, None, None)
             self._condition.notify()
 
-    def panic(self) -> None:
+    def panic(self, publish_generation: int = 0) -> None:
         with self._condition:
             if self._closed:
                 return
@@ -192,7 +194,7 @@ class _DebugAudioOutputService:
             synth = self._synth
             self._condition.notify_all()
         if synth is not None:
-            synth.panic()
+            synth.panic(publish_generation)
 
     def wait_until_idle(self, timeout: float) -> bool:
         deadline = time.monotonic() + timeout

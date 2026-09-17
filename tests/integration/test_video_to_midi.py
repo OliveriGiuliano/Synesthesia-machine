@@ -49,7 +49,8 @@ class RecordingSynth:
     def update(self, state: MidiStateFrame) -> None:
         self.updates.append(state)
 
-    def panic(self) -> None:
+    def panic(self, publish_generation: int = 0) -> None:
+        del publish_generation
         self.panic_count += 1
 
     def close(self) -> None:

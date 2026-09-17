@@ -56,11 +56,12 @@ class SendMidiRuntime:
         parameters: Mapping[str, ParameterValue],
         context: FrameContext,
     ) -> Mapping[str, RuntimeValue]:
-        del context
         midi = inputs["midi"]
         if midi is NoData:
             if not self._input_missing:
-                self._service.request_panic()
+                # The missing input stops the source: panic with this tick's
+                # generation so a late state from it cannot re-arm the port.
+                self._service.request_panic(context.publish_generation)
                 self._input_missing = True
             return {}
         self._input_missing = False
@@ -94,8 +95,8 @@ class SendMidiRuntime:
             status.last_error,
         )
 
-    def panic(self) -> None:
-        self._service.panic()
+    def panic(self, publish_generation: int) -> None:
+        self._service.panic(publish_generation)
 
     def reset(self, reason: ResetReason) -> None:
         del reason

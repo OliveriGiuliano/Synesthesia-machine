@@ -192,7 +192,7 @@ def _midi_overload_evidence() -> MidiOverloadResult:
         if not service.wait_until_idle(5.0):
             raise TimeoutError("MIDI service did not drain its latest state")
         latest_active = service.status().active_note_count
-        service.panic(5.0)
+        service.panic(timeout_s=5.0)
         after_panic = service.status().active_note_count
     finally:
         if backend.blocking_port is not None:

@@ -6,7 +6,7 @@ import math
 import threading
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from uuid import UUID
 
 import numpy as np
@@ -154,7 +154,8 @@ class RecordingSynth:
     def update(self, state: MidiStateFrame) -> None:
         self.updates.append(state)
 
-    def panic(self) -> None:
+    def panic(self, publish_generation: int = 0) -> None:
+        del publish_generation
         self.panic_count += 1
 
     def close(self) -> None:
@@ -173,8 +174,15 @@ class RecordingSynthFactory:
         return synth
 
 
-def _midi_state(notes: Mapping[tuple[int, int], int], *, tick_index: int = 1) -> MidiStateFrame:
-    context = frame_context(clock_id=CLOCK_ID, tick_index=tick_index)
+def _midi_state(
+    notes: Mapping[tuple[int, int], int],
+    *,
+    tick_index: int = 1,
+    publish_generation: int = 0,
+) -> MidiStateFrame:
+    context = frame_context(
+        clock_id=CLOCK_ID, tick_index=tick_index, publish_generation=publish_generation
+    )
     return MidiStateFrame(
         {MidiNoteKey(channel, note): velocity for (channel, note), velocity in notes.items()},
         context,
@@ -413,7 +421,7 @@ def test_runtime_never_opens_audio_device_on_graph_worker_and_discards_stale_sta
     assert time.monotonic() - started < 0.25
     assert entered_factory.wait(1.0)
 
-    runtime.panic()
+    runtime.panic(0)
     release_factory.set()
     assert runtime.wait_until_idle()
     assert synth.updates == []
@@ -624,27 +632,28 @@ def test_debug_synth_panic_silences_next_callback_and_allows_future_state() -> N
     synth.update(_midi_state({(0, 69): 127}))
     assert np.any(stream.render(configuration.block_size) != 0.0)
 
-    synth.panic(at_monotonic_ns=1)
+    synth.panic(publish_generation=1)
     panicked = stream.render(configuration.block_size)
     assert np.count_nonzero(panicked) == 0
     assert synth.active_voice_count == 0
     assert np.count_nonzero(stream.render(configuration.block_size)) == 0
 
-    synth.update(_midi_state({(0, 72): 100}, tick_index=2))
+    synth.update(_midi_state({(0, 72): 100}, tick_index=2, publish_generation=2))
     assert np.any(stream.render(configuration.block_size) != 0.0)
     assert synth.active_keys == (72,)
     synth.close()
 
 
-def _state_at(notes: Mapping[tuple[int, int], int], *, received_ns: int) -> MidiStateFrame:
+def _state_at(notes: Mapping[tuple[int, int], int], *, publish_generation: int) -> MidiStateFrame:
     context = FrameContext(
         clock_id=CLOCK_ID,
         tick_index=1,
         source_frame_index=0,
         source_time_s=0.0,
-        received_monotonic_ns=received_ns,
+        received_monotonic_ns=1,
         deadline_monotonic_ns=None,
         is_realtime=False,
+        publish_generation=publish_generation,
     )
     return MidiStateFrame(
         {MidiNoteKey(channel, note): velocity for (channel, note), velocity in notes.items()},
@@ -656,7 +665,8 @@ def _state_at(notes: Mapping[tuple[int, int], int], *, received_ns: int) -> Midi
 def test_debug_synth_panic_drops_stale_state_and_allows_fresh_state() -> None:
     # A state frame from a tick that lost the race against a panic (generated
     # before the panic, published after it) must not re-arm the voices the
-    # panic silenced; a frame generated after the panic must sound.
+    # panic silenced; a frame generated after the panic must sound. Ordering
+    # is the tick's publish generation, never a wall-clock instant.
     stream_factory = StreamFactory()
     configuration = SynthConfiguration(
         attack_ms=0.0,
@@ -667,13 +677,13 @@ def test_debug_synth_panic_drops_stale_state_and_allows_fresh_state() -> None:
     synth = DebugSynth(configuration, stream_factory=stream_factory)
     stream = stream_factory.streams[0]
 
-    stale = _state_at({(0, 69): 127}, received_ns=10)
+    stale = _state_at({(0, 69): 127}, publish_generation=1)
     synth.update(stale)
     assert np.any(stream.render(configuration.block_size) != 0.0)
 
-    # The panic happens at wall-clock instant 20; the frame above was
-    # generated at instant 10, i.e. before it.
-    synth.panic(at_monotonic_ns=20)
+    # The panic observed publish generation 1, the generation of the tick
+    # still executing when the panic landed.
+    synth.panic(publish_generation=1)
     assert np.count_nonzero(stream.render(configuration.block_size)) == 0
 
     # A late publish of the pre-panic frame is stale and must not re-arm.
@@ -682,9 +692,33 @@ def test_debug_synth_panic_drops_stale_state_and_allows_fresh_state() -> None:
     assert np.count_nonzero(stream.render(configuration.block_size)) == 0
 
     # A frame generated after the panic is fresh and sounds.
-    synth.update(_state_at({(0, 72): 100}, received_ns=30))
+    synth.update(_state_at({(0, 72): 100}, publish_generation=2))
     assert np.any(stream.render(configuration.block_size) != 0.0)
     assert synth.active_keys == (72,)
+    synth.close()
+
+
+def test_debug_synth_panic_does_not_reject_states_the_engine_never_ordered() -> None:
+    # Generation-0 states (source-built or directly scheduled) carry no tick
+    # ordering, so a generation-bearing panic must not start rejecting them:
+    # a source that feeds MIDI state directly must keep sounding after a panic.
+    stream_factory = StreamFactory()
+    configuration = SynthConfiguration(
+        attack_ms=0.0,
+        max_voices=2,
+        sample_rate=8000,
+        block_size=32,
+    )
+    synth = DebugSynth(configuration, stream_factory=stream_factory)
+    stream = stream_factory.streams[0]
+
+    synth.panic(publish_generation=1)
+    synth.update(_state_at({(0, 69): 127}, publish_generation=0))
+    # The block after the panic clears the voices; the following block
+    # renders the un-ordered state that the panic must not have rejected.
+    assert np.count_nonzero(stream.render(configuration.block_size)) == 0
+    assert np.any(stream.render(configuration.block_size) != 0.0)
+    assert synth.active_keys == (69,)
     synth.close()
 
 
@@ -702,6 +736,7 @@ def test_debug_synth_start_failure_aborts_and_closes_partial_stream() -> None:
 class PanicProbeRuntime:
     node_id: UUID
     panic_count: int = 0
+    panicked_generations: list[int] = field(default_factory=list)
     close_count: int = 0
 
     def process(
@@ -716,8 +751,9 @@ class PanicProbeRuntime:
     def reset(self, reason: ResetReason) -> None:
         del reason
 
-    def panic(self) -> None:
+    def panic(self, publish_generation: int) -> None:
         self.panic_count += 1
+        self.panicked_generations.append(publish_generation)
 
     def close(self) -> None:
         self.close_count += 1
@@ -766,5 +802,8 @@ def test_global_panic_propagates_through_every_runtime_boundary(boundary: str) -
     owner.panic()
     assert len(instances) == 1
     assert instances[0].panic_count == 1
+    # No tick has run, so the engine's publish generation is still 0: the
+    # watermark, not a call alone, is what the runtime receives.
+    assert instances[0].panicked_generations == [0]
     owner.close()
     assert instances[0].close_count == 1

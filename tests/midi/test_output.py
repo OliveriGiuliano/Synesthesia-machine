@@ -84,10 +84,14 @@ TARGET = "Exact Loopback Target"
 OTHER = "Never Substitute This Port"
 
 
-def _frame(notes: Mapping[tuple[int, int], int], tick_index: int = 1) -> MidiStateFrame:
+def _frame(
+    notes: Mapping[tuple[int, int], int], tick_index: int = 1, publish_generation: int = 0
+) -> MidiStateFrame:
     return MidiStateFrame(
         {MidiNoteKey(channel, note): velocity for (channel, note), velocity in notes.items()},
-        frame_context(clock_id=CLOCK_ID, tick_index=tick_index),
+        frame_context(
+            clock_id=CLOCK_ID, tick_index=tick_index, publish_generation=publish_generation
+        ),
         SOURCE_ID,
     )
 
@@ -789,6 +793,41 @@ def test_panic_port_switch_and_shutdown_use_explicit_offs_then_cc123() -> None:
     assert service.status().connection_state is MidiOutputConnectionState.CLOSED
 
 
+def test_panic_generation_rejects_late_states_and_admits_newer_and_unordered_ones() -> None:
+    # A desired state from a tick that lost the race against a panic must not
+    # re-arm the port (ADR-0022); states from later ticks and states the
+    # engine never ordered must keep flowing.
+    backend = MockMidiOutputBackend((TARGET,))
+    service = MidiOutputService(backend, refresh_interval_s=3600.0)
+    try:
+        _wait(service)
+        stale = _frame({(0, 60): 100}, publish_generation=1)
+        service.publish(stale, _configuration())
+        _wait(service)
+        port = backend.opened_ports[0]
+        assert port.sent[-1] == MidiMessage.note_on(MidiNoteKey(0, 60), 100)
+
+        service.panic(publish_generation=1)
+        assert port.sent[-1] == MidiMessage.all_notes_off(0)
+
+        # A late publish of the pre-panic state is stale: nothing is sent.
+        service.publish(stale, _configuration())
+        _wait(service)
+        assert port.sent[-1] == MidiMessage.all_notes_off(0)
+
+        # A state from a later tick is fresh and re-arms the note.
+        service.publish(_frame({(0, 64): 90}, tick_index=2, publish_generation=2), _configuration())
+        _wait(service)
+        assert port.sent[-1] == MidiMessage.note_on(MidiNoteKey(0, 64), 90)
+
+        # States the engine never ordered (generation 0) are never stale.
+        service.publish(_frame({(0, 67): 80}, publish_generation=0), _configuration())
+        _wait(service)
+        assert port.sent[-1] == MidiMessage.note_on(MidiNoteKey(0, 67), 80)
+    finally:
+        service.close()
+
+
 def test_failed_panic_is_best_effort_marks_error_closes_and_clears_state() -> None:
     backend = MockMidiOutputBackend((TARGET,))
     service = MidiOutputService(backend, refresh_interval_s=3600.0)
@@ -960,6 +999,7 @@ class _RecordingService:
     )
     panic_count: int = 0
     request_panic_count: int = 0
+    request_panic_generations: list[int] = field(default_factory=list)
     close_count: int = 0
     service_status: MidiServiceStatus = field(
         default_factory=lambda: MidiServiceStatus(
@@ -977,10 +1017,11 @@ class _RecordingService:
     def publish(self, frame: MidiStateFrame, configuration: MidiOutputConfiguration) -> None:
         self.published.append((frame, configuration))
 
-    def request_panic(self) -> None:
+    def request_panic(self, publish_generation: int = 0) -> None:
         self.request_panic_count += 1
+        self.request_panic_generations.append(publish_generation)
 
-    def panic(self, timeout_s: float = 2.0) -> None:
+    def panic(self, publish_generation: int = 0, timeout_s: float = 2.0) -> None:
         del timeout_s
         self.panic_count += 1
 
@@ -1005,9 +1046,12 @@ def test_runtime_no_data_status_reset_and_close_lifecycle() -> None:
     parameters = _parameters(definition, {"output_port": TARGET})
     midi = _frame({(0, 60): 100})
 
-    runtime.process({"midi": midi}, parameters, midi.context)
-    assert service.published == [(midi, _configuration())]
     runtime.process({"midi": NoData}, parameters, midi.context)
+    runtime.process({"midi": NoData}, parameters, midi.context)
+    assert service.request_panic_count == 1
+    # The input-missing panic carries the tick's publish generation, so a
+    # late state from that tick cannot re-arm the port.
+    assert service.request_panic_generations == [0]
     runtime.process({"midi": NoData}, parameters, midi.context)
     assert service.request_panic_count == 1
     runtime.reset(ResetReason.SOURCE_RESTARTED)

@@ -86,6 +86,7 @@ class FrameContext:
     received_monotonic_ns: int
     deadline_monotonic_ns: int | None
     is_realtime: bool
+    publish_generation: int
 
     def __init__(
         self,
@@ -96,6 +97,7 @@ class FrameContext:
         received_monotonic_ns: int,
         deadline_monotonic_ns: int | None,
         is_realtime: bool,
+        publish_generation: int = 0,
     ) -> None:
         # CPython 3.12 on Windows can corrupt sustained calls to the generated
         # frozen-dataclass initializer and object.__setattr__. Cached slot writes preserve
@@ -107,6 +109,7 @@ class FrameContext:
         _FRAME_CONTEXT_SLOTS[4].__set__(self, received_monotonic_ns)
         _FRAME_CONTEXT_SLOTS[5].__set__(self, deadline_monotonic_ns)
         _FRAME_CONTEXT_SLOTS[6].__set__(self, is_realtime)
+        _FRAME_CONTEXT_SLOTS[7].__set__(self, publish_generation)
         self.__post_init__()
 
     def __post_init__(self) -> None:
@@ -125,6 +128,9 @@ class FrameContext:
         if self.deadline_monotonic_ns is not None and self.deadline_monotonic_ns < 0:
             msg = "deadline_monotonic_ns cannot be negative"
             raise ValueError(msg)
+        if self.publish_generation < 0:
+            msg = "publish_generation cannot be negative"
+            raise ValueError(msg)
 
 
 _FRAME_CONTEXT_SLOTS = _member_descriptors(
@@ -137,6 +143,7 @@ _FRAME_CONTEXT_SLOTS = _member_descriptors(
         "received_monotonic_ns",
         "deadline_monotonic_ns",
         "is_realtime",
+        "publish_generation",
     ),
 )
 

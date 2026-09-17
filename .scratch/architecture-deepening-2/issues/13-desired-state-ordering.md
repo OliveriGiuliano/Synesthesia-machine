@@ -4,20 +4,26 @@
 
 **Solution:** Record a new ADR first, then carry a publish generation (or a panic-generation stamp applied at the publish seam) on the desired-state value so stale rejection becomes a generation comparison owned by the state model; the debug synth compares generations, no clocks.
 
-**ADR:** Requires a new ADR before implementation: a versioned contracts value crosses the process boundary (ADR-0005 territory); AGENTS.md treats this as an architecture-level contract change.
+**ADR:** Recorded first, per the architecture delta gate: `docs/adr/0022-publish-generation-panic-ordering.md`. Research showed `FrameContext`/`MidiStateFrame` are engine-local (no wire payload carries a frame context), so `ENGINE_PROTOCOL_VERSION` did not change.
 
 **Blocked by:** 12
 
-**Status:** open
+**Status:** resolved
 
 **Files:**
-- `docs/adr/ (new ADR)`
+- `docs/adr/0022-publish-generation-panic-ordering.md (new)`
 - `src/synesthesia_machine/contracts/runtime_values.py`
-- `src/synesthesia_machine/midi/debug_synth.py`
+- `src/synesthesia_machine/runtime/engine_facade.py`
+- `src/synesthesia_machine/runtime/scheduler.py`
+- `src/synesthesia_machine/nodes/base.py`
 - `src/synesthesia_machine/nodes/output/audio.py`
+- `src/synesthesia_machine/nodes/output/midi.py`
+- `src/synesthesia_machine/midi/debug_synth.py`
+- `src/synesthesia_machine/midi/output_service.py`
+- tests: migrated fakes in `tests/midi/test_debug_synth.py`, `tests/midi/test_output.py`, `tests/integration/test_video_to_midi.py`; new tests `tests/midi/test_debug_synth.py`, `tests/midi/test_output.py`, `tests/runtime/test_publish_generation.py (new)`
 
 **Acceptance:**
-- [ ] Ordering rule lives in the value, not the renderer
-- [ ] Deterministic: no wall clocks in tests
-- [ ] Future sinks inherit correct ordering for free
-- [ ] Targeted tests pass; `uv run check` green; no unrelated diff
+- [x] Ordering rule lives in the value, not the renderer
+- [x] Deterministic: no wall clocks in tests
+- [x] Future sinks inherit correct ordering for free
+- [x] Targeted tests pass; `uv run check` green; no unrelated diff
