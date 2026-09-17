@@ -39,7 +39,8 @@ from synesthesia_machine.media.source_config import (
     build_camera_source_config,
     build_video_source_config,
 )
-from synesthesia_machine.media.video_source import PresentedSourceFrame, VideoSourceService
+from synesthesia_machine.media.source_frame import PresentedSourceFrame
+from synesthesia_machine.media.video_source import VideoSourceService
 from synesthesia_machine.nodes.base import ResetReason
 from synesthesia_machine.nodes.input import LOAD_CAMERA_TYPE_ID, LOAD_VIDEO_TYPE_ID
 from synesthesia_machine.nodes.registry import NodeRegistry

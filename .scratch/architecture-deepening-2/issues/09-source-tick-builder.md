@@ -4,7 +4,7 @@
 
 **Solution:** One small pure module (e.g. media/source_frame.py) exposes a presented-tick builder that owns the conversion, context construction, and index rules; both services call it, and the builder is directly unit-testable without any thread or device.
 
-**Status:** open
+**Status:** resolved
 
 **Files:**
 - `src/synesthesia_machine/media/video_source.py`
@@ -12,8 +12,8 @@
 - `src/synesthesia_machine/media/source_frame.py (new)`
 
 **Acceptance:**
-- [ ] ImageFrame invariants live in one place
-- [ ] Builder is pure: testable without threads
-- [ ] A third source kind gets the rules for free
-- [ ] Per-source drift becomes impossible
-- [ ] Targeted tests pass; `uv run check` green; no unrelated diff
+- [x] ImageFrame invariants live in one place
+- [x] Builder is pure: testable without threads
+- [x] A third source kind gets the rules for free
+- [x] Per-source drift becomes impossible
+- [x] Targeted tests pass; `uv run check` green; no unrelated diff

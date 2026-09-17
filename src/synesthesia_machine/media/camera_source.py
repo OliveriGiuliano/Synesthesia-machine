@@ -19,16 +19,14 @@ import numpy as np
 from numpy.typing import NDArray
 
 from synesthesia_machine.contracts import (
-    AlphaMode,
-    ColorSpace,
-    FrameContext,
-    FrameProvenance,
-    ImageFrame,
-    NoData,
     SourceState,
     SourceStatus,
 )
-from synesthesia_machine.media.video_source import PresentedSourceFrame
+from synesthesia_machine.media.source_frame import (
+    PresentedSourceFrame,
+    build_outage_frame,
+    build_presented_image_frame,
+)
 from synesthesia_machine.nodes.base import ResetReason
 
 _DEVICE_ID = re.compile(r"^opencv:(0|[1-9][0-9]*)$")
@@ -512,7 +510,7 @@ class CameraSourceService:
             if not available:
                 return "Camera disconnected while capturing"
             try:
-                rgb = _bgr_to_rgb_float32(raw_frame)
+                rgb_uint8 = _bgr_to_rgb_uint8(raw_frame)
             except (TypeError, ValueError) as error:
                 return f"Camera returned an invalid frame: {error}"
 
@@ -529,22 +527,15 @@ class CameraSourceService:
                 run_started_ns = (
                     received_ns if self._run_started_ns is None else self._run_started_ns
                 )
-            context = FrameContext(
-                clock_id=self.node_id,
-                tick_index=processed_index,
+            image = build_presented_image_frame(
+                node_id=self.node_id,
+                source_kind="camera",
+                rgb_uint8=rgb_uint8,
+                processed_index=processed_index,
                 source_frame_index=source_frame_index,
-                source_time_s=max(0.0, (received_ns - run_started_ns) / _NANOSECONDS_PER_SECOND),
+                source_time_s=(received_ns - run_started_ns) / _NANOSECONDS_PER_SECOND,
                 received_monotonic_ns=received_ns,
                 deadline_monotonic_ns=None,
-                is_realtime=True,
-            )
-            image = ImageFrame(
-                rgb,
-                ColorSpace.SRGB,
-                ("R", "G", "B"),
-                AlphaMode.NONE,
-                context,
-                FrameProvenance(self.node_id, "camera"),
             )
             if not self._publish(PresentedSourceFrame(image, processed_index)):
                 return None
@@ -569,16 +560,16 @@ class CameraSourceService:
             self._processed_index += 1
             processed_index = self._processed_index
             run_started_ns = received_ns if self._run_started_ns is None else self._run_started_ns
-        context = FrameContext(
-            clock_id=self.node_id,
-            tick_index=processed_index,
-            source_frame_index=None,
-            source_time_s=max(0.0, (received_ns - run_started_ns) / _NANOSECONDS_PER_SECOND),
-            received_monotonic_ns=received_ns,
-            deadline_monotonic_ns=None,
-            is_realtime=True,
+        self._publish(
+            build_outage_frame(
+                node_id=self.node_id,
+                processed_index=processed_index,
+                source_frame_index=None,
+                source_time_s=(received_ns - run_started_ns) / _NANOSECONDS_PER_SECOND,
+                received_monotonic_ns=received_ns,
+                deadline_monotonic_ns=None,
+            )
         )
-        self._publish(PresentedSourceFrame(NoData, processed_index, context))
 
     def _publish(self, frame: PresentedSourceFrame) -> bool:
         try:
@@ -619,16 +610,14 @@ def _positive_float(value: float) -> float | None:
     return float(value) if np.isfinite(value) and value > 0.0 else None
 
 
-def _bgr_to_rgb_float32(raw_frame: object) -> NDArray[np.float32]:
+def _bgr_to_rgb_uint8(raw_frame: object) -> NDArray[np.uint8]:
     if not isinstance(raw_frame, np.ndarray):
         raise TypeError("capture frame is not an ndarray")
     frame = cast(NDArray[np.uint8], raw_frame)
     if frame.dtype != np.uint8 or frame.ndim != 3 or frame.shape[2] != 3:
         raise ValueError(f"expected HxWx3 uint8 BGR, got {frame.shape} {frame.dtype}")
-    rgb = np.ascontiguousarray(frame[..., ::-1], dtype=np.float32)
-    rgb *= np.float32(1.0 / 255.0)
-    rgb.flags.writeable = False
-    return rgb
+    # OpenCV captures arrive BGR; the shared builder normalizes from RGB.
+    return frame[..., ::-1]
 
 
 __all__ = [

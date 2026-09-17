@@ -23,14 +23,12 @@ import numpy as np
 from numpy.typing import NDArray
 
 from synesthesia_machine.contracts import (
-    AlphaMode,
-    ColorSpace,
-    FrameContext,
-    FrameProvenance,
-    ImageFrame,
-    NoDataType,
     SourceState,
     SourceStatus,
+)
+from synesthesia_machine.media.source_frame import (
+    PresentedSourceFrame,
+    build_presented_image_frame,
 )
 from synesthesia_machine.media_path import normalize_media_path
 from synesthesia_machine.nodes.base import ResetReason
@@ -74,45 +72,17 @@ class DecodedVideoFrame:
 
     source_frame_index: int
     pts_seconds: float
-    rgb: NDArray[np.float32]
+    rgb: NDArray[np.uint8]
 
     def __post_init__(self) -> None:
         if self.source_frame_index < 0:
             raise ValueError("source_frame_index cannot be negative")
         if not np.isfinite(self.pts_seconds):
             raise ValueError("frame PTS must be finite")
-        if self.rgb.dtype != np.float32 or self.rgb.ndim != 3 or self.rgb.shape[2] != 3:
-            raise ValueError("decoded video frames must be HxWx3 float32 RGB")
-        if self.rgb.flags.writeable or not self.rgb.flags.c_contiguous:
-            raise ValueError("decoded video frames must be read-only and C-contiguous")
-
-
-@dataclass(frozen=True, slots=True, init=False)
-class PresentedSourceFrame:
-    """One image or explicit outage tick ready for the engine source mailbox."""
-
-    image: ImageFrame | NoDataType
-    processed_index: int
-    context: FrameContext
-
-    def __init__(
-        self,
-        image: ImageFrame | NoDataType,
-        processed_index: int,
-        context: FrameContext | None = None,
-    ) -> None:
-        resolved_context = image.context if isinstance(image, ImageFrame) else context
-        if resolved_context is None:
-            raise ValueError("NoData source frames require an explicit frame context")
-        object.__setattr__(self, "image", image)
-        object.__setattr__(self, "processed_index", processed_index)
-        object.__setattr__(self, "context", resolved_context)
-        if self.processed_index < 1:
-            raise ValueError("processed_index must start at 1")
-        if self.context.tick_index != self.processed_index:
-            raise ValueError("source tick and processed index must match")
-        if isinstance(self.image, ImageFrame) and self.image.context != self.context:
-            raise ValueError("image and source-frame contexts must match")
+        if self.rgb.dtype != np.uint8 or self.rgb.ndim != 3 or self.rgb.shape[2] != 3:
+            raise ValueError("decoded video frames must be HxWx3 uint8 RGB")
+        if not self.rgb.flags.c_contiguous:
+            raise ValueError("decoded video frames must be C-contiguous")
 
 
 PresentedVideoFrame = PresentedSourceFrame
@@ -674,22 +644,15 @@ class VideoSourceService:
             processed_index = self._processed_index
             self._source_frame_index = frame.source_frame_index
             self._position_s = frame.pts_seconds
-        context = FrameContext(
-            clock_id=self.node_id,
-            tick_index=processed_index,
+        image = build_presented_image_frame(
+            node_id=self.node_id,
+            source_kind="video",
+            rgb_uint8=frame.rgb,
+            processed_index=processed_index,
             source_frame_index=frame.source_frame_index,
-            source_time_s=max(0.0, frame.pts_seconds),
+            source_time_s=frame.pts_seconds,
             received_monotonic_ns=received_ns,
             deadline_monotonic_ns=max(0, target_ns),
-            is_realtime=True,
-        )
-        image = ImageFrame(
-            data=frame.rgb,
-            color_space=ColorSpace.SRGB,
-            channel_names=("R", "G", "B"),
-            alpha_mode=AlphaMode.NONE,
-            context=context,
-            provenance=FrameProvenance(self.node_id, "video"),
         )
         try:
             self._on_frame(PresentedVideoFrame(image, processed_index))
@@ -766,12 +729,12 @@ def _convert_frame(frame: av.VideoFrame, source_frame_index: int) -> DecodedVide
     if frame.pts is None or frame.time_base is None:
         raise ValueError("frame has no usable presentation timestamp")
     pts_seconds = float(frame.pts * frame.time_base)
-    rgb_uint8 = np.asarray(frame.to_ndarray(format="rgb24"), dtype=np.uint8)
-    if rgb_uint8.ndim != 3 or rgb_uint8.shape[2] != 3:
-        raise ValueError(f"unexpected RGB frame shape {rgb_uint8.shape}")
-    rgb = np.ascontiguousarray(rgb_uint8, dtype=np.float32)
-    rgb *= np.float32(1.0 / 255.0)
-    rgb.flags.writeable = False
+    rgb = np.ascontiguousarray(
+        frame.to_ndarray(format="rgb24"),
+        dtype=np.uint8,
+    )
+    if rgb.ndim != 3 or rgb.shape[2] != 3:
+        raise ValueError(f"unexpected RGB frame shape {rgb.shape}")
     return DecodedVideoFrame(source_frame_index, pts_seconds, rgb)
 
 

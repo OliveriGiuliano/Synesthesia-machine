@@ -92,10 +92,16 @@ from synesthesia_machine.media.source_config import (
     build_camera_source_config,
     build_video_source_config,
 )
+from synesthesia_machine.media.source_frame import (
+    PresentedSourceFrame,
+    build_outage_frame,
+    build_presented_image_frame,
+    build_source_context,
+    normalize_uint8_rgb,
+)
 from synesthesia_machine.media.video_source import (
     DecodedVideoFrame,
     PlaybackClock,
-    PresentedSourceFrame,
     PresentedVideoFrame,
     PtsPlaybackTimeline,
     SystemPlaybackClock,
@@ -152,6 +158,9 @@ __all__ = [
     "blend_images",
     "brightness_image",
     "build_camera_source_config",
+    "build_outage_frame",
+    "build_presented_image_frame",
+    "build_source_context",
     "build_video_source_config",
     "camera_index_from_device_id",
     "canny_image",
@@ -180,6 +189,7 @@ __all__ = [
     "invert_colour_image",
     "low_pass_image",
     "multiply_scalar_image",
+    "normalize_uint8_rgb",
     "opacity_image",
     "open_camera",
     "posterize_image",
