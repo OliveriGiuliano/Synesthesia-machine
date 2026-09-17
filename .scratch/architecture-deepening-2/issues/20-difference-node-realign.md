@@ -4,7 +4,7 @@
 
 **Solution:** Move the Difference definition and runtime into the image domain (compositing), split dynamic.py along the subcategories its own definitions already declare (temporal / analysis / transform), and let the catalogue ordering fall out of declaration order instead of the positional swap.
 
-**Status:** open
+**Status:** resolved
 
 **Files:**
 - `src/synesthesia_machine/nodes/utility/dynamic.py`
@@ -12,8 +12,8 @@
 - `tests/architecture/test_builtin_catalogue.py`
 
 **Acceptance:**
-- [ ] Type_id prefix matches file location
-- [ ] Catalogue stops crossing domains
-- [ ] The reorder hack is deleted
-- [ ] Dynamic.py stops being a grab-bag
-- [ ] Targeted tests pass; `uv run check` green; no unrelated diff
+- [x] Type_id prefix matches file location
+- [x] Catalogue stops crossing domains
+- [x] The reorder hack is deleted
+- [x] Dynamic.py stops being a grab-bag
+- [x] Targeted tests pass; `uv run check` green; no unrelated diff
