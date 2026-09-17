@@ -24,6 +24,12 @@ if TYPE_CHECKING:
     # accepts; no runtime edge from contracts to graph is created.
     from synesthesia_machine.graph.model import GraphSnapshot
 
+# Default heartbeat liveness deadline in seconds, shared by every side of
+# the seam: the process client uses it to time out its own child, and the
+# engine session uses the same deadline when folding a client's heartbeat
+# timestamps into the connection state.
+DEFAULT_HEARTBEAT_TIMEOUT_S = 2.0
+
 
 class EngineState(StrEnum):
     STOPPED = "STOPPED"

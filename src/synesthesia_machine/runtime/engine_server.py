@@ -11,14 +11,13 @@ import time
 import traceback
 from contextlib import suppress
 from dataclasses import replace
-from multiprocessing.shared_memory import SharedMemory
 from pathlib import Path
 from typing import Protocol, cast, get_args
 
 import cv2
-import numpy as np
 import psutil
 
+from synesthesia_machine.contracts.engine_client import EngineClient
 from synesthesia_machine.contracts.engine_messages import (
     ENGINE_PROTOCOL_VERSION,
     ActivateGraph,
@@ -53,9 +52,9 @@ from synesthesia_machine.contracts.engine_messages import (
     QueryNodeMemoryDiagnostics,
     QueryNodeProfiles,
     QuerySourceStatus,
+    RemoteErrorKind,
     ResetProfiling,
     SetProfilingEnabled,
-    SharedFrameReady,
     Shutdown,
     ShutdownAcknowledged,
     SourceStatusResponse,
@@ -63,7 +62,6 @@ from synesthesia_machine.contracts.engine_messages import (
     TransportCommand,
     ValuePreviewsPublished,
     WaitUntilIdle,
-    WriteSharedFrame,
 )
 from synesthesia_machine.diagnostics.logging_setup import (
     ENGINE_LOGGER_NAME,
@@ -115,7 +113,6 @@ _COMMAND_TYPES: tuple[type[object], ...] = get_args(EngineCommand)
 
 _REVISION_EXEMPT_COMMANDS = (
     Ping,
-    WriteSharedFrame,
     Handshake,
     ActivateGraph,
     QueryDeviceCatalogue,
@@ -127,12 +124,31 @@ class StaleGraphRevisionError(RuntimeError):
     pass
 
 
+def classify_remote_error(error: BaseException) -> RemoteErrorKind:
+    """Single owner of the child's side of the seam's error vocabulary.
+
+    A failed command is classified into a stable kind before anything
+    crosses the process boundary; no Python exception class name is ever
+    sent, so the child's internal types stay an implementation detail.
+    """
+
+    if isinstance(error, StaleGraphRevisionError):
+        return RemoteErrorKind.STALE_REVISION
+    if isinstance(error, KeyError):
+        return RemoteErrorKind.KEY
+    if isinstance(error, NotImplementedError):
+        return RemoteErrorKind.NOT_IMPLEMENTED
+    if isinstance(error, ValueError):
+        return RemoteErrorKind.VALUE
+    return RemoteErrorKind.OTHER
+
+
 class _EventPublisher:
     """Publish heartbeats/compact previews without blocking command dispatch or graph work."""
 
     def __init__(
         self,
-        engine: InProcessEngineClient,
+        engine: EngineClient,
         event_queue: EventQueueWriter,
         *,
         writer: SharedMemoryPreviewWriter,
@@ -292,29 +308,42 @@ class EngineServer:
         connection: DuplexConnection,
         event_queue: EventQueueWriter,
         *,
+        engine: InProcessEngineClient | None = None,
+        events: _EventPublisher | None = None,
         heartbeat_interval_s: float = HEARTBEAT_INTERVAL_S,
     ) -> None:
+        """Assemble the child's runtime around an injectable engine seam.
+
+        Production wiring (the in-process client on the builtin registry,
+        plus the event publisher) is the default; tests inject fakes so a
+        real :class:`EngineServer` can be exercised without a child process.
+        """
+
         self._connection = connection
         self._event_queue = event_queue
         self._heartbeat_interval_s = heartbeat_interval_s
         self._started_monotonic_ns = time.monotonic_ns()
         self._graph_revision: int | None = None
+        self._process = psutil.Process()
         self._preview_wake = threading.Event()
         self._preview_writer = SharedMemoryPreviewWriter()
-        self._engine = InProcessEngineClient(
-            create_builtin_registry(),
-            preview_dirty_notifier=self._preview_wake.set,
-            preview_transport=self._preview_writer,
-        )
-        self._process = psutil.Process()
-        self._events = _EventPublisher(
-            self._engine,
-            event_queue,
-            writer=self._preview_writer,
-            started_monotonic_ns=self._started_monotonic_ns,
-            heartbeat_interval_s=heartbeat_interval_s,
-            preview_wake=self._preview_wake,
-        )
+        if engine is None:
+            engine = InProcessEngineClient(
+                create_builtin_registry(),
+                preview_dirty_notifier=self._preview_wake.set,
+                preview_transport=self._preview_writer,
+            )
+        self._engine = engine
+        if events is None:
+            events = _EventPublisher(
+                engine,
+                event_queue,
+                writer=self._preview_writer,
+                started_monotonic_ns=self._started_monotonic_ns,
+                heartbeat_interval_s=heartbeat_interval_s,
+                preview_wake=self._preview_wake,
+            )
+        self._events = events
 
     def run(self) -> None:
         self._events.start()
@@ -375,8 +404,6 @@ class EngineServer:
     def _handle(self, command: EngineCommand) -> EngineResponse:
         if isinstance(command, Ping):
             return Pong(command.request_id, os.getpid())
-        if isinstance(command, WriteSharedFrame):
-            return self._write_probe_frame(command)
         if isinstance(command, Handshake):
             return HandshakeAcknowledged(
                 command.request_id,
@@ -488,27 +515,12 @@ class EngineServer:
                 raise ValueError("Seek requires a source node and source time")
             self._engine.seek(command.source_node_id, command.source_time_s)
 
-    def _write_probe_frame(self, command: WriteSharedFrame) -> SharedFrameReady:
-        shared_memory = SharedMemory(name=command.shared_memory_name)
-        try:
-            target = np.ndarray(
-                (command.height, command.width, 3),
-                dtype=np.uint8,
-                buffer=shared_memory.buf,
-            )
-            target[..., 0] = np.arange(command.width, dtype=np.uint8)[np.newaxis, :]
-            target[..., 1] = np.arange(command.height, dtype=np.uint8)[:, np.newaxis]
-            target[..., 2] = 127
-        finally:
-            shared_memory.close()
-        return SharedFrameReady(command.request_id, 1)
-
     def _send_failure(self, request_id: str, error: Exception) -> None:
         self._connection.send(
             CommandFailed(
                 request_id,
                 self._graph_revision,
-                type(error).__name__,
+                classify_remote_error(error),
                 str(error),
                 traceback.format_exc(),
             )

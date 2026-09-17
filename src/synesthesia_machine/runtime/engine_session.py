@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from synesthesia_machine.contracts import (
+    DEFAULT_HEARTBEAT_TIMEOUT_S,
     DeviceCatalogue,
     EngineActivation,
     EngineClient,
@@ -41,11 +42,6 @@ if TYPE_CHECKING:
 
 __all__ = ["EngineSession", "RestartOutcome"]
 
-# Mirrors the process client's DEFAULT_HEARTBEAT_TIMEOUT_S: a client that
-# self-polices its heartbeat (the process client) already folds this into
-# status(), so the check mainly covers clients that publish heartbeat
-# timestamps without timing themselves out.
-_HEARTBEAT_TIMEOUT_S = 2.0
 
 #: States in which a previously observed STOPPED engine state can no longer
 #: be trusted: the engine is failing, restarting, or gone, so the next
@@ -163,7 +159,7 @@ class EngineSession:
                 and status.last_heartbeat_monotonic_ns is not None
                 and (
                     time.monotonic_ns() - status.last_heartbeat_monotonic_ns
-                    > _HEARTBEAT_TIMEOUT_S * 1_000_000_000
+                    > DEFAULT_HEARTBEAT_TIMEOUT_S * 1_000_000_000
                 )
             ):
                 state = EngineConnectionState.UNRESPONSIVE

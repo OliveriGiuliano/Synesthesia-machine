@@ -8,7 +8,7 @@
 
 **Blocked by:** 05, 06
 
-**Status:** open
+**Status:** resolved
 
 **Files:**
 - `src/synesthesia_machine/contracts/engine_messages.py`
@@ -19,8 +19,8 @@
 - `tools/process_ipc_probe.py`
 
 **Acceptance:**
-- [ ] Production child stops carrying probe code
-- [ ] One heartbeat constant, one error-remap owner
-- [ ] Tests construct a real EngineServer
-- [ ] New message types still flow via protocol unions
-- [ ] Targeted tests pass; `uv run check` green; no unrelated diff
+- [x] Production child stops carrying probe code
+- [x] One heartbeat constant, one error-remap owner
+- [x] Tests construct a real EngineServer
+- [x] New message types still flow via protocol unions
+- [x] Targeted tests pass; `uv run check` green; no unrelated diff

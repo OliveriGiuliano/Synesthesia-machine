@@ -6,6 +6,7 @@ import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import cast
 
 import psutil
 import pytest
@@ -24,13 +25,18 @@ from synesthesia_machine.contracts.engine_messages import (
     CommandFailed,
     GraphActivationAcknowledged,
     Panic,
+    RemoteErrorKind,
 )
 from synesthesia_machine.graph import GraphDocument, ValidationReport
 from synesthesia_machine.nodes import ResetReason
-from synesthesia_machine.runtime import EngineProtocolError, ProcessEngineClient
+from synesthesia_machine.runtime import (
+    EngineProtocolError,
+    InProcessEngineClient,
+    ProcessEngineClient,
+)
 from synesthesia_machine.runtime import engine_client as engine_client_module
 from synesthesia_machine.runtime import engine_server as engine_server_module
-from synesthesia_machine.runtime.engine_server import EngineServer
+from synesthesia_machine.runtime.engine_server import EngineServer, _EventPublisher
 
 
 def _wait_until(predicate: Callable[[], bool], *, timeout_s: float = 3.0) -> bool:
@@ -53,6 +59,31 @@ def _scalar_document() -> GraphDocument:
         parameters={"number_type": "FLOAT", "float_value": 0.5},
     )
     return document
+
+
+class _NoopConnection:
+    """Connection stand-in for dispatch tests that never talk to a child."""
+
+    def send(self, value: object) -> None:
+        del value
+
+    def recv(self) -> object:
+        raise EOFError
+
+    def poll(self, timeout: float = 0.0) -> bool:
+        del timeout
+        return False
+
+    def close(self) -> None:
+        return None
+
+
+class _NoopQueue:
+    def put_nowait(self, value: object) -> None:
+        del value
+
+    def close(self) -> None:
+        return None
 
 
 @pytest.fixture
@@ -344,10 +375,12 @@ def test_server_forwards_activate_reset_reason_to_child_engine() -> None:
         def graph_activated(self, graph_revision: int) -> None:
             assert graph_revision == snapshot.revision
 
-    server = object.__new__(EngineServer)
-    server._engine = EngineProbe()  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue]
-    server._events = EventsProbe()  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue]
-    server._graph_revision = None  # pyright: ignore[reportPrivateUsage]
+    server = EngineServer(
+        _NoopConnection(),
+        _NoopQueue(),
+        engine=cast(InProcessEngineClient, EngineProbe()),
+        events=cast(_EventPublisher, EventsProbe()),
+    )
     command = ActivateGraph(
         "request",
         snapshot.revision,
@@ -376,9 +409,11 @@ def test_server_rejects_stale_graph_command_before_runtime_mutation() -> None:
             self.panic_count += 1
 
     engine = EngineProbe()
-    server = object.__new__(EngineServer)
-    server._connection = ConnectionProbe()  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue]
-    server._engine = engine  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue]
+    server = EngineServer(
+        ConnectionProbe(),
+        _NoopQueue(),
+        engine=cast(InProcessEngineClient, engine),
+    )
     server._graph_revision = 7  # pyright: ignore[reportPrivateUsage]
 
     should_stop = server._dispatch(Panic("stale", 6))  # pyright: ignore[reportPrivateUsage]
@@ -388,7 +423,7 @@ def test_server_rejects_stale_graph_command_before_runtime_mutation() -> None:
     assert len(sent) == 1 and isinstance(sent[0], CommandFailed)
     failure = sent[0]
     assert isinstance(failure, CommandFailed)
-    assert failure.error_type == "StaleGraphRevisionError"
+    assert failure.error_type is RemoteErrorKind.STALE_REVISION
     assert "active revision is 7" in failure.message
 
 

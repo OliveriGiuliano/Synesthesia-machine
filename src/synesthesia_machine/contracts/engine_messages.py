@@ -20,7 +20,22 @@ from synesthesia_machine.contracts.engine_client import (
 )
 from synesthesia_machine.contracts.runtime_values import LiteralValue
 
-ENGINE_PROTOCOL_VERSION = 15
+ENGINE_PROTOCOL_VERSION = 16
+
+
+class RemoteErrorKind(StrEnum):
+    """Stable error vocabulary carried across the seam.
+
+    The child classifies a failed command into one of these kinds before it
+    touches the wire, so no Python exception class name ever crosses the
+    process boundary; the client maps the kind back to an exception type.
+    """
+
+    KEY = "key"
+    NOT_IMPLEMENTED = "not_implemented"
+    VALUE = "value"
+    STALE_REVISION = "stale_revision"
+    OTHER = "other"
 
 
 @dataclass(frozen=True, slots=True)
@@ -277,7 +292,7 @@ class CommandAcknowledged:
 class CommandFailed:
     request_id: str
     graph_revision: int | None
-    error_type: str
+    error_type: RemoteErrorKind
     message: str
     details: str | None = None
     protocol_version: int = ENGINE_PROTOCOL_VERSION
@@ -351,22 +366,6 @@ class Pong:
 
 
 @dataclass(frozen=True, slots=True)
-class WriteSharedFrame:
-    request_id: str
-    shared_memory_name: str
-    width: int
-    height: int
-    protocol_version: int = ENGINE_PROTOCOL_VERSION
-
-
-@dataclass(frozen=True, slots=True)
-class SharedFrameReady:
-    request_id: str
-    sequence: int
-    protocol_version: int = ENGINE_PROTOCOL_VERSION
-
-
-@dataclass(frozen=True, slots=True)
 class Shutdown:
     request_id: str
     graph_revision: int | None = None
@@ -382,7 +381,6 @@ class ShutdownAcknowledged:
 
 EngineCommand = (
     Ping
-    | WriteSharedFrame
     | Handshake
     | ActivateGraph
     | TransportCommand
@@ -401,7 +399,6 @@ EngineCommand = (
 )
 EngineResponse = (
     Pong
-    | SharedFrameReady
     | HandshakeAcknowledged
     | GraphActivationAcknowledged
     | SourceStatusResponse

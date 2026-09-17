@@ -6,13 +6,17 @@ from uuid import uuid4
 
 import numpy as np
 import pytest
-from tools.process_ipc_probe import EngineProbeProcess, SharedRgbSlot, generated_rgb_frame
+from tools.process_ipc_probe import (
+    EngineProbeProcess,
+    SharedFrameReady,
+    SharedRgbSlot,
+    WriteSharedFrame,
+    generated_rgb_frame,
+)
 
 from synesthesia_machine.contracts.engine_messages import (
     Ping,
     Pong,
-    SharedFrameReady,
-    WriteSharedFrame,
 )
 
 

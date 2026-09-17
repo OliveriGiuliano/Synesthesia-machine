@@ -1,6 +1,7 @@
 """Stable cross-process and runtime-value contracts."""
 
 from synesthesia_machine.contracts.engine_client import (
+    DEFAULT_HEARTBEAT_TIMEOUT_S,
     DeviceCatalogue,
     DeviceDescriptor,
     DeviceKind,
@@ -56,9 +57,9 @@ from synesthesia_machine.contracts.engine_messages import (
     QueryNodeMemoryDiagnostics,
     QueryNodeProfiles,
     QuerySourceStatus,
+    RemoteErrorKind,
     ResetProfiling,
     SetProfilingEnabled,
-    SharedFrameReady,
     Shutdown,
     ShutdownAcknowledged,
     SourceStatusResponse,
@@ -67,7 +68,6 @@ from synesthesia_machine.contracts.engine_messages import (
     ValuePreviewsPublished,
     WireConnection,
     WireNode,
-    WriteSharedFrame,
 )
 from synesthesia_machine.contracts.json import JsonObject, JsonValue
 from synesthesia_machine.contracts.runtime_values import (
@@ -99,6 +99,7 @@ from synesthesia_machine.contracts.validation import (
 )
 
 __all__ = [
+    "DEFAULT_HEARTBEAT_TIMEOUT_S",
     "ENGINE_PROTOCOL_VERSION",
     "ActivateGraph",
     "AlphaMode",
@@ -165,11 +166,11 @@ __all__ = [
     "QueryNodeMemoryDiagnostics",
     "QueryNodeProfiles",
     "QuerySourceStatus",
+    "RemoteErrorKind",
     "ResetProfiling",
     "ResetReason",
     "RuntimeValue",
     "SetProfilingEnabled",
-    "SharedFrameReady",
     "Shutdown",
     "ShutdownAcknowledged",
     "SourceState",
@@ -185,7 +186,6 @@ __all__ = [
     "ValuePreviewsPublished",
     "WireConnection",
     "WireNode",
-    "WriteSharedFrame",
     "clock_id_of",
     "freeze_uint8_preview",
     "read_only_float32",

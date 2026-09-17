@@ -50,6 +50,32 @@ from synesthesia_machine.runtime import EngineFacade, InProcessEngineClient, Por
 from synesthesia_machine.runtime.engine_client import ProcessEngineClient
 from synesthesia_machine.runtime.engine_server import EngineServer
 
+
+class _NoopConnection:
+    """Connection stand-in for dispatch tests that never talk to a child."""
+
+    def send(self, value: object) -> None:
+        del value
+
+    def recv(self) -> object:
+        raise EOFError
+
+    def poll(self, timeout: float = 0.0) -> bool:
+        del timeout
+        return False
+
+    def close(self) -> None:
+        return None
+
+
+class _NoopQueue:
+    def put_nowait(self, value: object) -> None:
+        del value
+
+    def close(self) -> None:
+        return None
+
+
 CLOCK_ID = UUID("00000000-0000-0000-0000-000000004501")
 SOURCE_ID = UUID("00000000-0000-0000-0000-000000004502")
 MIDI_ID = UUID("00000000-0000-0000-0000-000000004503")
@@ -1184,8 +1210,11 @@ def test_server_midi_status_query_returns_compact_typed_response() -> None:
             assert output_node_id == MIDI_ID
             return (expected,)
 
-    server = object.__new__(EngineServer)
-    server._engine = _EngineProbe()  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue]
+    server = EngineServer(
+        _NoopConnection(),
+        _NoopQueue(),
+        engine=cast(InProcessEngineClient, _EngineProbe()),
+    )
     server._graph_revision = 7  # pyright: ignore[reportPrivateUsage]
     response = server._handle(  # pyright: ignore[reportPrivateUsage]
         QueryMidiOutputStatus("midi-status", 7, MIDI_ID)

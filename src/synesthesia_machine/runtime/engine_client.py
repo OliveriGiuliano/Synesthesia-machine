@@ -17,6 +17,7 @@ from typing import Protocol, cast, get_args
 from uuid import UUID, uuid4
 
 from synesthesia_machine.contracts.engine_client import (
+    DEFAULT_HEARTBEAT_TIMEOUT_S,
     DeviceCatalogue,
     EngineActivation,
     EngineConnectionState,
@@ -62,6 +63,7 @@ from synesthesia_machine.contracts.engine_messages import (
     QueryNodeMemoryDiagnostics,
     QueryNodeProfiles,
     QuerySourceStatus,
+    RemoteErrorKind,
     ResetProfiling,
     SetProfilingEnabled,
     Shutdown,
@@ -78,7 +80,6 @@ from synesthesia_machine.runtime.preview_channel import PreviewSlotKey, SharedMe
 
 DEFAULT_REQUEST_TIMEOUT_S = 3.0
 DEFAULT_ACTIVATION_TIMEOUT_S = 10.0
-DEFAULT_HEARTBEAT_TIMEOUT_S = 2.0
 DEFAULT_CLOSE_TIMEOUT_S = 2.0
 
 _WINDOWS_EXIT_CODES = {
@@ -930,14 +931,18 @@ class ProcessEngineClient:
 
     @staticmethod
     def _raise_remote_error(response: CommandFailed) -> None:
-        message = response.message or response.error_type
-        if response.error_type == "KeyError":
-            raise KeyError(message)
-        if response.error_type == "NotImplementedError":
-            raise NotImplementedError(message)
-        if response.error_type == "ValueError":
-            raise ValueError(message)
-        raise RuntimeError(message)
+        # The child classified the failure before it crossed the seam; the
+        # client owns the kind-to-exception mapping.
+        message = response.message or str(response.error_type)
+        match response.error_type:
+            case RemoteErrorKind.KEY:
+                raise KeyError(message)
+            case RemoteErrorKind.NOT_IMPLEMENTED:
+                raise NotImplementedError(message)
+            case RemoteErrorKind.VALUE:
+                raise ValueError(message)
+            case _:
+                raise RuntimeError(message)
 
 
 __all__ = ["EngineProtocolError", "ProcessEngineClient"]

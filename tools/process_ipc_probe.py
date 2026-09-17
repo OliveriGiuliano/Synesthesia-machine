@@ -21,11 +21,36 @@ from synesthesia_machine.contracts.engine_messages import (
     EngineEvent,
     Ping,
     Pong,
-    SharedFrameReady,
     Shutdown,
     ShutdownAcknowledged,
-    WriteSharedFrame,
 )
+
+# The probe speaks its own tiny frame handshake: these message shapes are
+# local to the tool so the production engine contract stays free of
+# test-only commands (the spawned child of this probe implements them).
+
+
+@dataclass(frozen=True, slots=True)
+class WriteSharedFrame:
+    request_id: str
+    shared_memory_name: str
+    width: int
+    height: int
+    protocol_version: int = ENGINE_PROTOCOL_VERSION
+
+
+@dataclass(frozen=True, slots=True)
+class SharedFrameReady:
+    request_id: str
+    sequence: int
+    protocol_version: int = ENGINE_PROTOCOL_VERSION
+
+
+# Commands and events this probe can exchange: the production protocol
+# union plus the probe's local frame-handshake messages.
+ProbeCommand = EngineCommand | WriteSharedFrame
+ProbeEvent = EngineEvent | SharedFrameReady
+
 
 DEFAULT_WIDTH = 32
 DEFAULT_HEIGHT = 24
@@ -119,7 +144,7 @@ def engine_child(connection: DuplexConnection) -> None:
                 raise TypeError(msg)
             _validate_protocol(command.protocol_version)
 
-            event: EngineEvent
+            event: ProbeEvent
             if isinstance(command, Ping):
                 event = Pong(request_id=command.request_id, child_process_id=os.getpid())
             elif isinstance(command, WriteSharedFrame):
@@ -175,7 +200,7 @@ class EngineProbeProcess:
         finally:
             child_connection.close()
 
-    def request(self, command: EngineCommand, *, timeout_seconds: float = 5.0) -> EngineEvent:
+    def request(self, command: ProbeCommand, *, timeout_seconds: float = 5.0) -> ProbeEvent:
         connection = self._connection
         if connection is None:
             msg = "engine probe process is not running"
