@@ -88,7 +88,7 @@ def test_client_activates_real_video_and_drives_graph_through_final_api(tmp_path
         assert metrics.state is EngineState.STOPPED
         assert metrics.processed_ticks == DEFAULT_FRAME_COUNT
         assert metrics.memory_bytes > 0
-        previews = client.poll_image_previews()
+        previews = client.next_image_previews()
         # Image previews are anchored on each producing port (source.image,
         # resize.image), not on the display node, so both producer ports own one.
         by_source = {(preview.owner_id, preview.source_port_id): preview for preview in previews}
@@ -97,8 +97,9 @@ def test_client_activates_real_video_and_drives_graph_through_final_api(tmp_path
             by_source[(resize_id, "image")].width,
             by_source[(resize_id, "image")].height,
         ) == (32, 24)
-        acknowledged = {key: item.sequence for key, item in by_source.items()}
-        assert client.poll_image_previews(acknowledged) == ()
+        # The client owns the delivery cursors: the call above already advanced
+        # them, so a repeat delivery returns nothing.
+        assert client.next_image_previews() == ()
     finally:
         client.close()
 
@@ -132,7 +133,7 @@ def test_auto_stop_forgets_the_last_preview_frame(tmp_path: Path) -> None:
         assert activation.activated and activation.report.is_valid
         client.play(source_id)
         assert client.wait_until_idle(2.0)
-        previews = client.poll_image_previews()
+        previews = client.next_image_previews()
         assert previews and all(item.sequence > 0 for item in previews)
 
         broken = GraphDocument()
@@ -142,9 +143,9 @@ def test_auto_stop_forgets_the_last_preview_frame(tmp_path: Path) -> None:
         assert not activation.report.is_valid
         assert client.metrics().state is EngineState.STOPPED
 
-        assert client.poll_image_previews() == ()
-        assert client.poll_note_previews() == ()
-        assert client.poll_value_previews() == ()
+        assert client.next_image_previews() == ()
+        assert client.next_note_previews() == ()
+        assert client.next_value_previews() == ()
     finally:
         client.close()
 
@@ -356,9 +357,9 @@ def test_preview_disabled_engine_spins_no_preview_worker(tmp_path: Path) -> None
         assert client.wait_until_idle(3.0)
         thread_names = {thread.name for thread in threading.enumerate()}
         assert "in-process-preview-worker" not in thread_names
-        assert client.poll_image_previews() == ()
-        assert client.poll_note_previews() == ()
-        assert client.poll_value_previews() == ()
+        assert client.next_image_previews() == ()
+        assert client.next_note_previews() == ()
+        assert client.next_value_previews() == ()
         metrics = client.metrics()
         assert metrics.processed_ticks == DEFAULT_FRAME_COUNT
     finally:

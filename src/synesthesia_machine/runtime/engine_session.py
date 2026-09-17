@@ -1,10 +1,11 @@
 """Headless engine session: client-side bookkeeping over the EngineClient.
 
 The :class:`EngineSession` facade owns everything a caller would otherwise
-have to track by hand when driving the engine: the per-port preview sequence
-cursors, the folded six-state connection machine, the "engine is known
-stopped" cache (the cheap liveness skip used by periodic UI ticks), and the
-last valid activation used by the restart path.  It depends only on the
+have to track by hand when driving the engine: a cursor-free preview pump
+(the client keeps the per-port sequence cursors), the folded six-state
+connection machine, the "engine is known stopped" cache (the cheap
+liveness skip used by periodic UI ticks), and the last valid activation
+used by the restart path.  It depends only on the
 ``EngineClient`` protocol, so it behaves identically over the process and
 in-process clients, and it is Qt-free: the UI layer builds on it via the
 ``EngineBridge``.
@@ -83,12 +84,12 @@ class RestartOutcome:
 class EngineSession:
     """Drives an engine through the ``EngineClient`` protocol.
 
-    Preview polling is cursor-free from the caller's point of view: the
-    session keeps the per-port sequence cursors and passes them to the
-    client, so ``next_*_previews`` returns only previews newer than the last
-    delivered batch.  ``connection_state`` folds the client's status into the
-    six-state machine (closed session, unreachable client, stale heartbeat),
-    and ``is_known_stopped`` carries the "engine is stopped, don't re-poll"
+    Preview polling is cursor-free: the client owns the per-port sequence
+    cursors, so ``next_*_previews`` returns only previews newer than the last
+    delivered batch and a caller cannot poll with a stale threshold.
+    ``connection_state`` folds the client's status into the six-state machine
+    (closed session, unreachable client, stale heartbeat), and
+    ``is_known_stopped`` carries the "engine is stopped, don't re-poll"
     optimization.  Transport and status calls are plain pass-throughs.
     """
 
@@ -100,10 +101,6 @@ class EngineSession:
     ) -> None:
         self._client = client
         self._demand_roots_for = demand_roots_for
-        # Preview cursors: "already delivered up to this sequence" per port.
-        self._image_sequences: dict[tuple[UUID, str], int] = {}
-        self._value_sequences: dict[tuple[UUID, str], int] = {}
-        self._note_sequences: dict[UUID, int] = {}
         # Last valid (accepted) activation, remembered for the restart path.
         self._last_snapshot: GraphSnapshot | None = None
         self._last_demand_roots: tuple[UUID, ...] | None = None
@@ -113,54 +110,30 @@ class EngineSession:
     # -- preview pump ------------------------------------------------------
 
     def next_image_previews(self) -> tuple[ImagePreview, ...]:
-        """Deliver image previews newer than the session's cursors, advancing them."""
+        """Deliver the previews the client has not yet served (cursors live in the client)."""
         if self._closed:
             return ()
-        previews = self._client.poll_image_previews(self._image_sequences)
-        for preview in previews:
-            self._image_sequences[(preview.owner_id, preview.source_port_id)] = preview.sequence
-        return previews
+        return self._client.next_image_previews()
 
     def next_value_previews(self) -> tuple[ValuePreview, ...]:
-        """Deliver value previews newer than the session's cursors, advancing them."""
+        """Deliver the value previews the client has not yet served."""
         if self._closed:
             return ()
-        previews = self._client.poll_value_previews(self._value_sequences)
-        for preview in previews:
-            self._value_sequences[(preview.owner_id, preview.source_port_id)] = preview.sequence
-        return previews
+        return self._client.next_value_previews()
 
     def next_note_previews(self) -> tuple[NotePreview, ...]:
-        """Deliver note previews newer than the session's cursors, advancing them."""
+        """Deliver the note previews the client has not yet served."""
         if self._closed:
             return ()
-        previews = self._client.poll_note_previews(self._note_sequences)
-        for preview in previews:
-            self._note_sequences[preview.owner_id] = preview.sequence
-        return previews
+        return self._client.next_note_previews()
 
-    def clear_image_cursors(self) -> None:
-        """Forget the image preview cursors (e.g. the image dock was hidden)."""
-        self._image_sequences.clear()
+    def reset_image_preview_cursors(self) -> None:
+        """Make the client re-serve every retained image preview (dock hidden)."""
+        self._client.reset_image_preview_cursors()
 
-    def clear_value_cursors(self) -> None:
-        """Forget the value preview cursors."""
-        self._value_sequences.clear()
-
-    def clear_note_cursors(self) -> None:
-        """Forget the note preview cursors (e.g. the note dock was hidden)."""
-        self._note_sequences.clear()
-
-    def clear_preview_cursors(self) -> None:
-        """Forget every preview cursor so the next poll re-serves each port."""
-        self.clear_image_cursors()
-        self.clear_value_cursors()
-        self.clear_note_cursors()
-
-    def clear_previews(self) -> None:
-        """Clear the engine-side preview store and the session's cursors."""
-        self._client.clear_previews()
-        self.clear_preview_cursors()
+    def reset_note_preview_cursors(self) -> None:
+        """Make the client re-serve every retained note preview (e.g. the note dock was hidden)."""
+        self._client.reset_note_preview_cursors()
 
     # -- connection state --------------------------------------------------
 
@@ -254,8 +227,8 @@ class EngineSession:
         ``demand_roots`` is not given.
 
         An accepted activation becomes the last valid state remembered for
-        the restart path; rejections keep the previous one.  Preview cursors
-        are reset on every activation, accepted or not, because a replaced
+        the restart path; rejections keep the previous one. The client resets
+        its own preview state on every activation outcome, because a replaced
         or stopped runtime re-serves sequences from scratch.
         """
         roots: tuple[UUID, ...] | None
@@ -267,7 +240,6 @@ class EngineSession:
             roots = None
         self._known_stopped = False
         activation = self._client.activate(snapshot, demand_roots=roots)
-        self.clear_preview_cursors()
         if activation.activated:
             self._last_snapshot = snapshot
             self._last_demand_roots = roots
@@ -280,16 +252,15 @@ class EngineSession:
         its activation; when the client returns none (no valid graph on the
         engine side) and the session remembers a valid one, the session
         re-activates it with the remembered demand roots.  A successful
-        restart replaces the engine's preview state, so the cursors reset
-        with it; a failed restart (the process could not be replaced) keeps
-        the old engine's preview state intact.
+        restart resets the client's preview state (the new engine generation
+        re-serves sequences from scratch); a failed restart (the process
+        could not be replaced) keeps the old engine's preview state intact.
         """
         self._known_stopped = False
         try:
             activation = self._client.restart()
         except (RuntimeError, TimeoutError) as error:
             return RestartOutcome(ok=False, reason="restart_failed", detail=str(error))
-        self.clear_preview_cursors()
         if activation is None and self._last_snapshot is not None:
             try:
                 activation = self._client.activate(

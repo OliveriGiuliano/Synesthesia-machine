@@ -274,8 +274,8 @@ class _PerformanceRun(QObject):
             metrics = self._client.metrics()
             source = self._client.source_status(CANONICAL_SOURCE_ID)[0]
             self._samples.append(_metric_sample(metrics, elapsed_s))
-            image_previews = self._client.poll_image_previews()
-            note_previews = self._client.poll_note_previews()
+            image_previews = self._client.next_image_previews()
+            note_previews = self._client.next_note_previews()
             for preview in image_previews:
                 self._window.image_preview_panel.show_preview(preview)
             for preview in note_previews:

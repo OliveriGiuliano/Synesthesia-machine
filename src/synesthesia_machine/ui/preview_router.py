@@ -1,6 +1,6 @@
 """Preview routing: decides which sink each pumped preview lands in.
 
-The preview pump (the engine session's per-port sequence cursors) delivers
+The preview pump (the engine client's per-port sequence cursors) delivers
 each new frame once; the router is the pure routing policy applied to one
 pumped batch:
 

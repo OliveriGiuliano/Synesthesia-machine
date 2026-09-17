@@ -684,6 +684,16 @@ class InProcessEngineClient:
         self._graph_revision: int | None = None
         self._latest_valid_snapshot: GraphSnapshot | None = None
         self._latest_demand_roots: tuple[UUID, ...] | None = None
+        # "Already delivered up to this sequence" cursors: the client owns
+        # them so callers use the cursor-free next_*_previews API and cannot
+        # poll with a stale threshold.
+        self._image_sequences: dict[tuple[UUID, str], int] = {}
+        self._note_sequences: dict[UUID, int] = {}
+        self._value_sequences: dict[tuple[UUID, str], int] = {}
+        # Guards the cursor dicts: they are advanced by the preview pump and
+        # the child event publisher while activations and shutdowns reset
+        # them, so every access goes through this lock.
+        self._preview_cursor_lock = threading.Lock()
 
     def activate(
         self,
@@ -774,6 +784,16 @@ class InProcessEngineClient:
             self._worker = worker
             self._sources = sources
             self._preview_broker.apply(preview_configuration)
+            # A new generation renumbers every preview sequence from 1, so
+            # the delivery cursors reset with it: otherwise the next
+            # generation's previews are suppressed by the previous
+            # generation's counters. The child event publisher drives this
+            # client directly (no session to clear the state for it), so the
+            # reset must live here, not in a wrapper.
+            with self._preview_cursor_lock:
+                self._image_sequences.clear()
+                self._note_sequences.clear()
+                self._value_sequences.clear()
             worker.reset_plan_metrics()
             self._graph_revision = snapshot.revision
             self._latest_valid_snapshot = snapshot
@@ -956,26 +976,44 @@ class InProcessEngineClient:
                 runtime_errors=(worker.last_result.errors if worker and worker.last_result else ()),
             )
 
-    def poll_image_previews(
-        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
-    ) -> tuple[ImagePreview, ...]:
-        return self._preview_broker.poll_images(after_sequences)
+    def next_image_previews(self) -> tuple[ImagePreview, ...]:
+        with self._preview_cursor_lock:
+            previews = self._preview_broker.poll_images(self._image_sequences)
+            for preview in previews:
+                self._image_sequences[(preview.owner_id, preview.source_port_id)] = preview.sequence
+        return previews
 
-    def poll_note_previews(
-        self, after_sequences: Mapping[UUID, int] | None = None
-    ) -> tuple[NotePreview, ...]:
-        return self._preview_broker.poll_notes(after_sequences)
+    def next_note_previews(self) -> tuple[NotePreview, ...]:
+        with self._preview_cursor_lock:
+            previews = self._preview_broker.poll_notes(self._note_sequences)
+            for preview in previews:
+                self._note_sequences[preview.owner_id] = preview.sequence
+        return previews
 
-    def poll_value_previews(
-        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
-    ) -> tuple[ValuePreview, ...]:
-        return self._preview_broker.poll_values(after_sequences)
+    def next_value_previews(self) -> tuple[ValuePreview, ...]:
+        with self._preview_cursor_lock:
+            previews = self._preview_broker.poll_values(self._value_sequences)
+            for preview in previews:
+                self._value_sequences[(preview.owner_id, preview.source_port_id)] = preview.sequence
+        return previews
+
+    def reset_image_preview_cursors(self) -> None:
+        with self._preview_cursor_lock:
+            self._image_sequences.clear()
+
+    def reset_note_preview_cursors(self) -> None:
+        with self._preview_cursor_lock:
+            self._note_sequences.clear()
 
     def clear_previews(self) -> None:
-        # Bumping the broker generation drops in-flight publishes and makes
-        # the next poll start from a clean threshold, so a stopped engine
-        # cannot re-serve its last preview frame.
+        # Bumping the broker generation drops in-flight publishes and forgets
+        # the retained previews; the cursors are reset with them so a stopped
+        # engine cannot re-serve its last preview frame.
         self._preview_broker.clear()
+        with self._preview_cursor_lock:
+            self._image_sequences.clear()
+            self._note_sequences.clear()
+            self._value_sequences.clear()
 
     def wait_until_idle(self, timeout_s: float = 5.0) -> bool:
         deadline = time.monotonic() + max(0.0, timeout_s)
@@ -1164,6 +1202,12 @@ class InProcessEngineClient:
             self._facade.stop()
         with suppress(Exception):
             self._preview_broker.clear()
+        # The broker generation was reset: drop the cursors with it so the
+        # next generation's fresh sequences are not suppressed.
+        with self._preview_cursor_lock:
+            self._image_sequences.clear()
+            self._note_sequences.clear()
+            self._value_sequences.clear()
         for source in sources:
             with suppress(Exception):
                 source.close()
@@ -1189,6 +1233,12 @@ class InProcessEngineClient:
             self._preview_broker.clear()
         except Exception as error:
             errors.append(error)
+        # The broker generation was reset: drop the cursors with it so the
+        # next generation's fresh sequences are not suppressed.
+        with self._preview_cursor_lock:
+            self._image_sequences.clear()
+            self._note_sequences.clear()
+            self._value_sequences.clear()
         _raise_cleanup_errors(errors, "Runtime cleanup failed")
 
     def _effective_state(

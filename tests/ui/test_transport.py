@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import UUID
@@ -70,6 +70,9 @@ class _RecordingEngineClient:
     memory_diagnostics: tuple[NodeMemoryDiagnostic, ...] = ()
     midi_statuses: tuple[MidiOutputStatus, ...] = ()
     closed: bool = False
+    image_sequences: dict[tuple[UUID, str], int] = field(default_factory=dict)
+    value_sequences: dict[tuple[UUID, str], int] = field(default_factory=dict)
+    note_sequences: dict[UUID, int] = field(default_factory=dict)
     activation_started: threading.Event | None = None
     activation_release: threading.Event | None = None
     metrics_started: threading.Event | None = None
@@ -84,6 +87,9 @@ class _RecordingEngineClient:
         if self.activation_release is not None:
             assert self.activation_release.wait(2.0)
         self.activations.append(snapshot)
+        # The real clients reset their own preview state on every activation
+        # outcome; the UI no longer does it for them.
+        self.clear_previews()
         return EngineActivation(snapshot.revision, ValidationReport(), True)
 
     def play(self, source_node_id: UUID | None = None) -> None:
@@ -110,6 +116,9 @@ class _RecordingEngineClient:
 
     def clear_previews(self) -> None:
         self.calls.append(("clear_previews", None))
+        self.image_sequences.clear()
+        self.value_sequences.clear()
+        self.note_sequences.clear()
 
     def source_status(self, source_node_id: UUID | None = None) -> tuple[SourceStatus, ...]:
         if source_node_id is not None:
@@ -161,35 +170,43 @@ class _RecordingEngineClient:
     def reset_profiling(self) -> None:
         return
 
-    def poll_image_previews(
-        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
-    ) -> tuple[ImagePreview, ...]:
-        thresholds = after_sequences or {}
-        return tuple(
+    def next_image_previews(self) -> tuple[ImagePreview, ...]:
+        previews = tuple(
             preview
             for preview in self.image_previews
-            if preview.sequence > thresholds.get((preview.owner_id, preview.source_port_id), 0)
+            if preview.sequence
+            > self.image_sequences.get((preview.owner_id, preview.source_port_id), 0)
         )
+        for preview in previews:
+            self.image_sequences[(preview.owner_id, preview.source_port_id)] = preview.sequence
+        return previews
 
-    def poll_note_previews(
-        self, after_sequences: Mapping[UUID, int] | None = None
-    ) -> tuple[NotePreview, ...]:
-        thresholds = after_sequences or {}
-        return tuple(
+    def next_note_previews(self) -> tuple[NotePreview, ...]:
+        previews = tuple(
             preview
             for preview in self.note_previews
-            if preview.sequence > thresholds.get(preview.owner_id, 0)
+            if preview.sequence > self.note_sequences.get(preview.owner_id, 0)
         )
+        for preview in previews:
+            self.note_sequences[preview.owner_id] = preview.sequence
+        return previews
 
-    def poll_value_previews(
-        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
-    ) -> tuple[ValuePreview, ...]:
-        thresholds = after_sequences or {}
-        return tuple(
+    def next_value_previews(self) -> tuple[ValuePreview, ...]:
+        previews = tuple(
             preview
             for preview in self.value_previews
-            if preview.sequence > thresholds.get((preview.owner_id, preview.source_port_id), 0)
+            if preview.sequence
+            > self.value_sequences.get((preview.owner_id, preview.source_port_id), 0)
         )
+        for preview in previews:
+            self.value_sequences[(preview.owner_id, preview.source_port_id)] = preview.sequence
+        return previews
+
+    def reset_image_preview_cursors(self) -> None:
+        self.image_sequences.clear()
+
+    def reset_note_preview_cursors(self) -> None:
+        self.note_sequences.clear()
 
     def wait_until_idle(self, timeout_s: float = 5.0) -> bool:
         del timeout_s
@@ -427,8 +444,8 @@ def test_preview_and_metrics_polling_update_ui_with_sequence_coalescing(
     assert window.image_preview_panel.image_widget.isVisible()
     assert window.note_preview_panel.note_widget.isVisible()
     assert "sequence 1" in window.image_preview_panel.image_caption.text()
-    assert window.engine_session._image_sequences == {(source_id, "image"): 1}  # pyright: ignore[reportPrivateUsage]
-    assert window.engine_session._note_sequences == {NOTE_NODE: 1}  # pyright: ignore[reportPrivateUsage]
+    assert client.image_sequences == {(source_id, "image"): 1}
+    assert client.note_sequences == {NOTE_NODE: 1}
     assert "42 ticks" in window._engine_status.text()
     assert "3 dropped" in window._engine_status.text()
     assert "Input / processed / preview: 0.0 / 29.5 / 0.0 FPS" in (window._engine_status.toolTip())
@@ -463,7 +480,7 @@ def test_successful_activation_clears_all_stale_runtime_previews(
     runtime_window: tuple[MainWindow, _RecordingEngineClient],
     qapp: QApplication,
 ) -> None:
-    window, _client = runtime_window
+    window, client = runtime_window
     number_id = window.session.add_node("synmachine.utility.number", (0.0, 0.0))
     math_id = window.session.add_node("synmachine.utility.math", (300.0, 0.0))
     value_connection = window.session.add_connection(number_id, "value", math_id, "a")
@@ -481,10 +498,9 @@ def test_successful_activation_clears_all_stale_runtime_previews(
     window.scene.set_connection_image_preview(source_id, "image", thumbnail)
     window.image_preview_panel.show_preview(image_preview)
     window.note_preview_panel.show_preview(note_preview)
-    window.engine_session._image_sequences[(source_id, "image")] = 1  # pyright: ignore[reportPrivateUsage]
-    window.engine_session._note_sequences[NOTE_NODE] = 1  # pyright: ignore[reportPrivateUsage]
-    window.engine_session._value_sequences[(number_id, "value")] = 1  # pyright: ignore[reportPrivateUsage]
-
+    # The activation round trip is where the client resets its own preview
+    # state; the window handler then clears its preview widgets.
+    client.activate(window.session.document.snapshot())
     window._apply_engine_activation(
         EngineActivation(window.session.document.revision, ValidationReport(), True)
     )
@@ -493,9 +509,9 @@ def test_successful_activation_clears_all_stale_runtime_previews(
     assert window.scene.connection_items[image_connection]._image is None
     assert window.image_preview_panel.image_widget.latest_preview is None
     assert window.note_preview_panel.note_widget.latest_preview is None
-    assert window.engine_session._image_sequences == {}  # pyright: ignore[reportPrivateUsage]
-    assert window.engine_session._note_sequences == {}  # pyright: ignore[reportPrivateUsage]
-    assert window.engine_session._value_sequences == {}  # pyright: ignore[reportPrivateUsage]
+    assert client.image_sequences == {}
+    assert client.note_sequences == {}
+    assert client.value_sequences == {}
 
 
 def test_node_drag_release_preserves_live_connection_pills(

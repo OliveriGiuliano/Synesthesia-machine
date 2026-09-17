@@ -1361,8 +1361,8 @@ class MainWindow(QMainWindow):
             return
         count = len(activation.report.errors)
         self._clear_runtime_previews()
-        # The bridge already asked the engine to forget the previews it
-        # retained while active; the cursors are cleared above.
+        # The client reset its own preview state as part of the activation
+        # (the engine auto-stopped); the window only clears its widgets.
         self.statusBar().showMessage(
             trf("Graph has {count} error(s); engine stopped", count=count),
             5000,
@@ -1397,10 +1397,17 @@ class MainWindow(QMainWindow):
         )
 
     def _clear_runtime_previews(self) -> None:
+        """Clear the UI's preview widgets only.
+
+        The engine client owns its retained preview state and resets it on
+        every engine transition (activation, restart, auto-stop, shutdown);
+        the window must not reach into it, because the process client's
+        preview slots may already serve the new generation by the time this
+        runs.
+        """
         self.scene.clear_connection_previews()
         self.image_preview_panel.clear_preview()
         self.note_preview_panel.clear_preview()
-        self.engine_bridge.clear_runtime_previews()
 
     @Slot(bool)
     def _on_image_preview_visibility_changed(self, visible: bool) -> None:

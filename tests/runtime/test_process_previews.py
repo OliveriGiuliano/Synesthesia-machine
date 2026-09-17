@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from multiprocessing.shared_memory import SharedMemory
 from pathlib import Path
 from uuid import UUID
@@ -59,12 +59,11 @@ def _wait_for_preview(
     client: ProcessEngineClient,
     preview_id: UUID,
     *,
-    after_sequences: Mapping[tuple[UUID, str], int] | None = None,
     timeout_s: float = 3.0,
 ) -> ImagePreview:
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        previews = client.poll_image_previews(after_sequences)
+        previews = client.next_image_previews()
         match = next((preview for preview in previews if preview.owner_id == preview_id), None)
         if match is not None:
             return match
@@ -84,7 +83,7 @@ def _wait_for_value_preview(
 ) -> ValuePreview:
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        previews = client.poll_value_previews()
+        previews = client.next_value_previews()
         match = next((preview for preview in previews if preview.owner_id == owner_id), None)
         if match is not None:
             return match
@@ -133,12 +132,16 @@ def test_child_publishes_immutable_preview_and_graceful_close_unlinks_slot(
     assert not preview.data.flags.writeable
     assert preview.sequence > 0
     assert preview.tick_index > 0
+    # The pump already consumed both producers' frames (cursors advanced);
+    # re-serve the retained slots to inspect their latest contents.
+    client.reset_image_preview_cursors()
     latest = {
-        (item.owner_id, item.source_port_id): item.sequence for item in client.poll_image_previews()
+        (item.owner_id, item.source_port_id): item.sequence for item in client.next_image_previews()
     }
     assert latest[(resize_id, "image")] == preview.sequence
     assert len(latest) == 2
-    assert client.poll_image_previews(latest) == ()
+    # A repeat delivery sees nothing new.
+    assert client.next_image_previews() == ()
     slot_names = client.preview_shared_memory_names()
     assert len(slot_names) == 2
 
@@ -163,15 +166,21 @@ def test_reactivation_replaces_generation_and_unlinks_previous_slot(
     document.set_parameter(resize_id, "width", 16)
     document.set_parameter(resize_id, "height", 12)
     second = _render_preview(process_client, document, source_id, resize_id)
-    second_names = process_client.preview_shared_memory_names()
 
     assert (first.width, first.height) == (32, 24)
     assert (second.width, second.height, second.channels) == (16, 12, 3)
+    # Generation-2 slots are created on the client's event thread right
+    # after the reactivation handshake; wait for both announced targets
+    # instead of asserting a single instant.
+    deadline = time.monotonic() + 3.0
+    second_names = process_client.preview_shared_memory_names()
+    while len(second_names) < 2 and time.monotonic() < deadline:
+        time.sleep(0.02)
+        second_names = process_client.preview_shared_memory_names()
     assert len(second_names) == 2
     assert second_names != first_names
     for name in first_names:
         _assert_shared_memory_unlinked(name)
-
 
 def test_forced_child_termination_unlinks_parent_owned_preview_slot(
     tmp_path: Path,
@@ -262,9 +271,9 @@ def test_rejected_activation_forgets_retained_previews(tmp_path: Path) -> None:
         assert not activation.activated
         assert not activation.report.is_valid
 
-        assert client.poll_image_previews() == ()
+        assert client.next_image_previews() == ()
         assert client.preview_shared_memory_names() == ()
-        assert client.poll_note_previews() == ()
-        assert client.poll_value_previews() == ()
+        assert client.next_note_previews() == ()
+        assert client.next_value_previews() == ()
     finally:
         client.close()

@@ -237,22 +237,14 @@ class EngineBridge:
         )
 
     def _apply_activation(self, activation: EngineActivation) -> None:
+        # The session cleared the client's preview state as part of the
+        # activation, so the bridge only reports and publishes.
         self._state = replace(self._state, last_activation=activation)
         if activation.activated:
-            # The session reset its preview cursors on activation; the new
-            # engine generation re-serves every port from scratch.
-            self.clear_runtime_previews()
             self._on_status_message("activated", 3000)
         else:
-            self.clear_runtime_previews()
-            # The engine kept running previews mapped/retained while it was
-            # active; forget them client-side so the next poll cannot re-show
-            # the last frame as if the engine were still producing.
-            self._session.clear_previews()
             self._on_status_message("activation_rejected", 5000)
         self._publish_state()
-
-    # -- transport ---------------------------------------------------------
 
     def play(self, source_node_id: UUID | None = None) -> None:
         self._submit("transport", lambda: self._session.play(source_node_id))
@@ -332,14 +324,11 @@ class EngineBridge:
 
     def note_preview_hidden(self) -> None:
         """Drop the note cursors when the note dock is hidden."""
-        self._session.clear_note_cursors()
+        self._session.reset_note_preview_cursors()
 
     def image_preview_hidden(self) -> None:
         """Drop the image cursors when the image dock is hidden."""
-        self._session.clear_image_cursors()
-
-    def clear_runtime_previews(self) -> None:
-        self._session.clear_preview_cursors()
+        self._session.reset_image_preview_cursors()
 
     # -- status / telemetry ------------------------------------------------
 

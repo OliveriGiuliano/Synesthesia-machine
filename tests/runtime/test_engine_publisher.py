@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Mapping
 from uuid import UUID
 
 import numpy as np
@@ -41,26 +40,25 @@ class _CollectingQueue:
 
 
 class _StubEngine:
-    """Engine stand-in: polls return nothing until armed, then one note preview."""
+    """Engine stand-in: next_* return nothing until armed, then each stored note once."""
 
     def __init__(self) -> None:
         self.poll_calls = 0
         self.notes: list[object] = []
+        self._delivered: set[object] = set()
 
-    def poll_image_previews(
-        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
-    ) -> tuple[()]:
+    def next_image_previews(self) -> tuple[()]:
         return ()
 
-    def poll_note_previews(self, after_sequences: Mapping[UUID, int] | None = None) -> tuple:
+    def next_note_previews(self) -> tuple:
         self.poll_calls += 1
-        if self.notes:
-            return tuple(self.notes)
-        return ()
+        fresh = tuple(n for n in self.notes if n not in self._delivered)
+        if not fresh:
+            return ()
+        self._delivered.update(fresh)
+        return fresh
 
-    def poll_value_previews(
-        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
-    ) -> tuple[()]:
+    def next_value_previews(self) -> tuple[()]:
         return ()
 
 

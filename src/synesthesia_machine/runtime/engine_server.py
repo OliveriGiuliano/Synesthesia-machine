@@ -14,7 +14,6 @@ from dataclasses import replace
 from multiprocessing.shared_memory import SharedMemory
 from pathlib import Path
 from typing import Protocol, cast, get_args
-from uuid import UUID
 
 import cv2
 import numpy as np
@@ -157,8 +156,6 @@ class _EventPublisher:
         self._stop = threading.Event()
         self._graph_revision: int | None = None
         self._heartbeat_sequence = 0
-        self._note_sequences: dict[UUID, int] = {}
-        self._value_sequences: dict[tuple[UUID, str], int] = {}
         self._thread = threading.Thread(
             target=self._run,
             name="engine-event-publisher",
@@ -171,8 +168,6 @@ class _EventPublisher:
     def graph_activated(self, graph_revision: int) -> None:
         with self._lock:
             self._graph_revision = graph_revision
-            self._note_sequences.clear()
-            self._value_sequences.clear()
             self._writer.clear()
 
     def configure_slot(self, descriptor: PreviewSlotDescriptor, graph_revision: int) -> None:
@@ -254,14 +249,14 @@ class _EventPublisher:
     def _publish_previews(self) -> None:
         with self._lock:
             graph_revision = self._graph_revision
-            note_sequences = dict(self._note_sequences)
-            value_sequences = dict(self._value_sequences)
         if graph_revision is None:
             return
         # Image frames reach the UI-owned slots directly through the broker (and
         # the writer). Here we only drive the announce handshake for formats
         # that still lack an attached slot, then ship the compact note/value
-        # previews the broker produced.
+        # previews the broker produced. The engine client owns the per-port
+        # sequence cursors: each preview is delivered once, and if the event
+        # queue is full the batch is dropped (the latest-data policy).
         for key, generation, dimensions in self._writer.take_pending_announcements():
             self._put_event(
                 PreviewFormatChanged(
@@ -274,22 +269,12 @@ class _EventPublisher:
                     dimensions[2],
                 )
             )
-        note_previews = self._engine.poll_note_previews(note_sequences)
-        if note_previews and self._put_event(NotePreviewsPublished(graph_revision, note_previews)):
-            with self._lock:
-                if graph_revision == self._graph_revision:
-                    for preview in note_previews:
-                        self._note_sequences[preview.owner_id] = preview.sequence
-        value_previews = self._engine.poll_value_previews(value_sequences)
-        if value_previews and self._put_event(
-            ValuePreviewsPublished(graph_revision, value_previews)
-        ):
-            with self._lock:
-                if graph_revision == self._graph_revision:
-                    for preview in value_previews:
-                        self._value_sequences[(preview.owner_id, preview.source_port_id)] = (
-                            preview.sequence
-                        )
+        note_previews = self._engine.next_note_previews()
+        if note_previews:
+            self._put_event(NotePreviewsPublished(graph_revision, note_previews))
+        value_previews = self._engine.next_value_previews()
+        if value_previews:
+            self._put_event(ValuePreviewsPublished(graph_revision, value_previews))
 
     def _put_event(self, event: EngineAsyncEvent) -> bool:
         try:

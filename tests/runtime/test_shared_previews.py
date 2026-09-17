@@ -98,7 +98,7 @@ def test_peek_sequence_tracks_committed_frames_without_reading_frames() -> None:
         owner.close()
 
 
-def test_poll_image_previews_copies_only_frames_past_the_threshold(
+def test_next_image_previews_copies_only_frames_past_the_client_cursor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = ProcessEngineClient(auto_start=False)
@@ -113,7 +113,6 @@ def test_poll_image_previews_copies_only_frames_past_the_threshold(
         channels=3,
     )
     attachment = AttachedPreviewSlot(owner.descriptor)
-    key = (owner.descriptor.owner_id, "image")
     read_calls = 0
     original_read = owner.read
 
@@ -132,18 +131,18 @@ def test_poll_image_previews_copies_only_frames_past_the_threshold(
         attachment.write(
             ImagePreview(owner.descriptor.owner_id, "image", 1, 1, 2, 2, 3, first_frame)
         )
-        assert [preview.sequence for preview in client.poll_image_previews()] == [1]
+        assert [preview.sequence for preview in client.next_image_previews()] == [1]
         assert read_calls == 1
 
         # Idle slot: the seqlock peek says "no new frame", so no frame copy.
-        assert client.poll_image_previews({key: 1}) == ()
+        assert client.next_image_previews() == ()
         assert read_calls == 1
 
         second_frame = freeze_uint8_preview(np.full((2, 2, 3), 2, dtype=np.uint8))
         attachment.write(
             ImagePreview(owner.descriptor.owner_id, "image", 2, 2, 2, 2, 3, second_frame)
         )
-        assert [preview.sequence for preview in client.poll_image_previews({key: 1})] == [2]
+        assert [preview.sequence for preview in client.next_image_previews()] == [2]
         assert read_calls == 2
     finally:
         monkeypatch.undo()

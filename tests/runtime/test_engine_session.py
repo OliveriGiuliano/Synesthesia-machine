@@ -7,7 +7,7 @@ drives it through a fake: no process, no Qt, no engine internals.
 from __future__ import annotations
 
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from uuid import UUID, uuid4
 
@@ -50,14 +50,6 @@ def _seek_args_list() -> list[tuple[UUID, float]]:
     return []
 
 
-def _port_cursor_list() -> list[Mapping[tuple[UUID, str], int] | None]:
-    return []
-
-
-def _owner_cursor_list() -> list[Mapping[UUID, int] | None]:
-    return []
-
-
 @dataclass(slots=True)
 class _FakeEngineClient:
     """Recording EngineClient: canned status/previews, logged calls."""
@@ -79,13 +71,10 @@ class _FakeEngineClient:
     )
     calls: list[str] = field(default_factory=_verb_list)
     seek_args: list[tuple[UUID, float]] = field(default_factory=_seek_args_list)
-    image_cursors: list[Mapping[tuple[UUID, str], int] | None] = field(
-        default_factory=_port_cursor_list
-    )
-    value_cursors: list[Mapping[tuple[UUID, str], int] | None] = field(
-        default_factory=_port_cursor_list
-    )
-    note_cursors: list[Mapping[UUID, int] | None] = field(default_factory=_owner_cursor_list)
+    # Client-owned cursors, exposed so tests can assert their state.
+    image_sequences: dict[tuple[UUID, str], int] = field(default_factory=dict)
+    value_sequences: dict[tuple[UUID, str], int] = field(default_factory=dict)
+    note_sequences: dict[UUID, int] = field(default_factory=dict)
     closed: bool = False
 
     def activate(
@@ -96,6 +85,9 @@ class _FakeEngineClient:
         if error is not None:
             raise error
         self.activations.append((snapshot, None if demand_roots is None else tuple(demand_roots)))
+        # The real clients reset their own preview state on every activation
+        # outcome; the session no longer does it for them.
+        self._reset_preview_state()
         return EngineActivation(snapshot.revision, ValidationReport(), self.activation_activated)
 
     def play(self, source_node_id: UUID | None = None) -> None:
@@ -164,41 +156,48 @@ class _FakeEngineClient:
         self.calls.append("metrics")
         return EngineMetrics(self.engine_state)
 
-    def poll_image_previews(
-        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
-    ) -> tuple[ImagePreview, ...]:
-        self.calls.append("poll_image_previews")
-        self.image_cursors.append(None if after_sequences is None else dict(after_sequences))
-        thresholds = after_sequences or {}
-        return tuple(
+    def next_image_previews(self) -> tuple[ImagePreview, ...]:
+        self.calls.append("next_image_previews")
+        previews = tuple(
             preview
             for preview in self.image_previews
-            if preview.sequence > thresholds.get((preview.owner_id, preview.source_port_id), 0)
+            if preview.sequence
+            > self.image_sequences.get((preview.owner_id, preview.source_port_id), 0)
         )
+        for preview in previews:
+            self.image_sequences[(preview.owner_id, preview.source_port_id)] = preview.sequence
+        return previews
 
-    def poll_note_previews(
-        self, after_sequences: Mapping[UUID, int] | None = None
-    ) -> tuple[NotePreview, ...]:
-        self.calls.append("poll_note_previews")
-        self.note_cursors.append(None if after_sequences is None else dict(after_sequences))
-        thresholds = after_sequences or {}
-        return tuple(
+    def next_note_previews(self) -> tuple[NotePreview, ...]:
+        self.calls.append("next_note_previews")
+        previews = tuple(
             preview
             for preview in self.note_previews
-            if preview.sequence > thresholds.get(preview.owner_id, 0)
+            if preview.sequence > self.note_sequences.get(preview.owner_id, 0)
         )
+        for preview in previews:
+            self.note_sequences[preview.owner_id] = preview.sequence
+        return previews
 
-    def poll_value_previews(
-        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
-    ) -> tuple[ValuePreview, ...]:
-        self.calls.append("poll_value_previews")
-        self.value_cursors.append(None if after_sequences is None else dict(after_sequences))
-        thresholds = after_sequences or {}
-        return tuple(
+    def next_value_previews(self) -> tuple[ValuePreview, ...]:
+        self.calls.append("next_value_previews")
+        previews = tuple(
             preview
             for preview in self.value_previews
-            if preview.sequence > thresholds.get((preview.owner_id, preview.source_port_id), 0)
+            if preview.sequence
+            > self.value_sequences.get((preview.owner_id, preview.source_port_id), 0)
         )
+        for preview in previews:
+            self.value_sequences[(preview.owner_id, preview.source_port_id)] = preview.sequence
+        return previews
+
+    def reset_image_preview_cursors(self) -> None:
+        self.calls.append("reset_image_preview_cursors")
+        self.image_sequences.clear()
+
+    def reset_note_preview_cursors(self) -> None:
+        self.calls.append("reset_note_preview_cursors")
+        self.note_sequences.clear()
 
     def wait_until_idle(self, timeout_s: float = 5.0) -> bool:
         del timeout_s
@@ -220,10 +219,15 @@ class _FakeEngineClient:
         error = self.restart_error
         if error is not None:
             raise error
+        if self.restart_result is not None:
+            # A replaced engine generation resets the client's preview state.
+            self._reset_preview_state()
         return self.restart_result
 
-    def clear_previews(self) -> None:
-        self.calls.append("clear_previews")
+    def _reset_preview_state(self) -> None:
+        self.image_sequences.clear()
+        self.value_sequences.clear()
+        self.note_sequences.clear()
 
     def close(self) -> None:
         self.calls.append("close")
@@ -283,15 +287,13 @@ def test_next_image_previews_delivers_batch_once_and_advances_cursors() -> None:
     session = EngineSession(client)
     first = session.next_image_previews()
     assert [preview.sequence for preview in first] == [1, 2, 1]
-    # The session passes its own cursors; the test itself never passes
-    # after_sequences.  The first poll starts empty...
-    assert client.image_cursors[0] == {}
-    assert session.next_image_previews() == ()
-    # ...and the second poll sees the advanced cursors.
-    assert client.image_cursors[1] == {
+    # The client owns the cursors: the session just asks for the next batch,
+    # and each delivery advances the client's per-port cursor state.
+    assert client.image_sequences == {
         (SOURCE_A, "output"): 2,
         (SOURCE_B, "output"): 1,
     }
+    assert session.next_image_previews() == ()
 
 
 def test_next_value_previews_advances_cursors_per_port() -> None:
@@ -305,7 +307,7 @@ def test_next_value_previews_advances_cursors_per_port() -> None:
     session = EngineSession(client)
     assert [preview.sequence for preview in session.next_value_previews()] == [1, 3, 1]
     assert session.next_value_previews() == ()
-    assert client.value_cursors[1] == {
+    assert client.value_sequences == {
         (SOURCE_A, "count"): 3,
         (SOURCE_B, "count"): 1,
     }
@@ -322,15 +324,15 @@ def test_next_note_previews_advances_cursors_per_owner() -> None:
     session = EngineSession(client)
     assert [preview.sequence for preview in session.next_note_previews()] == [1, 2, 1]
     assert session.next_note_previews() == ()
-    assert client.note_cursors[1] == {SOURCE_A: 2, SOURCE_B: 1}
+    assert client.note_sequences == {SOURCE_A: 2, SOURCE_B: 1}
 
 
-def test_clear_preview_cursors_reserves_previews() -> None:
+def test_reset_image_preview_cursors_reserves_previews() -> None:
     client = _FakeEngineClient(image_previews=(_image_preview(SOURCE_A, "output", 1),))
     session = EngineSession(client)
     assert len(session.next_image_previews()) == 1
     assert session.next_image_previews() == ()
-    session.clear_preview_cursors()
+    session.reset_image_preview_cursors()
     assert len(session.next_image_previews()) == 1
 
 
@@ -487,7 +489,7 @@ def test_restart_resets_preview_cursors_on_replaced_engine() -> None:
     assert session.next_image_previews() == ()
     assert session.restart() == RestartOutcome(True, "ok")
     # The child was replaced: its preview sequences restart from scratch, so
-    # the session's cursors must not suppress the new frames.
+    # the client's cursors must not suppress the new frames.
     assert len(session.next_image_previews()) == 1
 
 
@@ -503,16 +505,6 @@ def test_failed_restart_keeps_preview_cursors() -> None:
     assert result.detail == "spawn failed"
     # The old engine still owns its preview state: cursors stay advanced.
     assert session.next_image_previews() == ()
-
-
-def test_clear_previews_clears_engine_store_and_cursors() -> None:
-    client = _FakeEngineClient(image_previews=(_image_preview(SOURCE_A, "output", 1),))
-    session = EngineSession(client)
-    assert len(session.next_image_previews()) == 1
-    assert session.next_image_previews() == ()
-    session.clear_previews()
-    assert "clear_previews" in client.calls
-    assert len(session.next_image_previews()) == 1
 
 
 def test_transport_commands_delegate_to_client() -> None:
@@ -590,7 +582,7 @@ def test_poll_status_closed_session_polls_nothing() -> None:
     assert "status" not in client.calls
 
 
-def test_per_family_cursor_clears_re_serve_only_their_family() -> None:
+def test_per_family_cursor_resets_re_serve_only_their_family() -> None:
     client = _FakeEngineClient(
         image_previews=(_image_preview(SOURCE_A, "output", 1),),
         value_previews=(_value_preview(SOURCE_A, "output", 1),),
@@ -604,16 +596,12 @@ def test_per_family_cursor_clears_re_serve_only_their_family() -> None:
     assert session.next_value_previews() == ()
     assert session.next_note_previews() == ()
 
-    session.clear_note_cursors()
+    # A family reset re-serves only that family's retained previews.
+    session.reset_note_preview_cursors()
     assert session.next_image_previews() == ()
     assert session.next_value_previews() == ()
     assert len(session.next_note_previews()) == 1
-    session.clear_image_cursors()
+    session.reset_image_preview_cursors()
     assert len(session.next_image_previews()) == 1
     assert session.next_note_previews() == ()
-    session.clear_value_cursors()
-    assert len(session.next_value_previews()) == 1
-    session.clear_preview_cursors()
-    assert len(session.next_image_previews()) == 1
-    assert len(session.next_value_previews()) == 1
-    assert len(session.next_note_previews()) == 1
+    assert session.next_value_previews() == ()

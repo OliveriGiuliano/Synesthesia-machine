@@ -93,11 +93,11 @@ def test_canonical_hue_chord_runs_in_child_with_audio_opt_in_and_bounded_preview
         assert metrics.dropped_before_processing == 0
 
         image = _wait_for(
-            client.poll_image_previews,
+            client.next_image_previews,
             lambda preview: preview.owner_id == RESIZE_ID,
         )
         note = _wait_for(
-            client.poll_note_previews,
+            client.next_note_previews,
             lambda preview: preview.owner_id == NOTE_VISUALIZER_ID,
         )
 

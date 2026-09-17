@@ -8,7 +8,7 @@ same protocol without changing transport or widget code.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
@@ -407,17 +407,15 @@ class EngineClient(Protocol):
 
     def metrics(self) -> EngineMetrics: ...
 
-    def poll_image_previews(
-        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
-    ) -> tuple[ImagePreview, ...]: ...
+    def next_image_previews(self) -> tuple[ImagePreview, ...]: ...
 
-    def poll_note_previews(
-        self, after_sequences: Mapping[UUID, int] | None = None
-    ) -> tuple[NotePreview, ...]: ...
+    def next_note_previews(self) -> tuple[NotePreview, ...]: ...
 
-    def poll_value_previews(
-        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
-    ) -> tuple[ValuePreview, ...]: ...
+    def next_value_previews(self) -> tuple[ValuePreview, ...]: ...
+
+    def reset_image_preview_cursors(self) -> None: ...
+
+    def reset_note_preview_cursors(self) -> None: ...
 
     def wait_until_idle(self, timeout_s: float = 5.0) -> bool: ...
 

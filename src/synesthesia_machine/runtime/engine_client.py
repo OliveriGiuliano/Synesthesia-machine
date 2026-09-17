@@ -6,7 +6,7 @@ import os
 import queue
 import threading
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from multiprocessing import get_context
@@ -74,7 +74,7 @@ from synesthesia_machine.contracts.engine_messages import (
 )
 from synesthesia_machine.graph.model import GraphSnapshot
 from synesthesia_machine.runtime.engine_server import engine_server_main
-from synesthesia_machine.runtime.preview_channel import SharedMemoryPreviewReader
+from synesthesia_machine.runtime.preview_channel import PreviewSlotKey, SharedMemoryPreviewReader
 
 DEFAULT_REQUEST_TIMEOUT_S = 3.0
 DEFAULT_ACTIVATION_TIMEOUT_S = 10.0
@@ -180,6 +180,12 @@ class ProcessEngineClient:
         self._latest_demand_roots: tuple[UUID, ...] | None = None
         self._note_previews: dict[UUID, NotePreview] = {}
         self._value_previews: dict[tuple[UUID, str], ValuePreview] = {}
+        # "Already delivered up to this sequence" cursors: the client owns
+        # them so callers use the cursor-free next_*_previews API and cannot
+        # poll with a stale threshold.
+        self._image_sequences: dict[PreviewSlotKey, int] = {}
+        self._note_sequences: dict[UUID, int] = {}
+        self._value_sequences: dict[tuple[UUID, str], int] = {}
         self._preview_reader = SharedMemoryPreviewReader()
         self._closed = False
         # True while the event thread is inside a slow synchronous request
@@ -378,14 +384,16 @@ class ProcessEngineClient:
             heartbeat_age_s=self._heartbeat_age_s(),
         )
 
-    def poll_image_previews(
-        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
-    ) -> tuple[ImagePreview, ...]:
-        # The UI polls at display cadence, so the reader's cheap seqlock-header
+    def next_image_previews(self) -> tuple[ImagePreview, ...]:
+        # The UI pumps at display cadence, so the reader's cheap seqlock-header
         # peek runs for every slot and the full frame copy only for slots that
-        # advanced past the caller's threshold. Slots idle at their last frame
+        # advanced past the client's own cursor. Slots idle at their last frame
         # cost a 48-byte header read per tick instead of a full preview memcpy.
-        return self._preview_reader.poll_images(after_sequences)
+        with self._preview_lock:
+            previews = self._preview_reader.poll_images(self._image_sequences)
+            for preview in previews:
+                self._image_sequences[(preview.owner_id, preview.source_port_id)] = preview.sequence
+        return previews
 
     def preview_shared_memory_names(self) -> tuple[str, ...]:
         """Expose owned slot names for lifecycle diagnostics and cleanup tests."""
@@ -393,11 +401,11 @@ class ProcessEngineClient:
         return self._preview_reader.shared_memory_names()
 
     def clear_previews(self) -> None:
-        """Forget retained preview state after the engine stops.
+        """Forget retained preview state and cursors after the engine stops.
 
         Shared preview slots keep their last frame mapped and the
         in-memory note/value previews remain in this client, so without
-        this the next poll after an auto-stop would re-show the stale
+        this the next pump after an auto-stop would re-show the stale
         last frame as if it were new. Closing the parent's slots is safe
         while the child keeps its own mapping (the same pattern close()
         uses); the next activation reconfigures fresh slots.
@@ -406,34 +414,49 @@ class ProcessEngineClient:
         with self._preview_lock:
             self._note_previews.clear()
             self._value_previews.clear()
+            self._image_sequences.clear()
+            self._note_sequences.clear()
+            self._value_sequences.clear()
         self._preview_reader.clear()
 
-    def poll_note_previews(
-        self, after_sequences: Mapping[UUID, int] | None = None
-    ) -> tuple[NotePreview, ...]:
-        thresholds = after_sequences or {}
+    def reset_image_preview_cursors(self) -> None:
+        """Forget the image cursors so the next pump re-serves each retained slot."""
+
         with self._preview_lock:
-            return tuple(
+            self._image_sequences.clear()
+
+    def reset_note_preview_cursors(self) -> None:
+        """Forget the note cursors so the next pump re-serves the retained previews."""
+
+        with self._preview_lock:
+            self._note_sequences.clear()
+
+    def next_note_previews(self) -> tuple[NotePreview, ...]:
+        with self._preview_lock:
+            previews = tuple(
                 preview
                 for node_id, preview in sorted(
                     self._note_previews.items(), key=lambda item: str(item[0])
                 )
-                if preview.sequence > thresholds.get(node_id, 0)
+                if preview.sequence > self._note_sequences.get(node_id, 0)
             )
+            for preview in previews:
+                self._note_sequences[preview.owner_id] = preview.sequence
+        return previews
 
-    def poll_value_previews(
-        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
-    ) -> tuple[ValuePreview, ...]:
-        thresholds = after_sequences or {}
+    def next_value_previews(self) -> tuple[ValuePreview, ...]:
         with self._preview_lock:
-            return tuple(
+            previews = tuple(
                 preview
                 for key, preview in sorted(
                     self._value_previews.items(),
                     key=lambda item: (str(item[0][0]), item[0][1]),
                 )
-                if preview.sequence > thresholds.get(key, 0)
+                if preview.sequence > self._value_sequences.get(key, 0)
             )
+            for preview in previews:
+                self._value_sequences[(preview.owner_id, preview.source_port_id)] = preview.sequence
+        return previews
 
     def wait_until_idle(self, timeout_s: float = 5.0) -> bool:
         response = self._request(
@@ -519,6 +542,9 @@ class ProcessEngineClient:
         with self._preview_lock:
             self._note_previews.clear()
             self._value_previews.clear()
+            self._image_sequences.clear()
+            self._note_sequences.clear()
+            self._value_sequences.clear()
         self._preview_reader.clear()
         if activation.activated:
             with self._lifecycle_lock:
@@ -696,6 +722,10 @@ class ProcessEngineClient:
             and current.channels == event.channels
         ):
             return
+        # A replaced slot is a fresh generation whose sequence counter starts
+        # over: forget this target's cursor so its first frame is delivered.
+        with self._preview_lock:
+            self._image_sequences.pop((event.owner_id, event.source_port_id), None)
         replacement = self._preview_reader.create_slot(
             owner_id=event.owner_id,
             source_port_id=event.source_port_id,
@@ -763,6 +793,13 @@ class ProcessEngineClient:
             process.join(self._close_timeout_s)
         if process.is_alive():
             raise TimeoutError(f"Engine process {process.pid} did not terminate")
+        # The child's preview generation is over: drop the slots and cursors
+        # so the restarted child's fresh slot sequences (which restart from
+        # 1) are not suppressed by the dead generation's counters.
+        with self._preview_lock:
+            self._image_sequences.clear()
+            self._note_sequences.clear()
+            self._value_sequences.clear()
         self._preview_reader.clear()
         with self._lifecycle_lock:
             self._last_exit_code = process.exitcode

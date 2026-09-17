@@ -148,8 +148,8 @@ def test_generated_video_drives_expected_midi_previews_and_mock_audio_via_client
         assert rendered_states == tuple(((0, note, 100),) for note in EXPECTED_NOTES)
         assert synth.panic_count == 1
 
-        image_previews = client.poll_image_previews()
-        note_previews = client.poll_note_previews()
+        image_previews = client.next_image_previews()
+        note_previews = client.next_note_previews()
         # Image previews are anchored on each demanded producer, not on the
         # display node, so every producer with a connected image/channel output
         # (source, resize, colour, separate_channels) owns a link-pill preview.

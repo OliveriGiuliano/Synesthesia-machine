@@ -10,7 +10,7 @@ without a ``QMainWindow`` or ``qWait`` timing.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
@@ -61,9 +61,12 @@ class _FakeClient:
         self.activations: list[tuple[object, tuple[UUID, ...] | None]] = []
         self.transport: list[tuple[str, UUID | None]] = []
         self.panics = 0
-        self.image_polls: list[Mapping[tuple[UUID, str], int] | None] = []
-        self.value_polls: list[Mapping[tuple[UUID, str], int] | None] = []
-        self.note_polls: list[Mapping[UUID, int] | None] = []
+        self.image_polls = 0
+        self.value_polls = 0
+        self.note_polls = 0
+        self.image_sequences: dict[tuple[UUID, str], int] = {}
+        self.value_sequences: dict[tuple[UUID, str], int] = {}
+        self.note_sequences: dict[UUID, int] = {}
         self.status_cycle: list[EngineConnectionState] = []
         self.device_requests: list[bool] = []
         self.cleared_previews = 0
@@ -79,6 +82,9 @@ class _FakeClient:
     ) -> EngineActivation:
         roots = tuple(demand_roots) if demand_roots is not None else None
         self.activations.append((snapshot, roots))
+        # The real clients reset their own preview state on every activation
+        # outcome; the bridge no longer does it for them.
+        self.clear_previews()
         return EngineActivation(graph_revision=7, report=_report(), activated=True)
 
     def play(self, source_node_id: UUID | None = None) -> None:
@@ -137,35 +143,36 @@ class _FakeClient:
     def metrics(self) -> EngineMetrics:
         return EngineMetrics(state=EngineState.RUNNING)
 
-    def poll_image_previews(
-        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
-    ) -> tuple[ImagePreview, ...]:
-        self.image_polls.append(after_sequences)
+    def next_image_previews(self) -> tuple[ImagePreview, ...]:
+        self.image_polls += 1
         if self.image_preview is None:
             return ()
         key = (self.image_preview.owner_id, self.image_preview.source_port_id)
-        cursor = after_sequences.get(key, 0) if after_sequences is not None else 0
-        if self.image_preview.sequence <= cursor:
+        if self.image_preview.sequence <= self.image_sequences.get(key, 0):
             return ()
+        self.image_sequences[key] = self.image_preview.sequence
         return (self.image_preview,)
 
-    def poll_value_previews(
-        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
-    ) -> tuple[ValuePreview, ...]:
-        self.value_polls.append(after_sequences)
+    def next_value_previews(self) -> tuple[ValuePreview, ...]:
+        self.value_polls += 1
         result: list[ValuePreview] = []
         for preview in self.value_previews:
             key = (preview.owner_id, preview.source_port_id)
-            cursor = after_sequences.get(key, 0) if after_sequences is not None else 0
-            if preview.sequence > cursor:
+            if preview.sequence > self.value_sequences.get(key, 0):
                 result.append(preview)
+        for preview in result:
+            self.value_sequences[(preview.owner_id, preview.source_port_id)] = preview.sequence
         return tuple(result)
 
-    def poll_note_previews(
-        self, after_sequences: Mapping[UUID, int] | None = None
-    ) -> tuple[NotePreview, ...]:
-        self.note_polls.append(after_sequences)
+    def next_note_previews(self) -> tuple[NotePreview, ...]:
+        self.note_polls += 1
         return ()
+
+    def reset_image_preview_cursors(self) -> None:
+        self.image_sequences.clear()
+
+    def reset_note_preview_cursors(self) -> None:
+        self.note_sequences.clear()
 
     def wait_until_idle(self, timeout_s: float = 5.0) -> bool:
         del timeout_s
@@ -178,6 +185,9 @@ class _FakeClient:
 
     def clear_previews(self) -> None:
         self.cleared_previews += 1
+        self.image_sequences.clear()
+        self.value_sequences.clear()
+        self.note_sequences.clear()
 
     def close(self) -> None:
         self.close_count += 1
@@ -308,9 +318,13 @@ def test_debounce_collapses_to_latest_snapshot() -> None:
 
 def test_rejected_activation_clears_previews_and_reports() -> None:
     client = _FakeClient()
-    client.activate = lambda snapshot, *, demand_roots=None: EngineActivation(  # type: ignore[method-assign]
-        graph_revision=1, report=_report(), activated=False
-    )
+
+    def rejected_activate(snapshot, *, demand_roots=None):
+        del snapshot, demand_roots
+        client.clear_previews()  # the client forgets previews on auto-stop
+        return EngineActivation(graph_revision=1, report=_report(), activated=False)
+
+    client.activate = rejected_activate  # type: ignore[method-assign]
     harness = _harness(client)
     harness.bridge.schedule_activation(_snapshot())
     harness.clock.fire_all()
@@ -340,7 +354,7 @@ def test_hidden_note_dock_skips_note_polling() -> None:
     client = _FakeClient()
     harness = _harness(client)
     harness.bridge.pump_previews_once(note_visible=False)
-    assert client.note_polls == [], "note port must not be polled while the dock is hidden"
+    assert client.note_polls == 0, "note port must not be polled while the dock is hidden"
 
 
 def test_hiding_the_note_dock_resets_its_cursors() -> None:
@@ -348,7 +362,7 @@ def test_hiding_the_note_dock_resets_its_cursors() -> None:
     harness = _harness(client)
     harness.bridge.pump_previews_once(note_visible=True)
     harness.bridge.note_preview_hidden()
-    assert client.note_polls, "the dock was visible, so the note port was polled once"
+    assert client.note_polls == 1, "the dock was visible, so the note port was polled once"
 
 
 # --- transport -------------------------------------------------------------

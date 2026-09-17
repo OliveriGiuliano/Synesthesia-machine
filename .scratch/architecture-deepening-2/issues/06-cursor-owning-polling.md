@@ -6,7 +6,7 @@
 
 **Blocked by:** 05
 
-**Status:** open
+**Status:** resolved
 
 **Files:**
 - `src/synesthesia_machine/contracts/engine_client.py`
@@ -16,8 +16,11 @@
 - `src/synesthesia_machine/ui/preview_router.py`
 
 **Acceptance:**
-- [ ] Smaller protocol surface
-- [ ] Cursor invariant localized in transports
-- [ ] Two cursor dictionaries deleted
-- [ ] Consumers can no longer poll wrongly
-- [ ] Targeted tests pass; `uv run check` green; no unrelated diff
+- [x] Smaller protocol surface
+- [x] Cursor invariant localized in transports
+- [x] Two cursor dictionaries deleted
+- [x] Consumers can no longer poll wrongly
+- [x] Targeted tests pass; `uv run check` green; no unrelated diff
+- [x] Fresh-context review findings fixed: in-process cursor reset on
+  `activate()` (child publisher path), window no longer closes client preview
+  state (widgets only), process-client image cursors lock-guarded

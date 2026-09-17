@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -145,23 +145,20 @@ class _SupervisionClient:
     def reset_profiling(self) -> None:
         return
 
-    def poll_image_previews(
-        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
-    ) -> tuple[ImagePreview, ...]:
-        del after_sequences
+    def next_image_previews(self) -> tuple[ImagePreview, ...]:
         return ()
 
-    def poll_note_previews(
-        self, after_sequences: Mapping[UUID, int] | None = None
-    ) -> tuple[NotePreview, ...]:
-        del after_sequences
+    def next_note_previews(self) -> tuple[NotePreview, ...]:
         return ()
 
-    def poll_value_previews(
-        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
-    ) -> tuple[ValuePreview, ...]:
-        del after_sequences
+    def next_value_previews(self) -> tuple[ValuePreview, ...]:
         return ()
+
+    def reset_image_preview_cursors(self) -> None:
+        return
+
+    def reset_note_preview_cursors(self) -> None:
+        return
 
     def wait_until_idle(self, timeout_s: float = 5.0) -> bool:
         del timeout_s
