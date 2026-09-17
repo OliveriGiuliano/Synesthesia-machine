@@ -20,13 +20,13 @@ from synesthesia_machine.contracts import (
 from synesthesia_machine.midi import MusicalSelector, select_midi_notes
 from synesthesia_machine.nodes.base import (
     ExecutionKind,
-    ExpectedNodeError,
     InputPortSpec,
     NodeDefinition,
     OutputPortSpec,
     ParameterEditorHint,
     ParameterSpec,
-    ResetReason,
+    PureFunctionRuntime,
+    require_same_clock,
 )
 from synesthesia_machine.nodes.synesthesia.musical import (
     COMMON_MUSICAL_PARAMETER_GROUP,
@@ -39,53 +39,47 @@ CHANNEL_TO_PITCH_TYPE_ID = "synmachine.synesthesia.channel_to_pitch"
 LINEAR_NOMINAL_RANGE = "LINEAR_NOMINAL_RANGE"
 
 
-class ChannelToPitchRuntime:
+def _channel_to_pitch_process(
+    node_id: UUID,
+    inputs: Mapping[str, RuntimeValue],
+    parameters: Mapping[str, ParameterValue],
+    context: FrameContext,
+) -> Mapping[str, RuntimeValue]:
+    musical = resolve_common_musical_settings(parameters)
+    midi = channel_histogram_to_midi_state(
+        cast(ChannelFrame, inputs["value"]),
+        node_id=node_id,
+        context=context,
+        selector=musical.selector,
+        parameter_a=cast(ChannelFrame | None, inputs.get("parameter_a")),
+        parameter_b=cast(ChannelFrame | None, inputs.get("parameter_b")),
+        occupancy_threshold_percent=cast(float, parameters["occupancy_threshold_percent"]),
+        minimum_a=cast(float, inputs.get("minimum_a", parameters["minimum_a"])),
+        maximum_a=(
+            cast(float, inputs.get("maximum_a", parameters["maximum_a"]))
+            if cast(bool, parameters["maximum_a_enabled"])
+            else None
+        ),
+        minimum_b=cast(float, inputs.get("minimum_b", parameters["minimum_b"])),
+        maximum_b=(
+            cast(float, inputs.get("maximum_b", parameters["maximum_b"]))
+            if cast(bool, parameters["maximum_b_enabled"])
+            else None
+        ),
+        ignore_non_finite=cast(bool, parameters["ignore_non_finite"]),
+        midi_channel=musical.midi_channel,
+        maximum_polyphony=musical.maximum_polyphony,
+        minimum_velocity=musical.minimum_velocity,
+        maximum_velocity=musical.maximum_velocity,
+    )
+    return {"midi": midi}
+
+
+class ChannelToPitchRuntime(PureFunctionRuntime):
     def __init__(self, node_id: UUID) -> None:
-        self.node_id = node_id
-
-    def process(
-        self,
-        inputs: Mapping[str, RuntimeValue],
-        parameters: Mapping[str, ParameterValue],
-        context: FrameContext,
-    ) -> Mapping[str, RuntimeValue]:
-        try:
-            musical = resolve_common_musical_settings(parameters)
-            midi = channel_histogram_to_midi_state(
-                cast(ChannelFrame, inputs["value"]),
-                node_id=self.node_id,
-                context=context,
-                selector=musical.selector,
-                parameter_a=cast(ChannelFrame | None, inputs.get("parameter_a")),
-                parameter_b=cast(ChannelFrame | None, inputs.get("parameter_b")),
-                occupancy_threshold_percent=cast(float, parameters["occupancy_threshold_percent"]),
-                minimum_a=cast(float, inputs.get("minimum_a", parameters["minimum_a"])),
-                maximum_a=(
-                    cast(float, inputs.get("maximum_a", parameters["maximum_a"]))
-                    if cast(bool, parameters["maximum_a_enabled"])
-                    else None
-                ),
-                minimum_b=cast(float, inputs.get("minimum_b", parameters["minimum_b"])),
-                maximum_b=(
-                    cast(float, inputs.get("maximum_b", parameters["maximum_b"]))
-                    if cast(bool, parameters["maximum_b_enabled"])
-                    else None
-                ),
-                ignore_non_finite=cast(bool, parameters["ignore_non_finite"]),
-                midi_channel=musical.midi_channel,
-                maximum_polyphony=musical.maximum_polyphony,
-                minimum_velocity=musical.minimum_velocity,
-                maximum_velocity=musical.maximum_velocity,
-            )
-        except ValueError as error:
-            raise ExpectedNodeError("invalid_channel_to_pitch", str(error)) from error
-        return {"midi": midi}
-
-    def reset(self, reason: ResetReason) -> None:
-        del reason
-
-    def close(self) -> None:
-        return
+        super().__init__(
+            node_id, processor=_channel_to_pitch_process, error_code="invalid_channel_to_pitch"
+        )
 
 
 def channel_histogram_to_midi_state(
@@ -329,15 +323,18 @@ def _validate_parameters(parameters: Mapping[str, ParameterValue]) -> Sequence[s
 
 
 def _validate_channels(channels: tuple[ChannelFrame, ...], context: FrameContext) -> None:
+    require_same_clock(
+        channels[0].context, context, "Value channel clock does not match the execution clock"
+    )
     expected_shape = channels[0].data.shape
-    expected_clock = channels[0].context.clock_id
-    if expected_clock != context.clock_id:
-        raise ValueError("Value channel clock does not match the execution clock")
     for channel in channels[1:]:
         if channel.data.shape != expected_shape:
             raise ValueError("Connected channels must have identical shapes")
-        if channel.context.clock_id != expected_clock:
-            raise ValueError("Connected channels must use the same source clock")
+        require_same_clock(
+            channels[0].context,
+            channel.context,
+            "Connected channels must use the same source clock",
+        )
 
 
 def _occupancy_strength(occupancy: float, threshold: float) -> float | None:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from uuid import UUID
 
 from synesthesia_machine.contracts.runtime_values import (
     FrameContext,
@@ -18,7 +17,7 @@ from synesthesia_machine.nodes.base import (
     InputPortSpec,
     NodeDefinition,
     ParameterSpec,
-    ResetReason,
+    StatelessRuntime,
 )
 from synesthesia_machine.nodes.migrations import (
     migrate_channel_display_v1_to_v2,
@@ -30,12 +29,7 @@ CHANNEL_DISPLAY_TYPE_ID = "synmachine.visualization.channel_display"
 NOTE_VISUALIZER_TYPE_ID = "synmachine.visualization.note_visualizer"
 
 
-class _VisualizerRuntime:
-    """Demand sink; the worker publishes inputs without rendering inside the engine."""
-
-    def __init__(self, node_id: UUID) -> None:
-        self.node_id = node_id
-
+class _VisualizerRuntime(StatelessRuntime):
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],
@@ -44,12 +38,6 @@ class _VisualizerRuntime:
     ) -> Mapping[str, RuntimeValue]:
         del inputs, parameters, context
         return {}
-
-    def reset(self, reason: ResetReason) -> None:
-        del reason
-
-    def close(self) -> None:
-        return
 
 
 def create_visualization_definitions() -> tuple[NodeDefinition, ...]:

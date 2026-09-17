@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from functools import partial
 from typing import cast
 from uuid import UUID
 
@@ -23,13 +24,14 @@ from synesthesia_machine.contracts import (
 )
 from synesthesia_machine.nodes import (
     ExecutionKind,
-    ExpectedNodeError,
     InputPortSpec,
     NodeDefinition,
     OutputPortSpec,
     ParameterEditorHint,
     ParameterSpec,
+    PureFunctionRuntime,
     ResetReason,
+    require_same_clock,
 )
 from synesthesia_machine.nodes.synesthesia.musical import (
     COMMON_MUSICAL_PARAMETER_GROUP,
@@ -107,42 +109,46 @@ class FourierShapeCache:
         self._band_indexes = None
 
 
-class FourierRuntime:
+def _fourier_process(
+    node_id: UUID,
+    inputs: Mapping[str, RuntimeValue],
+    parameters: Mapping[str, ParameterValue],
+    context: FrameContext,
+    cache: FourierShapeCache,
+) -> Mapping[str, RuntimeValue]:
+    midi = fourier_to_midi_state(
+        cast(ChannelFrame, inputs["value"]),
+        window=cast(str, parameters["window"]),
+        subtract_mean=cast(bool, parameters["subtract_mean"]),
+        frequency_mapping=cast(str, parameters["frequency_mapping"]),
+        frequency_minimum=cast(float, parameters["frequency_minimum"]),
+        frequency_maximum=cast(float, parameters["frequency_maximum"]),
+        amplitude_floor=cast(float, parameters["amplitude_floor"]),
+        amplitude_ceiling=cast(float, parameters["amplitude_ceiling"]),
+        dc_exclusion_radius=cast(float, parameters["dc_exclusion_radius"]),
+        band_aggregation=cast(str, parameters["band_aggregation"]),
+        percentile=cast(float, parameters["percentile"]),
+        activation_threshold=cast(float, parameters["activation_threshold"]),
+        analysis_max_dimension=cast(int, parameters["analysis_max_dimension"]),
+        settings=resolve_common_musical_settings(parameters),
+        node_id=node_id,
+        context=context,
+        cache=cache,
+    )
+    return {"midi": midi}
+
+
+class FourierRuntime(PureFunctionRuntime):
     """Own the shape-dependent map cache without making output history-dependent."""
 
     def __init__(self, node_id: UUID) -> None:
-        self.node_id = node_id
         self.cache = FourierShapeCache()
-
-    def process(
-        self,
-        inputs: Mapping[str, RuntimeValue],
-        parameters: Mapping[str, ParameterValue],
-        context: FrameContext,
-    ) -> Mapping[str, RuntimeValue]:
-        try:
-            midi = fourier_to_midi_state(
-                cast(ChannelFrame, inputs["value"]),
-                window=cast(str, parameters["window"]),
-                subtract_mean=cast(bool, parameters["subtract_mean"]),
-                frequency_mapping=cast(str, parameters["frequency_mapping"]),
-                frequency_minimum=cast(float, parameters["frequency_minimum"]),
-                frequency_maximum=cast(float, parameters["frequency_maximum"]),
-                amplitude_floor=cast(float, parameters["amplitude_floor"]),
-                amplitude_ceiling=cast(float, parameters["amplitude_ceiling"]),
-                dc_exclusion_radius=cast(float, parameters["dc_exclusion_radius"]),
-                band_aggregation=cast(str, parameters["band_aggregation"]),
-                percentile=cast(float, parameters["percentile"]),
-                activation_threshold=cast(float, parameters["activation_threshold"]),
-                analysis_max_dimension=cast(int, parameters["analysis_max_dimension"]),
-                settings=resolve_common_musical_settings(parameters),
-                node_id=self.node_id,
-                context=context,
-                cache=self.cache,
-            )
-        except (KeyError, TypeError, ValueError) as error:
-            raise ExpectedNodeError("invalid_fourier", str(error)) from error
-        return {"midi": midi}
+        super().__init__(
+            node_id,
+            processor=partial(_fourier_process, cache=self.cache),
+            error_code="invalid_fourier",
+            exceptions=(KeyError, TypeError, ValueError),
+        )
 
     def reset(self, reason: ResetReason) -> None:
         del reason
@@ -181,8 +187,9 @@ def fourier_to_midi_state(
     band-to-note arrangement is unchanged.
     """
 
-    if value.context.clock_id != context.clock_id:
-        raise ValueError("Fourier channel clock does not match the execution clock")
+    require_same_clock(
+        value.context, context, "Fourier channel clock does not match the execution clock"
+    )
     _validate_algorithm_parameters(
         window=window,
         frequency_mapping=frequency_mapping,

@@ -7,11 +7,8 @@ from dataclasses import replace
 from uuid import UUID
 
 from synesthesia_machine.contracts import (
-    FrameContext,
-    NoData,
     ParameterValue,
     PortType,
-    RuntimeValue,
 )
 from synesthesia_machine.media import build_video_source_config
 from synesthesia_machine.media.video_source import inspect_video
@@ -19,12 +16,12 @@ from synesthesia_machine.media_path import normalize_media_path
 from synesthesia_machine.nodes.base import (
     CachePolicy,
     ExecutionKind,
+    NoDataRuntime,
     NodeDefinition,
     OutputPortSpec,
     ParameterEditorHint,
     ParameterSpec,
     ParameterUpdateMode,
-    ResetReason,
     SourceOutputContract,
 )
 from synesthesia_machine.nodes.migrations import (
@@ -39,26 +36,11 @@ _DURATION_CACHE_MAX_ENTRIES = 128
 _video_duration_cache: dict[tuple[str, int, int], float | None] = {}
 
 
-class LoadVideoRuntime:
+class LoadVideoRuntime(NoDataRuntime):
     """Safe scheduler placeholder for externally injected source outputs."""
 
     def __init__(self, node_id: UUID) -> None:
-        self.node_id = node_id
-
-    def process(
-        self,
-        inputs: Mapping[str, RuntimeValue],
-        parameters: Mapping[str, ParameterValue],
-        context: FrameContext,
-    ) -> Mapping[str, RuntimeValue]:
-        del inputs, parameters, context
-        return {"image": NoData, "processed_index": NoData}
-
-    def reset(self, reason: ResetReason) -> None:
-        del reason
-
-    def close(self) -> None:
-        return
+        super().__init__(node_id, ("image", "processed_index"))
 
 
 def _video_region_duration(file_path: str, stream_index: int) -> float | None:

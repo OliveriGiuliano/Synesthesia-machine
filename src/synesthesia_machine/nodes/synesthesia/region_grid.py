@@ -23,13 +23,13 @@ from synesthesia_machine.contracts import (
 from synesthesia_machine.media import convert_image, image_to_luminance
 from synesthesia_machine.nodes import (
     ExecutionKind,
-    ExpectedNodeError,
     InputPortSpec,
     NodeDefinition,
     OutputPortSpec,
     ParameterEditorHint,
     ParameterSpec,
-    ResetReason,
+    PureFunctionRuntime,
+    require_same_clock,
 )
 from synesthesia_machine.nodes.synesthesia.musical import (
     COMMON_MUSICAL_PARAMETER_GROUP,
@@ -60,38 +60,35 @@ class RegionMeasurement:
     value: float
 
 
-class RegionGridRuntime:
+def _region_grid_process(
+    node_id: UUID,
+    inputs: Mapping[str, RuntimeValue],
+    parameters: Mapping[str, ParameterValue],
+    context: FrameContext,
+) -> Mapping[str, RuntimeValue]:
+    midi = region_grid_to_midi_state(
+        cast(ImageFrame, inputs["image"]),
+        metric=cast(str, parameters["metric"]),
+        grid_rows=cast(int, parameters["grid_rows"]),
+        grid_columns=cast(int, parameters["grid_columns"]),
+        activation_threshold=cast(float, parameters["activation_threshold"]),
+        settings=resolve_common_musical_settings(parameters),
+        node_id=node_id,
+        context=context,
+    )
+    return {"midi": midi}
+
+
+class RegionGridRuntime(PureFunctionRuntime):
     """Stateless image-grid measurement and desired-MIDI-state projection."""
 
     def __init__(self, node_id: UUID) -> None:
-        self.node_id = node_id
-
-    def process(
-        self,
-        inputs: Mapping[str, RuntimeValue],
-        parameters: Mapping[str, ParameterValue],
-        context: FrameContext,
-    ) -> Mapping[str, RuntimeValue]:
-        try:
-            midi = region_grid_to_midi_state(
-                cast(ImageFrame, inputs["image"]),
-                metric=cast(str, parameters["metric"]),
-                grid_rows=cast(int, parameters["grid_rows"]),
-                grid_columns=cast(int, parameters["grid_columns"]),
-                activation_threshold=cast(float, parameters["activation_threshold"]),
-                settings=resolve_common_musical_settings(parameters),
-                node_id=self.node_id,
-                context=context,
-            )
-        except (KeyError, TypeError, ValueError) as error:
-            raise ExpectedNodeError("invalid_region_grid", str(error)) from error
-        return {"midi": midi}
-
-    def reset(self, reason: ResetReason) -> None:
-        del reason
-
-    def close(self) -> None:
-        return
+        super().__init__(
+            node_id,
+            processor=_region_grid_process,
+            error_code="invalid_region_grid",
+            exceptions=(KeyError, TypeError, ValueError),
+        )
 
 
 def region_grid_to_midi_state(
@@ -107,8 +104,9 @@ def region_grid_to_midi_state(
 ) -> MidiStateFrame:
     """Measure cells and map top-left through bottom-right across allowed notes."""
 
-    if image.context.clock_id != context.clock_id:
-        raise ValueError("Region Grid image clock does not match the execution clock")
+    require_same_clock(
+        image.context, context, "Region Grid image clock does not match the execution clock"
+    )
     _validate_algorithm_parameters(
         metric=metric,
         grid_rows=grid_rows,

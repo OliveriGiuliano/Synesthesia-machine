@@ -6,7 +6,6 @@ import math
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
 from typing import cast
-from uuid import UUID
 
 import numpy as np
 
@@ -23,7 +22,7 @@ from synesthesia_machine.nodes.base import (
     NodeDefinition,
     OutputPortSpec,
     ParameterSpec,
-    ResetReason,
+    StatelessRuntime,
 )
 
 
@@ -34,18 +33,7 @@ class IntegerConversionMode(StrEnum):
     TRUNCATE = "TRUNCATE"
 
 
-class _ScalarBridgeRuntime:
-    def __init__(self, node_id: UUID) -> None:
-        self.node_id = node_id
-
-    def reset(self, reason: ResetReason) -> None:
-        del reason
-
-    def close(self) -> None:
-        return
-
-
-class RemapNumberRuntime(_ScalarBridgeRuntime):
+class RemapNumberRuntime(StatelessRuntime):
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],
@@ -67,7 +55,7 @@ class RemapNumberRuntime(_ScalarBridgeRuntime):
         return {"value": value}
 
 
-class FloatToIntegerRuntime(_ScalarBridgeRuntime):
+class FloatToIntegerRuntime(StatelessRuntime):
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],

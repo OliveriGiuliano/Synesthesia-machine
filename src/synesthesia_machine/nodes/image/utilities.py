@@ -20,12 +20,12 @@ from synesthesia_machine.nodes import (
     NodeDefinition,
     OutputPortSpec,
     ParameterSpec,
+    StatelessRuntime,
 )
-from synesthesia_machine.nodes.image.runtime_support import StatelessImageRuntime
 from synesthesia_machine.nodes.migrations import migrate_change_colour_space_v1_to_v2
 
 
-class ChangeColourSpaceRuntime(StatelessImageRuntime):
+class ChangeColourSpaceRuntime(StatelessRuntime):
     """Convert image values and descriptor metadata to an explicit colour space."""
 
     def process(

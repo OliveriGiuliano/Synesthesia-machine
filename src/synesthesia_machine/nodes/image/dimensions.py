@@ -43,14 +43,14 @@ from synesthesia_machine.nodes import (
     OutputPortSpec,
     ParameterEditorHint,
     ParameterSpec,
+    StatelessRuntime,
     TypeVariable,
 )
-from synesthesia_machine.nodes.image.runtime_support import StatelessImageRuntime
 
 IMAGE_OR_CHANNEL = TypeVariable("IMAGE_OR_CHANNEL", frozenset({PortType.IMAGE, PortType.CHANNEL}))
 
 
-class ResizeRuntime(StatelessImageRuntime):
+class ResizeRuntime(StatelessRuntime):
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],
@@ -73,7 +73,7 @@ class ResizeRuntime(StatelessImageRuntime):
         return {"image": _restore_type(source, result)}
 
 
-class CropRuntime(StatelessImageRuntime):
+class CropRuntime(StatelessRuntime):
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],
@@ -101,7 +101,7 @@ class CropRuntime(StatelessImageRuntime):
         return {"image": result}
 
 
-class FlipRuntime(StatelessImageRuntime):
+class FlipRuntime(StatelessRuntime):
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],
@@ -119,7 +119,7 @@ class FlipRuntime(StatelessImageRuntime):
         return {"image": _restore_type(source, result)}
 
 
-class RotateRuntime(StatelessImageRuntime):
+class RotateRuntime(StatelessRuntime):
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],

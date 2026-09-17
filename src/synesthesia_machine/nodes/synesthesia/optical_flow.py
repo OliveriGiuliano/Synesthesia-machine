@@ -25,12 +25,12 @@ from synesthesia_machine.contracts import (
 from synesthesia_machine.media import image_to_luminance
 from synesthesia_machine.nodes import (
     ExecutionKind,
-    ExpectedNodeError,
     InputPortSpec,
     NodeDefinition,
     OutputPortSpec,
     ParameterSpec,
-    ResetReason,
+    PureFunctionRuntime,
+    require_same_clock,
 )
 from synesthesia_machine.nodes.synesthesia.musical import (
     COMMON_MUSICAL_PARAMETER_GROUP,
@@ -125,43 +125,40 @@ class FlowCell:
         raise ValueError(f"Unknown optical-flow velocity feature: {feature!r}")
 
 
-class OpticalFlowRuntime:
+def _optical_flow_process(
+    node_id: UUID,
+    inputs: Mapping[str, RuntimeValue],
+    parameters: Mapping[str, ParameterValue],
+    context: FrameContext,
+) -> Mapping[str, RuntimeValue]:
+    midi = optical_flow_to_midi_state(
+        cast(ImageFrame, inputs["current"]),
+        cast(ImageFrame, inputs["reference"]),
+        flow_preset=cast(str, parameters["flow_preset"]),
+        minimum_motion_magnitude=cast(float, parameters["minimum_motion_magnitude"]),
+        pitch_feature=cast(str, parameters["pitch_feature"]),
+        velocity_feature=cast(str, parameters["velocity_feature"]),
+        grid_rows=cast(int, parameters["grid_rows"]),
+        grid_columns=cast(int, parameters["grid_columns"]),
+        aggregation=cast(str, parameters["aggregation"]),
+        magnitude_minimum=cast(float, parameters["magnitude_minimum"]),
+        magnitude_maximum=cast(float, parameters["magnitude_maximum"]),
+        analysis_max_dimension=cast(int, parameters["analysis_max_dimension"]),
+        settings=resolve_common_musical_settings(parameters),
+        node_id=node_id,
+        context=context,
+    )
+    return {"midi": midi}
+
+
+class OpticalFlowRuntime(PureFunctionRuntime):
     def __init__(self, node_id: UUID) -> None:
-        self.node_id = node_id
-
-    def process(
-        self,
-        inputs: Mapping[str, RuntimeValue],
-        parameters: Mapping[str, ParameterValue],
-        context: FrameContext,
-    ) -> Mapping[str, RuntimeValue]:
-        try:
-            midi = optical_flow_to_midi_state(
-                cast(ImageFrame, inputs["current"]),
-                cast(ImageFrame, inputs["reference"]),
-                flow_preset=cast(str, parameters["flow_preset"]),
-                minimum_motion_magnitude=cast(float, parameters["minimum_motion_magnitude"]),
-                pitch_feature=cast(str, parameters["pitch_feature"]),
-                velocity_feature=cast(str, parameters["velocity_feature"]),
-                grid_rows=cast(int, parameters["grid_rows"]),
-                grid_columns=cast(int, parameters["grid_columns"]),
-                aggregation=cast(str, parameters["aggregation"]),
-                magnitude_minimum=cast(float, parameters["magnitude_minimum"]),
-                magnitude_maximum=cast(float, parameters["magnitude_maximum"]),
-                analysis_max_dimension=cast(int, parameters["analysis_max_dimension"]),
-                settings=resolve_common_musical_settings(parameters),
-                node_id=self.node_id,
-                context=context,
-            )
-        except (KeyError, TypeError, ValueError) as error:
-            raise ExpectedNodeError("invalid_optical_flow", str(error)) from error
-        return {"midi": midi}
-
-    def reset(self, reason: ResetReason) -> None:
-        del reason
-
-    def close(self) -> None:
-        return
+        super().__init__(
+            node_id,
+            processor=_optical_flow_process,
+            error_code="invalid_optical_flow",
+            exceptions=(KeyError, TypeError, ValueError),
+        )
 
 
 def optical_flow_to_midi_state(
@@ -184,10 +181,12 @@ def optical_flow_to_midi_state(
 ) -> MidiStateFrame:
     """Calculate reference-to-current motion and map it through fixed musical ranges."""
 
-    if current.context.clock_id != reference.context.clock_id:
-        raise ValueError("Optical Flow inputs must use the same clock")
-    if current.context.clock_id != context.clock_id:
-        raise ValueError("Optical Flow image clock does not match the execution clock")
+    require_same_clock(
+        current.context, reference.context, "Optical Flow inputs must use the same clock"
+    )
+    require_same_clock(
+        current.context, context, "Optical Flow image clock does not match the execution clock"
+    )
     flow = calculate_dense_flow(
         current,
         reference,

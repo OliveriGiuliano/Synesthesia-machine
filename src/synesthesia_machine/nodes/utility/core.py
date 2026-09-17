@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from typing import cast
-from uuid import UUID
 
 from synesthesia_machine.contracts.runtime_values import (
     FrameContext,
@@ -21,7 +20,7 @@ from synesthesia_machine.nodes.base import (
     NodeDefinition,
     OutputPortSpec,
     ParameterSpec,
-    ResetReason,
+    StatelessRuntime,
     TypeVariable,
 )
 from synesthesia_machine.nodes.migrations import migrate_number_v0_to_v1
@@ -33,18 +32,7 @@ from synesthesia_machine.nodes.utility.scalar_bridges import create_scalar_bridg
 T = TypeVariable("T")
 
 
-class _RuntimeBase:
-    def __init__(self, node_id: UUID) -> None:
-        self.node_id = node_id
-
-    def reset(self, reason: ResetReason) -> None:
-        del reason
-
-    def close(self) -> None:
-        return
-
-
-class NumberRuntime(_RuntimeBase):
+class NumberRuntime(StatelessRuntime):
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],
@@ -57,7 +45,7 @@ class NumberRuntime(_RuntimeBase):
         return {"value": cast(float, parameters["float_value"])}
 
 
-class PassThroughRuntime(_RuntimeBase):
+class PassThroughRuntime(StatelessRuntime):
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],
@@ -68,7 +56,7 @@ class PassThroughRuntime(_RuntimeBase):
         return {"value": inputs["value"]}
 
 
-class ConditionalRuntime(_RuntimeBase):
+class ConditionalRuntime(StatelessRuntime):
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],
@@ -80,7 +68,7 @@ class ConditionalRuntime(_RuntimeBase):
         return {"value": value}
 
 
-class CompareRuntime(_RuntimeBase):
+class CompareRuntime(StatelessRuntime):
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],
@@ -112,7 +100,7 @@ class CompareRuntime(_RuntimeBase):
         return {"value": value}
 
 
-class LogicRuntime(_RuntimeBase):
+class LogicRuntime(StatelessRuntime):
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],
@@ -133,7 +121,7 @@ class LogicRuntime(_RuntimeBase):
         return {"value": values[operation]}
 
 
-class MathRuntime(_RuntimeBase):
+class MathRuntime(StatelessRuntime):
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],

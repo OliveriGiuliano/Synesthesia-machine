@@ -22,12 +22,12 @@ from synesthesia_machine.contracts import (
 )
 from synesthesia_machine.nodes import (
     ExecutionKind,
-    ExpectedNodeError,
     InputPortSpec,
     NodeDefinition,
     OutputPortSpec,
     ParameterSpec,
-    ResetReason,
+    PureFunctionRuntime,
+    require_same_clock,
 )
 from synesthesia_machine.nodes.synesthesia.musical import (
     COMMON_MUSICAL_PARAMETER_GROUP,
@@ -77,42 +77,39 @@ class ContourFeatures:
         }[feature]
 
 
-class EdgesToPitchRuntime:
+def _edges_to_pitch_process(
+    node_id: UUID,
+    inputs: Mapping[str, RuntimeValue],
+    parameters: Mapping[str, ParameterValue],
+    context: FrameContext,
+) -> Mapping[str, RuntimeValue]:
+    midi = edges_to_midi_state(
+        cast(ChannelFrame, inputs["edges"]),
+        retrieval_mode=cast(str, parameters["retrieval_mode"]),
+        minimum_contour_area=cast(float, parameters["minimum_contour_area"]),
+        minimum_contour_perimeter=cast(float, parameters["minimum_contour_perimeter"]),
+        contour_limit=cast(int, parameters["contour_limit"]),
+        pitch_feature=cast(str, parameters["pitch_feature"]),
+        velocity_feature=cast(str, parameters["velocity_feature"]),
+        pitch_minimum=cast(float, parameters["pitch_minimum"]),
+        pitch_maximum=cast(float, parameters["pitch_maximum"]),
+        velocity_minimum=cast(float, parameters["velocity_minimum"]),
+        velocity_maximum=cast(float, parameters["velocity_maximum"]),
+        settings=resolve_common_musical_settings(parameters),
+        node_id=node_id,
+        context=context,
+    )
+    return {"midi": midi}
+
+
+class EdgesToPitchRuntime(PureFunctionRuntime):
     def __init__(self, node_id: UUID) -> None:
-        self.node_id = node_id
-
-    def process(
-        self,
-        inputs: Mapping[str, RuntimeValue],
-        parameters: Mapping[str, ParameterValue],
-        context: FrameContext,
-    ) -> Mapping[str, RuntimeValue]:
-        try:
-            midi = edges_to_midi_state(
-                cast(ChannelFrame, inputs["edges"]),
-                retrieval_mode=cast(str, parameters["retrieval_mode"]),
-                minimum_contour_area=cast(float, parameters["minimum_contour_area"]),
-                minimum_contour_perimeter=cast(float, parameters["minimum_contour_perimeter"]),
-                contour_limit=cast(int, parameters["contour_limit"]),
-                pitch_feature=cast(str, parameters["pitch_feature"]),
-                velocity_feature=cast(str, parameters["velocity_feature"]),
-                pitch_minimum=cast(float, parameters["pitch_minimum"]),
-                pitch_maximum=cast(float, parameters["pitch_maximum"]),
-                velocity_minimum=cast(float, parameters["velocity_minimum"]),
-                velocity_maximum=cast(float, parameters["velocity_maximum"]),
-                settings=resolve_common_musical_settings(parameters),
-                node_id=self.node_id,
-                context=context,
-            )
-        except (KeyError, TypeError, ValueError) as error:
-            raise ExpectedNodeError("invalid_edges_to_pitch", str(error)) from error
-        return {"midi": midi}
-
-    def reset(self, reason: ResetReason) -> None:
-        del reason
-
-    def close(self) -> None:
-        return
+        super().__init__(
+            node_id,
+            processor=_edges_to_pitch_process,
+            error_code="invalid_edges_to_pitch",
+            exceptions=(KeyError, TypeError, ValueError),
+        )
 
 
 def edges_to_midi_state(
@@ -134,8 +131,9 @@ def edges_to_midi_state(
 ) -> MidiStateFrame:
     """Map filtered contour features through explicit ranges into desired MIDI state."""
 
-    if edges.context.clock_id != context.clock_id:
-        raise ValueError("Edges to Pitch channel clock does not match the execution clock")
+    require_same_clock(
+        edges.context, context, "Edges to Pitch channel clock does not match the execution clock"
+    )
     _validate_feature(pitch_feature, PITCH_FEATURES, "pitch")
     _validate_feature(velocity_feature, VELOCITY_FEATURES, "velocity")
     _validate_range(pitch_minimum, pitch_maximum, "pitch")

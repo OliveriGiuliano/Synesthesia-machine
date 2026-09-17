@@ -51,9 +51,9 @@ from synesthesia_machine.nodes import (
     OutputPortSpec,
     ParameterEditorHint,
     ParameterSpec,
+    StatelessRuntime,
     TypeVariable,
 )
-from synesthesia_machine.nodes.image.runtime_support import StatelessImageRuntime
 from synesthesia_machine.nodes.migrations import (
     NodeMigration,
     migrate_adjustment_channel_selection_v1_to_v2,
@@ -72,7 +72,7 @@ type FilterProcessor = Callable[
 ]
 
 
-class FilterRuntime(StatelessImageRuntime):
+class FilterRuntime(StatelessRuntime):
     def __init__(self, node_id: UUID, processor: FilterProcessor, error_code: str) -> None:
         super().__init__(node_id)
         self._processor = processor
@@ -106,7 +106,7 @@ class FilterRuntime(StatelessImageRuntime):
         return {"image": _restore_type(source, result)}
 
 
-class ThresholdRuntime(StatelessImageRuntime):
+class ThresholdRuntime(StatelessRuntime):
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],
@@ -126,7 +126,7 @@ class ThresholdRuntime(StatelessImageRuntime):
         return {"channel": result}
 
 
-class CannyRuntime(StatelessImageRuntime):
+class CannyRuntime(StatelessRuntime):
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],

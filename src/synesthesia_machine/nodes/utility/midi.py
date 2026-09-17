@@ -17,12 +17,11 @@ from synesthesia_machine.contracts import (
 )
 from synesthesia_machine.nodes import (
     ExecutionKind,
-    ExpectedNodeError,
     InputPortSpec,
     NodeDefinition,
     OutputPortSpec,
     ParameterSpec,
-    ResetReason,
+    PureFunctionRuntime,
     VariadicInputSpec,
 )
 
@@ -31,60 +30,54 @@ TRANSPOSE_TYPE_ID = "synmachine.utility.transpose"
 MIDI_MERGE_TYPE_ID = "synmachine.utility.midi_merge"
 
 
-class _MidiRuntimeBase:
+def _multiply_velocity_process(
+    node_id: UUID,
+    inputs: Mapping[str, RuntimeValue],
+    parameters: Mapping[str, ParameterValue],
+    context: FrameContext,
+) -> Mapping[str, RuntimeValue]:
+    state = cast(MidiStateFrame, inputs["midi"])
+    factor = cast(float, inputs.get("factor", parameters["factor"]))
+    return {"midi": multiply_velocity(state, factor, node_id, context)}
+
+
+class MultiplyVelocityRuntime(PureFunctionRuntime):
     def __init__(self, node_id: UUID) -> None:
-        self.node_id = node_id
-
-    def reset(self, reason: ResetReason) -> None:
-        del reason
-
-    def close(self) -> None:
-        return
+        super().__init__(
+            node_id, processor=_multiply_velocity_process, error_code="invalid_velocity_factor"
+        )
 
 
-class MultiplyVelocityRuntime(_MidiRuntimeBase):
-    def process(
-        self,
-        inputs: Mapping[str, RuntimeValue],
-        parameters: Mapping[str, ParameterValue],
-        context: FrameContext,
-    ) -> Mapping[str, RuntimeValue]:
-        state = cast(MidiStateFrame, inputs["midi"])
-        factor = cast(float, inputs.get("factor", parameters["factor"]))
-        try:
-            return {"midi": multiply_velocity(state, factor, self.node_id, context)}
-        except ValueError as error:
-            raise ExpectedNodeError("invalid_velocity_factor", str(error)) from error
+def _transpose_process(
+    node_id: UUID,
+    inputs: Mapping[str, RuntimeValue],
+    parameters: Mapping[str, ParameterValue],
+    context: FrameContext,
+) -> Mapping[str, RuntimeValue]:
+    state = cast(MidiStateFrame, inputs["midi"])
+    semitones = cast(int, inputs.get("semitones", parameters["semitones"]))
+    return {"midi": transpose_midi_state(state, semitones, node_id, context)}
 
 
-class TransposeRuntime(_MidiRuntimeBase):
-    def process(
-        self,
-        inputs: Mapping[str, RuntimeValue],
-        parameters: Mapping[str, ParameterValue],
-        context: FrameContext,
-    ) -> Mapping[str, RuntimeValue]:
-        state = cast(MidiStateFrame, inputs["midi"])
-        semitones = cast(int, inputs.get("semitones", parameters["semitones"]))
-        try:
-            return {"midi": transpose_midi_state(state, semitones, self.node_id, context)}
-        except ValueError as error:
-            raise ExpectedNodeError("invalid_transpose", str(error)) from error
+class TransposeRuntime(PureFunctionRuntime):
+    def __init__(self, node_id: UUID) -> None:
+        super().__init__(node_id, processor=_transpose_process, error_code="invalid_transpose")
 
 
-class MidiMergeRuntime(_MidiRuntimeBase):
-    def process(
-        self,
-        inputs: Mapping[str, RuntimeValue],
-        parameters: Mapping[str, ParameterValue],
-        context: FrameContext,
-    ) -> Mapping[str, RuntimeValue]:
-        del parameters
-        try:
-            states = tuple(cast(MidiStateFrame, value) for value in inputs.values())
-            return {"midi": merge_midi_states(states, self.node_id, context)}
-        except ValueError as error:
-            raise ExpectedNodeError("invalid_midi_merge", str(error)) from error
+def _midi_merge_process(
+    node_id: UUID,
+    inputs: Mapping[str, RuntimeValue],
+    parameters: Mapping[str, ParameterValue],
+    context: FrameContext,
+) -> Mapping[str, RuntimeValue]:
+    del parameters
+    states = tuple(cast(MidiStateFrame, value) for value in inputs.values())
+    return {"midi": merge_midi_states(states, node_id, context)}
+
+
+class MidiMergeRuntime(PureFunctionRuntime):
+    def __init__(self, node_id: UUID) -> None:
+        super().__init__(node_id, processor=_midi_merge_process, error_code="invalid_midi_merge")
 
 
 def multiply_velocity(

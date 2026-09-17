@@ -27,6 +27,7 @@ from synesthesia_machine.nodes import (
     ParameterEditorHint,
     ParameterSpec,
     ResetReason,
+    StatelessRuntime,
 )
 from synesthesia_machine.nodes.synesthesia.musical import (
     COMMON_MUSICAL_PARAMETER_GROUP,
@@ -48,7 +49,7 @@ CONTRAST = "CONTRAST"
 SCANLINE_METRICS = (VALUE, CONTRAST)
 
 
-class ScanlineRuntime:
+class ScanlineRuntime(StatelessRuntime):
     """Own scan position and advance it once per successful processed tick."""
 
     def __init__(self, node_id: UUID) -> None:

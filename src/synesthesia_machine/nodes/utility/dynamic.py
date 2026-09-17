@@ -34,6 +34,7 @@ from synesthesia_machine.nodes import (
     ParameterSpec,
     ParameterUpdateMode,
     ResetReason,
+    StatelessRuntime,
     TypeVariable,
     VariadicInputSpec,
 )
@@ -45,18 +46,7 @@ T = TypeVariable("T", _DYNAMIC_TYPES)
 T_ARRAY = ArrayTypeVariable("T", _DYNAMIC_TYPES)
 
 
-class _RuntimeBase:
-    def __init__(self, node_id: UUID) -> None:
-        self.node_id = node_id
-
-    def reset(self, reason: ResetReason) -> None:
-        del reason
-
-    def close(self) -> None:
-        return
-
-
-class DifferenceRuntime(_RuntimeBase):
+class DifferenceRuntime(StatelessRuntime):
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],
@@ -82,7 +72,7 @@ class DifferenceRuntime(_RuntimeBase):
         return {"image": frame_like(first, result)}
 
 
-class ModuloAccumulatorRuntime(_RuntimeBase):
+class ModuloAccumulatorRuntime(StatelessRuntime):
     def __init__(self, node_id: UUID) -> None:
         super().__init__(node_id)
         self._lock = Lock()
@@ -127,7 +117,7 @@ class ModuloAccumulatorRuntime(_RuntimeBase):
         self.reset(ResetReason.ENGINE_RESTARTED)
 
 
-class BufferRuntime(_RuntimeBase):
+class BufferRuntime(StatelessRuntime):
     def __init__(self, node_id: UUID) -> None:
         super().__init__(node_id)
         self._lock = Lock()
@@ -191,7 +181,7 @@ class BufferRuntime(_RuntimeBase):
         self._signature = None
 
 
-class StatisticsRuntime(_RuntimeBase):
+class StatisticsRuntime(StatelessRuntime):
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],
@@ -256,7 +246,7 @@ class StatisticsRuntime(_RuntimeBase):
         )
 
 
-class NormalizeRuntime(_RuntimeBase):
+class NormalizeRuntime(StatelessRuntime):
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],
@@ -297,7 +287,7 @@ class NormalizeRuntime(_RuntimeBase):
         return {"value": round(result) if isinstance(value, int) else float(result)}
 
 
-class CurveRuntime(_RuntimeBase):
+class CurveRuntime(StatelessRuntime):
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],

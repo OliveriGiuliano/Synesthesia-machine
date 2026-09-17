@@ -35,15 +35,15 @@ from synesthesia_machine.nodes import (
     ParameterEditorHint,
     ParameterSpec,
     ParameterUpdateMode,
+    StatelessRuntime,
 )
-from synesthesia_machine.nodes.image.runtime_support import StatelessImageRuntime
 from synesthesia_machine.nodes.migrations import (
     migrate_combine_channels_v1_to_v2,
     migrate_separate_channels_v1_to_v2,
 )
 
 
-class BlendImagesRuntime(StatelessImageRuntime):
+class BlendImagesRuntime(StatelessRuntime):
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],
@@ -66,7 +66,7 @@ class BlendImagesRuntime(StatelessImageRuntime):
         return {"image": result}
 
 
-class SeparateChannelsRuntime(StatelessImageRuntime):
+class SeparateChannelsRuntime(StatelessRuntime):
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],
@@ -83,7 +83,7 @@ class SeparateChannelsRuntime(StatelessImageRuntime):
         }
 
 
-class CombineChannelsRuntime(StatelessImageRuntime):
+class CombineChannelsRuntime(StatelessRuntime):
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],
@@ -110,7 +110,7 @@ class CombineChannelsRuntime(StatelessImageRuntime):
         return {"image": result}
 
 
-class ImageToLuminanceRuntime(StatelessImageRuntime):
+class ImageToLuminanceRuntime(StatelessRuntime):
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],

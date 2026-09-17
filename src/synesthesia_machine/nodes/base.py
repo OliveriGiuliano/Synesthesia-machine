@@ -22,6 +22,7 @@ from synesthesia_machine.contracts.engine_client import (
 from synesthesia_machine.contracts.runtime_values import (
     ColorValue,
     FrameContext,
+    NoData,
     NumericMatrix,
     ParameterValue,
     PortType,
@@ -357,6 +358,91 @@ class MidiOutputStatusProvider(Protocol):
 @runtime_checkable
 class NodeMemoryDiagnosticProvider(Protocol):
     def node_memory_diagnostic(self) -> NodeMemoryDiagnostic: ...
+
+
+class StatelessRuntime:
+    """Lifecycle skeleton for runtimes that hold no state between ticks.
+
+    Concrete stateless nodes subclass this (or one of the adapters below)
+    and implement only ``process``; a lifecycle change is one edit here.
+    """
+
+    def __init__(self, node_id: UUID) -> None:
+        self.node_id = node_id
+
+    def reset(self, reason: ResetReason) -> None:
+        del reason
+
+    def close(self) -> None:
+        return
+
+
+class NoDataRuntime(StatelessRuntime):
+    """Scheduler placeholder that publishes ``NoData`` for its declared outputs.
+
+    Source nodes use this as the safe default: the scheduler runs it until
+    source construction (or a restart) replaces the node's outputs.
+    """
+
+    def __init__(self, node_id: UUID, output_ports: Sequence[str]) -> None:
+        super().__init__(node_id)
+        self._output_ports = tuple(output_ports)
+
+    def process(
+        self,
+        inputs: Mapping[str, RuntimeValue],
+        parameters: Mapping[str, ParameterValue],
+        context: FrameContext,
+    ) -> Mapping[str, RuntimeValue]:
+        del inputs, parameters, context
+        return {port: NoData for port in self._output_ports}
+
+
+type PureFunctionProcessor = Callable[
+    [UUID, Mapping[str, RuntimeValue], Mapping[str, ParameterValue], FrameContext],
+    Mapping[str, RuntimeValue],
+]
+
+
+class PureFunctionRuntime(StatelessRuntime):
+    """Stateless runtime wrapping one pure function behind the error contract.
+
+    ``processor`` performs the node's computation - input extraction, the pure
+    algorithm call, and the output mapping - and returns the output mapping.
+    A failure raising one of ``exceptions`` becomes an ``ExpectedNodeError``
+    carrying the node's stable ``error_code``.
+    """
+
+    def __init__(
+        self,
+        node_id: UUID,
+        *,
+        processor: PureFunctionProcessor,
+        error_code: str,
+        exceptions: Sequence[type[Exception]] = (ValueError,),
+    ) -> None:
+        super().__init__(node_id)
+        self._processor = processor
+        self._error_code = error_code
+        self._exceptions = tuple(exceptions)
+
+    def process(
+        self,
+        inputs: Mapping[str, RuntimeValue],
+        parameters: Mapping[str, ParameterValue],
+        context: FrameContext,
+    ) -> Mapping[str, RuntimeValue]:
+        try:
+            return self._processor(self.node_id, inputs, parameters, context)
+        except self._exceptions as error:
+            raise ExpectedNodeError(self._error_code, str(error)) from error
+
+
+def require_same_clock(first: FrameContext, second: FrameContext, message: str) -> None:
+    """Raise ValueError when two frame contexts belong to different source clocks."""
+
+    if first.clock_id != second.clock_id:
+        raise ValueError(message)
 
 
 type RuntimeFactory = Callable[[UUID], NodeRuntime]

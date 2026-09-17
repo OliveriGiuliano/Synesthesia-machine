@@ -2,53 +2,33 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from uuid import UUID
 
 from synesthesia_machine.contracts import (
     DeviceKind,
-    FrameContext,
-    NoData,
-    ParameterValue,
     PortType,
-    RuntimeValue,
 )
 from synesthesia_machine.media import build_camera_source_config
 from synesthesia_machine.media.camera_source import CameraBackendPreference
 from synesthesia_machine.nodes.base import (
     CachePolicy,
     ExecutionKind,
+    NoDataRuntime,
     NodeDefinition,
     OutputPortSpec,
     ParameterSpec,
     ParameterUpdateMode,
-    ResetReason,
     SourceOutputContract,
 )
 
 LOAD_CAMERA_TYPE_ID = "synmachine.input.load_camera"
 
 
-class LoadCameraRuntime:
+class LoadCameraRuntime(NoDataRuntime):
     """Safe scheduler placeholder for externally injected live-camera outputs."""
 
     def __init__(self, node_id: UUID) -> None:
-        self.node_id = node_id
-
-    def process(
-        self,
-        inputs: Mapping[str, RuntimeValue],
-        parameters: Mapping[str, ParameterValue],
-        context: FrameContext,
-    ) -> Mapping[str, RuntimeValue]:
-        del inputs, parameters, context
-        return {"image": NoData, "processed_index": NoData}
-
-    def reset(self, reason: ResetReason) -> None:
-        del reason
-
-    def close(self) -> None:
-        return
+        super().__init__(node_id, ("image", "processed_index"))
 
 
 def create_camera_definitions() -> tuple[NodeDefinition, ...]:

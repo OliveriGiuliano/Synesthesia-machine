@@ -45,9 +45,9 @@ from synesthesia_machine.nodes import (
     OutputPortSpec,
     ParameterEditorHint,
     ParameterSpec,
+    StatelessRuntime,
     TypeVariable,
 )
-from synesthesia_machine.nodes.image.runtime_support import StatelessImageRuntime
 from synesthesia_machine.nodes.migrations import (
     NodeMigration,
     migrate_adjustment_channel_selection_v1_to_v2,
@@ -61,7 +61,7 @@ IMAGE_OR_CHANNEL = TypeVariable("IMAGE_OR_CHANNEL", frozenset({PortType.IMAGE, P
 type AdjustmentProcessor = Callable[..., ImageFrame | ChannelFrame]
 
 
-class AdjustmentRuntime(StatelessImageRuntime):
+class AdjustmentRuntime(StatelessRuntime):
     def __init__(
         self,
         node_id: UUID,
