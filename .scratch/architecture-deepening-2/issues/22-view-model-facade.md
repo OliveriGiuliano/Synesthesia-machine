@@ -6,7 +6,7 @@
 
 **Blocked by:** 21
 
-**Status:** open
+**Status:** resolved
 
 **Files:**
 - `src/synesthesia_machine/ui/view_models.py`
@@ -17,8 +17,8 @@
 - `src/synesthesia_machine/ui/__init__.py`
 
 **Acceptance:**
-- [ ] What a renderer sees = one projection
-- [ ] Absent-means-True interpreted in exactly one place
-- [ ] Window drops its document scans
-- [ ] Package interface reviewable in one file
-- [ ] Targeted tests pass; `uv run check` green; no unrelated diff
+- [x] What a renderer sees = one projection
+- [x] Absent-means-True interpreted in exactly one place
+- [x] Window drops its document scans
+- [x] Package interface reviewable in one file
+- [x] Targeted tests pass; `uv run check` green; no unrelated diff
