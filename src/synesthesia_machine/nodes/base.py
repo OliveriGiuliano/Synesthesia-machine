@@ -599,6 +599,7 @@ class NodeDefinition:
             if parameter.value_type is not PortType.STRING:
                 msg = f"Media reference parameter {self.media_parameter_id!r} must be a string"
                 raise ValueError(msg)
+        _check_migration_chain(self.type_id, self.implementation_version, self.migrations)
 
     def input(self, port_id: str) -> InputPortSpec | None:
         fixed = next((port for port in self.inputs if port.id == port_id), None)
@@ -715,6 +716,38 @@ def _ensure_unique(values: Iterable[str], kind: str) -> None:
             msg = f"Duplicate {kind} ID: {value!r}"
             raise ValueError(msg)
         seen.add(value)
+
+
+def _check_migration_chain(
+    type_id: str,
+    implementation_version: int,
+    migrations: Mapping[int, NodeMigration],
+) -> None:
+    """A registered definition must load from every version it can claim.
+
+    Saved payloads start at version 0 (pre-versioning) and walk one step at
+    a time, so the migration keys must form a contiguous run that ends
+    exactly at ``implementation_version - 1``: a gap strands any older
+    payload, and a key at or beyond the current version can never run.
+    """
+    if not migrations:
+        return
+    lowest = min(migrations)
+    if lowest < 0:
+        msg = f"Node {type_id!r} has a migration from a negative version"
+        raise ValueError(msg)
+    if max(migrations) >= implementation_version:
+        msg = (
+            f"Node {type_id!r} at implementation_version "
+            f"{implementation_version} registers unreachable migration "
+            f"{max(migrations)}"
+        )
+        raise ValueError(msg)
+    missing = set(range(lowest, implementation_version)) - set(migrations)
+    if missing:
+        names = ", ".join(str(version) for version in sorted(missing))
+        msg = f"Node {type_id!r} has no migration from version(s) {names}"
+        raise ValueError(msg)
 
 
 def _resolve_parameter_socket(

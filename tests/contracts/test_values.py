@@ -22,6 +22,7 @@ from synesthesia_machine.contracts import (
     FrameContext,
     FrameProvenance,
     ImageFrame,
+    JsonObject,
     MidiNoteKey,
     MidiStateFrame,
     NoData,
@@ -29,10 +30,14 @@ from synesthesia_machine.contracts import (
     PortType,
     read_only_float32,
 )
-from synesthesia_machine.nodes import ParameterSpec
+from synesthesia_machine.nodes import ParameterSpec, create_builtin_registry
 
 CLOCK_ID = UUID("00000000-0000-0000-0000-000000000101")
 SOURCE_ID = UUID("00000000-0000-0000-0000-000000000102")
+
+
+def _migration_step(data: JsonObject) -> JsonObject:
+    return data
 
 
 def test_node_definition_rejects_input_parameter_id_collisions() -> None:
@@ -43,6 +48,51 @@ def test_node_definition_rejects_input_parameter_id_collisions() -> None:
             definition,
             parameters=(ParameterSpec("value", "Value", PortType.FLOAT, 0.0),),
         )
+
+
+def test_node_definition_rejects_migration_chain_gap() -> None:
+    # A v3 definition missing the 2 -> 3 step can never load a payload
+    # saved at version 2 (or 0/1), so admission rejects the gap.
+    with pytest.raises(ValueError, match="no migration from version"):
+        make_definition("test.chain_gap", implementation_version=3, migrations={1: _migration_step})
+
+
+def test_node_definition_rejects_unreachable_migration() -> None:
+    # A key at or beyond implementation_version can never run.
+    with pytest.raises(ValueError, match="unreachable migration 2"):
+        make_definition(
+            "test.chain_dead",
+            implementation_version=2,
+            migrations={1: _migration_step, 2: _migration_step},
+        )
+
+
+def test_node_definition_rejects_negative_migration_version() -> None:
+    with pytest.raises(ValueError, match="negative version"):
+        make_definition("test.chain_negative", migrations={-1: _migration_step})
+
+
+def test_node_definition_accepts_contiguous_migration_runs() -> None:
+    # Legacy payloads start at version 0, so a contiguous run from 0 is
+    # valid at the current version, as is a single step from v-1.
+    legacy = make_definition(
+        "test.chain_legacy",
+        implementation_version=2,
+        migrations={0: _migration_step, 1: _migration_step},
+    )
+    assert set(legacy.migrations) == {0, 1}
+    single = make_definition(
+        "test.chain_single",
+        implementation_version=2,
+        migrations={1: _migration_step},
+    )
+    assert set(single.migrations) == {1}
+
+
+def test_builtin_definitions_admit_their_migration_chains() -> None:
+    # Constructing the built-in catalogue runs the admission check for
+    # every definition it registers.
+    assert len(create_builtin_registry().definitions()) > 0
 
 
 def test_no_data_is_a_distinct_singleton() -> None:

@@ -6,13 +6,19 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from uuid import UUID
 
-from synesthesia_machine.contracts import FrameContext, ParameterValue, PortType, RuntimeValue
+from synesthesia_machine.contracts import (
+    FrameContext,
+    ParameterValue,
+    PortType,
+    RuntimeValue,
+)
 from synesthesia_machine.nodes import (
     CachePolicy,
     ExecutionKind,
     ExpectedNodeError,
     InputPortSpec,
     NodeDefinition,
+    NodeMigration,
     OutputPortSpec,
     ResetReason,
     TypeVariable,
@@ -70,6 +76,8 @@ def make_definition(
     counters: dict[UUID, RuntimeCounters] | None = None,
     output: RuntimeValue = 1.0,
     raise_expected: bool = False,
+    implementation_version: int = 1,
+    migrations: Mapping[int, NodeMigration] | None = None,
 ) -> NodeDefinition:
     runtime_counters = counters if counters is not None else {}
 
@@ -84,7 +92,7 @@ def make_definition(
     inputs = () if input_type is None else (InputPortSpec("value", "Value", input_type),)
     return NodeDefinition(
         type_id=type_id,
-        implementation_version=1,
+        implementation_version=implementation_version,
         display_name=type_id,
         category="Test",
         description="Test node definition.",
@@ -93,6 +101,7 @@ def make_definition(
         parameters=(),
         execution_kind=execution_kind,
         runtime_factory=factory,
+        migrations=dict(migrations) if migrations is not None else {},
         cache_policy=cache_policy,
         handles_no_data=handles_no_data,
     )
