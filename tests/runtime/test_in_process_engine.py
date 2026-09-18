@@ -198,6 +198,44 @@ def test_seek_moves_video_playback_position(tmp_path: Path) -> None:
         client.close()
 
 
+def test_looping_source_honours_the_configured_region(tmp_path: Path) -> None:
+    # 24 frames at 12 fps give a 2 s video; the [0.5, 1.5] segment loops once
+    # per second, so the source must still be playing long after the whole
+    # file (which would end at ~2 s) has passed.
+    video = generate_test_video(tmp_path / "loop-region.mp4", frame_count=24, fps=12)
+    document = GraphDocument()
+    source_id = document.add_node(
+        "synmachine.input.load_video",
+        implementation_version=2,
+        parameters={
+            "file_path": str(video),
+            "loop": True,
+            "loop_start_s": 0.5,
+            "loop_end_s": 1.5,
+        },
+    )
+    client = InProcessEngineClient(create_application_registry())
+    try:
+        assert client.activate(document.snapshot()).activated
+        client.play(source_id)
+        times: list[float] = []
+        deadline = time.monotonic() + 3.5
+        while time.monotonic() < deadline:
+            status = client.source_status(source_id)[0]
+            if status.source_time_s is not None:
+                times.append(status.source_time_s)
+            if status.state is SourceState.ENDED:
+                break
+            time.sleep(0.05)
+        client.stop(source_id)
+        assert times
+        assert all(0.5 - 0.05 <= t <= 1.5 + 0.05 for t in times)
+        status = client.source_status(source_id)[0]
+        assert status.state is SourceState.STOPPED
+    finally:
+        client.close()
+
+
 def test_runtime_node_errors_are_exposed_through_typed_engine_metrics(tmp_path: Path) -> None:
     video = generate_test_video(tmp_path / "runtime-error.mp4", frame_count=2)
     document = GraphDocument()

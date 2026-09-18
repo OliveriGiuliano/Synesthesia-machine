@@ -228,7 +228,15 @@ class EngineBridge:
     def _flush_activation(self) -> None:
         pending = self._pending_activation
         self._pending_activation = None
-        if pending is None or self._closed or "activation" in self._tasks_inflight:
+        if pending is None or self._closed:
+            return
+        if "activation" in self._tasks_inflight:
+            # The in-flight activation still owns the engine: keep the newer
+            # snapshot queued so it is flushed when that one finishes
+            # (_on_task_result re-flushes). Dropping it would leave the
+            # engine running the stale plan - e.g. loop knobs that appear
+            # to do nothing while the video keeps playing from before.
+            self._pending_activation = pending
             return
         snapshot, demand_roots = pending
         self._submit(
@@ -476,6 +484,10 @@ class EngineBridge:
             return
         if kind == "activation" and isinstance(result, EngineActivation):
             self._apply_activation(result)
+            if self._pending_activation is not None:
+                # A newer snapshot was queued while this activation was in
+                # flight; the inflight slot is free now, so flush it.
+                self._flush_activation()
         elif kind == "devices" and isinstance(result, DeviceCatalogue):
             self.publish_device_catalogue(result)
         elif kind == "transport" and isinstance(result, TransportOutcome):

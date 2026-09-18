@@ -39,9 +39,11 @@ channel, so the duration crosses the process boundary as data.
 - The UI thread performs no file I/O for editor metadata; the definition
   stays a testable value object whose resolver is a plain function.
 - Loop slider bounds appear once the engine reports the source status (i.e.
-  once the source has started with a readable file). A never-started or
-  unreadable source leaves the timestamp editors unbounded instead of the UI
-  thread silently probing file headers.
+  once the source has started with a readable file). Until then — for a
+  never-started or unreadable source — the editors stay unbounded and their
+  interactive scale is inert (slider/track and fields disabled): the UI
+  presents no substitute range, so a user cannot select a time that lies
+  outside the video's real range. The UI thread never probes file headers.
 - Resolvers that need no runtime knowledge (e.g. the crop mode presentation
   rule) receive the status argument and ignore it; the protocol stays uniform.
 

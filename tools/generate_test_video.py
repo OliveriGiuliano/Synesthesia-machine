@@ -2,7 +2,7 @@
 
 import argparse
 import colorsys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from fractions import Fraction
 from itertools import pairwise
 from pathlib import Path
@@ -37,6 +37,8 @@ def generate_test_video(
     height: int = DEFAULT_HEIGHT,
     frame_count: int = DEFAULT_FRAME_COUNT,
     fps: int = DEFAULT_FPS,
+    codec: str = "mpeg4",
+    codec_options: Mapping[str, str] | None = None,
 ) -> Path:
     """Create an MP4 fixture and close all container/codec handles before returning."""
 
@@ -51,6 +53,8 @@ def generate_test_video(
         frame_count=frame_count,
         fps=fps,
         pixels=lambda index: frame_pixels(index, width=width, height=height),
+        codec=codec,
+        codec_options=dict(codec_options) if codec_options is not None else None,
     )
 
 
@@ -99,18 +103,24 @@ def _generate_cfr_video(
     frame_count: int,
     fps: int,
     pixels: FramePixelFactory,
+    codec: str = "mpeg4",
+    codec_options: Mapping[str, str] | None = None,
 ) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with av.open(str(output_path), mode="w") as container:
         # PyAV's overload includes dynamically selected stream types. The literal codec fixes the
-        # runtime type, but its current stub leaves generic packet parameters unknown.
         stream = container.add_stream(  # pyright: ignore[reportUnknownMemberType]
-            "mpeg4", rate=fps
+            codec, rate=fps
         )
+        assert isinstance(stream, av.VideoStream)
         stream.width = width
         stream.height = height
         stream.pix_fmt = "yuv420p"
         stream.time_base = Fraction(1, fps)
+        if codec_options is not None:
+            # Codec-specific options (e.g. x264 keyframe spacing) are applied before the first
+            # encode so the resulting GOP layout is deterministic for the requested codec.
+            stream.codec_context.options = dict(codec_options)
 
         for index in range(frame_count):
             frame = av.VideoFrame.from_ndarray(pixels(index), format="rgb24")

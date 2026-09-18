@@ -44,10 +44,13 @@ def test_loop_editors_are_bounded_by_published_duration() -> None:
         assert resolved.maximum == 120.5
 
 
-def test_loop_start_stops_at_a_concrete_loop_end() -> None:
+def test_resolver_binds_both_loop_editors_to_the_full_range() -> None:
+    # The mutual ordering of the two timestamps is enforced by the dual-knob
+    # editor widget, not by the resolver: both editors get the full range.
     values: dict[str, object] = {"file_path": "/videos/a.mp4", "loop_end_s": 30.0}
-    resolved = _resolve("loop_start_s", values, _status())
-    assert resolved.maximum == 30.0
+    for parameter_id in ("loop_start_s", "loop_end_s"):
+        resolved = _resolve(parameter_id, values, _status())
+        assert resolved.maximum == 120.5
 
 
 def test_editors_stay_unbounded_without_a_matching_status() -> None:

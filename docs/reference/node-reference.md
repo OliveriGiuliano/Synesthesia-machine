@@ -106,10 +106,15 @@ and exposed through one reusable editor group/view model.
   source-clock component.
 
 - **Loop region:** `Loop start` and `Loop end` are timestamps in seconds from the start of
-  the video, edited as a slider plus a `HH:MM:SS` field. While `Loop` is on, playback replays
-  only the segment between them, then returns to the start of the segment. A value of `0:00:00`
-  means "the whole video" on that side, the start cannot be past the end, and both are kept
-  inside the file's duration. Changing either timestamp restarts the source.
+  the video, edited as one dual-knob range slider (the down-pointing triangle above the groove
+  is the end, the up-pointing triangle below it is the start) plus precise `HH:MM:SS` fields
+  below it in the inspector. The slider's span is the video's actual duration — no more, no
+  less: until the engine reports the duration (momentarily, before playback starts, or for an
+  unreadable file) the slider and fields are disabled so a time outside the video can never
+  be selected. While `Loop` is on, playback replays only the segment between
+  them, then returns to the start of the segment. A value of `0:00:00` means "the whole video"
+  on that side, the start cannot be past the end, and both stay inside the file's duration.
+  Changing either timestamp restarts the source.
 - **Playback controls:** for a Load Video node the inspector shows a progress slider and
   rewind/forward buttons that seek 5 or 15 seconds back and forward. The slider follows the
   engine's reported position; drag it to scrub, and the slider is not moved by telemetry while

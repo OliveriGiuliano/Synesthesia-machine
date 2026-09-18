@@ -687,6 +687,11 @@ class DocumentSession(QObject):
             self.registry,
             self.report,
             compilation=self._compilation,
+            # Document edits re-project the same view: the engine-published
+            # source statuses must carry over, or editor bounds (e.g. the
+            # loop editors' video-duration scale) would silently fall back
+            # to the unbounded substitute after every parameter change.
+            source_statuses=self._source_statuses or None,
         )
         self.changed.emit()
         if runtime_changed:

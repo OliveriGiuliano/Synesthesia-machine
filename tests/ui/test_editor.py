@@ -60,6 +60,8 @@ from synesthesia_machine.ui.parameter_editors import (
     FilePathParameterEditor,
     FloatRangeParameterEditor,
     IntRangeParameterEditor,
+    LoopRangeParameterEditor,
+    SiblingContext,
     create_parameter_editor,
 )
 from synesthesia_machine.ui.theme import DEFAULT_THEME, node_category_color
@@ -666,38 +668,46 @@ def test_float_editor_preserves_and_clamps_tiny_positive_bounds(qapp: QApplicati
     assert edits[-1] == pytest.approx(1e-12)
 
 
-def test_loop_timestamp_editors_constrain_their_siblings(qapp: QApplication) -> None:
+def test_loop_range_editor_constrains_its_knobs(qapp: QApplication) -> None:
     del qapp
     definition = create_application_registry().require("synmachine.input.load_video")
     start_spec = definition.parameter("loop_start_s")
     end_spec = definition.parameter("loop_end_s")
     assert start_spec is not None and end_spec is not None
 
-    # The loop start cannot run past the current loop end.
-    start_edits: list[object] = []
-    start_editor = create_parameter_editor(
-        ParameterViewModel(start_spec, 0.0, False),
-        start_edits.append,
-        sibling_values={"loop_end_s": 30.0},
-    )
-    assert start_editor.maximum() <= 30.0
-    start_editor.setValue(45.0)
-    assert start_editor.value() <= 30.0
-    assert start_edits[-1] == 30.0
+    # The loop end is represented by the loop start's dual-knob editor.
+    member = create_parameter_editor(ParameterViewModel(end_spec, 0.0, False), lambda _value: None)
+    assert member is None
 
-    # A positive loop end cannot sink below the loop start, while 0.0 still
-    # means "until the end of the video".
-    end_edits: list[object] = []
-    end_editor = create_parameter_editor(
-        ParameterViewModel(end_spec, 0.0, False),
-        end_edits.append,
-        sibling_values={"loop_start_s": 12.0},
+    start_edits: list[object] = []
+    sibling_edits: list[tuple[str, object]] = []
+    editor = create_parameter_editor(
+        ParameterViewModel(start_spec, 12.0, False),
+        start_edits.append,
+        siblings=SiblingContext(
+            values={"loop_end_s": 30.0}, connected={}, specs={"loop_end_s": end_spec}
+        ),
+        on_sibling_changed=lambda parameter_id, value: sibling_edits.append((parameter_id, value)),
     )
-    end_editor.setValue(5.0)
-    assert end_editor.value() == 12.0
-    assert end_edits[-1] == 12.0
-    end_editor.setValue(0.0)
-    assert end_editor.value() == 0.0
+    assert isinstance(editor, LoopRangeParameterEditor)
+    assert editor.start_value() == pytest.approx(12.0)
+    assert editor.end_value() == pytest.approx(30.0)
+
+    # The loop start cannot run into the concrete loop end: it commits the
+    # largest time before the end instead of the end itself.
+    editor.set_start(45.0)
+    assert editor.start_value() < 30.0
+    assert start_edits[-1] < 30.0
+
+    # A positive loop end cannot sink to or below the loop start, while 0.0
+    # still means "until the end of the video".
+    start = editor.start_value()
+    editor.set_end(5.0)
+    assert sibling_edits[-1][0] == "loop_end_s"
+    assert editor.end_value() > start
+    editor.set_end(0.0)
+    assert editor.end_value() == 0.0
+    assert sibling_edits[-1] == ("loop_end_s", 0.0)
 
 
 def test_color_dialog_uses_real_window_parent_instead_of_graph_proxy(

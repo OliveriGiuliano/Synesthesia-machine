@@ -67,11 +67,11 @@ def _load_video_parameter_editor(
     values: Mapping[str, ParameterValue],
     status: SourceStatus | None,
 ) -> ParameterSpec:
-    """Bound the loop timestamp editors to the video's real time range.
+    """Bound the loop range editor to the video's real time range.
 
     The bound is the duration the engine published for this node's source
-    (ADR-0023); the resolver itself performs no file I/O. The start
-    timestamp additionally stops at a concrete loop end.
+    (ADR-0023); the resolver itself performs no file I/O. The start/end
+    ordering is enforced by the editor widget, which owns both knobs.
     """
 
     if spec.id not in _LOOP_TIMESTAMP_IDS:
@@ -82,16 +82,9 @@ def _load_video_parameter_editor(
     if str(normalize_media_path(status.file_path)) != str(normalize_media_path(file_path)):
         return spec
     duration = status.duration_s
-    if duration is None:
+    if duration is None or duration <= 0.0:
         return spec
-    maximum = float(duration)
-    if spec.id == "loop_start_s":
-        end = values.get("loop_end_s")
-        if isinstance(end, float) and end > 0.0:
-            maximum = min(maximum, end)
-    if maximum <= 0.0:
-        return spec
-    return replace(spec, maximum=maximum)
+    return replace(spec, maximum=float(duration))
 
 
 def create_input_definitions() -> tuple[NodeDefinition, ...]:
@@ -156,12 +149,13 @@ def create_input_definitions() -> tuple[NodeDefinition, ...]:
                     PortType.FLOAT,
                     0.0,
                     help_text=(
-                        "Where playback (and the loop) starts in the video, as a timestamp "
-                        "such as 00:01:30. 00:00:00 is the beginning of the file."
+                        "Where the loop region begins: the up-pointing triangle below the "
+                        "range slider, as a timestamp such as 00:01:30. 00:00:00 is the "
+                        "beginning of the file."
                     ),
                     minimum=0.0,
                     update_mode=ParameterUpdateMode.RESTART_SOURCE,
-                    editor_hint=ParameterEditorHint.TIMESTAMP,
+                    editor_hint=ParameterEditorHint.LOOP_RANGE,
                 ),
                 ParameterSpec(
                     "loop_end_s",
@@ -169,13 +163,13 @@ def create_input_definitions() -> tuple[NodeDefinition, ...]:
                     PortType.FLOAT,
                     0.0,
                     help_text=(
-                        "Where playback (and the loop) ends, as a timestamp such as 00:01:30. "
-                        "00:00:00 means the end of the video; otherwise it must stay after the "
-                        "loop start."
+                        "Where the loop region ends: the down-pointing triangle above the "
+                        "range slider, as a timestamp such as 00:01:30. 00:00:00 means the "
+                        "end of the video; otherwise it must stay after the loop start."
                     ),
                     minimum=0.0,
                     update_mode=ParameterUpdateMode.RESTART_SOURCE,
-                    editor_hint=ParameterEditorHint.TIMESTAMP,
+                    editor_hint=ParameterEditorHint.LOOP_RANGE,
                 ),
                 ParameterSpec(
                     "stream_index",

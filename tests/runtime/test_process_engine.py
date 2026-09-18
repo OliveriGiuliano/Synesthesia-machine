@@ -257,6 +257,49 @@ def test_invalid_candidate_stops_the_engine_and_valid_candidate_restarts_it(
     assert _wait_until(lambda: process_client.metrics().state is EngineState.RUNNING)
 
 
+def test_looping_source_runs_seamlessly_in_the_spawned_process(
+    process_client: ProcessEngineClient,
+    tmp_path: Path,
+) -> None:
+    # The loop head pre-decode worker and the kept-open container live inside
+    # the spawned engine process (spawn start method); the region must loop
+    # there exactly as it does in-process (ADR-0024).
+    video = generate_test_video(tmp_path / "process-loop.mp4", frame_count=24, fps=12)
+    document = GraphDocument()
+    source_id = document.add_node(
+        "synmachine.input.load_video",
+        implementation_version=2,
+        parameters={
+            "file_path": str(video),
+            "loop": True,
+            "loop_start_s": 0.5,
+            "loop_end_s": 1.5,
+        },
+    )
+    assert process_client.activate(document.snapshot()).activated
+    process_client.play(source_id)
+    assert _wait_until(
+        lambda: process_client.source_status(source_id)[0].state is SourceState.PLAYING
+    )
+
+    # 24 frames at 12 fps make the file end at ~2 s; a looping source confined
+    # to [0.5, 1.5) must still be playing at 3.5 s, past the file end.
+    deadline = time.monotonic() + 3.5
+    times: list[float] = []
+    while time.monotonic() < deadline:
+        status = process_client.source_status(source_id)[0]
+        if status.source_time_s is not None:
+            times.append(status.source_time_s)
+        if status.state is SourceState.ENDED:
+            break
+        time.sleep(0.05)
+    process_client.stop(source_id)
+
+    assert times
+    assert all(0.5 - 0.05 <= t <= 1.5 + 0.05 for t in times)
+    assert process_client.source_status(source_id)[0].state is SourceState.STOPPED
+
+
 def test_forced_crash_fails_boundedly_and_restart_rebuilds_latest_valid_graph(
     process_client: ProcessEngineClient,
 ) -> None:

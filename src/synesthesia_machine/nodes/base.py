@@ -122,6 +122,7 @@ class ParameterEditorHint(StrEnum):
     DEFAULT = "DEFAULT"
     SLIDER = "SLIDER"
     TIMESTAMP = "TIMESTAMP"
+    LOOP_RANGE = "LOOP_RANGE"
 
 
 @dataclass(frozen=True, slots=True)

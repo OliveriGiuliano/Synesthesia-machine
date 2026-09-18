@@ -36,7 +36,14 @@ from synesthesia_machine.nodes import NodeDefinition, NodeRegistry
 from synesthesia_machine.nodes.input import LOAD_VIDEO_TYPE_ID
 from synesthesia_machine.ui.canvas import NODE_MIME_TYPE
 from synesthesia_machine.ui.musical_controls import MusicalParameterEditor
-from synesthesia_machine.ui.parameter_editors import create_parameter_editor, parameter_tooltip
+from synesthesia_machine.ui.parameter_editors import (
+    create_parameter_editor,
+    editor_drag_tracker,
+    is_loop_range_anchor,
+    is_loop_range_member,
+    parameter_tooltip,
+    sibling_context_of,
+)
 from synesthesia_machine.ui.playback_controls import VideoPlaybackControls
 from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.theme import node_category_color
@@ -403,7 +410,15 @@ class InspectorPanel(QWidget):
         self._refresh_timer.timeout.connect(self.refresh)
         session.changed.connect(self._schedule_refresh)
         session.deviceCatalogueChanged.connect(self._schedule_refresh)
+        editor_drag_tracker().activeChanged.connect(self._on_editor_drag_changed)
         self.refresh()
+
+    @Slot(bool)
+    def _on_editor_drag_changed(self, active: bool) -> None:
+        if not active:
+            # A rebuild deferred while a parameter drag was in flight can now
+            # land: the gesture is over, so the form may be torn down again.
+            self._schedule_refresh()
 
     @Slot()
     def _schedule_refresh(self) -> None:
@@ -448,6 +463,13 @@ class InspectorPanel(QWidget):
 
     @Slot()
     def refresh(self) -> None:
+        if editor_drag_tracker().is_active:
+            # A drag is in flight: tearing down the form would destroy the
+            # editor mid-gesture (its C++ track is freed before the release
+            # event can arrive). Defer the rebuild; the drag-end signal
+            # re-arms the timer once the gesture is over.
+            self._refresh_timer.start(100)
+            return
         self._refresh_timer.stop()
         self._clear_form()
         view_model = self.session.view_model
@@ -491,17 +513,28 @@ class InspectorPanel(QWidget):
                 self.form_container,
             )
             self.form.addRow(editor)
+        siblings = sibling_context_of(node.parameters)
         for parameter in node.parameters:
             if parameter.spec.id in grouped_parameter_ids:
+                continue
+            if is_loop_range_member(parameter.spec):
+                # Represented by the loop range anchor editor.
                 continue
             callback = partial(self._set_parameter, node.node_id, parameter.spec.id)
             editor = create_parameter_editor(
                 parameter,
                 callback,
                 dynamic_choices=self.session.device_parameter_choices(parameter),
-                sibling_values={p.spec.id: p.value for p in node.parameters},
+                siblings=siblings,
+                on_sibling_changed=partial(self._set_parameter, node.node_id),
             )
-            label = QLabel(tr(parameter.spec.label), self.form_container)
+            if editor is None:
+                continue
+            if is_loop_range_anchor(parameter.spec):
+                label_text = tr("Loop range")
+            else:
+                label_text = tr(parameter.spec.label)
+            label = QLabel(label_text, self.form_container)
             help_text = parameter_tooltip(parameter.spec)
             label.setToolTip(format_tooltip(help_text))
             label.setAccessibleDescription(help_text)
@@ -600,6 +633,7 @@ class InspectorPanel(QWidget):
 
     def _clear_form(self) -> None:
         self._playback_node_id = None
+        self._playback_controls = None
         self._diagnostic_labels = None
         while self.form.rowCount():
             self.form.removeRow(0)

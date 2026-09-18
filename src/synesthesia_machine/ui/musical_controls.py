@@ -35,6 +35,8 @@ class MusicalParameterEditor(QGroupBox):
                 parameter,
                 lambda value, parameter_id=parameter_id: on_changed(parameter_id, value),
             )
+            if editor is None:
+                continue
             self.editors[parameter_id] = editor
             layout.addRow(parameter.spec.label, editor)
         scale_editor = self.editors.get("scale")

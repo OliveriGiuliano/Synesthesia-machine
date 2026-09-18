@@ -6,6 +6,7 @@ import threading
 import time
 from collections.abc import Callable
 from fractions import Fraction
+from itertools import pairwise
 from pathlib import Path
 from uuid import UUID
 
@@ -466,6 +467,122 @@ def test_seek_clamps_to_the_played_segment(tmp_path: Path) -> None:
         source.close()
 
 
+def test_loop_region_beyond_duration_errors_instead_of_playing_whole_file(
+    tmp_path: Path,
+) -> None:
+    # Timestamps past the video's real duration can be persisted (for
+    # instance typed before the engine published the duration). The region
+    # then has no frames, so the source must fail with a clear, actionable
+    # error instead of silently degrading to the whole file.
+    path = generate_test_video(tmp_path / "oob-loop.mp4", frame_count=60, fps=12)  # 5 s video
+    received: list[PresentedVideoFrame] = []
+    source = VideoSourceService(
+        SOURCE_ID,
+        path,
+        loop=True,
+        loop_start_s=20.0,
+        loop_end_s=40.0,
+        on_frame=received.append,
+        clock=AdvancingClock(),
+    )
+    try:
+        status = source.status()
+        assert status.state is SourceState.ERROR
+        assert status.last_error is not None
+        assert "20.00s" in status.last_error
+        assert "5.00s" in status.last_error
+        # Playing cannot clear a configuration error (a reload with the same
+        # configuration would not help either); it must not raise.
+        source.play()
+        assert source.status().state is SourceState.ERROR
+        # A stop and subsequent play re-assert the error instead of starting
+        # a pass over the whole file.
+        source.stop()
+        source.play()
+        assert source.status().state is SourceState.ERROR
+        assert source.status().last_error is not None
+        time.sleep(0.1)
+        assert not received
+    finally:
+        source.close()
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "expected_start", "expected_end"),
+    [
+        pytest.param(0.5, 1.5, 0.5, 1.5, id="in-range-untouched"),
+        pytest.param(1.0, 40.0, 1.0, 5.0, id="end-clamped-to-duration"),
+    ],
+)
+def test_loop_region_clamps_to_the_video_duration(
+    tmp_path: Path, start: float, end: float, expected_start: float, expected_end: float
+) -> None:
+    path = generate_test_video(tmp_path / "region.mp4", frame_count=60, fps=12)  # 5 s video
+    source = VideoSourceService(
+        SOURCE_ID,
+        path,
+        loop_start_s=start,
+        loop_end_s=end,
+        on_frame=lambda _frame: None,
+    )
+    try:
+        assert source._region_start_s == pytest.approx(expected_start, abs=0.05)  # pyright: ignore[reportPrivateUsage]
+        assert source._region_end_s == pytest.approx(expected_end, abs=0.05)  # pyright: ignore[reportPrivateUsage]
+    finally:
+        source.close()
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [
+        pytest.param(20.0, 40.0, id="both-beyond-duration"),
+        pytest.param(40.0, 0.0, id="start-beyond-zero-end"),
+    ],
+)
+def test_loop_region_start_beyond_duration_is_rejected(
+    tmp_path: Path, start: float, end: float
+) -> None:
+    # A start timestamp at or past the video's end leaves an empty region:
+    # the source reports a configuration error instead of degrading to the
+    # whole file (which would silently ignore both timestamps).
+    path = generate_test_video(tmp_path / "region-reject.mp4", frame_count=60, fps=12)
+    source = VideoSourceService(
+        SOURCE_ID,
+        path,
+        loop=True,
+        loop_start_s=start,
+        loop_end_s=end,
+        on_frame=lambda _frame: None,
+    )
+    try:
+        status = source.status()
+        assert status.state is SourceState.ERROR
+        assert status.last_error is not None
+    finally:
+        source.close()
+
+
+def test_loop_region_start_at_exactly_duration_is_rejected(tmp_path: Path) -> None:
+    path = generate_test_video(tmp_path / "region-edge.mp4", frame_count=60, fps=12)
+    probe = VideoSourceService(SOURCE_ID, path, on_frame=lambda _frame: None)
+    duration_s = probe.metadata.duration_s
+    probe.close()
+    assert duration_s is not None
+    source = VideoSourceService(
+        SOURCE_ID,
+        path,
+        loop=True,
+        loop_start_s=duration_s,
+        loop_end_s=duration_s + 10.0,
+        on_frame=lambda _frame: None,
+    )
+    try:
+        assert source.status().state is SourceState.ERROR
+        assert source.status().last_error is not None
+    finally:
+        source.close()
+
+
 @pytest.mark.parametrize("position", (-1.0, float("inf"), float("nan")))
 def test_seek_rejects_invalid_positions(tmp_path: Path, position: float) -> None:
     path = generate_test_video(tmp_path / "seek-invalid.mp4", frame_count=2)
@@ -484,3 +601,244 @@ def test_seek_rejects_closed_source(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="closed"):
         source.seek(0.1)
+
+
+def test_loop_boundary_gap_is_at_most_one_frame_interval(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A natural loop boundary must not stall for the pass-restart cost.
+
+    The live decode path is artificially slowed to just under the presentation
+    pacing (one fixed cost per frame, modelling a complex stream - a phone
+    video with a long GOP - whose live decode cannot run far ahead of the
+    bounded presentation queue). Only the live worker pays that cost; the
+    pre-decode worker decodes at native speed, mirroring how the head's
+    dedicated runway - the whole tail of the previous pass - hides a
+    restart cost the live path cannot hide at the boundary moment.
+
+    Without the ADR-0024 kept-open container and pre-decoded loop head, the
+    boundary gap is the full restart cost (reopen + seek + the whole
+    pre-keyframe discard: 200 frames x 38 ms here), far beyond one frame
+    interval. With the head, the restarted pass's first frames are already
+    staged and the boundary presents within one frame interval. The 40 ms
+    bound is the fixture's frame interval (25 fps at 1x).
+    """
+
+    import synesthesia_machine.media.video_source as video_source_module
+
+    path = generate_test_video(
+        tmp_path / "boundary.mp4",
+        width=64,
+        height=48,
+        frame_count=400,
+        fps=25,
+        codec="libx264",
+        # A single keyframe at t=0 forces every pass restart to discard the
+        # whole pre-region prefix (200 frames for the 8 s region start), so
+        # the natural boundary gap without a pre-decoded head is the full
+        # restart cost, far beyond one frame interval.
+        codec_options={"keyint_min": "400", "keyint_max": "400", "scenecut": "0"},
+    )
+    real_av = video_source_module.av
+
+    class _SlowLiveContainer:
+        """Delegates to a real container but slows only the live decode thread.
+
+        The live worker's thread name is the one handle this test has to
+        distinguish it from the pre-decode worker: only frames yielded to the
+        live thread pay the per-frame cost, which is exactly the restart cost
+        the loop head exists to hide.
+        """
+
+        def __init__(self, container: object) -> None:
+            self._container = container
+            self._decode = container.decode
+
+        def decode(self, *args: object, **kwargs: object) -> object:
+            def stream_frames() -> object:
+                for frame in self._decode(*args, **kwargs):
+                    # 38 ms: just under the 40 ms presentation interval, so
+                    # the live path keeps up but cannot run far ahead of
+                    # presentation (the queue stays empty most of the pass).
+                    if threading.current_thread().name.startswith("video-decode-"):
+                        time.sleep(0.038)
+                    yield frame
+
+            return stream_frames()
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._container, name)
+
+        def __enter__(self) -> _SlowLiveContainer:
+            return self
+
+        def __exit__(self, *exc: object) -> bool:
+            self._container.close()
+            return False
+
+    class _SlowLiveAv:
+        time_base = real_av.time_base
+
+        def open(self, *args: object, **kwargs: object) -> _SlowLiveContainer:
+            return _SlowLiveContainer(real_av.open(*args, **kwargs))
+
+    monkeypatch.setattr(video_source_module, "av", _SlowLiveAv())
+    received: list[tuple[int, int, float]] = []
+    resets: list[ResetReason] = []
+
+    def on_frame(frame: PresentedVideoFrame) -> None:
+        received.append(
+            (time.perf_counter_ns(), frame.processed_index, frame.image.context.source_time_s)
+        )
+
+    # The default SystemPlaybackClock paces presentation in wall time - the
+    # boundary stall is a wall-time phenomenon and must not be elided.
+    source = VideoSourceService(
+        SOURCE_ID,
+        path,
+        loop=True,
+        loop_start_s=8.0,
+        loop_end_s=12.0,
+        on_frame=on_frame,
+        on_reset=resets.append,
+    )
+    source.play()
+    try:
+        deadline = time.monotonic() + 90.0
+        while time.monotonic() < deadline:
+            # Three boundaries need four pass starts (processed_index resets
+            # to 0 at each restart, so each pass's first frame is index 1).
+            if sum(1 for _, index, _ in received if index == 1) >= 4:
+                break
+            time.sleep(0.05)
+        pass_starts = [i for i, (_, index, _) in enumerate(received) if index == 1]
+        assert len(pass_starts) >= 4, "the loop never completed four passes"
+
+        frame_interval_ns = 1_000_000_000 // 25  # 40 ms at 25 fps
+        for i in range(1, min(4, len(pass_starts))):
+            boundary = pass_starts[i]
+            gap_ns = received[boundary][0] - received[boundary - 1][0]
+            assert gap_ns <= frame_interval_ns, (
+                f"boundary {i} stalled {gap_ns / 1e6:.0f} ms across the loop "
+                f"boundary (bound: one 40 ms frame interval)"
+            )
+            # The restarted pass presents the region start with a fresh tick.
+            assert received[boundary][2] == pytest.approx(8.0, abs=0.04 + 0.02)
+            assert resets.count(ResetReason.SOURCE_RESTARTED) >= i
+    finally:
+        source.close()
+
+
+def test_loop_boundary_stays_seamless_when_prefix_frames_lack_pts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The head worker's frame index must stay aligned with the live pass's.
+
+    Some streams yield frames without a usable PTS in the pre-keyframe
+    prefix. The live pass counts such frames toward frame selection (and
+    never presents them - conversion rejects them), so the pre-decode
+    worker must mirror that counting; otherwise the source_frame_index
+    duplicate filter at the boundary drops nothing and the loop head is
+    presented twice.
+
+    The shim nulls the PTS of the first 100 frames every decoder yields
+    (both workers restart from the same single keyframe, so they see the
+    same PTS-less prefix). A misaligned head re-presents the staged head
+    from the live pass: the presented PTS series then drops from the
+    head's end - well before the region end - back to the region start
+    mid-pass, which the assertions below reject. Only a legitimate wrap
+    (a drop from the region end to the region start) may drop.
+    """
+
+    import synesthesia_machine.media.video_source as video_source_module
+
+    path = generate_test_video(
+        tmp_path / "prefix-pts.mp4",
+        width=64,
+        height=48,
+        frame_count=400,
+        fps=25,
+        codec="libx264",
+        codec_options={"keyint_min": "400", "keyint_max": "400", "scenecut": "0"},
+    )
+    real_av = video_source_module.av
+
+    class _PrefixPtsNoneContainer:
+        """Nulls the PTS of the first 100 frames every decoder yields."""
+
+        PREFIX_FRAMES = 100
+
+        def __init__(self, container: object) -> None:
+            self._container = container
+            self._decode = container.decode
+
+        def decode(self, *args: object, **kwargs: object) -> object:
+            def stream_frames() -> object:
+                yielded = 0
+                for frame in self._decode(*args, **kwargs):
+                    if yielded < self.PREFIX_FRAMES:
+                        frame.pts = None
+                        yielded += 1
+                    yield frame
+
+            return stream_frames()
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._container, name)
+
+        def __enter__(self) -> _PrefixPtsNoneContainer:
+            return self
+
+        def __exit__(self, *exc: object) -> bool:
+            self._container.close()
+            return False
+
+    class _PrefixPtsNoneAv:
+        time_base = real_av.time_base
+
+        def open(self, *args: object, **kwargs: object) -> _PrefixPtsNoneContainer:
+            return _PrefixPtsNoneContainer(real_av.open(*args, **kwargs))
+
+    monkeypatch.setattr(video_source_module, "av", _PrefixPtsNoneAv())
+    received: list[tuple[int, int, float]] = []
+
+    def on_frame(frame: PresentedVideoFrame) -> None:
+        received.append(
+            (
+                time.perf_counter_ns(),
+                frame.processed_index,
+                frame.image.context.source_time_s,
+            )
+        )
+
+    source = VideoSourceService(
+        SOURCE_ID,
+        path,
+        loop=True,
+        loop_start_s=8.0,
+        loop_end_s=12.0,
+        on_frame=on_frame,
+    )
+    source.play()
+    try:
+        deadline = time.monotonic() + 60.0
+        while time.monotonic() < deadline:
+            # Three pass starts (two boundaries): the PTS-less prefix makes
+            # every pass pay the misalignment, not just the first.
+            if sum(1 for _, index, _ in received if index == 1) >= 3:
+                break
+            time.sleep(0.05)
+        pass_starts = [i for i, (_, index, _) in enumerate(received) if index == 1]
+        assert len(pass_starts) >= 3, "the loop never completed three passes"
+
+        region_end = 12.0
+        interval = 0.04
+        for (_prev_wall, _prev_index, prev_pts), (_, _, cur_pts) in pairwise(received):
+            if cur_pts < prev_pts - 1e-9:
+                assert prev_pts >= region_end - 2 * interval, (
+                    f"PTS dropped {prev_pts:.2f} -> {cur_pts:.2f} mid-pass: the loop "
+                    "head was presented twice (head worker index misaligned with "
+                    "the live pass)"
+                )
+    finally:
+        source.close()

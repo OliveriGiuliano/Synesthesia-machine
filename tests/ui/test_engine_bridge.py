@@ -37,6 +37,7 @@ from synesthesia_machine.runtime import EngineSession
 from synesthesia_machine.ui.engine_bridge import (
     EngineBridge,
     EngineBridgeState,
+    EngineTaskRunner,
     PumpedPreviews,
 )
 from synesthesia_machine.ui.preview_router import PreviewRouter
@@ -231,11 +232,51 @@ class _ScriptedClock:
             callback()
 
 
+class _HoldingRunner:
+    """Keeps submitted operations in flight until the test delivers them.
+
+    Models a slow engine round trip: the task is accepted (so the bridge's
+    in-flight bookkeeping names its kind) but its outcome has not arrived yet.
+    """
+
+    def __init__(self) -> None:
+        self.pending: list[
+            tuple[
+                str,
+                Callable[[], object],
+                Callable[[str, object], None],
+                Callable[[str, object], None],
+            ]
+        ] = []
+
+    def submit(
+        self,
+        kind: str,
+        operation: Callable[[], object],
+        *,
+        on_result: Callable[[str, object], None],
+        on_error: Callable[[str, object], None],
+    ) -> bool:
+        self.pending.append((kind, operation, on_result, on_error))
+        return True
+
+    def deliver_one(self) -> None:
+        """Deliver the oldest held operation (a result may enqueue more)."""
+
+        if not self.pending:
+            return
+        kind, operation, on_result, on_error = self.pending.pop(0)
+        try:
+            on_result(kind, operation())
+        except Exception as error:
+            on_error(kind, error)
+
+
 @dataclass
 class _Harness:
     bridge: EngineBridge
     client: _FakeClient
-    runner: _SyncRunner
+    runner: EngineTaskRunner
     clock: _ScriptedClock
     states: list[EngineBridgeState]
     previews: list[PumpedPreviews]
@@ -246,11 +287,13 @@ def _harness(
     client: _FakeClient,
     *,
     demand_roots: tuple[UUID, ...] = (),
+    runner: EngineTaskRunner | None = None,
 ) -> _Harness:
     states: list[EngineBridgeState] = []
     previews: list[PumpedPreviews] = []
     messages: list[tuple[str, int]] = []
-    runner = _SyncRunner()
+    if runner is None:
+        runner = _SyncRunner()
     clock = _ScriptedClock()
     session = EngineSession(client)
     bridge = EngineBridge(
@@ -314,6 +357,35 @@ def test_debounce_collapses_to_latest_snapshot() -> None:
     harness.bridge.schedule_activation(second)
     harness.clock.fire_all()
     assert [snapshot for snapshot, _ in client.activations] == [second]
+
+
+def test_activation_scheduled_while_another_is_inflight_survives() -> None:
+    """A graph edit landing while an activation is in flight must not be lost.
+
+    An engine swap (pause sources, replace the plan, re-create sources, resume)
+    outlasts the 100 ms debounce, so a knob commit made while the previous
+    activation is still running must be flushed when that activation
+    completes. Dropping it leaves the engine running the stale plan - the
+    user-visible symptom is e.g. loop knobs that "do nothing" while the
+    video keeps playing from before.
+    """
+    client = _FakeClient()
+    runner = _HoldingRunner()
+    harness = _harness(client, runner=runner)
+    stale, latest = _snapshot(1), _snapshot(2)
+    harness.bridge.schedule_activation(stale)
+    harness.clock.fire_all()
+    assert client.activations == [], "the activation is in flight, not yet delivered"
+    # The newer edit arrives while the first activation is still in flight.
+    harness.bridge.schedule_activation(latest)
+    harness.clock.fire_all()
+    assert client.activations == []
+    # The in-flight activation completes...
+    runner.deliver_one()
+    assert [snapshot for snapshot, _ in client.activations] == [stale]
+    # ...and the bridge flushes the newer snapshot it queued in the meantime.
+    runner.deliver_one()
+    assert [snapshot for snapshot, _ in client.activations] == [stale, latest]
 
 
 def test_rejected_activation_clears_previews_and_reports() -> None:

@@ -740,7 +740,6 @@ Use PyAV for container opening, stream selection, decoding, and frame timestamps
 - `file_path: path`, not connectable.
 - `loop: bool`, default false.
 - `playback_speed: float`, default 1.0; restarts the source.
-- `loop: bool`, default false.
 - `loop_start_s: float`, seconds from the video start, default 0.0; restarts the source.
 - `loop_end_s: float`, seconds from the video start, default 0.0 meaning "video end";
   restarts the source. While looping, playback is confined to the segment
@@ -758,7 +757,9 @@ reported through the per-source status telemetry (`SourceStatus.source_time_s`).
 - When looping, playback is confined to the segment `[loop_start_s, loop_end_s)`,
   then restarts at the segment start; 0.0 means the video start / video end.
 - An empty or inverted loop segment falls back to a valid one so a source always
-  has something to play.
+  has something to play; a loop start at or beyond the video's end is reported
+  as a region error (the source stays stopped and re-evaluates on reload)
+  instead of silently playing nothing.
 - Seek clamps to the played segment; a seek while stopped records the position for
   the next play.
 - Play starts from the current position; Stop resets to the start and resets emitted `processed_index`.
@@ -771,6 +772,9 @@ reported through the per-source status telemetry (`SourceStatus.source_time_s`).
 - At natural non-looping end, the last presented frame is processed before a source-ended reset
   silences that source component and clears its stateful runtimes.
 - Missing/corrupt frames produce warnings and are skipped; repeated decode failure stops the source.
+- A loop boundary presents seamlessly from a bounded buffer of pre-decoded loop-head
+  frames (ADR-0024); a head that cannot be staged in time degrades to the at-boundary
+  restart cost, never to a failure or unbounded retention.
 
 ### 11.2 Load Camera
 

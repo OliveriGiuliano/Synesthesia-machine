@@ -113,6 +113,8 @@ def _create_default_video_source(
         playback_speed=config.playback_speed,
         loop=config.loop,
         stream_index=config.stream_index,
+        loop_start_s=config.loop_start_s,
+        loop_end_s=config.loop_end_s,
         on_frame=cast(Callable[[PresentedSourceFrame], None], on_frame),
         on_reset=cast(Callable[[ResetReason], None] | None, on_reset),
     )

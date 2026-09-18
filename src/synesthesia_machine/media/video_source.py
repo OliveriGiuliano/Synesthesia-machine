@@ -7,6 +7,7 @@ changing the source's PTS-driven playback timeline.
 
 from __future__ import annotations
 
+import contextlib
 import queue
 import threading
 import time
@@ -196,6 +197,16 @@ def inspect_video(path: str | Path, *, stream_index: int = 0) -> VideoMetadata:
         )
 
 
+def _describe_region_error(start_s: float, duration_s: float) -> str:
+    """User-actionable message for a loop start at or past the video's end."""
+
+    return (
+        f"Start timestamp {start_s:.2f}s is at or past the end of the video "
+        f"({duration_s:.2f}s), so the loop region is empty. Set the start "
+        f"timestamp to a value before {duration_s:.2f}s."
+    )
+
+
 class VideoSourceService:
     """Lifecycle owner for one compiled Load Video source node."""
 
@@ -238,8 +249,9 @@ class VideoSourceService:
         self._metadata = inspect_video(file_path, stream_index=stream_index)
         self._stream_index = self._metadata.stream_index
         # The played segment is [loop_start_s, loop_end_s); a zero end means
-        # "until the end of the video". An empty or inverted region falls back
-        # to [0, loop_end_s) (or the whole file) so the source always has a
+        # "until the end of the video". Timestamps beyond the video's duration
+        # clamp to it, and an empty or inverted region falls back to
+        # [0, loop_end_s) (or the whole file) so the source always has a
         # playable segment instead of failing to decode.
         duration_s = self._metadata.duration_s
         if loop_end_s > 0.0:
@@ -248,6 +260,8 @@ class VideoSourceService:
             region_end_s = duration_s
         else:
             region_end_s = None
+        if duration_s is not None and region_end_s is not None:
+            region_end_s = min(region_end_s, duration_s)
         region_start_s = loop_start_s
         if duration_s is not None:
             region_start_s = min(region_start_s, duration_s)
@@ -255,9 +269,28 @@ class VideoSourceService:
             region_start_s = 0.0
             if region_end_s <= 0.0:
                 region_end_s = None
+        self._loop_start_s = loop_start_s
+        self._region_error: str | None = None
+        if duration_s is not None and loop_start_s >= duration_s:
+            self._region_error = _describe_region_error(loop_start_s, duration_s)
         self._region_start_s = region_start_s
         self._region_end_s = region_end_s
         self._pass_start_s = region_start_s
+        # ADR-0024: a looping source keeps a bounded buffer of pre-decoded
+        # loop-head frames so a pass boundary presents without stalling for
+        # the restart cost. About one second of the region at the published
+        # rate (reduced by the every-Nth selection), floored at 2 and capped
+        # at the region's frame count; sources without a usable frame rate or
+        # with a degenerate region do not pre-decode.
+        head_budget: int | None = None
+        average_rate = self._metadata.average_rate
+        if loop and average_rate is not None and average_rate > 0.0 and region_end_s is not None:
+            region_frames = int(
+                max(0.0, region_end_s - region_start_s) * average_rate / process_every_nth_frame
+            )
+            if region_frames >= 1:
+                head_budget = min(int(average_rate), max(2, region_frames))
+        self._head_frame_budget = head_budget
 
         self._lock = threading.RLock()
         self._decode_queue: queue.Queue[_DecodeItem] = queue.Queue(decode_queue_size)
@@ -268,12 +301,24 @@ class VideoSourceService:
         self._timeline = PtsPlaybackTimeline(playback_speed)
         self._decode_thread: threading.Thread | None = None
         self._presentation_thread: threading.Thread | None = None
-        self._state = SourceState.READY
+        # ADR-0024 loop head: the worker stages frames in a private queue and
+        # swaps it in only while the presentation is not mid-consumption, so
+        # at most two bounded head buffers exist at once.
+        self._head_queue: queue.Queue[DecodedVideoFrame] = queue.Queue(head_budget or 0)
+        self._head_thread: threading.Thread | None = None
+        self._head_container: Any | None = None
+        self._head_in_use = False
+        self._head_trigger = threading.Event()
+        # The live decode container stays open across passes of one instance
+        # (ADR-0024); it is re-opened only when the file changes (reload) or
+        # the source is closed/stopped.
+        self._live_container: Any | None = None
+        self._state = SourceState.ERROR if self._region_error is not None else SourceState.READY
         self._source_frame_index: int | None = None
         self._processed_index = 0
         self._skipped_by_selection = 0
         self._warnings = 0
-        self._last_error: str | None = None
+        self._last_error = self._region_error
         self._position_s = 0.0
         self._seek_target_s = 0.0
         self._seek_event = threading.Event()
@@ -309,7 +354,12 @@ class VideoSourceService:
         if state is SourceState.CLOSED:
             raise RuntimeError("Video source is closed")
         if state is SourceState.ERROR:
-            raise RuntimeError("Video source must be reloaded after an error")
+            if self._region_error is None:
+                raise RuntimeError("Video source must be reloaded after an error")
+            # A configuration error (a start timestamp beyond the video's end)
+            # cannot be cleared by playing or reloading the same configuration;
+            # a corrected configuration replaces the source instead.
+            return
         if state is SourceState.PLAYING:
             return
         if state is SourceState.PAUSED:
@@ -323,7 +373,14 @@ class VideoSourceService:
         A pending seek makes the pass start at the seek target; otherwise the
         pass starts at the configured segment start.
         """
-
+        if self._region_error is not None:
+            # Re-assert the configuration error for any pass start (including
+            # one after a stop) instead of starting workers for a region with
+            # no frames.
+            with self._lock:
+                self._state = SourceState.ERROR
+                self._last_error = self._region_error
+            return
         # Stopping (and waking) first lets a paused worker leave its blocked
         # state wait, so the join below cannot time out; the fresh pass
         # re-arms both events.
@@ -360,12 +417,25 @@ class VideoSourceService:
                 name=f"video-decode-{self.node_id}",
                 daemon=True,
             )
+            self._head_thread = None
+            if self._head_frame_budget is not None:
+                self._head_thread = threading.Thread(
+                    target=self._head_loop,
+                    name=f"video-head-{self.node_id}",
+                    daemon=True,
+                )
             presentation_thread = self._presentation_thread
             decode_thread = self._decode_thread
+            head_thread = self._head_thread
         if publish_restart:
             self._publish_reset(ResetReason.SOURCE_RESTARTED)
         presentation_thread.start()
         decode_thread.start()
+        if head_thread is not None:
+            head_thread.start()
+            # The first pass is the runway that warms the head before the
+            # first loop boundary.
+            self._head_trigger.set()
 
     def pause(self) -> None:
         with self._lock:
@@ -412,8 +482,20 @@ class VideoSourceService:
             raise
         with self._lock:
             self._metadata = metadata
-            self._last_error = None
-            self._state = SourceState.READY
+            # Re-evaluate the region against the reloaded file: a longer file
+            # may make the previously empty region playable again.
+            duration_s = metadata.duration_s
+            self._region_error = (
+                _describe_region_error(self._loop_start_s, duration_s)
+                if duration_s is not None and self._loop_start_s >= duration_s
+                else None
+            )
+            if self._region_error is not None:
+                self._last_error = self._region_error
+                self._state = SourceState.ERROR
+            else:
+                self._last_error = None
+                self._state = SourceState.READY
 
     def seek(self, source_time_s: float) -> None:
         """Jump playback to ``source_time_s`` (clamped to the played segment).
@@ -465,6 +547,10 @@ class VideoSourceService:
         self._wake_event.set()
         self._join_workers()
         self._clear_decode_queue()
+        self._release_containers()
+        self._head_in_use = False
+        self._head_trigger.clear()
+        self._head_queue = queue.Queue(self._head_frame_budget or 0)
         with self._lock:
             self._timeline.reset()
             self._source_frame_index = None
@@ -476,10 +562,25 @@ class VideoSourceService:
                 # Stopping restarts playback at the segment's beginning.
                 self._position_s = self._region_start_s
 
+    def _release_containers(self) -> None:
+        """Close the kept-open containers after the workers have stopped.
+
+        Best-effort: a broken file must not keep the source from stopping or
+        closing. ``_halt`` is idempotent - already-released containers are
+        simply ``None`` on a second call.
+        """
+
+        for container in (self._live_container, self._head_container):
+            if container is not None:
+                with contextlib.suppress(Exception):
+                    container.close()
+        self._live_container = None
+        self._head_container = None
+
     def _join_workers(self) -> None:
         current = threading.current_thread()
         with self._lock:
-            threads = (self._decode_thread, self._presentation_thread)
+            threads = (self._decode_thread, self._presentation_thread, self._head_thread)
         for thread in threads:
             if thread is not None and thread is not current and thread.is_alive():
                 thread.join(timeout=5.0)
@@ -496,6 +597,8 @@ class VideoSourceService:
                 self._decode_thread = None
             if self._presentation_thread is not current:
                 self._presentation_thread = None
+            if self._head_thread is not current:
+                self._head_thread = None
 
     def _decode_loop(self) -> None:
         consecutive_failures = 0
@@ -537,45 +640,71 @@ class VideoSourceService:
             # the seek event; the presentation thread only observes it.
             start_s = self._seek_target_s
             self._seek_event.clear()
-        with av.open(str(self._metadata.path), mode="r") as container:
-            stream = container.streams.video[self._stream_index]
-            if start_s > 0.0:
-                self._seek_container(container, stream, start_s)
-            source_frame_index = 0
-            for frame in container.decode(stream):  # pyright: ignore[reportUnknownMemberType]
-                if self._stop_event.is_set():
-                    return
-                if self._seek_event.is_set():
-                    # A seek arrived mid-pass: end this pass so the next one
-                    # starts from the requested position.
-                    return
-                if frame.pts is not None and frame.time_base is not None:
-                    pts_seconds = float(frame.pts * frame.time_base)
-                    if pts_seconds < start_s:
-                        # Frames before the segment start (the seek lands on
-                        # the previous keyframe): decode through, present none.
-                        continue
-                    if end_s is not None and pts_seconds > end_s:
-                        # The segment is complete; the container is dropped
-                        # when this pass ends.
-                        break
-                decoded_any = True
-                if source_frame_index % self._process_every_nth_frame != 0:
-                    with self._lock:
-                        self._skipped_by_selection += 1
-                    source_frame_index += 1
+        container = self._ensure_live_container()
+        stream = container.streams.video[self._stream_index]
+        # Reposition the kept-open container for every pass: it may sit at
+        # the previous pass's EOF, and the seek lands on the keyframe at or
+        # before the pass start. Frames before the pass start (the discard
+        # up to the region start) are decoded through and never presented.
+        self._seek_container(container, stream, start_s)
+        source_frame_index = 0
+        for frame in container.decode(stream):  # pyright: ignore[reportUnknownMemberType]
+            if self._stop_event.is_set():
+                return
+            if self._seek_event.is_set():
+                # A seek arrived mid-pass: end this pass so the next one
+                # starts from the requested position.
+                return
+            if frame.pts is not None and frame.time_base is not None:
+                pts_seconds = float(frame.pts * frame.time_base)
+                if pts_seconds < start_s:
+                    # Frames before the segment start (the seek lands on
+                    # the previous keyframe): decode through, present none.
                     continue
-                try:
-                    decoded = _convert_frame(frame, source_frame_index)
-                except (TypeError, ValueError) as error:
-                    self._warn(f"Skipped source frame {source_frame_index}: {error}")
-                    source_frame_index += 1
-                    continue
-                if not self._queue_put(decoded):
-                    return
+                if end_s is not None and pts_seconds > end_s:
+                    # The segment is complete; the kept-open container is
+                    # repositioned by the next pass's seek.
+                    break
+            decoded_any = True
+            if source_frame_index % self._process_every_nth_frame != 0:
+                with self._lock:
+                    self._skipped_by_selection += 1
                 source_frame_index += 1
+                continue
+            try:
+                decoded = _convert_frame(frame, source_frame_index)
+            except (TypeError, ValueError) as error:
+                self._warn(f"Skipped source frame {source_frame_index}: {error}")
+                source_frame_index += 1
+                continue
+            if not self._queue_put(decoded):
+                return
+            source_frame_index += 1
         if not decoded_any and not self._seek_event.is_set():
             raise ValueError("video stream contains no decodable frames")
+
+    def _ensure_live_container(self) -> Any:
+        """The decode thread's container, kept open across passes (ADR-0024).
+
+        The container is re-opened only when the file changes (reload) or
+        the source is stopped/closed (``_halt`` releases it after joining
+        the workers, so the decode thread is its sole user while alive).
+        """
+
+        container = self._live_container
+        if container is None:
+            container = av.open(str(self._metadata.path), mode="r")
+            self._live_container = container
+        return container
+
+    def _ensure_head_container(self) -> Any:
+        """The head worker's private container (its own decoder state)."""
+
+        container = self._head_container
+        if container is None:
+            container = av.open(str(self._metadata.path), mode="r")
+            self._head_container = container
+        return container
 
     @staticmethod
     def _seek_container(container: Any, stream: Any, start_s: float) -> None:
@@ -590,16 +719,132 @@ class VideoSourceService:
             # Container timestamps are microseconds (``av.time_base``).
             container.seek(int(start_s * 1_000_000))
 
+    def _head_loop(self) -> None:
+        """Keep the loop head warm so a pass boundary presents without a stall.
+
+        ADR-0024: in its own container this worker reproduces the pass
+        restart's pre-keyframe discard and stages the first frames of the
+        region in a bounded queue. The presentation thread consumes the
+        staged head only immediately after a loop signal and drops the
+        duplicate frames the restarted live pass decodes (matched by
+        ``source_frame_index`` - the worker mirrors the live pass exactly:
+        same seek, same pre-start discard, same every-Nth selection). The
+        staged queue is swapped in only while the presentation is not
+        mid-consumption. A head that cannot be staged in time degrades to
+        the at-boundary restart cost - never to a failure.
+        """
+
+        while not self._stop_event.is_set():
+            self._head_trigger.wait(timeout=0.05)
+            if self._stop_event.is_set():
+                return
+            self._head_trigger.clear()
+            if self._stop_event.is_set():
+                return
+            budget = self._head_frame_budget
+            if budget is None:
+                continue
+            staged: queue.Queue[DecodedVideoFrame] = queue.Queue(budget)
+            try:
+                container = self._ensure_head_container()
+                stream = container.streams.video[self._stream_index]
+                self._seek_container(container, stream, self._region_start_s)
+                ordinal = 0
+                staged_count = 0
+                for frame in container.decode(stream):  # pyright: ignore[reportUnknownMemberType]
+                    if self._stop_event.is_set():
+                        return
+                    if frame.pts is None or frame.time_base is None:
+                        # The live pass counts PTS-less frames toward frame
+                        # selection (conversion rejects them, so they are never
+                        # presented); mirror that exactly or the head's frame
+                        # index drifts from the live pass's and the boundary
+                        # duplicate filter misfires (ADR-0024).
+                        ordinal += 1
+                        continue
+                    pts_seconds = float(frame.pts * frame.time_base)
+                    if pts_seconds < self._region_start_s:
+                        continue
+                    if self._region_end_s is not None and pts_seconds > self._region_end_s:
+                        break
+                    if ordinal % self._process_every_nth_frame == 0 and staged_count < budget:
+                        try:
+                            decoded = _convert_frame(frame, ordinal)
+                        except (TypeError, ValueError):
+                            # A frame the live pass would skip is simply not staged.
+                            pass
+                        else:
+                            staged.put(decoded)
+                            staged_count += 1
+                            if staged_count >= budget:
+                                break
+                    ordinal += 1
+            except Exception as error:
+                # A head failure degrades the boundary to the restart cost;
+                # it must never fail the source.
+                self._warn(f"Video loop head pre-decode failed: {error}")
+                continue
+            if staged.empty():
+                # Nothing stageable (empty region or no decodable frames):
+                # keep whatever head exists.
+                continue
+            # Swap the fresh head in only while the presentation is not
+            # draining the current one; give up after a bounded wait and let
+            # the next trigger retry.
+            deadline_ns = self._clock.monotonic_ns() + 2_000_000_000
+            while self._clock.monotonic_ns() < deadline_ns:
+                if self._stop_event.is_set():
+                    return
+                with self._lock:
+                    if not self._head_in_use:
+                        self._head_queue = staged
+                        break
+                time.sleep(0.02)
+
     def _presentation_loop(self) -> None:
+        # Presentation-local loop-head state: after a loop signal the staged
+        # head (captured by reference) is consumed before the restarted live
+        # pass's frames; live frames duplicating an already-presented head
+        # frame are dropped by source_frame_index.
+        head_queue: queue.Queue[DecodedVideoFrame] = queue.Queue(0)
+        using_head = False
+        head_upto = -1
         while not self._stop_event.is_set():
             if self._claim_pending_seek():
                 self._apply_seek()
+                using_head = False
+                head_upto = -1
+            # The staged head must be served before blocking on the decode
+            # queue: at a boundary the live pass is still paying its
+            # restart, so the decode queue stays empty while the head is
+            # ready (ADR-0024).
+            if using_head:
+                try:
+                    head_item = head_queue.get_nowait()
+                except queue.Empty:
+                    # The staged head is exhausted (or was never staged in
+                    # time - the degraded case): fall back to the live
+                    # pass's frames, dropping duplicates of the presented
+                    # head.
+                    using_head = False
+                    with self._lock:
+                        self._head_in_use = False
+                else:
+                    if not self._passes_seek_filter(head_item.pts_seconds):
+                        continue
+                    if not self._present(head_item):
+                        return
+                    if head_item.source_frame_index > head_upto:
+                        head_upto = head_item.source_frame_index
+                    continue
             try:
                 item = self._decode_queue.get(timeout=0.05)
             except queue.Empty:
                 continue
             if item is _QueueSignal.END:
+                using_head = False
                 with self._lock:
+                    self._head_in_use = False
                     if self._state not in {SourceState.CLOSED, SourceState.ERROR}:
                         self._state = SourceState.ENDED
                 # Reset the complete source-clock component at natural EOF. Without this
@@ -612,7 +857,20 @@ class VideoSourceService:
                     self._timeline.reset()
                     self._source_frame_index = None
                     self._processed_index = 0
+                    self._head_in_use = True
+                    head_queue = self._head_queue
                 self._publish_reset(ResetReason.SOURCE_RESTARTED)
+                using_head = True
+                head_upto = -1
+                # The worker refills the head for the next boundary while the
+                # presentation is still consuming the current one; it swaps
+                # in the fresh head only once this consumption is over.
+                self._head_trigger.set()
+                continue
+            if head_upto >= 0 and item.source_frame_index <= head_upto:
+                # A live frame duplicating one already presented from the
+                # staged head: the restarted pass re-decodes the head's
+                # prefix, so it is dropped instead of presented twice.
                 continue
             if not self._passes_seek_filter(item.pts_seconds):
                 continue
@@ -624,7 +882,10 @@ class VideoSourceService:
 
         Drops the stale frames the interrupted pass already queued and lets
         the PTS filter drop any stragglers still decoding from that pass, so
-        the new pass's first frame lands at the seek point.
+        the new pass's first frame lands at the seek point. The staged loop
+        head is abandoned (the interrupted pass restarts at the seek target,
+        not the region start the head was staged for); the head remains valid
+        for the loop boundary that ends the seek pass.
         """
 
         self._clear_decode_queue()
@@ -632,6 +893,7 @@ class VideoSourceService:
             self._timeline.reset()
             self._source_frame_index = None
             self._processed_index = 0
+            self._head_in_use = False
         self._publish_reset(ResetReason.SOURCE_RESTARTED)
 
     def _passes_seek_filter(self, pts_seconds: float) -> bool:

@@ -36,7 +36,13 @@ from synesthesia_machine.graph import (
     ValidationIssue,
     ValidationSeverity,
 )
-from synesthesia_machine.ui.parameter_editors import create_parameter_editor, parameter_tooltip
+from synesthesia_machine.ui.parameter_editors import (
+    LoopRangeParameterEditor,
+    create_parameter_editor,
+    is_loop_range_member,
+    parameter_tooltip,
+    sibling_context_of,
+)
 from synesthesia_machine.ui.preview_families import pill_family, theme_token
 from synesthesia_machine.ui.theme import Theme, node_category_color
 from synesthesia_machine.ui.tooltips import format_tooltip
@@ -593,6 +599,10 @@ class NodeGraphicsItem(QGraphicsObject):
             self.view_model.node_id,
             parameter.spec.id,
         )
+        sibling_callback = partial(
+            self._on_parameter_changed,
+            self.view_model.node_id,
+        )
         dynamic_choices = (
             () if self._device_choice_provider is None else self._device_choice_provider(parameter)
         )
@@ -601,15 +611,28 @@ class NodeGraphicsItem(QGraphicsObject):
             callback,
             compact=True,
             dynamic_choices=dynamic_choices,
-            sibling_values={p.spec.id: p.value for p in self.view_model.parameters},
+            siblings=sibling_context_of(self.view_model.parameters),
+            on_sibling_changed=sibling_callback,
+            theme=self.theme,
         )
+        if editor is None:
+            # Represented by the loop range anchor editor.
+            return
         editor.setFixedWidth(round(NODE_EDITOR_WIDTH))
+        if isinstance(editor, LoopRangeParameterEditor):
+            # Center the editor over the two rows the pair occupies so its
+            # groove sits in the middle of the band. sizeHint() is the
+            # post-layout height; editor.height() can still hold the
+            # pre-layout value when the proxy has not synced the widget yet.
+            row_height = self.theme.metrics.row_height
+            pos_y = (
+                y - row_height / 2.0 + max(0.0, (2 * row_height - editor.sizeHint().height()) / 2.0)
+            )
+        else:
+            pos_y = y - self.theme.metrics.row_height / 2.0 + 2.0
         proxy = QGraphicsProxyWidget(self)
         proxy.setWidget(editor)
-        proxy.setPos(
-            self._editor_left(),
-            y - self.theme.metrics.row_height / 2.0 + 2.0,
-        )
+        proxy.setPos(self._editor_left(), pos_y)
         proxy.setVisible(self._detail_visible)
         self.parameter_editors[parameter.spec.id] = proxy
 
@@ -699,6 +722,9 @@ class NodeGraphicsItem(QGraphicsObject):
             self._draw_row(painter, y, port.label, port.type_name, False)
             y += metrics.row_height
         for parameter in self.view_model.parameters:
+            if is_loop_range_member(parameter.spec):
+                y += metrics.row_height
+                continue
             detail = tr("Live input") if parameter.connected else ""
             self._draw_row(
                 painter,

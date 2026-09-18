@@ -9,6 +9,7 @@ from pathlib import Path
 from uuid import UUID
 
 from PySide6.QtCore import (
+    QEvent,
     QMimeData,
     QObject,
     QPoint,
@@ -17,6 +18,7 @@ from PySide6.QtCore import (
     QRectF,
     QSignalBlocker,
     Qt,
+    QTimer,
     Signal,
     Slot,
 )
@@ -36,6 +38,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QGraphicsItem,
+    QGraphicsProxyWidget,
     QGraphicsScene,
     QGraphicsView,
     QInputDialog,
@@ -59,7 +62,11 @@ from synesthesia_machine.ui.graphics import (
     TemporaryConnectionGraphicsItem,
     layout_node_size,
 )
-from synesthesia_machine.ui.parameter_editors import FilePathParameterEditor
+from synesthesia_machine.ui.parameter_editors import (
+    FilePathParameterEditor,
+    LoopRangeParameterEditor,
+    editor_drag_tracker,
+)
 from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.theme import Theme
 from synesthesia_machine.ui.translations import tr
@@ -117,12 +124,24 @@ class GraphScene(QGraphicsScene):
         self.setSceneRect(
             -SCENE_EXTENT_X, -SCENE_EXTENT_Y, 2.0 * SCENE_EXTENT_X, 2.0 * SCENE_EXTENT_Y
         )
+        self._deferred_device_rebuild = False
+        self._deferred_sync_timer = QTimer(self)
+        self._deferred_sync_timer.setSingleShot(True)
+        self._deferred_sync_timer.setInterval(0)
+        self._deferred_sync_timer.timeout.connect(self._run_deferred_sync)
+        editor_drag_tracker().activeChanged.connect(self._on_editor_drag_changed)
         session.changed.connect(self.sync_from_session)
         session.deviceCatalogueChanged.connect(self._rebuild_device_editors)
         self.selectionChanged.connect(self.update_selection_outline)
         self.sync_from_session()
 
     def sync_from_session(self) -> None:
+        if editor_drag_tracker().is_active:
+            # Tearing down node items mid-drag would free the editor's C++
+            # track before its release event arrives. Defer; the drag-end
+            # signal re-runs the deferred work once the gesture is over.
+            self._deferred_sync_timer.start(100)
+            return
         selected_nodes = self.selected_node_ids()
         selected_connections = self.selected_connection_ids()
         selected_groups = self.selected_group_ids()
@@ -196,6 +215,12 @@ class GraphScene(QGraphicsScene):
 
     @Slot()
     def _rebuild_device_editors(self) -> None:
+        if editor_drag_tracker().is_active:
+            # Device changes during a drag must not free in-flight editor
+            # tracks; rebuild once the gesture is over.
+            self._deferred_device_rebuild = True
+            self._deferred_sync_timer.start(100)
+            return
         selected_nodes = self.selected_node_ids()
         for item in tuple(self.node_items.values()):
             self.removeItem(item)
@@ -204,6 +229,22 @@ class GraphScene(QGraphicsScene):
         for node_id in selected_nodes:
             if (item := self.node_items.get(node_id)) is not None:
                 item.setSelected(True)
+
+    @Slot(bool)
+    def _on_editor_drag_changed(self, active: bool) -> None:
+        if not active and self._deferred_sync_timer.isActive():
+            # The gesture that held the rebuild back is over: run the
+            # deferred work now so the canvas converges without waiting out
+            # the debounce interval.
+            self._deferred_sync_timer.start(0)
+
+    @Slot()
+    def _run_deferred_sync(self) -> None:
+        if self._deferred_device_rebuild:
+            self._deferred_device_rebuild = False
+            self._rebuild_device_editors()
+            return
+        self.sync_from_session()
 
     @property
     def large_graph_mode(self) -> bool:
@@ -757,6 +798,13 @@ class GraphView(QGraphicsView):
         self._drop_open_result = False
         self._space_pan_used = False
         self._last_pan = QPoint()
+        # Canvas loop-range drag in flight: (editor, proxy item). The view
+        # owns the gesture end to end; a grab from the proxy child widget
+        # would leave offscreen and some compositor paths without move events.
+        self._loop_drag: tuple[LoopRangeParameterEditor, QGraphicsProxyWidget] | None = None
+        # Press-time anchor for an in-flight loop drag: (local x at press,
+        # press position in viewport coordinates, view zoom at press).
+        self._loop_drag_anchor: tuple[float, QPointF, float] | None = None
         self.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing)
         self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
@@ -769,6 +817,10 @@ class GraphView(QGraphicsView):
         self.setCacheMode(QGraphicsView.CacheModeFlag.CacheBackground)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
+        if self._loop_drag is not None:
+            # Zooming mid-drag would re-map the pointer under the knobs.
+            event.accept()
+            return
         vertical_delta = event.angleDelta().y()
         if vertical_delta == 0:
             super().wheelEvent(event)
@@ -833,6 +885,27 @@ class GraphView(QGraphicsView):
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             event.accept()
             return
+        if event.button() is Qt.MouseButton.LeftButton:
+            target = self._loop_drag_target(event.position().toPoint())
+            if target is not None:
+                editor, proxy = target
+                local = proxy.mapFromScene(self.mapToScene(event.position().toPoint()))
+                editor.knob_pressed(local.x(), local.y())
+                if editor.dragged_knob() is not None:
+                    # Anchor the gesture in viewport space: the scene frame
+                    # can shift between the press and later moves (layout
+                    # settling, recentering), and re-mapping every move
+                    # through the current frame teleported the knob on the
+                    # first move. The press's local x and the view zoom are
+                    # captured once and viewport deltas are applied to them.
+                    self._loop_drag = target
+                    self._loop_drag_anchor = (
+                        local.x(),
+                        event.position(),
+                        self.transform().m11(),
+                    )
+                    event.accept()
+                    return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
@@ -844,6 +917,12 @@ class GraphView(QGraphicsView):
             self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
             event.accept()
             return
+        if self._loop_drag is not None and self._loop_drag_anchor is not None:
+            anchor_x, press_pos, scale = self._loop_drag_anchor
+            delta = (event.position() - press_pos).x() / scale
+            self._loop_drag[0].knob_moved(anchor_x + delta)
+            event.accept()
+            return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
@@ -852,6 +931,10 @@ class GraphView(QGraphicsView):
             self.setCursor(
                 Qt.CursorShape.OpenHandCursor if self._space_pressed else Qt.CursorShape.ArrowCursor
             )
+            event.accept()
+            return
+        if self._loop_drag is not None:
+            self._finish_loop_drag()
             event.accept()
             return
         super().mouseReleaseEvent(event)
@@ -872,6 +955,39 @@ class GraphView(QGraphicsView):
             event.accept()
             return
         super().contextMenuEvent(event)
+
+    def leaveEvent(self, event: QEvent) -> None:
+        if self._loop_drag is not None:
+            # The pointer left the canvas mid-gesture: commit at the last
+            # in-view position rather than stranding a stuck drag.
+            self._finish_loop_drag()
+        super().leaveEvent(event)
+
+    def _loop_drag_target(
+        self, view_pos: QPoint
+    ) -> tuple[LoopRangeParameterEditor, QGraphicsProxyWidget] | None:
+        """Editor under the pointer, when the press lands on its painted track."""
+
+        item = self.itemAt(view_pos)
+        if not isinstance(item, QGraphicsProxyWidget):
+            return None
+        editor = item.widget()
+        if not isinstance(editor, LoopRangeParameterEditor):
+            return None
+        local = item.mapFromScene(self.mapToScene(view_pos))
+        track = editor.track
+        within_x = 0.0 <= local.x() <= float(track.width())
+        within_y = 0.0 <= local.y() <= float(track.height())
+        if not (within_x and within_y):
+            return None
+        return editor, item
+
+    def _finish_loop_drag(self) -> None:
+        drag = self._loop_drag
+        self._loop_drag = None
+        self._loop_drag_anchor = None
+        if drag is not None:
+            drag[0].knob_released()
 
     def frame_selection(self) -> None:
         selected = self.graph_scene.selectedItems()
