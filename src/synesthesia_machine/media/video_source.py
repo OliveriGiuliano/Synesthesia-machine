@@ -398,10 +398,22 @@ class VideoSourceService:
             if self._seek_event.is_set():
                 # A seek issued while the source was not playing restarts the
                 # pass at the requested position instead of the segment start.
-                self._pass_start_s = self._seek_target_s
+                # A target at or beyond the region end cannot begin a pass
+                # (no frame is presentable there): start at the segment start
+                # instead, or every play would park at the end again.
+                seek_target_s = self._seek_target_s
                 self._seek_event.clear()
+                if self._region_end_s is None or seek_target_s < self._region_end_s:
+                    self._pass_start_s = seek_target_s
+                else:
+                    self._pass_start_s = self._region_start_s
+                    self._seek_filter_pts = None
             else:
                 self._pass_start_s = self._region_start_s
+                # A fresh pass must not inherit the PTS filter of an earlier
+                # seek: a seek that ended at the region end would otherwise
+                # drop every frame of this pass.
+                self._seek_filter_pts = None
             self._position_s = self._pass_start_s
             # The new presentation thread must not re-apply a seek that
             # _start_pass already honored as its pass start.
@@ -604,7 +616,7 @@ class VideoSourceService:
         consecutive_failures = 0
         while not self._stop_event.is_set():
             try:
-                self._decode_once()
+                passed_any = self._decode_once()
                 consecutive_failures = 0
             except Exception as error:
                 consecutive_failures += 1
@@ -621,7 +633,12 @@ class VideoSourceService:
                 # A seek interrupted the pass: loop back and decode a new pass
                 # from the requested position.
                 continue
-            if not self._loop:
+            # A pass whose range contained no presentable frame (a seek that
+            # landed at or beyond the region's end) ends the source cleanly
+            # instead of looping: seeking to the end of the played segment
+            # must stop playback, and the loop's restart rules apply when the
+            # user plays again.
+            if not self._loop or not passed_any:
                 self._queue_put(_QueueSignal.END)
                 return
             # A looping pass restarts from the segment's configured start,
@@ -630,8 +647,16 @@ class VideoSourceService:
             if not self._queue_put(_QueueSignal.LOOP):
                 return
 
-    def _decode_once(self) -> None:
+    def _decode_once(self) -> bool:
+        """Decode one pass from its start to the region's end.
+
+        Returns whether the pass range contained any presentable frame. A
+        range that contains none (a seek that landed at or beyond the
+        region's end) is a clean end of pass, not a failure; only a stream
+        that yields no frames at all raises.
+        """
         decoded_any = False
+        saw_any_frame = False
         start_s = self._pass_start_s
         end_s = self._region_end_s
         if self._seek_event.is_set():
@@ -640,6 +665,11 @@ class VideoSourceService:
             # the seek event; the presentation thread only observes it.
             start_s = self._seek_target_s
             self._seek_event.clear()
+        if end_s is not None and start_s >= end_s:
+            # The pass range holds no presentable frame (a seek that landed
+            # at or beyond the region's end): a clean end of pass. The kept-
+            # open container is left in place; the next pass repositions it.
+            return False
         container = self._ensure_live_container()
         stream = container.streams.video[self._stream_index]
         # Reposition the kept-open container for every pass: it may sit at
@@ -649,12 +679,13 @@ class VideoSourceService:
         self._seek_container(container, stream, start_s)
         source_frame_index = 0
         for frame in container.decode(stream):  # pyright: ignore[reportUnknownMemberType]
+            saw_any_frame = True
             if self._stop_event.is_set():
-                return
+                return decoded_any
             if self._seek_event.is_set():
                 # A seek arrived mid-pass: end this pass so the next one
                 # starts from the requested position.
-                return
+                return decoded_any
             if frame.pts is not None and frame.time_base is not None:
                 pts_seconds = float(frame.pts * frame.time_base)
                 if pts_seconds < start_s:
@@ -678,10 +709,11 @@ class VideoSourceService:
                 source_frame_index += 1
                 continue
             if not self._queue_put(decoded):
-                return
+                return decoded_any
             source_frame_index += 1
-        if not decoded_any and not self._seek_event.is_set():
+        if not decoded_any and not saw_any_frame and not self._seek_event.is_set():
             raise ValueError("video stream contains no decodable frames")
+        return decoded_any
 
     def _ensure_live_container(self) -> Any:
         """The decode thread's container, kept open across passes (ADR-0024).

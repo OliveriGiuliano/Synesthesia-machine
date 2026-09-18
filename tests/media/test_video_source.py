@@ -467,6 +467,117 @@ def test_seek_clamps_to_the_played_segment(tmp_path: Path) -> None:
         source.close()
 
 
+@pytest.mark.parametrize("loop", (False, True))
+def test_seek_to_region_end_while_playing_ends_cleanly(
+    tmp_path: Path,
+    loop: bool,
+) -> None:
+    # Seeking to the far end of the played segment - what the UI's own
+    # controls do at the slider's far right - leaves a pass whose range
+    # holds no presentable frame. The source must park at the requested
+    # position instead of tripping into the no-decodable-frames error, and
+    # a looping source must not auto-restart from the segment start.
+    path = generate_test_video(tmp_path / "seek-end.mp4", frame_count=24, fps=12)  # 2 s video
+    received: list[PresentedVideoFrame] = []
+    source = VideoSourceService(
+        SOURCE_ID,
+        path,
+        loop=loop,
+        on_frame=received.append,
+        clock=AdvancingClock(),
+    )
+    try:
+        assert source.metadata.duration_s is not None
+        source.play()
+        assert _wait_until(
+            lambda: len(received) >= 3 and source.status().state is SourceState.PLAYING,
+            timeout_s=10.0,
+        )
+        source.seek(source.metadata.duration_s)
+        # The position jumps to the (clamped) target: the region's end.
+        assert source.status().source_time_s == pytest.approx(source.metadata.duration_s)
+        # The empty pass ends the source cleanly: parked, without an error.
+        assert _wait_until(lambda: source.status().state is SourceState.ENDED, timeout_s=10.0)
+        status = source.status()
+        assert status.state is SourceState.ENDED
+        assert status.last_error is None
+        # The next play starts a fresh pass from the segment start.
+        presented_before = len(received)
+        source.play()
+        assert _wait_until(lambda: len(received) > presented_before, timeout_s=10.0)
+        assert source.status().state is SourceState.PLAYING
+    finally:
+        source.close()
+
+
+def test_stream_without_decodable_frames_still_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A container that opens but yields no frames at all is a genuine
+    # failure, not an empty pass: the repeated-failure error is preserved.
+    import types
+
+    import synesthesia_machine.media.video_source as video_source_module
+
+    class _EmptyStream:
+        time_base = Fraction(1, 12)
+        average_rate = None
+        frames = 0
+        duration = None
+        width = 32
+        height = 24
+        codec_context = types.SimpleNamespace(name="mpeg4")
+
+    class _EmptyContainer:
+        def __init__(self) -> None:
+            self.streams = types.SimpleNamespace(video=(_EmptyStream(),))
+            self.duration = None
+
+        def seek(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+
+        def decode(self, *args: object, **kwargs: object) -> object:
+            return iter(())
+
+        def close(self) -> None:
+            pass
+
+        def __enter__(self) -> _EmptyContainer:
+            return self
+
+        def __exit__(self, *exc: object) -> bool:
+            self.close()
+            return False
+
+    class _EmptyAv:
+        time_base = Fraction(1, 1_000_000)
+
+        def open(self, *args: object, **kwargs: object) -> _EmptyContainer:
+            return _EmptyContainer()
+
+    monkeypatch.setattr(video_source_module, "av", _EmptyAv())
+    path = tmp_path / "undecodable.mp4"
+    path.write_bytes(b"")
+    received: list[PresentedVideoFrame] = []
+    source = VideoSourceService(
+        SOURCE_ID,
+        path,
+        on_frame=received.append,
+        clock=AdvancingClock(),
+        max_decode_failures=1,
+    )
+    try:
+        source.play()
+        assert _wait_until(lambda: source.status().state is SourceState.ERROR, timeout_s=10.0)
+        status = source.status()
+        assert status.state is SourceState.ERROR
+        assert "no decodable frames" in (status.last_error or "")
+        assert not received
+    finally:
+        source.close()
+
+
 def test_loop_region_beyond_duration_errors_instead_of_playing_whole_file(
     tmp_path: Path,
 ) -> None:
