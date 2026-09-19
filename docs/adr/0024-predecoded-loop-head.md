@@ -63,3 +63,14 @@ proportionally worse for files with larger keyframe intervals.
   untouched.
 - If PyAV ever changes seek+decode determinism, the index-based duplicate filter
   degrades to a possible one-frame visual difference at the boundary, not to a stall.
+
+## Update
+
+- 2026-09-19: The "reproduces exactly" mirror is now one implementation. The
+  seek/discard/select/convert state machine moved to the shared region pass
+  (`synesthesia_machine.media.region_pass`), which the live decode thread and
+  the head worker both execute over their own container adapters;
+  `DecodedVideoFrame` and the frame conversion moved with it. The decisions
+  above are unchanged; only the mechanism that keeps the head from drifting
+  from the live pass is different (one shared machine instead of two
+  hand-kept copies).

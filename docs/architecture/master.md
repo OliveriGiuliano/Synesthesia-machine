@@ -773,8 +773,10 @@ reported through the per-source status telemetry (`SourceStatus.source_time_s`).
   silences that source component and clears its stateful runtimes.
 - Missing/corrupt frames produce warnings and are skipped; repeated decode failure stops the source.
 - A loop boundary presents seamlessly from a bounded buffer of pre-decoded loop-head
-  frames (ADR-0024); a head that cannot be staged in time degrades to the at-boundary
-  restart cost, never to a failure or unbounded retention.
+  frames (ADR-0024); the live decode pass and the head pre-decode execute one shared
+  region pass over their own container adapters, so the head's frame ordering cannot
+  drift from the live pass's. A head that cannot be staged in time degrades to the
+  at-boundary restart cost, never to a failure or unbounded retention.
 
 ### 11.2 Load Camera
 

@@ -21,12 +21,15 @@ from uuid import UUID
 
 import av
 import numpy as np
-from numpy.typing import NDArray
 
 from synesthesia_machine.contracts import (
     ResetReason,
     SourceState,
     SourceStatus,
+)
+from synesthesia_machine.media.region_pass import (
+    DecodedVideoFrame,
+    run_region_pass,
 )
 from synesthesia_machine.media.source_frame import (
     PresentedSourceFrame,
@@ -87,25 +90,6 @@ class VideoMetadata:
     duration_s: float | None
     average_rate: float | None
     frame_count: int | None
-
-
-@dataclass(frozen=True, slots=True)
-class DecodedVideoFrame:
-    """Selected decoded frame before its presentation deadline is reached."""
-
-    source_frame_index: int
-    pts_seconds: float
-    rgb: NDArray[np.uint8]
-
-    def __post_init__(self) -> None:
-        if self.source_frame_index < 0:
-            raise ValueError("source_frame_index cannot be negative")
-        if not np.isfinite(self.pts_seconds):
-            raise ValueError("frame PTS must be finite")
-        if self.rgb.dtype != np.uint8 or self.rgb.ndim != 3 or self.rgb.shape[2] != 3:
-            raise ValueError("decoded video frames must be HxWx3 uint8 RGB")
-        if not self.rgb.flags.c_contiguous:
-            raise ValueError("decoded video frames must be C-contiguous")
 
 
 PresentedVideoFrame = PresentedSourceFrame
@@ -698,8 +682,6 @@ class VideoSourceService:
         region's end) is a clean end of pass, not a failure; only a stream
         that yields no frames at all raises.
         """
-        decoded_any = False
-        saw_any_frame = False
         start_s = self._pass_start_s
         end_s = self._region_end_s
         if self._seek_event.is_set():
@@ -715,48 +697,37 @@ class VideoSourceService:
             return False
         container = self._ensure_live_container()
         stream = container.streams.video[self._stream_index]
-        # Reposition the kept-open container for every pass: it may sit at
-        # the previous pass's EOF, and the seek lands on the keyframe at or
-        # before the pass start. Frames before the pass start (the discard
-        # up to the region start) are decoded through and never presented.
-        self._seek_container(container, stream, start_s)
-        source_frame_index = 0
-        for frame in container.decode(stream):  # pyright: ignore[reportUnknownMemberType]
-            saw_any_frame = True
-            if self._stop_event.is_set():
-                return decoded_any
-            if self._seek_event.is_set():
-                # A seek arrived mid-pass: end this pass so the next one
-                # starts from the requested position.
-                return decoded_any
-            if frame.pts is not None and frame.time_base is not None:
-                pts_seconds = float(frame.pts * frame.time_base)
-                if pts_seconds < start_s:
-                    # Frames before the segment start (the seek lands on
-                    # the previous keyframe): decode through, present none.
-                    continue
-                if end_s is not None and pts_seconds > end_s:
-                    # The segment is complete; the kept-open container is
-                    # repositioned by the next pass's seek.
-                    break
-            decoded_any = True
-            if source_frame_index % self._process_every_nth_frame != 0:
-                with self._lock:
-                    self._skipped_by_selection += 1
-                source_frame_index += 1
-                continue
-            try:
-                decoded = _convert_frame(frame, source_frame_index)
-            except (TypeError, ValueError) as error:
-                self._warn(f"Skipped source frame {source_frame_index}: {error}")
-                source_frame_index += 1
-                continue
-            if not self._queue_put(decoded):
-                return decoded_any
-            source_frame_index += 1
-        if not decoded_any and not saw_any_frame and not self._seek_event.is_set():
+
+        def consume(decoded: DecodedVideoFrame) -> bool:
+            return self._queue_put(decoded)
+
+        def interrupted() -> bool:
+            # A stop or a mid-pass seek ends this pass; the loop (or the
+            # seek's pass) restarts from the requested position.
+            return self._stop_event.is_set() or self._seek_event.is_set()
+
+        outcome = run_region_pass(
+            container,
+            stream,
+            start_s=start_s,
+            end_s=end_s,
+            every_nth=self._process_every_nth_frame,
+            consume=consume,
+            interrupted=interrupted,
+            on_frame_failed=lambda index, error: self._warn(
+                f"Skipped source frame {index}: {error}"
+            ),
+        )
+        if outcome.skipped_by_selection:
+            with self._lock:
+                self._skipped_by_selection += outcome.skipped_by_selection
+        if (
+            outcome.frames_in_range == 0
+            and outcome.frames_decoded == 0
+            and not self._seek_event.is_set()
+        ):
             raise ValueError("video stream contains no decodable frames")
-        return decoded_any
+        return outcome.frames_in_range > 0
 
     def _ensure_live_container(self) -> Any:
         """The decode thread's container, kept open across passes (ADR-0024).
@@ -781,32 +752,17 @@ class VideoSourceService:
             self._head_container = container
         return container
 
-    @staticmethod
-    def _seek_container(container: Any, stream: Any, start_s: float) -> None:
-        """Seek to the keyframe at or before ``start_s`` (the ``stream``-relative
-        offset keeps the demuxer on the right stream). PyAV ships no type
-        stubs, so both handles are ``Any`` at this third-party boundary."""
-
-        time_base = stream.time_base
-        if time_base is not None:
-            container.seek(int(start_s / time_base), stream=stream)
-        else:
-            # Container timestamps are microseconds (``av.time_base``).
-            container.seek(int(start_s * 1_000_000))
-
     def _head_loop(self) -> None:
         """Keep the loop head warm so a pass boundary presents without a stall.
 
-        ADR-0024: in its own container this worker reproduces the pass
-        restart's pre-keyframe discard and stages the first frames of the
-        region in a bounded queue. The presentation thread consumes the
+        ADR-0024: in its own container this worker runs the same shared
+        region pass as the live decode thread - same seek, same pre-start
+        discard, same every-Nth selection - and stages the first frames of
+        the region in a bounded queue. The presentation thread consumes the
         staged head only immediately after a loop signal and drops the
         duplicate frames the restarted live pass decodes (matched by
-        ``source_frame_index`` - the worker mirrors the live pass exactly:
-        same seek, same pre-start discard, same every-Nth selection). The
-        staged queue is swapped in only while the presentation is not
-        mid-consumption. A head that cannot be staged in time degrades to
-        the at-boundary restart cost - never to a failure.
+        ``source_frame_index``). The two passes execute one shared machine
+        and cannot drift, which is what the boundary duplicate filter rests on.
         """
 
         while not self._stop_event.is_set():
@@ -820,40 +776,40 @@ class VideoSourceService:
             if budget is None:
                 continue
             staged: queue.Queue[DecodedVideoFrame] = queue.Queue(budget)
+            staged_count = 0
+
+            def consume(
+                decoded: DecodedVideoFrame,
+                _staged: queue.Queue[DecodedVideoFrame] = staged,
+                _budget: int = budget,
+            ) -> bool:
+                # The head holds at most ``budget`` frames: the presentation
+                # thread serves the first ~1 s of the boundary, then falls
+                # back to the live pass. ``_staged``/``_budget`` bind the
+                # per-iteration loop variables at definition time.
+                nonlocal staged_count
+                _staged.put(decoded)
+                staged_count += 1
+                return staged_count < _budget
+
+            def interrupted() -> bool:
+                return self._stop_event.is_set()
+
             try:
                 container = self._ensure_head_container()
                 stream = container.streams.video[self._stream_index]
-                self._seek_container(container, stream, self._region_start_s)
-                ordinal = 0
-                staged_count = 0
-                for frame in container.decode(stream):  # pyright: ignore[reportUnknownMemberType]
-                    if self._stop_event.is_set():
-                        return
-                    if frame.pts is None or frame.time_base is None:
-                        # The live pass counts PTS-less frames toward frame
-                        # selection (conversion rejects them, so they are never
-                        # presented); mirror that exactly or the head's frame
-                        # index drifts from the live pass's and the boundary
-                        # duplicate filter misfires (ADR-0024).
-                        ordinal += 1
-                        continue
-                    pts_seconds = float(frame.pts * frame.time_base)
-                    if pts_seconds < self._region_start_s:
-                        continue
-                    if self._region_end_s is not None and pts_seconds > self._region_end_s:
-                        break
-                    if ordinal % self._process_every_nth_frame == 0 and staged_count < budget:
-                        try:
-                            decoded = _convert_frame(frame, ordinal)
-                        except (TypeError, ValueError):
-                            # A frame the live pass would skip is simply not staged.
-                            pass
-                        else:
-                            staged.put(decoded)
-                            staged_count += 1
-                            if staged_count >= budget:
-                                break
-                    ordinal += 1
+                # The head always pre-decodes from the region start, whatever
+                # position a seeked pass takes: the head belongs to the
+                # boundary, not to the pass (ADR-0024).
+                run_region_pass(
+                    container,
+                    stream,
+                    start_s=self._region_start_s,
+                    end_s=self._region_end_s,
+                    every_nth=self._process_every_nth_frame,
+                    consume=consume,
+                    interrupted=interrupted,
+                )
             except Exception as error:
                 # A head failure degrades the boundary to the restart cost;
                 # it must never fail the source.
@@ -1084,19 +1040,6 @@ class VideoSourceService:
     def _publish_reset(self, reason: ResetReason) -> None:
         if self._on_reset is not None:
             self._on_reset(reason)
-
-
-def _convert_frame(frame: av.VideoFrame, source_frame_index: int) -> DecodedVideoFrame:
-    if frame.pts is None or frame.time_base is None:
-        raise ValueError("frame has no usable presentation timestamp")
-    pts_seconds = float(frame.pts * frame.time_base)
-    rgb = np.ascontiguousarray(
-        frame.to_ndarray(format="rgb24"),
-        dtype=np.uint8,
-    )
-    if rgb.ndim != 3 or rgb.shape[2] != 3:
-        raise ValueError(f"unexpected RGB frame shape {rgb.shape}")
-    return DecodedVideoFrame(source_frame_index, pts_seconds, rgb)
 
 
 __all__ = [

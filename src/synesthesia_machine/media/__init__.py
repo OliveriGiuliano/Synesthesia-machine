@@ -86,6 +86,12 @@ from synesthesia_machine.media.image_common import (
     sanitize_finite,
     validate_odd_kernel,
 )
+from synesthesia_machine.media.region_pass import (
+    DecodeContainer,
+    DecodedVideoFrame,
+    RegionPassOutcome,
+    run_region_pass,
+)
 from synesthesia_machine.media.resize import FitMode, Interpolation, resize_image
 from synesthesia_machine.media.source_config import (
     CameraSourceConfig,
@@ -101,7 +107,6 @@ from synesthesia_machine.media.source_frame import (
     normalize_uint8_rgb,
 )
 from synesthesia_machine.media.video_source import (
-    DecodedVideoFrame,
     PlaybackClock,
     PresentedVideoFrame,
     PtsPlaybackTimeline,
@@ -133,6 +138,7 @@ __all__ = [
     "ConvolutionNormalization",
     "CoordinateMode",
     "CropOutOfBounds",
+    "DecodeContainer",
     "DecodedVideoFrame",
     "FiniteReport",
     "FitMode",
@@ -146,6 +152,7 @@ __all__ = [
     "PresentedSourceFrame",
     "PresentedVideoFrame",
     "PtsPlaybackTimeline",
+    "RegionPassOutcome",
     "StretchMode",
     "SystemCameraClock",
     "SystemPlaybackClock",
@@ -197,6 +204,7 @@ __all__ = [
     "posterize_image",
     "resize_image",
     "rotate_image",
+    "run_region_pass",
     "sanitize_finite",
     "saturation_image",
     "separate_image_channels",
