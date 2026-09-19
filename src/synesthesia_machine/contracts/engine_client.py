@@ -24,10 +24,9 @@ if TYPE_CHECKING:
     # accepts; no runtime edge from contracts to graph is created.
     from synesthesia_machine.graph.model import GraphSnapshot
 
-# Default heartbeat liveness deadline in seconds, shared by every side of
-# the seam: the process client uses it to time out its own child, and the
-# engine session uses the same deadline when folding a client's heartbeat
-# timestamps into the connection state.
+#: Default heartbeat liveness deadline in seconds.  Owned by the process
+#: client: it uses this deadline to fold a stale child heartbeat into the
+#: connection state it reports, so the deadline lives in exactly one place.
 DEFAULT_HEARTBEAT_TIMEOUT_S = 2.0
 
 

@@ -1,7 +1,8 @@
 """Headless EngineSession facade tests over a recording fake client.
 
 The session depends only on the ``EngineClient`` protocol, so every test
-drives it through a fake: no process, no Qt, no engine internals.
+drives it through a fake: no process, no Qt, no engine internals.  The
+fake reports the state an adapter would fold; the session trusts it.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import pytest
 from synesthesia_machine.contracts import (
     DeviceCatalogue,
     EngineActivation,
+    EngineClient,
     EngineConnectionState,
     EngineMetrics,
     EngineState,
@@ -229,6 +231,10 @@ class _FakeEngineClient:
         self.value_sequences.clear()
         self.note_sequences.clear()
 
+    def clear_previews(self) -> None:
+        self.calls.append("clear_previews")
+        self._reset_preview_state()
+
     def close(self) -> None:
         self.calls.append("close")
         self.closed = True
@@ -351,18 +357,25 @@ def test_connection_state_folds_client_states() -> None:
     assert session.connection_state() is EngineConnectionState.RESTARTING
 
 
-def test_connection_state_folds_stale_heartbeat_to_unresponsive() -> None:
-    client = _FakeEngineClient(last_heartbeat_offset_s=5.0)  # past the 2 s timeout
+def test_session_trusts_the_state_the_adapter_folded() -> None:
+    # A stale heartbeat is the adapter's business to fold: the process
+    # client folds it into UNRESPONSIVE before the session sees the status,
+    # so the session must not apply a second fold.
+    client = _FakeEngineClient(connection_state=EngineConnectionState.UNRESPONSIVE)
     session = EngineSession(client)
     assert session.connection_state() is EngineConnectionState.UNRESPONSIVE
-    client.last_heartbeat_offset_s = 0.5
+    client.connection_state = EngineConnectionState.CONNECTED
+    client.last_heartbeat_offset_s = 5.0  # stale if anyone re-folded it
     assert session.connection_state() is EngineConnectionState.CONNECTED
 
 
-def test_connection_state_folds_unreachable_client_to_crashed() -> None:
+def test_status_errors_propagate_from_the_client() -> None:
+    # The protocol guarantees status() never raises; the session does not
+    # mask a client that violates it.
     client = _FakeEngineClient(status_error=RuntimeError("engine gone"))
     session = EngineSession(client)
-    assert session.connection_state() is EngineConnectionState.CRASHED
+    with pytest.raises(RuntimeError, match="engine gone"):
+        session.connection_state()
 
 
 def test_closed_session_reports_closed_without_polling() -> None:
@@ -373,6 +386,21 @@ def test_closed_session_reports_closed_without_polling() -> None:
     assert session.connection_state() is EngineConnectionState.CLOSED
     assert session.next_image_previews() == ()
     assert "status" not in client.calls
+
+
+def test_closed_session_preview_resets_are_no_ops() -> None:
+    client = _FakeEngineClient(
+        image_previews=(_image_preview(SOURCE_A, "output", 1),),
+        note_previews=(_note_preview(SOURCE_A, 1),),
+    )
+    session = EngineSession(client)
+    session.close()
+    session.reset_image_preview_cursors()
+    session.reset_note_preview_cursors()
+    assert "reset_image_preview_cursors" not in client.calls
+    assert "reset_note_preview_cursors" not in client.calls
+    assert session.next_image_previews() == ()
+    assert session.next_note_previews() == ()
 
 
 def test_known_stopped_tracks_engine_state_and_invalidates() -> None:
@@ -437,14 +465,17 @@ def test_restart_uses_client_reactivation_when_available() -> None:
     assert client.activations == []  # the client re-activated internally
 
 
-def test_restart_rebuilds_last_valid_graph_with_remembered_roots() -> None:
-    client = _FakeEngineClient()
+def test_restart_does_not_rebuild_from_session_memory() -> None:
+    # Restart-path graph memory lives in the adapter: even though the
+    # session saw an accepted activation, it must not re-activate on the
+    # client's behalf when the adapter has no graph to replay.
+    client = _FakeEngineClient(restart_result=None)
     session = EngineSession(client, demand_roots_for=lambda snapshot: (SOURCE_A,))
     snapshot = _snapshot()
     session.activate(snapshot)
-    client.restart_result = None  # client has no valid graph: session rebuilds
     assert session.restart() == RestartOutcome(True, "ok")
-    assert client.activations == [(snapshot, (SOURCE_A,)), (snapshot, (SOURCE_A,))]
+    assert client.calls == ["activate", "restart"]
+    assert client.activations == [(snapshot, (SOURCE_A,))]
 
 
 def test_restart_without_valid_graph_is_ok_and_rebuilds_nothing() -> None:
@@ -465,18 +496,6 @@ def test_restart_reports_restart_failure() -> None:
     session = EngineSession(client)
     result = session.restart()
     assert (result.ok, result.reason) == (False, "restart_failed")
-    assert result.detail == "spawn failed"
-
-
-def test_restart_reports_rebuild_failure() -> None:
-    client = _FakeEngineClient()
-    session = EngineSession(client, demand_roots_for=lambda snapshot: (SOURCE_A,))
-    session.activate(_snapshot())
-    client.restart_result = None
-    client.activate_error = RuntimeError("ipc broken")
-    result = session.restart()
-    assert (result.ok, result.reason) == (False, "rebuild_failed")
-    assert result.detail == "ipc broken"
 
 
 def test_restart_resets_preview_cursors_on_replaced_engine() -> None:
@@ -521,29 +540,26 @@ def test_transport_commands_delegate_to_client() -> None:
     assert client.seek_args == [(SOURCE_A, 1.5)]
 
 
-def test_status_and_telemetry_pass_throughs_delegate() -> None:
+def test_session_surface_is_protocol_plus_its_own_behaviours() -> None:
     client = _FakeEngineClient()
     session = EngineSession(client)
-    assert session.status().connection_state is EngineConnectionState.CONNECTED
-    assert session.source_status() == ()
-    assert session.midi_output_status() == ()
-    assert session.device_catalogue(force_refresh=True) == DeviceCatalogue()
-    assert session.node_memory_diagnostics() == ()
-    assert session.node_profiles() == ()
-    session.set_profiling_enabled(True)
-    session.reset_profiling()
-    assert session.wait_until_idle() is True
-    assert client.calls == [
-        "status",
-        "source_status",
-        "midi_output_status",
-        "device_catalogue",
-        "node_memory_diagnostics",
-        "node_profiles",
-        "set_profiling_enabled",
-        "reset_profiling",
-        "wait_until_idle",
-    ]
+    assert session.client is client
+    own = {
+        "client",
+        "poll_status",
+        "connection_state",
+        "is_known_stopped",
+        "restart",
+    }
+    protocol = {name for name in dir(EngineClient) if not name.startswith("_")}
+    surface = {name for name in dir(EngineSession) if not name.startswith("_")}
+    # Nothing beyond the protocol and the session's genuine behaviours.
+    assert surface <= protocol | own
+    # The protocol keeps the full client surface: methods the session no
+    # longer forwards remain one ``session.client`` hop away.
+    assert {"clear_previews", "status", "wait_until_idle", "device_catalogue"} <= (
+        protocol - surface
+    )
 
 
 def test_restart_outcome_rejects_inconsistent_values() -> None:
@@ -553,23 +569,25 @@ def test_restart_outcome_rejects_inconsistent_values() -> None:
         RestartOutcome(True, "rejected")
 
 
-def test_poll_status_folds_machine_and_returns_status() -> None:
+def test_poll_status_returns_the_adapter_state_and_status() -> None:
     client = _FakeEngineClient()
     session = EngineSession(client)
     state, status = session.poll_status()
     assert state is EngineConnectionState.CONNECTED
     assert status is not None
     assert status.connection_state is EngineConnectionState.CONNECTED
-    # A stale heartbeat folds CONNECTED to UNRESPONSIVE; the status still arrives.
+    # The state is exactly what the adapter folded; the session applies no
+    # second fold, and the raw status always arrives alongside it.
+    client.connection_state = EngineConnectionState.UNRESPONSIVE
     client.last_heartbeat_offset_s = 5.0
     state, status = session.poll_status()
     assert state is EngineConnectionState.UNRESPONSIVE
     assert status is not None
-    # An unreachable client folds to CRASHED without a status.
+    # A client whose status() raises violates the protocol; the session does
+    # not mask it.
     client.status_error = RuntimeError("ipc down")
-    state, status = session.poll_status()
-    assert state is EngineConnectionState.CRASHED
-    assert status is None
+    with pytest.raises(RuntimeError, match="ipc down"):
+        session.poll_status()
 
 
 def test_poll_status_closed_session_polls_nothing() -> None:

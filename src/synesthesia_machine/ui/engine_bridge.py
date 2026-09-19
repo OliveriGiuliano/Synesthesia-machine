@@ -3,9 +3,11 @@
 The editor drives the engine through one module. The bridge owns the
 :class:`~synesthesia_machine.runtime.engine_session.EngineSession` — the
 Qt-free module that drives the engine client: per-port preview sequence
-cursors, the folded six-state connection machine, the "engine is known
-stopped" cache, and the restart-outcome mapping (the ADR-0013/0020
-policies). On top of it the bridge owns the Qt-facing concerns: transport
+cursors, the connection state the client folds from liveness, the "engine
+is known stopped" cache, and the restart-outcome mapping (the ADR-0013/0020
+policies). The full client protocol surface is one hop away through the
+session's ``client`` property, which the bridge reaches for the reads it
+publishes. On top of it the bridge owns the Qt-facing concerns: transport
 and telemetry dispatch over the injected task runner, graph-activation
 scheduling with its debounce, and status normalisation. The main window
 becomes a thin compositor: it forwards user intents to the bridge and
@@ -271,7 +273,7 @@ class EngineBridge:
         self._submit("transport", lambda: self._load_play(source_node_id))
 
     def _load_play(self, target: UUID) -> TransportOutcome:
-        statuses = self._session.source_status(target)
+        statuses = self._session.client.source_status(target)
         if statuses and statuses[0].state is SourceState.PAUSED:
             self._session.resume(target)
             return TransportOutcome("Resumed", target)
@@ -371,11 +373,11 @@ class EngineBridge:
 
     def _load_telemetry(self, selected_node_id: UUID | None) -> _TelemetrySnapshot:
         metrics = self._session.metrics()
-        sources = self._session.source_status()
-        midi_outputs = self._session.midi_output_status()
+        sources = self._session.client.source_status()
+        midi_outputs = self._session.client.midi_output_status()
         diagnostic = None
         if selected_node_id is not None:
-            diagnostics = self._session.node_memory_diagnostics(selected_node_id)
+            diagnostics = self._session.client.node_memory_diagnostics(selected_node_id)
             diagnostic = diagnostics[0] if diagnostics else None
         return metrics, sources, midi_outputs, diagnostic
 
@@ -400,7 +402,7 @@ class EngineBridge:
         if self._closed:
             return None, ()
         try:
-            return self._session.metrics(), self._session.node_profiles()
+            return self._session.metrics(), self._session.client.node_profiles()
         except (RuntimeError, TimeoutError):
             return None, ()
 
@@ -429,10 +431,10 @@ class EngineBridge:
     # -- runtime profiling ---------------------------------------------------
 
     def set_profiling_enabled(self, enabled: bool) -> None:
-        self._session.set_profiling_enabled(enabled)
+        self._session.client.set_profiling_enabled(enabled)
 
     def reset_profiling(self) -> None:
-        self._session.reset_profiling()
+        self._session.client.reset_profiling()
 
     def refresh_profiles(self) -> None:
         """Poll the per-node profiles on the task pool and publish them.
@@ -442,7 +444,7 @@ class EngineBridge:
         """
         if self._closed:
             return
-        self._submit("profiles", self._session.node_profiles)
+        self._submit("profiles", self._session.client.node_profiles)
 
     # -- devices -----------------------------------------------------------
 
@@ -460,7 +462,7 @@ class EngineBridge:
 
     def request_device_catalogue(self, *, force_refresh: bool = False) -> None:
         submitted = self._submit(
-            "devices", lambda: self._session.device_catalogue(force_refresh=force_refresh)
+            "devices", lambda: self._session.client.device_catalogue(force_refresh=force_refresh)
         )
         if submitted and force_refresh:
             self._on_status_message("devices_refreshing", 3000)
