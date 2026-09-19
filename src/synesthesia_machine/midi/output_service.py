@@ -22,6 +22,7 @@ from synesthesia_machine.contracts import (
     MidiStateFrame,
 )
 from synesthesia_machine.midi.state_diff import diff_midi_states
+from synesthesia_machine.midi.state_ordering import StateOrdering
 
 
 class VelocityUpdatePolicy(StrEnum):
@@ -340,17 +341,23 @@ class NullMidiOutputService:
 
     Publishes are accepted and discarded: no port is ever opened, no note is
     ever sent, and no error is ever reported, so an exported graph can contain
-    Send-MIDI nodes without side effects.
+    Send-MIDI nodes without side effects. It still records panics through the
+    shared state-ordering policy (ADR-0022), so its watermark stays comparable
+    to the real service's.
     """
+
+    def __init__(self) -> None:
+        self._ordering = StateOrdering()
 
     def publish(self, frame: MidiStateFrame, configuration: MidiOutputConfiguration) -> None:
         del frame, configuration
 
     def request_panic(self, publish_generation: int = 0) -> None:
-        del publish_generation
+        self._ordering.record_panic(publish_generation)
 
     def panic(self, publish_generation: int = 0, timeout_s: float = 2.0) -> None:
-        del publish_generation, timeout_s
+        del timeout_s
+        self._ordering.record_panic(publish_generation)
 
     def refresh_outputs(self) -> None:
         pass
@@ -406,10 +413,9 @@ class MidiOutputService:
         self._panic_requested = 0
         self._panic_completed = 0
         self._dropped_state_updates = 0
-        # Highest publish generation invalidated by a panic (ADR-0022):
-        # desired states from ticks at or below it must not re-arm the port
-        # after the all-notes-off the panic just sent.
-        self._stale_upto_generation = 0
+        # One shared state-ordering policy (ADR-0022): desired states from
+        # ticks at or below the panic watermark must not re-arm the port.
+        self._ordering = StateOrdering()
 
         self._port: MidiOutputPort | None = None
         self._port_name: str | None = None
@@ -434,7 +440,7 @@ class MidiOutputService:
         # produced before the panic and must not re-arm the port.
         # Generation-0 states were never ordered by the engine and are
         # never stale.
-        if 0 < frame.context.publish_generation <= self._stale_upto_generation:
+        if self._ordering.is_stale(frame.context.publish_generation):
             return
         desired = _DesiredState.from_frame(frame, configuration)
         with self._condition:
@@ -451,7 +457,7 @@ class MidiOutputService:
                 return
             self._pending = None
             self._latest = None
-            self._stale_upto_generation = max(self._stale_upto_generation, publish_generation)
+            self._ordering.record_panic(publish_generation)
             self._panic_requested += 1
             self._condition.notify_all()
 
@@ -461,7 +467,7 @@ class MidiOutputService:
                 return
             self._pending = None
             self._latest = None
-            self._stale_upto_generation = max(self._stale_upto_generation, publish_generation)
+            self._ordering.record_panic(publish_generation)
             self._panic_requested += 1
             generation = self._panic_requested
             self._condition.notify_all()

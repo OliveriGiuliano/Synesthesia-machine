@@ -35,6 +35,7 @@ from synesthesia_machine.midi import (
     MidoRtMidiBackend,
     MockMidiOutputBackend,
     MockMidiOutputPort,
+    NullMidiOutputService,
     VelocityUpdatePolicy,
 )
 from synesthesia_machine.nodes import (
@@ -1060,6 +1061,88 @@ def test_runtime_no_data_status_reset_and_close_lifecycle() -> None:
     assert service.request_panic_count == 2
     runtime.close()
     assert service.close_count == 1
+
+
+def test_runtime_no_data_panics_with_the_ticks_publish_generation_latched() -> None:
+    # The input-missing panic must carry the tick's publish generation
+    # (ADR-0022) so a late in-flight state from that tick cannot re-arm the
+    # port, and it must latch like the absence it ends: one panic per
+    # missing-to-data transition, never one per tick.
+    service = _RecordingService()
+    definition = create_midi_output_definitions(service_factory=lambda: service)[0]
+    runtime = definition.runtime_factory(MIDI_ID)
+    parameters = _parameters(definition, {"output_port": TARGET})
+
+    first = _frame({(0, 60): 100}, tick_index=1, publish_generation=1)
+    runtime.process({"midi": first}, parameters, first.context)
+    assert len(service.published) == 1
+
+    runtime.process(
+        {"midi": NoData},
+        parameters,
+        frame_context(clock_id=CLOCK_ID, tick_index=2, publish_generation=2),
+    )
+    runtime.process(
+        {"midi": NoData},
+        parameters,
+        frame_context(clock_id=CLOCK_ID, tick_index=3, publish_generation=3),
+    )
+    # One panic for the whole absence, at the first missing tick's generation.
+    assert service.request_panic_generations == [2]
+
+    fresh = _frame({(0, 64): 90}, tick_index=4, publish_generation=4)
+    runtime.process({"midi": fresh}, parameters, fresh.context)
+    assert service.request_panic_generations == [2]
+    assert service.published[-1][0] is fresh
+
+    runtime.process(
+        {"midi": NoData},
+        parameters,
+        frame_context(clock_id=CLOCK_ID, tick_index=5, publish_generation=5),
+    )
+    assert service.request_panic_generations == [2, 5]
+    runtime.close()
+
+
+def test_null_midi_service_keeps_the_same_ordering_watermark_as_the_real_service() -> None:
+    # The null stand-in must apply the same state-ordering policy as the
+    # real service rather than a private re-implementation: identical
+    # explicit-generation sequences leave identical watermarks, and the
+    # real service's wire output follows the policy's verdicts.
+    backend = MockMidiOutputBackend((TARGET,))
+    real = MidiOutputService(backend, refresh_interval_s=3600.0)
+    null = NullMidiOutputService()
+    try:
+        _wait(real)
+        stale = _frame({(0, 60): 100}, publish_generation=1)
+        real.publish(stale, _configuration())
+        null.publish(stale, _configuration())
+        _wait(real)
+        port = backend.opened_ports[0]
+        assert port.sent[-1] == MidiMessage.note_on(MidiNoteKey(0, 60), 100)
+
+        real.panic(publish_generation=1)
+        null.panic(publish_generation=1)
+
+        real.publish(stale, _configuration())
+        null.publish(stale, _configuration())
+        _wait(real)
+        # The late stale frame is rejected: the wire still shows the panic.
+        assert port.sent[-1] == MidiMessage.all_notes_off(0)
+
+        real.publish(_frame({(0, 64): 90}, tick_index=2, publish_generation=2), _configuration())
+        null.publish(_frame({(0, 64): 90}, tick_index=2, publish_generation=2), _configuration())
+        real.panic(publish_generation=3)
+        null.panic(publish_generation=3)
+        _wait(real)
+        assert port.sent[-1] == MidiMessage.all_notes_off(0)
+        assert (
+            null._ordering.stale_upto_generation  # pyright: ignore[reportPrivateUsage]
+            == real._ordering.stale_upto_generation  # pyright: ignore[reportPrivateUsage]
+            == 3
+        )
+    finally:
+        real.close()
 
 
 def test_unavailable_runtime_status_becomes_recoverable_scheduler_error() -> None:

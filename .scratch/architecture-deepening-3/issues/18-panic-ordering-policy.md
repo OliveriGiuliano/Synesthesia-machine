@@ -4,7 +4,7 @@
 
 **Solution:** One small state-ordering policy module — reject a state ordered by the engine whose generation is at or below the watermark of the most recent panic; generation-0 states are never rejected — owned by the sinks and mirrored cheaply by their null variants; `GenerateAudioRuntime` panics with the tick's real `publish_generation` on NoData, like `SendMidiRuntime`. A future panic-capable sink adopts the policy instead of rediscovering it, making the ADR-0022 promise true.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Files:**
 - `src/synesthesia_machine/midi/state_ordering.py` (new policy module, or beside `state_diff.py`)
@@ -16,11 +16,11 @@
 - `tests/midi/test_output.py` · `tests/midi/test_debug_synth.py`
 
 **Acceptance:**
-- [ ] One policy module holds the rejection rule; both real sinks and both nulls apply it
-- [ ] `GenerateAudioRuntime` panics with the tick's `publish_generation` on NoData
-- [ ] Regression test: a stale state (generation below the panic watermark) is rejected by both sinks, driven with explicit generations — no clocks
-- [ ] Null-variant conformance against the policy is checked, not assumed by construction
-- [ ] `uv run check` green; MIDI + runtime test suites green; no unrelated diff
+- [x] One policy module holds the rejection rule; both real sinks and both nulls apply it
+- [x] `GenerateAudioRuntime` panics with the tick's `publish_generation` on NoData
+- [x] Regression test: a stale state (generation below the panic watermark) is rejected by both sinks, driven with explicit generations — no clocks
+- [x] Null-variant conformance against the policy is checked, not assumed by construction
+- [x] `uv run check` green; MIDI + runtime test suites green; no unrelated diff
 
 ## Comments
 

@@ -49,6 +49,7 @@ class GenerateAudioRuntime:
     ) -> None:
         self.node_id = node_id
         self._service = _DebugAudioOutputService(synth_factory)
+        self._input_missing = False
 
     def process(
         self,
@@ -56,14 +57,20 @@ class GenerateAudioRuntime:
         parameters: Mapping[str, ParameterValue],
         context: FrameContext,
     ) -> Mapping[str, RuntimeValue]:
-        del context
         if not cast(bool, parameters["enabled"]):
             self._service.disable()
             return {}
         midi = inputs["midi"]
         if midi is NoData:
-            self._service.panic()
+            if not self._input_missing:
+                # The missing input stops the source: panic with this tick's
+                # generation so a late state from it cannot re-arm the
+                # voices (ADR-0022), latched like the Send-MIDI sink so one
+                # absence re-panics once.
+                self._service.panic(context.publish_generation)
+                self._input_missing = True
             return {}
+        self._input_missing = False
         midi = cast(MidiStateFrame, midi)
         configuration = SynthConfiguration(
             waveform=SynthWaveform(cast(str, parameters["waveform"])),
@@ -89,6 +96,7 @@ class GenerateAudioRuntime:
         # no-watermark default instead of a publish generation.
         del reason
         self._service.panic()
+        self._input_missing = False
 
     def close(self) -> None:
         self._service.close()

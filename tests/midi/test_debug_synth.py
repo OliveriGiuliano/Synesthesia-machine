@@ -27,7 +27,12 @@ from synesthesia_machine.contracts import (
     RuntimeValue,
 )
 from synesthesia_machine.graph import GraphCompiler, GraphDocument
-from synesthesia_machine.midi import DebugSynth, SynthConfiguration, SynthWaveform
+from synesthesia_machine.midi import (
+    DebugSynth,
+    NullDebugSynth,
+    SynthConfiguration,
+    SynthWaveform,
+)
 from synesthesia_machine.midi.debug_synth import (
     AudioCallback,
     enumerate_audio_output_devices,
@@ -143,20 +148,22 @@ class RecordingSynth:
     configuration: SynthConfiguration
     updates: list[MidiStateFrame]
     panic_count: int
+    panic_generations: list[int]
     close_count: int
 
     def __init__(self, configuration: SynthConfiguration) -> None:
         self.configuration = configuration
         self.updates = []
         self.panic_count = 0
+        self.panic_generations = []
         self.close_count = 0
 
     def update(self, state: MidiStateFrame) -> None:
         self.updates.append(state)
 
     def panic(self, publish_generation: int = 0) -> None:
-        del publish_generation
         self.panic_count += 1
+        self.panic_generations.append(publish_generation)
 
     def close(self) -> None:
         self.close_count += 1
@@ -351,6 +358,144 @@ def test_scheduler_no_data_reset_panic_and_close_cannot_leave_stale_state() -> N
     assert synth.panic_count == 3
     scheduler.close()
     assert synth.close_count == 1
+
+
+def test_runtime_no_data_panics_with_the_ticks_publish_generation_latched() -> None:
+    # ADR-0022: a missing input must panic the synth with the publish
+    # generation of the tick that lost the race, so a late in-flight state
+    # from that tick cannot re-arm the silenced voices. As in the Send-MIDI
+    # sink, a continuous absence re-panics once, on the missing-to-data
+    # transition, not on every tick.
+    synth_factory = RecordingSynthFactory()
+    definition = create_output_definitions(synth_factory=synth_factory)[0]
+    runtime = definition.runtime_factory(AUDIO_NODE_ID)
+    enabled = _parameters(definition, {"enabled": True})
+    first = _midi_state({(0, 60): 100}, tick_index=1, publish_generation=1)
+    runtime.process({"midi": first}, enabled, first.context)
+    assert runtime.wait_until_idle()
+    assert synth_factory.synths, "the first publish opens the synth lazily"
+    synth = synth_factory.synths[0]
+    _wait_for(lambda: len(synth.updates) == 1)
+
+    missing_two = frame_context(clock_id=MIDI_SOURCE_ID, tick_index=2, publish_generation=2)
+    runtime.process({"midi": NoData}, enabled, missing_two)
+    runtime.process(
+        {"midi": NoData},
+        enabled,
+        frame_context(clock_id=MIDI_SOURCE_ID, tick_index=3, publish_generation=3),
+    )
+    # One panic for the whole absence, carrying the first missing tick's
+    # generation so late states from that tick are stale.
+    assert synth.panic_generations == [2]
+
+    fresh = _midi_state({(0, 64): 90}, tick_index=4, publish_generation=4)
+    runtime.process({"midi": fresh}, enabled, fresh.context)
+    assert runtime.wait_until_idle()
+    assert synth.panic_generations == [2]
+    assert synth.updates[-1] is fresh
+
+    runtime.close()
+    # Close silences through the no-watermark default; the service panics
+    # immediately on the caller and again from the worker's shutdown path,
+    # but neither path stamps a tick generation.
+    assert synth.panic_generations[0] == 2
+    assert all(generation == 0 for generation in synth.panic_generations[1:])
+
+
+def test_facade_no_data_panics_audio_sink_with_the_ticks_generation() -> None:
+    # End to end (ADR-0022): the facade stamps every tick, so a missing
+    # source value must panic the audio sink with that tick's generation; a
+    # late in-flight state from the same tick cannot re-arm the voices.
+    synth_factory = RecordingSynthFactory()
+    source_definition = make_definition(
+        "test.midi_source",
+        output_type=PortType.MIDI_STATE,
+        execution_kind=ExecutionKind.SOURCE,
+    )
+    audio_definition = create_output_definitions(synth_factory=synth_factory)[0]
+    registry = NodeRegistry((source_definition, audio_definition))
+    document = GraphDocument()
+    source_id = document.add_node(source_definition.type_id, node_id=MIDI_SOURCE_ID)
+    audio_id = document.add_node(
+        audio_definition.type_id, node_id=AUDIO_NODE_ID, parameters={"enabled": True}
+    )
+    document.add_connection(source_id, "value", audio_id, "midi")
+    facade = EngineFacade(registry)
+    try:
+        assert facade.activate(document.snapshot()).plan is not None
+        facade.tick(
+            frame_context(clock_id=MIDI_SOURCE_ID),
+            source_values={
+                PortKey(MIDI_SOURCE_ID, "value"): _midi_state({(0, 60): 100}, tick_index=1)
+            },
+        )
+        _wait_for(lambda: bool(synth_factory.synths))
+        synth = synth_factory.synths[0]
+        _wait_for(lambda: len(synth.updates) == 1)
+
+        facade.tick(
+            frame_context(clock_id=MIDI_SOURCE_ID, tick_index=2),
+            source_values={PortKey(MIDI_SOURCE_ID, "value"): NoData},
+        )
+        assert synth.panic_generations == [2]
+
+        facade.tick(
+            frame_context(clock_id=MIDI_SOURCE_ID, tick_index=3),
+            source_values={PortKey(MIDI_SOURCE_ID, "value"): NoData},
+        )
+        assert synth.panic_generations == [2]
+    finally:
+        facade.close()
+    # Close silences through the no-watermark default; the service panics
+    # immediately on the caller and again from the worker's shutdown path,
+    # but neither path stamps a tick generation.
+    assert synth.panic_generations[0] == 2
+    assert all(generation == 0 for generation in synth.panic_generations[1:])
+
+
+def test_null_synth_keeps_the_same_ordering_watermark_as_the_real_synth() -> None:
+    # The null stand-in must apply the same state-ordering policy as the
+    # real synth rather than a private re-implementation: identical
+    # explicit-generation sequences leave identical watermarks, and the
+    # real sink's observable behaviour follows the policy's verdicts.
+    configuration = SynthConfiguration(attack_ms=0.0, max_voices=2, sample_rate=8000, block_size=32)
+    stream_factory = StreamFactory()
+    real = DebugSynth(configuration, stream_factory=stream_factory)
+    null = NullDebugSynth(configuration)
+    stream = stream_factory.streams[0]
+    try:
+        stale = _state_at({(0, 69): 127}, publish_generation=1)
+        real.update(stale)
+        null.update(stale)
+        stream.render(configuration.block_size)
+        assert real.active_voice_count == 1
+
+        real.panic(publish_generation=1)
+        null.panic(publish_generation=1)
+        stream.render(configuration.block_size)
+
+        real.update(stale)
+        null.update(stale)
+        stream.render(configuration.block_size)
+        # The late stale frame is rejected by the real sink...
+        assert real.active_voice_count == 0
+
+        unordered = _state_at({(0, 72): 100}, publish_generation=0)
+        real.update(unordered)
+        null.update(unordered)
+        stream.render(configuration.block_size)
+        # ...the unordered frame is admitted.
+        assert real.active_keys == (72,)
+
+        real.panic(publish_generation=3)
+        null.panic(publish_generation=3)
+        assert (
+            null._ordering.stale_upto_generation  # pyright: ignore[reportPrivateUsage]
+            == real._ordering.stale_upto_generation  # pyright: ignore[reportPrivateUsage]
+            == 3
+        )
+    finally:
+        real.close()
 
 
 def test_audio_open_failure_becomes_recoverable_scheduler_error() -> None:
