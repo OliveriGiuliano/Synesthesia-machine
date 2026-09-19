@@ -46,14 +46,10 @@ from synesthesia_machine.contracts import (
     DeviceCatalogue,
     EngineActivation,
     EngineClient,
-    EngineConnectionState,
-    EngineMetrics,
     EngineStatus,
     ImagePreview,
-    MidiOutputConnectionState,
     NodeProfile,
     NotePreview,
-    SourceState,
 )
 from synesthesia_machine.diagnostics import create_diagnostic_bundle
 from synesthesia_machine.graph import (
@@ -64,7 +60,7 @@ from synesthesia_machine.graph import (
     ValidationIssue,
     generate_random_graph,
 )
-from synesthesia_machine.nodes import NodeRegistry, PreviewDock
+from synesthesia_machine.nodes import NodeRegistry
 from synesthesia_machine.persistence import (
     RelinkMatch,
     find_missing_media,
@@ -92,6 +88,12 @@ from synesthesia_machine.ui.engine_bridge import (
     EngineBridgeState,
     EngineRestartOutcome,
 )
+from synesthesia_machine.ui.engine_status_presenter import (
+    EngineStatusPresenter,
+    ErrorTooltip,
+    FailureIntent,
+    TelemetryIntents,
+)
 from synesthesia_machine.ui.engine_task_runner import QtEngineTaskRunner, QtUiClock
 from synesthesia_machine.ui.midi_export import (
     MidiExportJob,
@@ -99,7 +101,7 @@ from synesthesia_machine.ui.midi_export import (
     midi_export_tooltip,
 )
 from synesthesia_machine.ui.preview_families import display_visualizer
-from synesthesia_machine.ui.preview_router import PreviewRouter, PumpedPreviews
+from synesthesia_machine.ui.preview_router import RoutingResult
 from synesthesia_machine.ui.previews import (
     ImagePreviewPanel,
     NotePreviewPanel,
@@ -110,7 +112,7 @@ from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.theme import DEFAULT_THEME, Theme
 from synesthesia_machine.ui.translations import set_language, tr, trf
 from synesthesia_machine.ui.transport import resolve_transport_target
-from synesthesia_machine.ui.view_models import GraphViewModel, PortViewModel
+from synesthesia_machine.ui.view_models import PortViewModel
 from synesthesia_machine.ui.widgets import (
     InspectorPanel,
     NodeLibrary,
@@ -176,22 +178,11 @@ class MainWindow(QMainWindow):
             autosave_controller=self.autosave_controller,
             recent_file_limit=lambda: self.preferences.recent_file_limit,
         )
-        self._image_dock_preview_sources: frozenset[tuple[UUID, str]] = frozenset()
         self._engine_closed = False
-        self._engine_failure_signature: tuple[object, ...] | None = None
-        self._source_error_signature: tuple[tuple[UUID, str], ...] = ()
-        self._midi_error_signature: tuple[tuple[UUID, str, tuple[str, ...]], ...] = ()
-        self._runtime_error_signature: tuple[tuple[UUID, str, str], ...] = ()
         self._midi_eligibility: tuple[bool, str] | None = None
         self._midi_eligibility_key: object | None = None
         self._source_node_ids: tuple[UUID, ...] = ()
         self._source_node_ids_key: object | None = None
-        self._rendered_metrics: EngineMetrics | None = None
-        self._applied_device_catalogue: DeviceCatalogue | None = None
-        self._rendered_profiles: tuple[NodeProfile, ...] | None = None
-        self._rendered_last_activation: EngineActivation | None = None
-        self._rendered_last_transport: object | None = None
-        self._rendered_last_restart: EngineRestartOutcome | None = None
         self._midi_export_job: MidiExportJob | None = None
         self._autosave_timer = QTimer(self)
         self._autosave_timer.setSingleShot(True)
@@ -215,18 +206,21 @@ class MainWindow(QMainWindow):
         # state the bridge publishes.
         self._engine_task_runner = QtEngineTaskRunner(self)
         self._engine_tasks_inflight = self._engine_task_runner.inflight
-        self.preview_router = PreviewRouter()
         self.engine_session = EngineSession(engine_client)
         self.engine_bridge = EngineBridge(
             self.engine_session,
             demand_roots_for=self._runtime_demand_roots,
             task_runner=self._engine_task_runner,
             clock=QtUiClock(self._activation_timer),
-            preview_router=self.preview_router,
             on_previews=self._on_pumped_previews,
             on_state=self._on_engine_state,
             on_status_message=self._on_engine_status_message,
         )
+        # The presenter interprets the bridge's published state into display
+        # intents (which settled facts are new, which error digests changed);
+        # the window renders the intents and owns only localization and
+        # widget policy.
+        self.engine_status_presenter = EngineStatusPresenter()
         self._device_refresh_timer.timeout.connect(self.engine_bridge.request_device_catalogue)
         self._node_count = QLabel(self)
         self._validation_status = QLabel(self)
@@ -1156,7 +1150,6 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{name}[*] — Synesthesia Machine {__version__}")
         self.setWindowModified(self.session.is_dirty)
         view_model = self.session.view_model
-        self._image_dock_preview_sources = self._image_visualizer_source_keys(view_model)
         self._node_count.setText(
             trf(
                 "{nodes} node(s) · {cables} cable(s) · {groups} group/comment(s)",
@@ -1339,19 +1332,6 @@ class MainWindow(QMainWindow):
             note_dock_visible=self.note_preview_dock.isVisible(),
         )
 
-    @staticmethod
-    def _image_visualizer_source_keys(
-        view: GraphViewModel,
-    ) -> frozenset[tuple[UUID, str]]:
-        visualizer_ids = {
-            node.node_id for node in view.nodes if node.preview_dock is PreviewDock.IMAGE
-        }
-        return frozenset(
-            (connection.source_node_id, connection.source_port_id)
-            for connection in view.connections
-            if connection.destination_node_id in visualizer_ids
-        )
-
     def _clear_runtime_previews(self) -> None:
         """Clear the UI's preview widgets only.
 
@@ -1381,21 +1361,20 @@ class MainWindow(QMainWindow):
     def _poll_previews(self) -> None:
         if self._engine_closed:
             return
-        # Canvas link pills are always visible, so value and image previews are
-        # polled unconditionally; only the note dock's port is gated on its
-        # visibility (the image dock's visibility is read when the batch is
-        # routed, since its frames still land on the canvas pills).
+        # Canvas link pills are always visible, so value and image previews
+        # are polled unconditionally; the note dock's port is gated on its
+        # visibility. The pump routes the batch itself, so this call hands
+        # it the image dock's visibility and the current projection (its
+        # frames still land on the canvas pills either way).
         self.engine_bridge.pump_previews_once(
             note_visible=self.note_preview_dock.isVisible(),
+            image_visible=self.image_preview_dock.isVisible(),
+            view=self.session.view_model,
         )
 
-    def _on_pumped_previews(self, pumped: PumpedPreviews) -> None:
-        """Apply the preview router's sink decision to the pills and docks."""
-        routed = self.preview_router.route(
-            pumped,
-            image_visible=self.image_preview_dock.isVisible(),
-            image_dock_sources=self._image_dock_preview_sources,
-        )
+    def _on_pumped_previews(self, routed: RoutingResult) -> None:
+        """Apply the bridge's routing result to the pills and docks (the
+        window performs no routing itself)."""
         dock_keys = {(preview.owner_id, preview.source_port_id) for preview in routed.image_dock}
         for preview in routed.image_pill:
             # Convert the preview bytes once and share the QImage between the
@@ -1416,150 +1395,112 @@ class MainWindow(QMainWindow):
     @Slot()
     def _refresh_engine_status(self) -> None:
         # The cheap status liveness check runs on the UI thread through the
-        # bridge (a local fold in the process client, no IPC); the heavy
-        # metrics round trip goes to the engine task pool.
+        # bridge (a local fold in the process client, no IPC); the presenter
+        # then decides whether the heavy metrics round trip (engine task
+        # pool) is worth it for the published state.
         if self._engine_closed:
             return
         self.engine_bridge.refresh_status()
-        state = self.engine_bridge.state
-        if state.status is None:
+        plan = self.engine_status_presenter.plan_telemetry_refresh(
+            self.engine_bridge.state, self.scene.selected_node_ids()
+        )
+        if plan.skip:
+            # A stopped engine publishes no data, and the cheap liveness
+            # check above still catches crash and heartbeat timeouts.
+            # Skipping the periodic metrics round trip keeps the UI thread
+            # free for editing.
             return
-        if state.connection_state is EngineConnectionState.RESTARTING:
-            return
-        if state.connection_state in {
-            EngineConnectionState.CRASHED,
-            EngineConnectionState.UNRESPONSIVE,
-        }:
-            return
-        selected_nodes = self.scene.selected_node_ids()
-        selected_node = next(iter(selected_nodes)) if len(selected_nodes) == 1 else None
-        if (
-            state.known_stopped
-            and state.connection_state is EngineConnectionState.CONNECTED
-            and selected_node is None
-        ):
-            # A stopped engine publishes no data, and the cheap liveness check
-            # above still catches crash and heartbeat timeouts. Skipping the
-            # periodic metrics round trip keeps the UI thread free for editing.
-            return
-        self.engine_bridge.refresh_telemetry(selected_node)
+        self.engine_bridge.refresh_telemetry(plan.node)
 
     def _render_engine_status(self, status: EngineStatus) -> None:
-        restart = self.action_registry.require("restart_engine")
-        failed = status.connection_state in {
-            EngineConnectionState.CRASHED,
-            EngineConnectionState.UNRESPONSIVE,
-        }
-        restart.setEnabled(failed)
-        if failed:
-            self._show_engine_failure(status)
+        intent = self.engine_status_presenter.present_engine_status(status)
+        self.action_registry.require("restart_engine").setEnabled(intent.restart_enabled)
+        if intent.restart_enabled:
+            # A failed engine: the presenter owns the dialog dedup (failure
+            # signature); the window renders the label and status-bar text
+            # and shows the dialog only for a new failure.
+            self._show_engine_failure(
+                status, self.engine_status_presenter.present_engine_failure(status)
+            )
             return
-        self._engine_failure_signature = None
-        if status.connection_state is EngineConnectionState.RESTARTING:
+        # Recovery: the presenter forgets the announced failure so a later
+        # crash dialog is shown again.
+        self.engine_status_presenter.failure_reset()
+        if intent.restarting:
             self._engine_status.setText(tr("Engine RESTARTING"))
 
-    def _apply_engine_telemetry(self, state: EngineBridgeState) -> None:
-        metrics = state.metrics
-        if metrics is None:
-            return
-        sources = state.source_statuses
-        midi_outputs = state.midi_output_statuses
-        self.session.set_source_statuses(sources)
-        self.inspector.set_memory_diagnostic(state.diagnostic)
-        self.inspector.set_source_statuses(sources)
-        source_text = ", ".join(tr(status.state.value) for status in sources) or tr("no source")
-        source_errors = tuple(
-            (status.node_id, status.last_error or tr("Unknown source error"))
-            for status in sources
-            if status.state is SourceState.ERROR
-        )
-        midi_errors = tuple(
-            (
-                status.node_id,
-                status.last_error or tr("MIDI output is unavailable"),
-                status.available_ports,
+    def _apply_telemetry_intents(self, intents: TelemetryIntents) -> None:
+        """Apply the presenter's display intents for one telemetry publish."""
+        self.session.set_source_statuses(intents.source_statuses)
+        self.inspector.set_memory_diagnostic(intents.diagnostic)
+        self.inspector.set_source_statuses(intents.source_statuses)
+        source_text = ", ".join(tr(state) for state in intents.source_states) or tr("no source")
+        tooltip = intents.tooltip
+        if isinstance(tooltip, ErrorTooltip):
+            lines = [
+                trf(
+                    "Source {node}: {message}",
+                    node=str(node_id)[:8],
+                    message=message or tr("Unknown source error"),
+                )
+                for node_id, message in tooltip.sources
+            ]
+            lines.extend(
+                trf(
+                    "MIDI {node}: {message}. Available outputs: {outputs}",
+                    node=str(node_id)[:8],
+                    message=message or tr("MIDI output is unavailable"),
+                    outputs=", ".join(ports) or tr("none"),
+                )
+                for node_id, message, ports in tooltip.midi
             )
-            for status in midi_outputs
-            if status.connection_state
-            in {MidiOutputConnectionState.ERROR, MidiOutputConnectionState.UNAVAILABLE}
-        )
-        runtime_errors = tuple(
-            (error.node_id, error.code, error.message) for error in metrics.runtime_errors
-        )
-        diagnostic_lines = [
-            trf("Source {node}: {message}", node=str(node_id)[:8], message=message)
-            for node_id, message in source_errors
-        ]
-        diagnostic_lines.extend(
-            trf(
-                "MIDI {node}: {message}. Available outputs: {outputs}",
-                node=str(node_id)[:8],
-                message=message,
-                outputs=", ".join(ports) or tr("none"),
+            lines.extend(
+                trf(
+                    "Node {node}: {message} ({code})",
+                    node=str(node_id)[:8],
+                    message=message,
+                    code=code,
+                )
+                for node_id, code, message in tooltip.nodes
             )
-            for node_id, message, ports in midi_errors
-        )
-        diagnostic_lines.extend(
-            trf(
-                "Node {node}: {message} ({code})",
-                node=str(node_id)[:8],
-                message=message,
-                code=code,
-            )
-            for node_id, code, message in runtime_errors
-        )
-        if diagnostic_lines:
-            diagnostic_detail = "\n".join(diagnostic_lines)
-            self._engine_status.setToolTip(diagnostic_detail)
-            if (
-                source_errors != self._source_error_signature
-                or midi_errors != self._midi_error_signature
-                or runtime_errors != self._runtime_error_signature
-            ):
-                self.statusBar().showMessage(diagnostic_detail, 10000)
+            detail = "\n".join(lines)
+            self._engine_status.setToolTip(detail)
+            if intents.announce_errors:
+                self.statusBar().showMessage(detail, 10000)
         else:
             midi_detail = "\n".join(
                 trf(
                     "MIDI {port}: {state}, {count} active note(s)",
-                    port=status.selected_port or tr("unselected"),
-                    state=tr(status.connection_state.value),
-                    count=status.active_note_count,
+                    port=port or tr("unselected"),
+                    state=tr(state),
+                    count=count,
                 )
-                for status in midi_outputs
+                for port, state, count in tooltip.midi
             )
+            figures = tooltip.figures
             telemetry = (
-                f"Input / processed / preview: {metrics.input_fps:.1f} / "
-                f"{metrics.processed_fps:.1f} / {metrics.preview_fps:.1f} FPS\n"
-                f"Graph p95: {metrics.p95_graph_execution_ms:.2f} ms · "
-                f"queue {metrics.mailbox_occupancy}/{metrics.mailbox_capacity} · "
-                f"frame age {metrics.frame_age_ms:.1f} ms\n"
-                f"CPU {metrics.supervisor.cpu_percent:.1f}% · "
-                f"RAM {metrics.memory_bytes / (1024 * 1024):.1f} MiB"
+                f"Input / processed / preview: {figures[0]} / "
+                f"{figures[1]} / {figures[2]} FPS\n"
+                f"Graph p95: {figures[3]} ms · queue {figures[4]} · "
+                f"frame age {figures[5]} ms\n"
+                f"CPU {figures[6]}% · RAM {figures[7]} MiB"
             )
             self._engine_status.setToolTip(
                 f"{midi_detail}\n{telemetry}" if midi_detail else telemetry
             )
-        self._source_error_signature = source_errors
-        self._midi_error_signature = midi_errors
-        self._runtime_error_signature = runtime_errors
-        midi_text = ", ".join(tr(status.connection_state.value) for status in midi_outputs) or tr(
-            "no output"
-        )
+        midi_text = ", ".join(tr(state) for state in intents.midi_states) or tr("no output")
         summary = (
             trf(
                 "Engine {state} · source {source}",
-                state=tr(metrics.state.value),
+                state=tr(intents.engine_state),
                 source=source_text,
             )
             + " · "
             f"MIDI {midi_text} · "
-            f"{metrics.processed_ticks} ticks"
+            f"{intents.ticks} ticks"
         )
-        if metrics.dropped_before_processing:
-            summary += trf(
-                " · {count} dropped",
-                count=metrics.dropped_before_processing,
-            )
+        if intents.dropped:
+            summary += trf(" · {count} dropped", count=intents.dropped)
         # The status line is rebuilt every 100 ms while the engine runs;
         # skip the setText re-layout when nothing changed so an idle engine
         # costs only the string comparison.
@@ -1581,12 +1522,13 @@ class MainWindow(QMainWindow):
 
     def _apply_engine_restart(self, outcome: EngineRestartOutcome) -> None:
         if outcome.outcome != "restart_failed":
-            # The child was replaced: forget its previews and the failure
-            # signature; the session dropped its "known stopped" cache on
-            # restart, so the final refresh below re-learns the real state
-            # instead of skipping it.
+            # The child was replaced: forget its previews and the presenter's
+            # announced failure (re-arming the dialog for a later crash); the
+            # session dropped its "known stopped" cache on restart, so the
+            # final refresh below re-learns the real state instead of
+            # skipping it.
             self._clear_runtime_previews()
-            self._engine_failure_signature = None
+            self.engine_status_presenter.failure_reset()
         if outcome.outcome == "restart_failed":
             self.statusBar().showMessage(
                 trf("Engine restart failed: {error}", error=outcome.detail), 8000
@@ -1613,31 +1555,20 @@ class MainWindow(QMainWindow):
             return
         if state.status is not None:
             self._render_engine_status(state.status)
-        # The last_* fields persist in the state; object identity tells a new
-        # settled result from a stale one carried along by an unrelated publish.
-        if state.metrics is not None and state.metrics is not self._rendered_metrics:
-            self._rendered_metrics = state.metrics
-            self._apply_engine_telemetry(state)
-        if (
-            state.device_catalogue is not None
-            and state.device_catalogue is not self._applied_device_catalogue
-        ):
-            self._applied_device_catalogue = state.device_catalogue
-            self._apply_device_catalogue(state.device_catalogue)
-        if state.node_profiles is not self._rendered_profiles and self.profiler_dock.isVisible():
-            self._rendered_profiles = state.node_profiles
-            self._render_profiles(state.node_profiles)
-        if (
-            state.last_activation is not None
-            and state.last_activation is not self._rendered_last_activation
-        ):
-            self._rendered_last_activation = state.last_activation
-            self._apply_engine_activation(state.last_activation)
-        if (
-            state.last_transport is not None
-            and state.last_transport is not self._rendered_last_transport
-        ):
-            self._rendered_last_transport = state.last_transport
+        # The presenter folds the published state into per-concern intents;
+        # its object-identity caches tell a new settled fact (the last_*
+        # fields persist in the state) from a stale one carried along by an
+        # unrelated publish.
+        intents = self.engine_status_presenter.present_state(state)
+        if intents.telemetry is not None:
+            self._apply_telemetry_intents(intents.telemetry)
+        if intents.device_catalogue is not None:
+            self._apply_device_catalogue(intents.device_catalogue)
+        if intents.node_profiles is not None and self.profiler_dock.isVisible():
+            self._render_profiles(intents.node_profiles)
+        if intents.activation is not None:
+            self._apply_engine_activation(intents.activation)
+        if intents.transport is not None:
             # A transport command changes engine run state outside of an
             # activation; the session dropped its "known stopped" cache with
             # it, so the periodic refresh resumes instead of showing a stale
@@ -1645,40 +1576,37 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 trf(
                     "{verb} source {source}",
-                    verb=tr(state.last_transport.verb),
-                    source=str(state.last_transport.target)[:8],
+                    verb=tr(intents.transport.verb),
+                    source=str(intents.transport.target)[:8],
                 ),
                 3000,
             )
-        if state.last_restart is not None and state.last_restart is not self._rendered_last_restart:
-            self._rendered_last_restart = state.last_restart
-            self._apply_engine_restart(state.last_restart)
+        if intents.restart is not None:
+            self._apply_engine_restart(intents.restart)
 
     def _on_engine_status_message(self, message: str, timeout_ms: int) -> None:
         if self._engine_closed:
             return
-        if message in {"activated", "activation_rejected"}:
-            # The revision / error count is rendered from the published state.
+        intent = self.engine_status_presenter.present_status_message(message, timeout_ms)
+        if intent is None:
+            # "activated" and "activation_rejected" are rendered from the
+            # published state.
             return
-        if message == "panic_ok":
-            self.statusBar().showMessage(tr("All outputs silenced"), timeout_ms)
-            return
-        # Every task failure changes engine run state outside of an
-        # activation; the session dropped its "known stopped" cache with it,
-        # so the periodic refresh resumes instead of showing a stale STOPPED
-        # status.
-        if message == "activation_failed":
-            self.statusBar().showMessage(tr("Engine activation failed"), timeout_ms)
-        elif message == "devices_refreshing":
-            self.statusBar().showMessage(tr("Refreshing devices…"), timeout_ms)
-        elif message == "devices_failed":
-            self.statusBar().showMessage(tr("Could not refresh devices"), timeout_ms)
-        elif message == "transport_failed":
-            self.statusBar().showMessage(tr("Could not control source"), timeout_ms)
-        elif message == "panic_failed":
-            self.statusBar().showMessage(tr("Could not send panic"), timeout_ms)
-        elif message == "restart_failed":
-            self.statusBar().showMessage(tr("Engine restart failed"), timeout_ms)
+        texts = {
+            "panic_ok": tr("All outputs silenced"),
+            "activation_failed": tr("Engine activation failed"),
+            "devices_refreshing": tr("Refreshing devices…"),
+            "devices_failed": tr("Could not refresh devices"),
+            "transport_failed": tr("Could not control source"),
+            "panic_failed": tr("Could not send panic"),
+            "restart_failed": tr("Engine restart failed"),
+        }
+        self.statusBar().showMessage(texts[intent.key], intent.timeout_ms)
+        if intent.needs_status_refresh:
+            # Every task failure changes engine run state outside of an
+            # activation; the session dropped its "known stopped" cache with
+            # it, so the periodic refresh resumes instead of showing a stale
+            # STOPPED status.
             self._refresh_engine_status()
 
     @Slot(bool)
@@ -1724,18 +1652,13 @@ class MainWindow(QMainWindow):
         levels = profile_heat_levels(self.profiler_panel.profiles) if enabled else None
         self.scene.set_node_heatmap(levels)
 
-    def _show_engine_failure(self, status: EngineStatus) -> None:
+    def _show_engine_failure(self, status: EngineStatus, intent: FailureIntent) -> None:
         state = status.connection_state.value
         exit_text = "" if status.exit_code is None else f" · exit {status.exit_code}"
-        crash_report = (
-            None
-            if status.crash_log_path is None or not Path(status.crash_log_path).is_file()
-            else status.crash_log_path
-        )
         log_text = (
             tr(" · no crash report file")
-            if crash_report is None
-            else trf(" · crash report {path}", path=crash_report)
+            if not intent.crash_report_available
+            else trf(" · crash report {path}", path=status.crash_log_path)
         )
         self._engine_status.setText(
             trf(
@@ -1749,16 +1672,10 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             trf("Engine {state}: {detail}", state=tr(state.lower()), detail=detail)
         )
-        signature = (
-            status.connection_state,
-            status.child_process_id,
-            status.exit_code,
-            status.last_error,
-            status.crash_log_path,
-        )
-        if signature == self._engine_failure_signature:
+        if not intent.dialog:
+            # The same failure was already announced: keep the label and
+            # status-bar text current, do not re-show the dialog.
             return
-        self._engine_failure_signature = signature
         message = trf(
             "The engine is {state}. The graph document remains open and editable.\n\n"
             "Details: {detail}",
@@ -1767,8 +1684,8 @@ class MainWindow(QMainWindow):
         )
         if status.exit_code is not None:
             message += trf("\nExit code: {code}", code=status.exit_code)
-        if crash_report is not None:
-            message += trf("\nCrash report: {path}", path=crash_report)
+        if intent.crash_report_available:
+            message += trf("\nCrash report: {path}", path=status.crash_log_path)
         else:
             message += tr("\nNo crash-report file was produced.")
             message += tr(" Native termination can occur before Python can write a traceback.")

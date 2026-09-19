@@ -16,6 +16,7 @@ from uuid import UUID, uuid4
 
 import numpy as np
 
+from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.contracts.engine_client import (
     DeviceCatalogue,
     EngineActivation,
@@ -31,16 +32,18 @@ from synesthesia_machine.contracts.engine_client import (
     SourceStatus,
     ValuePreview,
 )
-from synesthesia_machine.graph import ValidationReport
+from synesthesia_machine.graph import GraphDocument, ValidationReport
 from synesthesia_machine.graph.model import GraphSnapshot
+from synesthesia_machine.nodes import NodeRegistry
+from synesthesia_machine.nodes.visualization import DISPLAY_IMAGE_DATA_TYPE_ID
 from synesthesia_machine.runtime import EngineSession
 from synesthesia_machine.ui.engine_bridge import (
     EngineBridge,
     EngineBridgeState,
     EngineTaskRunner,
-    PumpedPreviews,
 )
-from synesthesia_machine.ui.preview_router import PreviewRouter
+from synesthesia_machine.ui.preview_router import RoutingResult
+from synesthesia_machine.ui.view_models import GraphViewModel, project_graph
 
 _IMAGE_PORT = "image"
 _OWNER_A = UUID("0" * 32)
@@ -53,6 +56,29 @@ def _report() -> ValidationReport:
 
 def _snapshot(revision: int = 1) -> GraphSnapshot:
     return GraphSnapshot(document_id=uuid4(), revision=revision, nodes=(), connections=())
+
+
+def _registry() -> NodeRegistry:
+    return create_application_registry()
+
+
+def _empty_view() -> GraphViewModel:
+    """A projection with no visualizer nodes: every preview routes to the pills."""
+    return project_graph(_snapshot(), _registry(), _report())
+
+
+def _document_with_image_visualizer() -> tuple[GraphDocument, UUID]:
+    """A load_video source feeding a display node; the second value is the
+    source node id (a preview owned by it feeds the image dock)."""
+    document = GraphDocument()
+    source = document.add_node(
+        "synmachine.input.load_video",
+        implementation_version=2,
+        parameters={"file_path": "/nonexistent/video.mp4"},
+    )
+    display = document.add_node(DISPLAY_IMAGE_DATA_TYPE_ID, implementation_version=2)
+    document.add_connection(source, "image", display, "image")
+    return document, source
 
 
 class _FakeClient:
@@ -279,7 +305,7 @@ class _Harness:
     runner: EngineTaskRunner
     clock: _ScriptedClock
     states: list[EngineBridgeState]
-    previews: list[PumpedPreviews]
+    previews: list[RoutingResult]
     messages: list[tuple[str, int]]
 
 
@@ -290,7 +316,7 @@ def _harness(
     runner: EngineTaskRunner | None = None,
 ) -> _Harness:
     states: list[EngineBridgeState] = []
-    previews: list[PumpedPreviews] = []
+    previews: list[RoutingResult] = []
     messages: list[tuple[str, int]] = []
     if runner is None:
         runner = _SyncRunner()
@@ -301,7 +327,6 @@ def _harness(
         demand_roots_for=lambda _snapshot: demand_roots,
         task_runner=runner,
         clock=clock,
-        preview_router=PreviewRouter(),
         on_previews=previews.append,
         on_state=states.append,
         on_status_message=lambda text, ms: messages.append((text, ms)),
@@ -309,13 +334,13 @@ def _harness(
     return _Harness(bridge, client, runner, clock, states, previews, messages)
 
 
-def _image_preview() -> ImagePreview:
+def _image_preview(owner: UUID = _OWNER_A, sequence: int = 1) -> ImagePreview:
     data = np.zeros((2, 2, 4), dtype=np.uint8)
     data.flags.writeable = False
     return ImagePreview(
-        owner_id=_OWNER_A,
+        owner_id=owner,
         source_port_id=_IMAGE_PORT,
-        sequence=1,
+        sequence=sequence,
         tick_index=1,
         width=2,
         height=2,
@@ -412,27 +437,48 @@ def test_preview_pump_routes_batch_and_advances_cursors() -> None:
     client.image_preview = _image_preview()
     client.value_previews = (_value_preview("1.00"),)
     harness = _harness(client)
-    harness.bridge.pump_previews_once(note_visible=False)
+    harness.bridge.pump_previews_once(note_visible=False, image_visible=True, view=_empty_view())
     assert len(harness.previews) == 1
     batch = harness.previews[0]
-    assert len(batch.image_previews) == 1
-    assert len(batch.value_previews) == 1
+    assert len(batch.image_pill) == 1
+    assert len(batch.value_pill) == 1
     # The cursor advanced to the emitted sequence, so a repeat poll emits nothing new.
-    harness.bridge.pump_previews_once(note_visible=False)
-    assert harness.previews[-1].image_previews == ()
+    harness.bridge.pump_previews_once(note_visible=False, image_visible=True, view=_empty_view())
+    assert harness.previews[-1].image_pill == ()
+
+
+def test_image_dock_routing_follows_visibility_and_visualizer_feed() -> None:
+    client = _FakeClient()
+    document, source = _document_with_image_visualizer()
+    view = project_graph(document.snapshot(), _registry(), _report())
+    client.image_preview = _image_preview(owner=source)
+    harness = _harness(client)
+    # A visible image dock receives frames whose source port feeds a display node.
+    harness.bridge.pump_previews_once(note_visible=False, image_visible=True, view=view)
+    assert len(harness.previews) == 1
+    routed = harness.previews[0]
+    assert len(routed.image_dock) == 1
+    assert routed.image_dock[0].owner_id == source
+    # The canvas pill receives the same frame either way.
+    assert len(routed.image_pill) == 1
+    # A new frame while the dock is hidden stays on the pill only.
+    client.image_preview = _image_preview(owner=source, sequence=2)
+    harness.bridge.pump_previews_once(note_visible=False, image_visible=False, view=view)
+    assert harness.previews[-1].image_dock == ()
+    assert len(harness.previews[-1].image_pill) == 1
 
 
 def test_hidden_note_dock_skips_note_polling() -> None:
     client = _FakeClient()
     harness = _harness(client)
-    harness.bridge.pump_previews_once(note_visible=False)
+    harness.bridge.pump_previews_once(note_visible=False, image_visible=False, view=_empty_view())
     assert client.note_polls == 0, "note port must not be polled while the dock is hidden"
 
 
 def test_hiding_the_note_dock_resets_its_cursors() -> None:
     client = _FakeClient()
     harness = _harness(client)
-    harness.bridge.pump_previews_once(note_visible=True)
+    harness.bridge.pump_previews_once(note_visible=True, image_visible=False, view=_empty_view())
     harness.bridge.note_preview_hidden()
     assert client.note_polls == 1, "the dock was visible, so the note port was polled once"
 

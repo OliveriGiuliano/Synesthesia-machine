@@ -21,9 +21,9 @@ bridge directly without a ``QMainWindow`` or ``qWait`` timing. The preview
 pump itself is driven by the compositor's timer (it needs the note dock's
 visibility flag the window holds), so the bridge exposes a single
 ``pump_previews_once`` step rather than owning that timer; the step asks
-the session for the previews newer than its cursors and hands the batch to
-the injected preview router, and the compositor applies the router's
-routing decision to the scene and panels.
+the session for the previews newer than its cursors, routes the batch with
+the bridge's preview router, and hands the compositor the sink decisions
+to apply to the scene and panels.
 
 The bridge publishes two kinds of output. Rich results (activation reports,
 telemetry, device catalogues, profiles, restart/transport outcomes) are
@@ -53,18 +53,20 @@ from synesthesia_machine.contracts.engine_client import (
     SourceState,
     SourceStatus,
 )
+from synesthesia_machine.nodes import PreviewDock
 from synesthesia_machine.runtime import EngineSession
-from synesthesia_machine.ui.preview_router import PreviewRouter, PumpedPreviews
+from synesthesia_machine.ui.preview_router import PreviewRouter, PumpedPreviews, RoutingResult
 
 if TYPE_CHECKING:
     from synesthesia_machine.graph.model import GraphSnapshot
+    from synesthesia_machine.ui.view_models import GraphViewModel
 
 __all__ = [
     "EngineBridge",
     "EngineBridgeState",
     "EngineRestartOutcome",
     "EngineTaskRunner",
-    "PumpedPreviews",
+    "RoutingResult",
     "TransportOutcome",
     "UiClock",
 ]
@@ -164,8 +166,7 @@ class EngineBridge:
         demand_roots_for: Callable[[GraphSnapshot], tuple[UUID, ...]],
         task_runner: EngineTaskRunner,
         clock: UiClock,
-        preview_router: PreviewRouter,
-        on_previews: Callable[[PumpedPreviews], None],
+        on_previews: Callable[[RoutingResult], None],
         on_state: Callable[[EngineBridgeState], None],
         on_status_message: Callable[[str, int], None],
     ) -> None:
@@ -173,7 +174,16 @@ class EngineBridge:
         self._demand_roots_for = demand_roots_for
         self._task_runner = task_runner
         self._clock = clock
-        self._preview_router = preview_router
+        # The pump step owns the routing policy: a stateless router the
+        # bridge applies to every pumped batch before the compositor sees
+        # it, so the interface only advertises behaviour it performs.
+        self._preview_router = PreviewRouter()
+        # The image dock's visualizer-source set, refreshed by projection
+        # object identity: the session republishes the projection on document
+        # change, language switch, and source-status updates, and recomputing
+        # the set after any of them is the correct response.
+        self._preview_view: GraphViewModel | None = None
+        self._image_dock_sources: frozenset[tuple[UUID, str]] = frozenset()
         self._on_previews = on_previews
         self._on_state = on_state
         self._on_status_message = on_status_message
@@ -406,17 +416,33 @@ class EngineBridge:
         except (RuntimeError, TimeoutError):
             return None, ()
 
-    def pump_previews_once(self, *, note_visible: bool) -> None:
-        """Poll the preview ports and hand the batch to the compositor callback.
+    def pump_previews_once(
+        self,
+        *,
+        note_visible: bool,
+        image_visible: bool,
+        view: GraphViewModel,
+    ) -> None:
+        """Poll the preview ports, route the batch, and hand the sink
+        decisions to the compositor callback.
 
-        Driven by the compositor's timer (which supplies the note dock's
-        visibility flag); the engine session owns the per-port sequence
-        cursors, and the note family is not pumped while the note dock is
-        hidden. A failed poll (e.g. the engine transport closing) skips the
-        tick without touching any published state.
+        Driven by the compositor's timer (which supplies the docks' Qt
+        visibility flags and the current view-model projection); the engine
+        session owns the per-port sequence cursors, the note family is not
+        pumped while the note dock is hidden, and this step owns the
+        routing: the batch is routed with the bridge's preview router before
+        the compositor sees it. The image dock's visualizer-source set is
+        derived from the projection and refreshed whenever the window hands
+        over a new projection object (the session republishes it on document
+        change, language switch, and source-status updates). A failed poll
+        (e.g. the engine transport closing) skips the tick without touching
+        any published state.
         """
         if self._closed:
             return
+        if view is not self._preview_view:
+            self._preview_view = view
+            self._image_dock_sources = self._image_visualizer_source_keys(view)
         try:
             note_previews = self._session.next_note_previews() if note_visible else ()
             pumped = PumpedPreviews(
@@ -426,7 +452,26 @@ class EngineBridge:
             )
         except (RuntimeError, TimeoutError):
             return
-        self._on_previews(pumped)
+        self._on_previews(
+            self._preview_router.route(
+                pumped,
+                image_visible=image_visible,
+                image_dock_sources=self._image_dock_sources,
+            )
+        )
+
+    @staticmethod
+    def _image_visualizer_source_keys(view: GraphViewModel) -> frozenset[tuple[UUID, str]]:
+        """The source ports that feed a display visualizer: the image dock
+        only shows previews whose source port lands on such a node."""
+        visualizer_ids = {
+            node.node_id for node in view.nodes if node.preview_dock is PreviewDock.IMAGE
+        }
+        return frozenset(
+            (connection.source_node_id, connection.source_port_id)
+            for connection in view.connections
+            if connection.destination_node_id in visualizer_ids
+        )
 
     # -- runtime profiling ---------------------------------------------------
 
