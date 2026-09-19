@@ -4,7 +4,7 @@
 
 **Solution:** Give the controller a replacement entry point that takes an already-built snapshot (or routes the window's generate path through the controller's replacement flow), so every document-replacement path — open, new, generate, and any future path — calls the controller; the window's inline sequence is deleted.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Files:**
 - `src/synesthesia_machine/ui/document_lifecycle.py`
@@ -12,11 +12,12 @@
 - `tests/ui/test_document_lifecycle.py`
 
 **Acceptance:**
-- [ ] No replacement decision sequence is written inline outside the controller
-- [ ] The scripted-host tests cover the replace-with-existing-snapshot path (the randomize flow)
-- [ ] Full-window tests pass with the window delegating
-- [ ] `uv run check` green; no unrelated diff
+- [x] No replacement decision sequence is written inline outside the controller
+- [x] The scripted-host tests cover the replace-with-existing-snapshot path (the randomize flow)
+- [x] Full-window tests pass with the window delegating
+- [x] `uv run check` green; no unrelated diff
 
 ## Comments
 
 - 2026-09-18: From the third architecture-review run (UI-lifecycle scout F3).
+- 2026-09-19: Resolved — the controller gained `replace_with_generated(builder)` (the builder runs only after consent; a builder failure reports through the host) and `confirm_close()` (a DISCARD on close drops the current document's recovery record); the window's inline sequences in `randomize_nodes` and `closeEvent` are deleted and both paths delegate to the controller, which now owns the decision flow for open, new, generated-graph, and close. Two-axis review passed; its P3 nit (pre-translated error title) was aligned with the sibling raw-English `lifecycle_error` calls.

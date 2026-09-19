@@ -16,7 +16,7 @@ from collections.abc import Callable
 from enum import Enum, auto
 from functools import partial
 from pathlib import Path
-from typing import Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 from uuid import UUID
 
 from PySide6.QtGui import QAction
@@ -31,6 +31,9 @@ from synesthesia_machine.ui.application_settings import ApplicationSettingsStore
 from synesthesia_machine.ui.autosave_controller import AutosaveController
 from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.translations import tr, trf
+
+if TYPE_CHECKING:
+    from synesthesia_machine.graph.model import GraphSnapshot
 
 
 class ReplacementDecision(Enum):
@@ -89,8 +92,9 @@ class DocumentLifecycleController:
     """Decisions and effects of the document lifecycle, off any window.
 
     The controller is the single owner of the recent-file list and of the
-    replacement decision flow, so the window (and its action states) cannot
-    drift from the behaviour a user actually experiences.
+    replacement decision flow: open, new, generated-graph replacement, and
+    close all ask it, so the window (and its action states) cannot drift from
+    the behaviour a user actually experiences.
     """
 
     def __init__(
@@ -144,6 +148,43 @@ class DocumentLifecycleController:
         if decision is ReplacementDecision.DISCARD:
             self.discard_recovery(previous_id)
         self._host.lifecycle_status(tr("Created new graph"), 3000)
+
+    def replace_with_generated(self, builder: Callable[[], GraphSnapshot]) -> bool:
+        """Replace the document with a freshly built graph through the
+        replacement decision flow.
+
+        The builder runs only after the user consents, so a cancelled
+        decision performs no generation work; a builder failure reports
+        through the host and leaves the document untouched. Returns True when
+        the document was replaced.
+        """
+        previous_id = self._session.document.document_id
+        decision = self.confirm_replacement()
+        if decision is ReplacementDecision.CANCEL:
+            return False
+        try:
+            snapshot = builder()
+        except (KeyError, RuntimeError, ValueError) as error:
+            self._host.lifecycle_error("Could not generate random graph", str(error))
+            return False
+        self._session.replace_with_snapshot(snapshot)
+        if decision is ReplacementDecision.DISCARD:
+            self.discard_recovery(previous_id)
+        return True
+
+    def confirm_close(self) -> bool:
+        """Run the replacement decision flow for an application close.
+
+        Nothing is replaced - the app is going down - so a DISCARD answer
+        only drops the current document's recovery record. True when the
+        close may proceed.
+        """
+        decision = self.confirm_replacement()
+        if decision is ReplacementDecision.CANCEL:
+            return False
+        if decision is ReplacementDecision.DISCARD:
+            self.discard_recovery(self._session.document.document_id)
+        return True
 
     # -- open / save --------------------------------------------------------
 

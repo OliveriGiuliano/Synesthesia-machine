@@ -79,10 +79,7 @@ from synesthesia_machine.ui.application_settings import (
 from synesthesia_machine.ui.autosave_controller import AutosaveController
 from synesthesia_machine.ui.canvas import GraphScene, GraphView
 from synesthesia_machine.ui.demand_roots import compute_demand_roots
-from synesthesia_machine.ui.document_lifecycle import (
-    DocumentLifecycleController,
-    ReplacementDecision,
-)
+from synesthesia_machine.ui.document_lifecycle import DocumentLifecycleController
 from synesthesia_machine.ui.engine_bridge import (
     EngineBridge,
     EngineBridgeState,
@@ -822,24 +819,16 @@ class MainWindow(QMainWindow):
     def randomize_nodes(self) -> None:
         selected = self.scene.selected_node_ids()
         if not selected:
-            previous_id = self.session.document.document_id
-            decision = self.document_lifecycle.confirm_replacement()
-            if decision is ReplacementDecision.CANCEL:
+            if not self.document_lifecycle.replace_with_generated(
+                lambda: generate_random_graph(self.registry)
+            ):
                 return
-            try:
-                snapshot = generate_random_graph(self.registry)
-            except (KeyError, RuntimeError, ValueError) as error:
-                self._show_error("Could not generate random graph", str(error))
-                return
-            self.session.replace_with_snapshot(snapshot)
-            if decision is ReplacementDecision.DISCARD:
-                self.document_lifecycle.discard_recovery(previous_id)
             self.scene.select_node_ids(set())
             QTimer.singleShot(0, self.view.frame_all)
             self.statusBar().showMessage(
                 trf(
                     "Generated a complete randomized graph with {nodes} nodes",
-                    nodes=len(snapshot.nodes),
+                    nodes=len(self.session.document.nodes),
                 ),
                 4000,
             )
@@ -2016,32 +2005,29 @@ class MainWindow(QMainWindow):
         self.document_lifecycle.autosave_now()
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        decision = self.document_lifecycle.confirm_replacement()
-        if decision is not ReplacementDecision.CANCEL:
-            if decision is ReplacementDecision.DISCARD:
-                self.document_lifecycle.discard_recovery(self.session.document.document_id)
-            job = self._midi_export_job
-            if job is not None:
-                # Stop the export worker before the shell goes down; the join is
-                # bounded so a stuck export cannot block shutdown.
-                self._midi_export_job = None
-                job.cancel()
-                job.close()
-            self._activation_timer.stop()
-            self._autosave_timer.stop()
-            self._preview_timer.stop()
-            self._metrics_timer.stop()
-            self._profiler_timer.stop()
-            self._device_refresh_timer.stop()
-            if not self._engine_closed:
-                self._engine_closed = True
-                # Drain the engine task pool first: in-flight operations still
-                # talk to the client, and the bridge closes it afterwards.
-                self._engine_task_runner.close()
-                with suppress(RuntimeError, TimeoutError):
-                    self.engine_bridge.close()
-            self.autosave_controller.close()
-            self._save_window_state()
-            event.accept()
+        if not self.document_lifecycle.confirm_close():
+            event.ignore()
             return
-        event.ignore()
+        job = self._midi_export_job
+        if job is not None:
+            # Stop the export worker before the shell goes down; the join is
+            # bounded so a stuck export cannot block shutdown.
+            self._midi_export_job = None
+            job.cancel()
+            job.close()
+        self._activation_timer.stop()
+        self._autosave_timer.stop()
+        self._preview_timer.stop()
+        self._metrics_timer.stop()
+        self._profiler_timer.stop()
+        self._device_refresh_timer.stop()
+        if not self._engine_closed:
+            self._engine_closed = True
+            # Drain the engine task pool first: in-flight operations still
+            # talk to the client, and the bridge closes it afterwards.
+            self._engine_task_runner.close()
+            with suppress(RuntimeError, TimeoutError):
+                self.engine_bridge.close()
+        self.autosave_controller.close()
+        self._save_window_state()
+        event.accept()

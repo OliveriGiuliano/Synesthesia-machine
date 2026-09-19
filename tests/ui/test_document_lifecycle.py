@@ -15,7 +15,7 @@ import pytest
 from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QWidget
 
-from synesthesia_machine.graph import GraphDocument
+from synesthesia_machine.graph import GraphDocument, GraphSnapshot
 from synesthesia_machine.nodes.utility import create_utility_registry
 from synesthesia_machine.persistence.autosave import AutosaveStore
 from synesthesia_machine.ui.application_settings import ApplicationSettingsStore
@@ -179,6 +179,74 @@ def test_new_document_proceed_on_clean_document(env: LifecycleEnv) -> None:
     env.controller.new_document()
     assert env.session.document.document_id != before
     assert env.host.statuses and env.host.statuses[0][0].startswith("Created")
+
+
+def _generated_snapshot() -> GraphSnapshot:
+    document = GraphDocument()
+    document.add_node("synmachine.utility.number", position=(5.0, 5.0))
+    return document.snapshot()
+
+
+def test_replace_with_generated_proceeds_on_clean_document(env: LifecycleEnv) -> None:
+    before = env.session.document.document_id
+    calls: list[int] = []
+
+    def builder() -> GraphSnapshot:
+        calls.append(1)
+        return _generated_snapshot()
+
+    assert env.controller.replace_with_generated(builder) is True
+    assert calls == [1], "the builder runs exactly once, after consent"
+    assert env.session.document.document_id is not before
+    assert len(env.session.document.nodes) == 1
+
+
+def test_replace_with_generated_cancel_skips_generation(env: LifecycleEnv) -> None:
+    _dirty(env)
+    before = env.session.document.document_id
+    env.host.unsaved_choice = QMessageBox.StandardButton.Cancel
+    calls: list[int] = []
+
+    def builder() -> GraphSnapshot:
+        calls.append(1)
+        return _generated_snapshot()
+
+    assert env.controller.replace_with_generated(builder) is False
+    assert calls == [], "a cancelled decision must not run the generator"
+    assert env.session.document.document_id is before
+
+
+def test_replace_with_generated_discard_drops_previous_recovery(env: LifecycleEnv) -> None:
+    _dirty(env)
+    env.autosave_store.save(env.session.document.snapshot())
+    env.host.unsaved_choice = QMessageBox.StandardButton.Discard
+    assert env.controller.replace_with_generated(_generated_snapshot) is True
+    assert env.autosave_store.discover() == ()
+
+
+def test_replace_with_generated_builder_failure_keeps_document(env: LifecycleEnv) -> None:
+    before = env.session.document.document_id
+
+    def broken() -> GraphSnapshot:
+        raise ValueError("no random graph")
+
+    assert env.controller.replace_with_generated(broken) is False
+    assert env.session.document.document_id is before
+    assert env.host.errors[0][0] == "Could not generate random graph"
+
+
+def test_confirm_close_discard_drops_recovery_and_cancel_blocks(env: LifecycleEnv) -> None:
+    _dirty(env)
+    env.autosave_store.save(env.session.document.snapshot())
+    env.host.unsaved_choice = QMessageBox.StandardButton.Discard
+    assert env.controller.confirm_close() is True
+    assert env.autosave_store.discover() == ()
+
+    _dirty(env)
+    env.autosave_store.save(env.session.document.snapshot())
+    env.host.unsaved_choice = QMessageBox.StandardButton.Cancel
+    assert env.controller.confirm_close() is False
+    assert len(env.autosave_store.discover()) == 1, "a Cancel close keeps the recovery"
 
 
 def test_remember_and_truncate_recent_list(env: LifecycleEnv, tmp_path: Path) -> None:
