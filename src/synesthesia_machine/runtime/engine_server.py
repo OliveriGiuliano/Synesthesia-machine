@@ -17,6 +17,7 @@ from typing import Protocol, cast, get_args
 import cv2
 import psutil
 
+from synesthesia_machine.contracts import EngineSupervisorFacts
 from synesthesia_machine.contracts.engine_messages import (
     ENGINE_PROTOCOL_VERSION,
     ActivateGraph,
@@ -475,12 +476,18 @@ class EngineServer:
             return CommandAcknowledged(command.request_id, self._graph_revision)
         if isinstance(command, QueryMetrics):
             metrics = self._engine.metrics()
+            # The child fills the facts it alone can measure (its own pid,
+            # uptime, CPU and the host memory); the parent client layers on
+            # restart_count and heartbeat_age_s, which only the supervisor
+            # knows.
             metrics = replace(
                 metrics,
-                child_process_id=os.getpid(),
-                uptime_s=(time.monotonic_ns() - self._started_monotonic_ns) / 1_000_000_000,
-                cpu_percent=self._process.cpu_percent(),
-                system_memory_bytes=psutil.virtual_memory().used,
+                supervisor=EngineSupervisorFacts(
+                    child_process_id=os.getpid(),
+                    uptime_s=(time.monotonic_ns() - self._started_monotonic_ns) / 1_000_000_000,
+                    cpu_percent=self._process.cpu_percent(),
+                    system_memory_bytes=psutil.virtual_memory().used,
+                ),
             )
             return MetricsResponse(command.request_id, self._graph_revision, metrics)
         if isinstance(command, WaitUntilIdle):

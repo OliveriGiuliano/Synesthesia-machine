@@ -14,6 +14,7 @@ from tools.generate_test_video import DEFAULT_FRAME_COUNT, generate_test_video
 from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.contracts import (
     EngineState,
+    EngineSupervisorFacts,
     MidiOutputConnectionState,
     SourceState,
     SourceStatus,
@@ -54,6 +55,21 @@ def test_effective_engine_state_tracks_mixed_asynchronous_source_transitions() -
             )
             is EngineState.STOPPED
         )
+    finally:
+        client.close()
+
+
+def test_in_process_placement_reports_vacuous_supervisor_facts() -> None:
+    """No child process exists in-process: the record is the vacuous default.
+
+    This pins the per-placement meaning of ``child_process_id=None`` and
+    ``heartbeat_age_s=0.0`` (EngineSupervisorFacts docstring): they denote
+    "no such process", never a measurement.
+    """
+
+    client = InProcessEngineClient(NodeRegistry(()))
+    try:
+        assert client.metrics().supervisor == EngineSupervisorFacts()
     finally:
         client.close()
 

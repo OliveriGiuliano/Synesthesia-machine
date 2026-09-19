@@ -1533,7 +1533,7 @@ class MainWindow(QMainWindow):
                 f"Graph p95: {metrics.p95_graph_execution_ms:.2f} ms · "
                 f"queue {metrics.mailbox_occupancy}/{metrics.mailbox_capacity} · "
                 f"frame age {metrics.frame_age_ms:.1f} ms\n"
-                f"CPU {metrics.cpu_percent:.1f}% · "
+                f"CPU {metrics.supervisor.cpu_percent:.1f}% · "
                 f"RAM {metrics.memory_bytes / (1024 * 1024):.1f} MiB"
             )
             self._engine_status.setToolTip(

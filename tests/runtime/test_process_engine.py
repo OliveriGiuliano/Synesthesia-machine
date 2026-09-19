@@ -152,7 +152,7 @@ def test_process_activation_metrics_and_concurrent_request_correlation(
         metrics = tuple(future.result() for future in futures)
     assert all(item.graph_revision == snapshot.revision for item in metrics)
     child_process_id = process_client.status().child_process_id
-    assert all(item.child_process_id == child_process_id for item in metrics)
+    assert all(item.supervisor.child_process_id == child_process_id for item in metrics)
     assert process_client.source_status() == ()
 
 
@@ -323,7 +323,18 @@ def test_forced_crash_fails_boundedly_and_restart_rebuilds_latest_valid_graph(
     with pytest.raises(RuntimeError, match=r"not connected|disconnected|exited"):
         process_client.source_status()
     assert time.monotonic() - started < 0.5
-    assert process_client.metrics().state is EngineState.ERROR
+    synthesized = process_client.metrics()
+    assert synthesized.state is EngineState.ERROR
+    assert synthesized.graph_revision == snapshot.revision
+    # The synthesized record carries the supervisor's facts only: the
+    # child-owned measurements are at their vacuous defaults, and the
+    # child pid is the last spawned one.
+    assert synthesized.supervisor.child_process_id == original_process_id
+    assert synthesized.supervisor.restart_count == 0
+    assert synthesized.supervisor.uptime_s == 0.0
+    assert synthesized.supervisor.cpu_percent == 0.0
+    assert synthesized.supervisor.system_memory_bytes == 0
+    assert synthesized.supervisor.heartbeat_age_s >= 0.0
 
     activation = process_client.restart()
     restarted = process_client.status()

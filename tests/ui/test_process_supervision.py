@@ -28,6 +28,7 @@ from synesthesia_machine.contracts import (
     EngineMetrics,
     EngineState,
     EngineStatus,
+    EngineSupervisorFacts,
     ImagePreview,
     MidiOutputStatus,
     NodeMemoryDiagnostic,
@@ -132,8 +133,10 @@ class _SupervisionClient:
         return EngineMetrics(
             EngineState.STOPPED,
             graph_revision=self.engine_status.graph_revision,
-            restart_count=self.restart_count,
-            child_process_id=self.engine_status.child_process_id,
+            supervisor=EngineSupervisorFacts(
+                restart_count=self.restart_count,
+                child_process_id=self.engine_status.child_process_id,
+            ),
         )
 
     def node_profiles(self) -> tuple[NodeProfile, ...]:

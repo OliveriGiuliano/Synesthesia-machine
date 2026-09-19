@@ -24,6 +24,7 @@ from synesthesia_machine.contracts.engine_client import (
     EngineMetrics,
     EngineState,
     EngineStatus,
+    EngineSupervisorFacts,
     ImagePreview,
     MidiOutputStatus,
     NodeMemoryDiagnostic,
@@ -367,22 +368,31 @@ class ProcessEngineClient:
             EngineConnectionState.CRASHED,
             EngineConnectionState.UNRESPONSIVE,
         }:
+            # No engine telemetry exists: synthesize the record from the
+            # supervisor's own facts so the driver still sees one value.
             return EngineMetrics(
                 state=EngineState.ERROR,
                 graph_revision=self._graph_revision,
-                restart_count=self._restart_count,
-                child_process_id=self._child_process_id,
-                heartbeat_age_s=self._heartbeat_age_s(),
+                supervisor=EngineSupervisorFacts(
+                    restart_count=self._restart_count,
+                    child_process_id=self._child_process_id,
+                    heartbeat_age_s=self._heartbeat_age_s(),
+                ),
             )
         response = self._request(
             QueryMetrics(uuid4().hex, self._graph_revision),
             MetricsResponse,
         )
         self._accept_revision(response.graph_revision)
+        # The child's reply already carries its own pid/uptime/CPU/memory
+        # facts; only the supervision facts are parent-owned.
         return replace(
             response.metrics,
-            restart_count=self._restart_count,
-            heartbeat_age_s=self._heartbeat_age_s(),
+            supervisor=replace(
+                response.metrics.supervisor,
+                restart_count=self._restart_count,
+                heartbeat_age_s=self._heartbeat_age_s(),
+            ),
         )
 
     def next_image_previews(self) -> tuple[ImagePreview, ...]:

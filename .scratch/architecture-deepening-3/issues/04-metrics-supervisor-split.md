@@ -4,7 +4,7 @@
 
 **Solution:** A typed sub-record groups the supervisor facts so a consumer cannot treat `cpu_percent` as always meaningful; each layer fills only the record it owns; per-placement vacuity is documented on the type; the synthesized crashed-child metrics shape is pinned by a test. Whether the split crosses the wire as two fields, one nested field, or a protocol bump is a contract decision to settle first.
 
-**Status:** needs-triage
+**Status:** resolved
 
 **Blocked by:** 01
 
@@ -17,12 +17,13 @@
 - `tests/ui/test_process_supervision.py`
 
 **Acceptance:**
-- [ ] Supervisor facts are a separate typed record; engine telemetry and supervisor facts are filled by different owners
-- [ ] `child_process_id=None` + `heartbeat_age_s=0.0` means one documented thing per placement, not two
-- [ ] The synthesized ERROR metrics shape for a crashed child is pinned by a test
-- [ ] Any wire-shape change is explicit (protocol bump or compatibility argument) and covered by the protocol-version consistency test
-- [ ] Targeted tests pass; `uv run check` green; no unrelated diff
+- [x] Supervisor facts are a separate typed record; engine telemetry and supervisor facts are filled by different owners
+- [x] `child_process_id=None` + `heartbeat_age_s=0.0` means one documented thing per placement, not two
+- [x] The synthesized ERROR metrics shape for a crashed child is pinned by a test
+- [x] Any wire-shape change is explicit (protocol bump or compatibility argument) and covered by the protocol-version consistency test
+- [x] Targeted tests pass; `uv run check` green; no unrelated diff
 
 ## Comments
 
 - 2026-09-18: From the third architecture-review run (report candidate "One driver, four engine modes"; engine-cluster scout F5).
+- 2026-09-19: Implemented as ADR-0027. `EngineSupervisorFacts` (contracts) groups the six supervisor fields; `EngineMetrics` keeps only engine telemetry plus a `supervisor` sub-record (last field). Ownership per layer: the engine body never touches supervisor; the child server's metrics reply fills the child-owned facts (pid/uptime/cpu/sysmem); the parent client layers on restart_count/heartbeat_age_s and synthesizes the full record from supervisor facts for a crashed/unresponsive child. Wire change is explicit: protocol 17→18 (pickled payload shape change; parent/child ship in one build, so the handshake guard is the compatibility mechanism), pinned by the consistency test. New pins: in-process vacuity (`supervisor == EngineSupervisorFacts()`) and the synthesized crashed-child shape. Review: two-axis PASS, no findings. Gates: full suite 1389 passed / 3 skipped (Windows-only), `uv run check` green.

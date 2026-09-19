@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
@@ -261,7 +261,41 @@ class NodeProfile:
 
 
 @dataclass(frozen=True, slots=True)
+class EngineSupervisorFacts:
+    """Process-supervision facts, kept out of the engine telemetry record.
+
+    The fields are filled by different owners per engine placement, and a
+    zero/None value means "no such process" rather than a measurement:
+
+    - In-process placement: the record is always the vacuous default
+      (``EngineSupervisorFacts()``) — no child process exists, so every
+      field stays at its zero/None default.
+    - Process placement: the spawned child fills ``child_process_id``,
+      ``uptime_s``, ``cpu_percent`` and ``system_memory_bytes`` (facts
+      about itself, on the metrics wire reply), and the parent client fills
+      ``restart_count`` and ``heartbeat_age_s`` (facts about its own
+      supervision of the child). ``child_process_id`` is ``None`` only
+      before the child has ever been spawned.
+    """
+
+    child_process_id: int | None = None
+    uptime_s: float = 0.0
+    cpu_percent: float = 0.0
+    system_memory_bytes: int = 0
+    restart_count: int = 0
+    heartbeat_age_s: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
 class EngineMetrics:
+    """Engine telemetry for one query; supervision lives in ``supervisor``.
+
+    The engine body fills the telemetry fields in both placements; the
+    placement layers fill ``supervisor`` (see :class:`EngineSupervisorFacts`
+    for the per-field owners and the per-placement vacuity), so a consumer
+    can never mistake a vacuous in-process default for a measurement.
+    """
+
     state: EngineState = EngineState.STOPPED
     graph_revision: int | None = None
     processed_ticks: int = 0
@@ -271,12 +305,6 @@ class EngineMetrics:
     dropped_before_processing: int = 0
     skipped_by_selection: int = 0
     memory_bytes: int = 0
-    cpu_percent: float = 0.0
-    system_memory_bytes: int = 0
-    uptime_s: float = 0.0
-    restart_count: int = 0
-    child_process_id: int | None = None
-    heartbeat_age_s: float = 0.0
     mailbox_occupancy: int = 0
     mailbox_capacity: int = 0
     preview_fps: float = 0.0
@@ -288,6 +316,7 @@ class EngineMetrics:
     p99_graph_execution_ms: float = 0.0
     max_graph_execution_ms: float = 0.0
     runtime_errors: tuple[NodeExecutionError, ...] = ()
+    supervisor: EngineSupervisorFacts = field(default_factory=EngineSupervisorFacts)
 
 
 @dataclass(frozen=True, slots=True)

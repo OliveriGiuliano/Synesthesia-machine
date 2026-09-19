@@ -445,7 +445,7 @@ def _run_once(
             end_to_end_processing_latency_ms=final_metrics.processing_latency_ms,
             mailbox_occupancy=final_metrics.mailbox_occupancy,
             mailbox_capacity=final_metrics.mailbox_capacity,
-            engine_cpu_percent=final_metrics.cpu_percent,
+            engine_cpu_percent=final_metrics.supervisor.cpu_percent,
             engine_rss_bytes=final_metrics.memory_bytes,
             peak_sampled_engine_rss_bytes=max(memory_samples),
             ui_heartbeat_p50_ms=heartbeat_p50,

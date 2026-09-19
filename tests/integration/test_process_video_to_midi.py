@@ -88,7 +88,7 @@ def test_canonical_hue_chord_runs_in_child_with_audio_opt_in_and_bounded_preview
         metrics = client.metrics()
         assert source.state is SourceState.ENDED
         assert source.processed_index == HUE_FRAME_COUNT
-        assert metrics.child_process_id == status.child_process_id
+        assert metrics.supervisor.child_process_id == status.child_process_id
         assert metrics.processed_ticks == HUE_FRAME_COUNT
         assert metrics.dropped_before_processing == 0
 

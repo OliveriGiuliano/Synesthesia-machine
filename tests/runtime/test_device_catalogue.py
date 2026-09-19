@@ -172,7 +172,7 @@ def test_device_catalogue_query_uses_current_protocol_without_graph_revision() -
     query = QueryDeviceCatalogue("request", True)
 
     assert query.force_refresh
-    assert query.protocol_version == ENGINE_PROTOCOL_VERSION == 17
+    assert query.protocol_version == ENGINE_PROTOCOL_VERSION == 18
 
 
 def test_engine_server_dispatches_device_query_without_active_graph_revision() -> None:
