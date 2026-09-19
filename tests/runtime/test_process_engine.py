@@ -30,8 +30,8 @@ from synesthesia_machine.contracts.engine_messages import (
 from synesthesia_machine.graph import GraphDocument, ValidationReport
 from synesthesia_machine.nodes import ResetReason
 from synesthesia_machine.runtime import (
+    EngineBody,
     EngineProtocolError,
-    InProcessEngineClient,
     ProcessEngineClient,
 )
 from synesthesia_machine.runtime import engine_client as engine_client_module
@@ -421,7 +421,7 @@ def test_server_forwards_activate_reset_reason_to_child_engine() -> None:
     server = EngineServer(
         _NoopConnection(),
         _NoopQueue(),
-        engine=cast(InProcessEngineClient, EngineProbe()),
+        engine=cast(EngineBody, EngineProbe()),
         events=cast(_EventPublisher, EventsProbe()),
     )
     command = ActivateGraph(
@@ -455,7 +455,7 @@ def test_server_rejects_stale_graph_command_before_runtime_mutation() -> None:
     server = EngineServer(
         ConnectionProbe(),
         _NoopQueue(),
-        engine=cast(InProcessEngineClient, engine),
+        engine=cast(EngineBody, engine),
     )
     server._graph_revision = 7  # pyright: ignore[reportPrivateUsage]
 

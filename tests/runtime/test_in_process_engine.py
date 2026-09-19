@@ -33,9 +33,9 @@ SOURCE_B = UUID("00000000-0000-0000-0000-0000000000b2")
 def test_effective_engine_state_tracks_mixed_asynchronous_source_transitions() -> None:
     client = InProcessEngineClient(create_application_registry())
     try:
-        client._state = EngineState.RUNNING
+        client._body._state = EngineState.RUNNING
         assert (
-            client._effective_state(
+            client._body._effective_state(
                 (
                     SourceStatus(SOURCE_A, SourceState.ENDED),
                     SourceStatus(SOURCE_B, SourceState.PAUSED),
@@ -45,7 +45,7 @@ def test_effective_engine_state_tracks_mixed_asynchronous_source_transitions() -
             is EngineState.PAUSED
         )
         assert (
-            client._effective_state(
+            client._body._effective_state(
                 (
                     SourceStatus(SOURCE_A, SourceState.ENDED),
                     SourceStatus(SOURCE_B, SourceState.STOPPED),
@@ -567,7 +567,7 @@ def test_source_tick_without_declared_outputs_fails_loudly(tmp_path: Path) -> No
     try:
         assert client.activate(document.snapshot()).activated
         client.play(SOURCE_A)
-        worker = client._worker
+        worker = client._body._worker
         assert worker is not None
         deadline = time.monotonic() + 5.0
         while worker.last_error is None and time.monotonic() < deadline:

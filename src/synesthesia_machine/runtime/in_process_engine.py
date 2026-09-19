@@ -1,20 +1,18 @@
-"""In-process engine client and latest-frame graph worker."""
+"""In-process engine client: the in-process placement's protocol hat (ADR-0026).
+
+The in-process placement composes the placement-independent engine body
+with the transport-independent ``EngineClient`` protocol. This client holds
+no engine state of its own: every method either delegates to the body or
+is client-only behaviour (a connected ``status``, a user restart from the
+body's last valid plan, and preview clearing). The spawned child placement
+never builds this class; it runs the body directly behind the wire.
+"""
 
 from __future__ import annotations
 
-import logging
-import math
-import threading
 import time
-from collections import deque
-from collections.abc import Callable, Iterable, Mapping
-from contextlib import suppress
-from dataclasses import dataclass, replace
-from functools import partial
-from typing import Protocol, cast
+from collections.abc import Callable, Iterable
 from uuid import UUID
-
-import psutil
 
 from synesthesia_machine.contracts import (
     DeviceCatalogue,
@@ -28,580 +26,37 @@ from synesthesia_machine.contracts import (
     NodeMemoryDiagnostic,
     NodeProfile,
     NotePreview,
-    SourceState,
+    ResetReason,
     SourceStatus,
     ValuePreview,
 )
 from synesthesia_machine.graph.model import GraphSnapshot
-from synesthesia_machine.media.camera_source import CameraSourceService
-from synesthesia_machine.media.source_config import CameraSourceConfig, VideoSourceConfig
-from synesthesia_machine.media.source_frame import PresentedSourceFrame
-from synesthesia_machine.media.video_source import VideoSourceService
-from synesthesia_machine.nodes import ExecutionKind, NodeRegistry, ResetReason
-from synesthesia_machine.runtime.device_catalogue import (
-    DeviceCatalogueService,
-    SystemDeviceCatalogueService,
+from synesthesia_machine.nodes import NodeRegistry
+from synesthesia_machine.runtime.device_catalogue import DeviceCatalogueService
+from synesthesia_machine.runtime.engine_body import (
+    CameraSourceFactory,
+    EngineBody,
+    LatestFrameGraphWorker,
+    SourceController,
+    SourceMailboxMetrics,
+    TickObserver,
+    VideoSourceFactory,
 )
-from synesthesia_machine.runtime.engine_facade import EngineFacade
-from synesthesia_machine.runtime.execution_plan import CompiledNode, ExecutionPlan, PortKey
-from synesthesia_machine.runtime.preview_channel import InMemoryPreviewTransport, PreviewTransport
-from synesthesia_machine.runtime.previews import (
-    PreviewBroker,
-    _LatestPreviewWorker,  # type: ignore[reportPrivateUsage]  # ADR-0009 worker lives with the broker
-    _PreviewConfiguration,  # type: ignore[reportPrivateUsage]  # null broker returns the real type
-)
-from synesthesia_machine.runtime.profiling import RuntimeProfiler
-from synesthesia_machine.runtime.scheduler import TickResult
-
-type TickObserver = Callable[[UUID, PresentedSourceFrame, TickResult, ExecutionPlan], None]
-
-
-class SourceController(Protocol):
-    node_id: UUID
-
-    def play(self) -> None: ...
-
-    def pause(self) -> None: ...
-
-    def resume(self) -> None: ...
-
-    def stop(self) -> None: ...
-
-    def reload(self) -> None: ...
-
-    def seek(self, source_time_s: float) -> None: ...
-
-    def status(self, *, dropped_before_processing: int = 0) -> SourceStatus: ...
-
-    def wait_until_finished(self, timeout_s: float = 5.0) -> bool: ...
-
-    def close(self) -> None: ...
-
-
-class VideoSourceFactory(Protocol):
-    def __call__(
-        self,
-        node_id: UUID,
-        config: VideoSourceConfig,
-        on_frame: object,
-        on_reset: object,
-    ) -> SourceController: ...
-
-
-class CameraSourceFactory(Protocol):
-    def __call__(
-        self,
-        node_id: UUID,
-        config: CameraSourceConfig,
-        on_frame: object,
-        on_reset: object,
-    ) -> SourceController: ...
-
-
-def _create_default_video_source(
-    node_id: UUID,
-    config: VideoSourceConfig,
-    on_frame: object,
-    on_reset: object,
-) -> VideoSourceService:
-    """Map a declared video source configuration onto the service constructor."""
-
-    return VideoSourceService(
-        node_id,
-        config.file_path,
-        process_every_nth_frame=config.process_every_nth_frame,
-        playback_speed=config.playback_speed,
-        loop=config.loop,
-        stream_index=config.stream_index,
-        loop_start_s=config.loop_start_s,
-        loop_end_s=config.loop_end_s,
-        on_frame=cast(Callable[[PresentedSourceFrame], None], on_frame),
-        on_reset=cast(Callable[[ResetReason], None] | None, on_reset),
-    )
-
-
-def _create_default_camera_source(
-    node_id: UUID,
-    config: CameraSourceConfig,
-    on_frame: object,
-    on_reset: object,
-) -> CameraSourceService:
-    """Map a declared camera source configuration onto the service constructor."""
-
-    return CameraSourceService(
-        node_id,
-        config.device_id,
-        requested_width=config.requested_width,
-        requested_height=config.requested_height,
-        requested_fps=config.requested_fps,
-        backend_preference=config.backend_preference,
-        on_frame=cast(Callable[[PresentedSourceFrame], None], on_frame),
-        on_reset=cast(Callable[[ResetReason], None] | None, on_reset),
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class _TickCommand:
-    source_node_id: UUID
-    frame: PresentedSourceFrame
-
-
-@dataclass(frozen=True, slots=True)
-class _ResetCommand:
-    source_node_id: UUID
-    reason: ResetReason
-
-
-type _GraphCommand = _TickCommand | _ResetCommand
-
-_SOURCE_MAILBOX_CAPACITY = 2
-_GRAPH_LATENCY_WINDOW = 240
-_FPS_WINDOW_NS = 1_000_000_000
-
-
-@dataclass(frozen=True, slots=True)
-class SourceMailboxMetrics:
-    """Current bounded-mailbox state and latest completed-frame timing for one source."""
-
-    occupancy: int
-    capacity: int
-    dropped_before_processing: int
-    processing_latency_ms: float
-    frame_age_ms: float
-
-
-class _NoPreviewBroker:
-    """Null preview broker for preview-disabled engines (export, tests).
-
-    Polls stay empty and publication is a no-op so a preview-free workload
-    never spins the preview worker thread or scans preview targets.
-    """
-
-    @staticmethod
-    def prepare(plan: ExecutionPlan) -> _PreviewConfiguration:
-        return _PreviewConfiguration((), (), ())
-
-    def apply(self, configuration: _PreviewConfiguration) -> None:
-        return None
-
-    def clear(self) -> None:
-        return None
-
-    @property
-    def generation(self) -> int:
-        return 0
-
-    def publish(self, result: TickResult, *, expected_generation: int | None = None) -> None:
-        return None
-
-    def poll_images(
-        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
-    ) -> tuple[ImagePreview, ...]:
-        return ()
-
-    def poll_notes(
-        self, after_sequences: Mapping[UUID, int] | None = None
-    ) -> tuple[NotePreview, ...]:
-        return ()
-
-    def poll_values(
-        self, after_sequences: Mapping[tuple[UUID, str], int] | None = None
-    ) -> tuple[ValuePreview, ...]:
-        return ()
-
-    def preview_fps(self) -> float:
-        return 0.0
-
-
-class LatestFrameGraphWorker:
-    """Serialize scheduler access while retaining at most one pending tick per source."""
-
-    def __init__(
-        self,
-        facade: EngineFacade,
-        *,
-        preview_broker: PreviewBroker | None = None,
-        monotonic_ns: Callable[[], int] = time.perf_counter_ns,
-        execution_clock_ns: Callable[[], int] = time.perf_counter_ns,
-        tick_observer: TickObserver | None = None,
-    ) -> None:
-        self._facade = facade
-        self._preview_worker = (
-            _LatestPreviewWorker(preview_broker) if preview_broker is not None else None
-        )
-        self._tick_observer = tick_observer
-        self._observer_failure_logged = False
-        self._monotonic_ns = monotonic_ns
-        self._execution_clock_ns = execution_clock_ns
-        self._condition = threading.Condition()
-        self._commands: deque[_GraphCommand] = deque()
-        self._busy = False
-        self._active_tick_source_id: UUID | None = None
-        self._closed = False
-        self._processed_ticks = 0
-        self._dropped_by_source: dict[UUID, int] = {}
-        self._last_completed_received_ns: dict[UUID, int] = {}
-        self._last_processing_latency_ms: dict[UUID, float] = {}
-        self._graph_durations_ns: deque[int] = deque(maxlen=_GRAPH_LATENCY_WINDOW)
-        self._input_times_ns: deque[int] = deque(maxlen=240)
-        self._processed_times_ns: deque[int] = deque(maxlen=240)
-        self._last_result: TickResult | None = None
-        self._last_error: str | None = None
-        self._started_ns: int | None = None
-        self._last_tick_ns: int | None = None
-        self._thread = threading.Thread(
-            target=self._run,
-            name="in-process-graph-worker",
-            daemon=True,
-        )
-        self._thread.start()
-
-    @property
-    def processed_ticks(self) -> int:
-        with self._condition:
-            return self._processed_ticks
-
-    @property
-    def last_result(self) -> TickResult | None:
-        with self._condition:
-            return self._last_result
-
-    @property
-    def last_error(self) -> str | None:
-        with self._condition:
-            graph_error = self._last_error
-        preview_error = (
-            self._preview_worker.last_error if self._preview_worker is not None else None
-        )
-        return graph_error or preview_error
-
-    @property
-    def elapsed_s(self) -> float:
-        with self._condition:
-            if self._started_ns is None or self._last_tick_ns is None:
-                return 0.0
-            return max(0.0, (self._last_tick_ns - self._started_ns) / 1_000_000_000)
-
-    @property
-    def input_fps(self) -> float:
-        with self._condition:
-            return _rolling_event_rate(self._input_times_ns, self._monotonic_ns())
-
-    @property
-    def processed_fps(self) -> float:
-        with self._condition:
-            return _rolling_event_rate(self._processed_times_ns, self._monotonic_ns())
-
-    def publish(self, source_node_id: UUID, frame: PresentedSourceFrame) -> None:
-        if frame.context.clock_id != source_node_id:
-            raise ValueError("presented frame clock does not match its source node")
-        command = _TickCommand(source_node_id, frame)
-        with self._condition:
-            self._ensure_open()
-            self._input_times_ns.append(frame.context.received_monotonic_ns)
-            for index in range(len(self._commands) - 1, -1, -1):
-                pending = self._commands[index]
-                if isinstance(pending, _ResetCommand) and pending.source_node_id == source_node_id:
-                    # Sources serialize reset-then-frame: a tick published
-                    # while a reset for this source is still queued is newer
-                    # than that reset, so it must run after it instead of
-                    # being dropped (losing the first frame of a new run).
-                    self._commands.insert(index + 1, command)
-                    self._condition.notify()
-                    return
-                if isinstance(pending, _TickCommand) and pending.source_node_id == source_node_id:
-                    self._commands[index] = command
-                    self._dropped_by_source[source_node_id] = (
-                        self._dropped_by_source.get(source_node_id, 0) + 1
-                    )
-                    self._condition.notify()
-                    return
-            self._commands.append(command)
-            self._condition.notify()
-
-    def reset_source(self, source_node_id: UUID, reason: ResetReason) -> None:
-        with self._condition:
-            self._ensure_open()
-            if reason is not ResetReason.SOURCE_ENDED:
-                self._commands = deque(
-                    command
-                    for command in self._commands
-                    if not (
-                        isinstance(command, _TickCommand)
-                        and command.source_node_id == source_node_id
-                    )
-                )
-            self._commands.append(_ResetCommand(source_node_id, reason))
-            self._condition.notify()
-
-    def dropped_for(self, source_node_id: UUID) -> int:
-        with self._condition:
-            return self._dropped_by_source.get(source_node_id, 0)
-
-    def total_dropped(self) -> int:
-        with self._condition:
-            return sum(self._dropped_by_source.values())
-
-    def graph_execution_metrics(self) -> tuple[int, float, float, float, float]:
-        with self._condition:
-            ordered = tuple(sorted(self._graph_durations_ns))
-        if not ordered:
-            return (0, 0.0, 0.0, 0.0, 0.0)
-        return (
-            len(ordered),
-            _duration_percentile_ms(ordered, 50.0),
-            _duration_percentile_ms(ordered, 95.0),
-            _duration_percentile_ms(ordered, 99.0),
-            ordered[-1] / 1_000_000.0,
-        )
-
-    def reset_graph_execution_metrics(self) -> None:
-        with self._condition:
-            self._graph_durations_ns.clear()
-            self._input_times_ns.clear()
-            self._processed_times_ns.clear()
-
-    def mailbox_metrics(self, source_node_id: UUID) -> SourceMailboxMetrics:
-        """Return an atomic snapshot of one source's two-slot latest-frame mailbox."""
-
-        with self._condition:
-            occupancy = int(self._active_tick_source_id == source_node_id) + sum(
-                isinstance(command, _TickCommand) and command.source_node_id == source_node_id
-                for command in self._commands
-            )
-            received_ns = self._last_completed_received_ns.get(source_node_id)
-            frame_age_ms = (
-                max(0.0, (self._monotonic_ns() - received_ns) / 1_000_000)
-                if received_ns is not None
-                else 0.0
-            )
-            return SourceMailboxMetrics(
-                occupancy=occupancy,
-                capacity=_SOURCE_MAILBOX_CAPACITY,
-                dropped_before_processing=self._dropped_by_source.get(source_node_id, 0),
-                processing_latency_ms=self._last_processing_latency_ms.get(source_node_id, 0.0),
-                frame_age_ms=frame_age_ms,
-            )
-
-    def wait_until_idle(self, timeout_s: float = 5.0) -> bool:
-        deadline = time.monotonic() + max(0.0, timeout_s)
-        with self._condition:
-            while self._commands or self._busy:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0.0:
-                    return False
-                self._condition.wait(remaining)
-        if self._preview_worker is None:
-            return True
-        return self._preview_worker.wait_until_idle(max(0.0, deadline - time.monotonic()))
-
-    def reset_plan_metrics(self) -> None:
-        """Clear plan-scoped diagnostics after an atomic swap has committed."""
-
-        with self._condition:
-            self._processed_ticks = 0
-            self._dropped_by_source.clear()
-            self._last_completed_received_ns.clear()
-            self._last_processing_latency_ms.clear()
-            self._graph_durations_ns.clear()
-            self._input_times_ns.clear()
-            self._processed_times_ns.clear()
-            self._last_result = None
-            self._last_error = None
-            self._started_ns = None
-            self._last_tick_ns = None
-        if self._preview_worker is not None:
-            self._preview_worker.reset_error()
-
-    def close(self) -> None:
-        with self._condition:
-            if self._closed:
-                return
-            self._closed = True
-            self._commands.clear()
-            self._condition.notify_all()
-        if self._thread is not threading.current_thread():
-            self._thread.join(timeout=5.0)
-            if self._thread.is_alive():
-                if self._preview_worker is not None:
-                    self._preview_worker.close()
-                raise TimeoutError("Graph worker did not stop within 5 seconds")
-        if self._preview_worker is not None:
-            self._preview_worker.close()
-
-    def _run(self) -> None:
-        while True:
-            with self._condition:
-                while not self._commands and not self._closed:
-                    self._condition.wait()
-                if self._closed:
-                    self._busy = False
-                    self._condition.notify_all()
-                    return
-                command = self._commands.popleft()
-                self._busy = True
-                self._active_tick_source_id = (
-                    command.source_node_id if isinstance(command, _TickCommand) else None
-                )
-            try:
-                if isinstance(command, _ResetCommand):
-                    self._facade.reset_source(command.source_node_id, command.reason)
-                else:
-                    frame = command.frame
-                    plan = self._facade.active_plan
-                    if plan is None:
-                        raise RuntimeError(
-                            f"Source tick for {command.source_node_id} "
-                            "published while no plan is active"
-                        )
-                    source_node = plan.node(command.source_node_id)
-                    contract = (
-                        source_node.definition.source_outputs if source_node is not None else None
-                    )
-                    if contract is None:
-                        # A source whose outputs are not declared on its own
-                        # definition would publish into ports that nothing
-                        # reads: fail loudly instead of orphaning.
-                        raise RuntimeError(
-                            f"Source {command.source_node_id} declares no output contract"
-                        )
-                    graph_started_ns = self._execution_clock_ns()
-                    result = self._facade.tick(
-                        frame.context,
-                        source_values={
-                            PortKey(command.source_node_id, contract.image_port): frame.image,
-                            PortKey(command.source_node_id, contract.processed_index_port): (
-                                frame.processed_index
-                            ),
-                        },
-                    )
-                    if self._preview_worker is not None:
-                        self._preview_worker.submit(result)
-                    if self._tick_observer is not None:
-                        # Observation is diagnostic: a broken observer must not
-                        # stop the tick loop that feeds the real outputs. One
-                        # traceback per worker (the first failure) pinpoints
-                        # the fault without flooding the log per tick; the
-                        # consumer of a run-to-end simulation verifies the
-                        # observed stream itself (ADR-0025).
-                        try:
-                            self._tick_observer(command.source_node_id, frame, result, plan)
-                        except Exception:
-                            if not self._observer_failure_logged:
-                                self._observer_failure_logged = True
-                                logging.getLogger(__name__).exception(
-                                    "Tick observer failed for source %s",
-                                    command.source_node_id,
-                                )
-                    completed_ns = self._monotonic_ns()
-                    graph_duration_ns = max(0, self._execution_clock_ns() - graph_started_ns)
-                    with self._condition:
-                        if self._started_ns is None:
-                            self._started_ns = completed_ns
-                        self._last_tick_ns = completed_ns
-                        self._processed_ticks += 1
-                        self._processed_times_ns.append(completed_ns)
-                        self._last_result = result
-                        self._graph_durations_ns.append(graph_duration_ns)
-                        received_ns = frame.context.received_monotonic_ns
-                        self._last_completed_received_ns[command.source_node_id] = received_ns
-                        self._last_processing_latency_ms[command.source_node_id] = max(
-                            0.0, (completed_ns - received_ns) / 1_000_000
-                        )
-            except Exception as error:
-                with self._condition:
-                    self._last_error = str(error)
-            finally:
-                with self._condition:
-                    self._busy = False
-                    self._active_tick_source_id = None
-                    self._condition.notify_all()
-
-    def _ensure_open(self) -> None:
-        if self._closed:
-            raise RuntimeError("Graph worker is closed")
-
-
-def _duration_percentile_ms(ordered_ns: tuple[int, ...], percentile: float) -> float:
-    position = (len(ordered_ns) - 1) * percentile / 100.0
-    lower = math.floor(position)
-    upper = math.ceil(position)
-    if lower == upper:
-        value_ns = float(ordered_ns[lower])
-    else:
-        fraction = position - lower
-        value_ns = ordered_ns[lower] * (1.0 - fraction) + ordered_ns[upper] * fraction
-    return value_ns / 1_000_000.0
-
-
-def _rolling_event_rate(events_ns: deque[int], now_ns: int) -> float:
-    cutoff_ns = now_ns - _FPS_WINDOW_NS
-    while events_ns and events_ns[0] < cutoff_ns:
-        events_ns.popleft()
-    return float(len(events_ns))
-
-
-class _FailedSource:
-    """Status-preserving source used when source preparation fails during activation."""
-
-    def __init__(
-        self,
-        node_id: UUID,
-        error: Exception,
-        *,
-        source_kind: str,
-        file_path: str = "",
-        device_id: str | None = None,
-    ) -> None:
-        self.node_id = node_id
-        self._file_path = file_path
-        self._source_kind = source_kind
-        self._device_id = device_id
-        self._error = str(error)
-        self._state = SourceState.ERROR
-
-    def play(self) -> None:
-        raise RuntimeError(self._error)
-
-    def pause(self) -> None:
-        return
-
-    def resume(self) -> None:
-        return
-
-    def stop(self) -> None:
-        if self._state is not SourceState.CLOSED:
-            self._state = SourceState.STOPPED
-
-    def reload(self) -> None:
-        self._state = SourceState.ERROR
-
-    def seek(self, source_time_s: float) -> None:
-        del source_time_s
-        raise NotImplementedError(f"{self._source_kind.title()} source cannot seek")
-
-    def status(self, *, dropped_before_processing: int = 0) -> SourceStatus:
-        return SourceStatus(
-            node_id=self.node_id,
-            state=self._state,
-            file_path=self._file_path,
-            dropped_before_processing=dropped_before_processing,
-            warnings=1,
-            last_error=self._error,
-            source_kind=self._source_kind,
-            device_id=self._device_id,
-        )
-
-    def wait_until_finished(self, timeout_s: float = 5.0) -> bool:
-        del timeout_s
-        return True
-
-    def close(self) -> None:
-        self._state = SourceState.CLOSED
+from synesthesia_machine.runtime.preview_channel import PreviewTransport
+
+__all__ = [
+    "CameraSourceFactory",
+    "InProcessEngineClient",
+    "LatestFrameGraphWorker",
+    "SourceController",
+    "SourceMailboxMetrics",
+    "TickObserver",
+    "VideoSourceFactory",
+]
 
 
 class InProcessEngineClient:
-    """In-process implementation of the transport-independent EngineClient protocol."""
+    """In-process placement of the EngineClient protocol: a thin hat over the EngineBody."""
 
     def __init__(
         self,
@@ -616,44 +71,19 @@ class InProcessEngineClient:
         preview_dirty_notifier: Callable[[], None] | None = None,
         preview_transport: PreviewTransport | None = None,
     ) -> None:
-        self._lock = threading.RLock()
-        self._profiler = RuntimeProfiler()
-        self._tick_observer = tick_observer
-        self._facade = EngineFacade(registry)
-        self._profiling_enabled = False
-        self._video_source_factory = video_source_factory or _create_default_video_source
-        self._camera_source_factory = camera_source_factory or _create_default_camera_source
-        self._device_catalogue_service = device_catalogue_service or SystemDeviceCatalogueService()
-        self._worker_clock = worker_clock
-        self._use_previews = use_previews
-        self._preview_transport = (
-            preview_transport if preview_transport is not None else InMemoryPreviewTransport()
+        self._body = EngineBody(
+            registry,
+            video_source_factory=video_source_factory,
+            camera_source_factory=camera_source_factory,
+            device_catalogue_service=device_catalogue_service,
+            worker_clock=worker_clock,
+            tick_observer=tick_observer,
+            use_previews=use_previews,
+            preview_dirty_notifier=preview_dirty_notifier,
+            preview_transport=preview_transport,
         )
-        self._preview_broker: PreviewBroker | _NoPreviewBroker = (
-            PreviewBroker(
-                transport=self._preview_transport,
-                dirty_notifier=preview_dirty_notifier,
-            )
-            if use_previews
-            else _NoPreviewBroker()
-        )
-        self._worker: LatestFrameGraphWorker | None = None
-        self._sources: dict[UUID, SourceController] = {}
-        self._state = EngineState.STOPPED
-        self._interrupted_playing_source_ids: frozenset[UUID] = frozenset()
-        self._graph_revision: int | None = None
-        self._latest_valid_snapshot: GraphSnapshot | None = None
-        self._latest_demand_roots: tuple[UUID, ...] | None = None
-        # "Already delivered up to this sequence" cursors: the client owns
-        # them so callers use the cursor-free next_*_previews API and cannot
-        # poll with a stale threshold.
-        self._image_sequences: dict[tuple[UUID, str], int] = {}
-        self._note_sequences: dict[UUID, int] = {}
-        self._value_sequences: dict[tuple[UUID, str], int] = {}
-        # Guards the cursor dicts: they are advanced by the preview pump and
-        # the child event publisher while activations and shutdowns reset
-        # them, so every access goes through this lock.
-        self._preview_cursor_lock = threading.Lock()
+
+    # -- Protocol surface: one delegation per body capability -------------
 
     def activate(
         self,
@@ -662,611 +92,101 @@ class InProcessEngineClient:
         demand_roots: Iterable[UUID] | None = None,
         reset_reason: ResetReason = ResetReason.PLAN_REPLACED,
     ) -> EngineActivation:
-        with self._lock:
-            self._ensure_open()
-            roots = None if demand_roots is None else tuple(sorted(demand_roots, key=str))
-            prepared = self._facade.prepare(
-                snapshot,
-                demand_roots=roots,
-                reset_reason=reset_reason,
-            )
-            plan = prepared.plan
-            if plan is None:
-                # A graph that no longer compiles stops the engine: the previous
-                # plan must not keep producing output from a broken document.
-                prepared.close()
-                self._stop_runtime_for_invalid_graph()
-                return EngineActivation(snapshot.revision, prepared.result.report, False)
-            try:
-                preview_configuration = self._preview_broker.prepare(plan)
-            except Exception:
-                prepared.close()
-                raise
-
-            worker = self._worker
-            worker_created = worker is None
-            if worker is None:
-                worker_broker: PreviewBroker | None = (
-                    self._preview_broker
-                    if isinstance(self._preview_broker, PreviewBroker)
-                    else None
-                )
-                worker = LatestFrameGraphWorker(
-                    self._facade,
-                    preview_broker=worker_broker,
-                    monotonic_ns=self._worker_clock,
-                    tick_observer=self._tick_observer,
-                )
-            old_plan = self._facade.active_plan
-            reusable_sources = self._reusable_source_ids(old_plan, plan, reset_reason)
-            sources: dict[UUID, SourceController] = {}
-            try:
-                for node in plan.nodes:
-                    if node.definition.execution_kind is not ExecutionKind.SOURCE:
-                        continue
-                    existing = self._sources.get(node.node_id)
-                    sources[node.node_id] = (
-                        existing
-                        if existing is not None and node.node_id in reusable_sources
-                        else self._create_source(node, worker)
-                    )
-            except Exception:
-                self._dispose_candidate_sources(sources, reusable_sources)
-                if worker_created:
-                    worker.close()
-                prepared.close()
-                raise
-
-            old_states = {
-                node_id: source.status().state for node_id, source in self._sources.items()
-            }
-            paused_for_swap: list[SourceController] = []
-            try:
-                for node_id, source in self._sources.items():
-                    if old_states[node_id] in {SourceState.PLAYING, SourceState.RECONNECTING}:
-                        source.pause()
-                        paused_for_swap.append(source)
-                if self._worker is not None and not self._worker.wait_until_idle(5.0):
-                    raise TimeoutError("Active graph did not reach a safe plan-swap boundary")
-                self._facade.commit(prepared, reset_reason=reset_reason)
-            except Exception:
-                for source in paused_for_swap:
-                    with suppress(Exception):
-                        source.resume()
-                self._dispose_candidate_sources(sources, reusable_sources)
-                if worker_created:
-                    worker.close()
-                prepared.close()
-                raise
-
-            previous_sources = self._sources
-            previous_state = self._state
-            self._worker = worker
-            self._sources = sources
-            self._preview_broker.apply(preview_configuration)
-            # A new generation renumbers every preview sequence from 1, so
-            # the delivery cursors reset with it: otherwise the next
-            # generation's previews are suppressed by the previous
-            # generation's counters. The child event publisher drives this
-            # client directly (no session to clear the state for it), so the
-            # reset must live here, not in a wrapper.
-            with self._preview_cursor_lock:
-                self._image_sequences.clear()
-                self._note_sequences.clear()
-                self._value_sequences.clear()
-            worker.reset_plan_metrics()
-            self._graph_revision = snapshot.revision
-            self._latest_valid_snapshot = snapshot
-            self._latest_demand_roots = roots
-            self._state = previous_state if old_plan is not None else EngineState.STOPPED
-            self._profiler.reset()
-            for node_id, source in previous_sources.items():
-                if node_id not in reusable_sources:
-                    with suppress(Exception):
-                        source.close()
-            if previous_state is EngineState.RUNNING:
-                for node_id, source in sources.items():
-                    if old_states.get(node_id) in {SourceState.PLAYING, SourceState.RECONNECTING}:
-                        with suppress(Exception):
-                            source.resume() if node_id in reusable_sources else source.play()
-            interrupted = self._interrupted_playing_source_ids
-            if interrupted:
-                # The previous valid plan was torn down by a broken graph
-                # (ADR-0013): sources are fresh in READY, so the sources that
-                # were playing when the stop happened play again without a
-                # user gesture (ADR-0020). Positions are not preserved.
-                self._interrupted_playing_source_ids = frozenset()
-                for node_id, source in sources.items():
-                    if node_id in interrupted:
-                        with suppress(Exception):
-                            source.play()
-                self._refresh_transport_state()
-            return EngineActivation(snapshot.revision, prepared.result.report, True)
+        return self._body.activate(snapshot, demand_roots=demand_roots, reset_reason=reset_reason)
 
     def play(self, source_node_id: UUID | None = None) -> None:
-        with self._lock:
-            sources = self._selected_sources(source_node_id)
-            for source in sources:
-                source.play()
-            self._refresh_transport_state()
+        self._body.play(source_node_id)
 
     def pause(self, source_node_id: UUID | None = None) -> None:
-        with self._lock:
-            sources = self._selected_sources(source_node_id)
-            for source in sources:
-                source.pause()
-            self._refresh_transport_state()
-
-            if self._state is not EngineState.RUNNING:
-                # No source is producing state any more: silence the MIDI and
-                # debug-audio outputs (notes off, voices cleared). Drain the
-                # frame worker first so frames already presented cannot execute
-                # after the panic and re-assert the notes that just went off.
-                worker = self._worker
-                if worker is not None:
-                    worker.wait_until_idle(2.0)
-                self._facade.panic()
+        self._body.pause(source_node_id)
 
     def resume(self, source_node_id: UUID | None = None) -> None:
-        with self._lock:
-            sources = self._selected_sources(source_node_id)
-            for source in sources:
-                source.resume()
-            self._refresh_transport_state()
+        self._body.resume(source_node_id)
 
     def stop(self, source_node_id: UUID | None = None) -> None:
-        with self._lock:
-            sources = self._selected_sources(source_node_id)
-            for source in sources:
-                source.stop()
-            if source_node_id is None:
-                self._facade.panic()
-            self._refresh_transport_state()
+        self._body.stop(source_node_id)
 
     def reload(self, source_node_id: UUID | None = None) -> None:
-        with self._lock:
-            sources = self._selected_sources(source_node_id)
-            for source in sources:
-                source.reload()
-            if source_node_id is None:
-                self._facade.panic()
-            self._refresh_transport_state()
+        self._body.reload(source_node_id)
 
     def seek(self, source_node_id: UUID, source_time_s: float) -> None:
-        with self._lock:
-            self._selected_sources(source_node_id)[0].seek(source_time_s)
+        self._body.seek(source_node_id, source_time_s)
 
     def panic(self) -> None:
-        with self._lock:
-            self._ensure_open()
-            self._facade.panic()
+        self._body.panic()
 
     def source_status(self, source_node_id: UUID | None = None) -> tuple[SourceStatus, ...]:
-        with self._lock:
-            worker = self._worker
-            statuses: list[SourceStatus] = []
-            for source in self._selected_sources(source_node_id):
-                status = source.status()
-                if worker is not None:
-                    mailbox = worker.mailbox_metrics(source.node_id)
-                    status = replace(
-                        status,
-                        dropped_before_processing=mailbox.dropped_before_processing,
-                        mailbox_occupancy=mailbox.occupancy,
-                        frame_age_ms=mailbox.frame_age_ms,
-                        mailbox_capacity=mailbox.capacity,
-                        processing_latency_ms=mailbox.processing_latency_ms,
-                    )
-                statuses.append(status)
-            return tuple(statuses)
+        return self._body.source_status(source_node_id)
 
     def midi_output_status(
         self, output_node_id: UUID | None = None
     ) -> tuple[MidiOutputStatus, ...]:
-        with self._lock:
-            self._ensure_open()
-        return self._facade.midi_output_status(output_node_id)
+        return self._body.midi_output_status(output_node_id)
 
     def device_catalogue(self, *, force_refresh: bool = False) -> DeviceCatalogue:
-        with self._lock:
-            self._ensure_open()
-        return self._device_catalogue_service.catalogue(force_refresh=force_refresh)
+        return self._body.device_catalogue(force_refresh=force_refresh)
 
     def node_memory_diagnostics(
         self, node_id: UUID | None = None
     ) -> tuple[NodeMemoryDiagnostic, ...]:
-        with self._lock:
-            self._ensure_open()
-            return self._facade.node_memory_diagnostics(node_id)
+        return self._body.node_memory_diagnostics(node_id)
 
     def node_profiles(self) -> tuple[NodeProfile, ...]:
-        return self._profiler.profiles()
+        return self._body.node_profiles()
 
     def set_profiling_enabled(self, enabled: bool) -> None:
-        with self._lock:
-            self._ensure_open()
-            if enabled == self._profiling_enabled:
-                return
-            self._profiling_enabled = enabled
-            self._profiler.reset()
-            self._facade.set_profiling_hook(self._profiler.record if enabled else None)
+        self._body.set_profiling_enabled(enabled)
 
     def reset_profiling(self) -> None:
-        self._profiler.reset()
-        worker = self._worker
-        if worker is not None:
-            worker.reset_graph_execution_metrics()
+        self._body.reset_profiling()
 
     def metrics(self) -> EngineMetrics:
-        with self._lock:
-            if self._state is EngineState.CLOSED:
-                return EngineMetrics(state=EngineState.CLOSED, graph_revision=self._graph_revision)
-            worker = self._worker
-            statuses = self.source_status()
-            state = self._effective_state(statuses, worker)
-            processed_ticks = worker.processed_ticks if worker is not None else 0
-            input_fps = worker.input_fps if worker is not None else 0.0
-            processed_fps = worker.processed_fps if worker is not None else 0.0
-            p95_ms = self._profiler.global_p95_ms()
-            graph_window, graph_p50, graph_p95, graph_p99, graph_max = (
-                worker.graph_execution_metrics() if worker is not None else (0, 0.0, 0.0, 0.0, 0.0)
-            )
-            return EngineMetrics(
-                state=state,
-                graph_revision=self._graph_revision,
-                processed_ticks=processed_ticks,
-                input_fps=input_fps,
-                processed_fps=processed_fps,
-                p95_node_time_ms=p95_ms,
-                dropped_before_processing=(worker.total_dropped() if worker is not None else 0),
-                skipped_by_selection=sum(status.skipped_by_selection for status in statuses),
-                memory_bytes=psutil.Process().memory_info().rss,
-                mailbox_occupancy=sum(status.mailbox_occupancy for status in statuses),
-                mailbox_capacity=sum(status.mailbox_capacity for status in statuses),
-                preview_fps=self._preview_broker.preview_fps(),
-                frame_age_ms=max((status.frame_age_ms for status in statuses), default=0.0),
-                processing_latency_ms=max(
-                    (status.processing_latency_ms for status in statuses), default=0.0
-                ),
-                graph_latency_window_size=graph_window,
-                p50_graph_execution_ms=graph_p50,
-                p95_graph_execution_ms=graph_p95,
-                p99_graph_execution_ms=graph_p99,
-                max_graph_execution_ms=graph_max,
-                runtime_errors=(worker.last_result.errors if worker and worker.last_result else ()),
-            )
+        return self._body.metrics()
 
     def next_image_previews(self) -> tuple[ImagePreview, ...]:
-        with self._preview_cursor_lock:
-            previews = self._preview_broker.poll_images(self._image_sequences)
-            for preview in previews:
-                self._image_sequences[(preview.owner_id, preview.source_port_id)] = preview.sequence
-        return previews
+        return self._body.next_image_previews()
 
     def next_note_previews(self) -> tuple[NotePreview, ...]:
-        with self._preview_cursor_lock:
-            previews = self._preview_broker.poll_notes(self._note_sequences)
-            for preview in previews:
-                self._note_sequences[preview.owner_id] = preview.sequence
-        return previews
+        return self._body.next_note_previews()
 
     def next_value_previews(self) -> tuple[ValuePreview, ...]:
-        with self._preview_cursor_lock:
-            previews = self._preview_broker.poll_values(self._value_sequences)
-            for preview in previews:
-                self._value_sequences[(preview.owner_id, preview.source_port_id)] = preview.sequence
-        return previews
+        return self._body.next_value_previews()
 
     def reset_image_preview_cursors(self) -> None:
-        with self._preview_cursor_lock:
-            self._image_sequences.clear()
+        self._body.reset_image_preview_cursors()
 
     def reset_note_preview_cursors(self) -> None:
-        with self._preview_cursor_lock:
-            self._note_sequences.clear()
+        self._body.reset_note_preview_cursors()
 
     def clear_previews(self) -> None:
-        # Bumping the broker generation drops in-flight publishes and forgets
-        # the retained previews; the cursors are reset with them so a stopped
-        # engine cannot re-serve its last preview frame.
-        self._preview_broker.clear()
-        with self._preview_cursor_lock:
-            self._image_sequences.clear()
-            self._note_sequences.clear()
-            self._value_sequences.clear()
+        self._body.clear_previews()
 
     def wait_until_idle(self, timeout_s: float = 5.0) -> bool:
-        deadline = time.monotonic() + max(0.0, timeout_s)
-        with self._lock:
-            sources = tuple(self._sources.values())
-            worker = self._worker
-        for source in sources:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0.0 or not source.wait_until_finished(remaining):
-                return False
-        if worker is None:
-            return True
-        return worker.wait_until_idle(max(0.0, deadline - time.monotonic()))
+        return self._body.wait_until_idle(timeout_s)
+
+    def close(self) -> None:
+        self._body.close()
+
+    # -- Client-only behaviour: composition over the body ------------------
 
     def status(self) -> EngineStatus:
-        with self._lock:
-            connection_state = (
-                EngineConnectionState.CLOSED
-                if self._state is EngineState.CLOSED
-                else EngineConnectionState.CONNECTED
-            )
-            return EngineStatus(connection_state, graph_revision=self._graph_revision)
+        # The in-process placement never loses its connection: the only
+        # state transitions are CLOSED after close() and everything else
+        # is CONNECTED.
+        connection_state = (
+            EngineConnectionState.CLOSED
+            if self._body.state is EngineState.CLOSED
+            else EngineConnectionState.CONNECTED
+        )
+        return EngineStatus(connection_state, graph_revision=self._body.graph_revision)
 
     def restart(self) -> EngineActivation | None:
-        with self._lock:
-            self._ensure_open()
-            snapshot = self._latest_valid_snapshot
-            demand_roots = self._latest_demand_roots
-        if snapshot is None:
+        source = self._body.last_activation()
+        if source is None:
             return None
-        return self.activate(
+        snapshot, demand_roots = source
+        return self._body.activate(
             snapshot,
             demand_roots=demand_roots,
             reset_reason=ResetReason.ENGINE_RESTARTED,
         )
-
-    def close(self) -> None:
-        with self._lock:
-            if self._state is EngineState.CLOSED:
-                return
-            errors: list[Exception] = []
-            try:
-                self._close_runtime()
-            except Exception as error:
-                errors.append(error)
-            try:
-                self._facade.close()
-            except Exception as error:
-                errors.append(error)
-            try:
-                self._device_catalogue_service.close()
-            except Exception as error:
-                errors.append(error)
-            finally:
-                self._interrupted_playing_source_ids = frozenset()
-                self._state = EngineState.CLOSED
-            _raise_cleanup_errors(errors, "Engine cleanup failed")
-
-    def _create_source(
-        self, node: CompiledNode, worker: LatestFrameGraphWorker
-    ) -> SourceController:
-        """Build a source from the configuration its node definition declares."""
-
-        definition = node.definition
-        builder = definition.source_config_builder
-        if builder is None:
-            return _FailedSource(
-                node.node_id,
-                RuntimeError(f"{definition.type_id} declares no source configuration builder"),
-                source_kind="unknown",
-            )
-        try:
-            # Compiled nodes retain only the parameters the graph sets
-            # explicitly; source configuration needs the full declared
-            # mapping, so the definition's defaults are merged in first.
-            effective_parameters = {spec.id: spec.default for spec in definition.parameters}
-            effective_parameters.update(node.parameters)
-            config = builder(effective_parameters)
-        except Exception as error:
-            return _FailedSource(node.node_id, error, source_kind="unknown")
-        if isinstance(config, VideoSourceConfig):
-            return self._create_video_source(node, worker, config)
-        if isinstance(config, CameraSourceConfig):
-            return self._create_camera_source(node, worker, config)
-        return _FailedSource(
-            node.node_id,
-            RuntimeError(
-                f"{definition.type_id} declares an unsupported source configuration "
-                f"type {type(config).__name__}"
-            ),
-            source_kind="unknown",
-        )
-
-    def _create_video_source(
-        self,
-        node: CompiledNode,
-        worker: LatestFrameGraphWorker,
-        config: VideoSourceConfig,
-    ) -> SourceController:
-        try:
-            return self._video_source_factory(
-                node.node_id,
-                config,
-                on_frame=partial(worker.publish, node.node_id),
-                on_reset=partial(worker.reset_source, node.node_id),
-            )
-        except Exception as error:
-            return _FailedSource(
-                node.node_id,
-                error,
-                source_kind="video",
-                file_path=config.file_path,
-            )
-
-    def _create_camera_source(
-        self,
-        node: CompiledNode,
-        worker: LatestFrameGraphWorker,
-        config: CameraSourceConfig,
-    ) -> SourceController:
-        try:
-            return self._camera_source_factory(
-                node.node_id,
-                config,
-                on_frame=partial(worker.publish, node.node_id),
-                on_reset=partial(worker.reset_source, node.node_id),
-            )
-        except Exception as error:
-            return _FailedSource(
-                node.node_id,
-                error,
-                source_kind="camera",
-                device_id=config.device_id,
-            )
-
-    @staticmethod
-    def _reusable_source_ids(
-        old_plan: ExecutionPlan | None,
-        new_plan: ExecutionPlan,
-        reset_reason: ResetReason,
-    ) -> frozenset[UUID]:
-        if reset_reason is not ResetReason.PLAN_REPLACED or old_plan is None:
-            return frozenset()
-        old_sources = {
-            node.node_id: node
-            for node in old_plan.nodes
-            if node.definition.execution_kind is ExecutionKind.SOURCE
-        }
-        return frozenset(
-            node.node_id
-            for node in new_plan.nodes
-            if node.definition.execution_kind is ExecutionKind.SOURCE
-            and (old := old_sources.get(node.node_id)) is not None
-            and old.state_retention_key == node.state_retention_key
-        )
-
-    @staticmethod
-    def _dispose_candidate_sources(
-        sources: Mapping[UUID, SourceController], reusable_source_ids: frozenset[UUID]
-    ) -> None:
-        for node_id, source in sources.items():
-            if node_id not in reusable_source_ids:
-                with suppress(Exception):
-                    source.close()
-
-    def _selected_sources(self, source_node_id: UUID | None) -> tuple[SourceController, ...]:
-        self._ensure_open()
-        if source_node_id is None:
-            return tuple(self._sources[key] for key in sorted(self._sources, key=str))
-        source = self._sources.get(source_node_id)
-        if source is None:
-            raise KeyError(f"Unknown source node: {source_node_id}")
-        return (source,)
-
-    def _refresh_transport_state(self) -> None:
-        """Derive aggregate transport state after a source-scoped command."""
-
-        states = tuple(source.status().state for source in self._sources.values())
-        if any(state in {SourceState.PLAYING, SourceState.RECONNECTING} for state in states):
-            self._state = EngineState.RUNNING
-        elif any(state is SourceState.PAUSED for state in states):
-            self._state = EngineState.PAUSED
-        else:
-            self._state = EngineState.STOPPED
-
-    def _stop_runtime_for_invalid_graph(self) -> None:
-        """Stop and tear down the runtime after a broken graph (client stays open)."""
-
-        # Remember which sources were playing so the next valid activation can
-        # resume them (ADR-0020). Re-capture only while live sources exist: a
-        # second consecutive broken activation must not wipe the memory.
-        if self._sources:
-            self._interrupted_playing_source_ids = frozenset(
-                node_id
-                for node_id, source in self._sources.items()
-                if source.status().state in {SourceState.PLAYING, SourceState.RECONNECTING}
-            )
-        sources = tuple(self._sources.values())
-        self._sources = {}
-        for source in sources:
-            with suppress(Exception):
-                source.stop()
-        worker = self._worker
-        self._worker = None
-        if worker is not None:
-            with suppress(Exception):
-                worker.close()
-        with suppress(Exception):
-            self._facade.stop()
-        with suppress(Exception):
-            self._preview_broker.clear()
-        # The broker generation was reset: drop the cursors with it so the
-        # next generation's fresh sequences are not suppressed.
-        with self._preview_cursor_lock:
-            self._image_sequences.clear()
-            self._note_sequences.clear()
-            self._value_sequences.clear()
-        for source in sources:
-            with suppress(Exception):
-                source.close()
-        self._state = EngineState.STOPPED
-
-    def _close_runtime(self) -> None:
-        sources = tuple(self._sources.values())
-        self._sources = {}
-        worker = self._worker
-        self._worker = None
-        errors: list[Exception] = []
-        for source in sources:
-            try:
-                source.close()
-            except Exception as error:
-                errors.append(error)
-        if worker is not None:
-            try:
-                worker.close()
-            except Exception as error:
-                errors.append(error)
-        try:
-            self._preview_broker.clear()
-        except Exception as error:
-            errors.append(error)
-        # The broker generation was reset: drop the cursors with it so the
-        # next generation's fresh sequences are not suppressed.
-        with self._preview_cursor_lock:
-            self._image_sequences.clear()
-            self._note_sequences.clear()
-            self._value_sequences.clear()
-        _raise_cleanup_errors(errors, "Runtime cleanup failed")
-
-    def _effective_state(
-        self,
-        statuses: tuple[SourceStatus, ...],
-        worker: LatestFrameGraphWorker | None,
-    ) -> EngineState:
-        if worker is not None:
-            if worker.last_error is not None:
-                return EngineState.ERROR
-            result = worker.last_result
-            if result is not None and result.errors:
-                return EngineState.ERROR
-        if any(status.state is SourceState.ERROR for status in statuses):
-            return EngineState.ERROR
-        if any(
-            status.state in {SourceState.PLAYING, SourceState.RECONNECTING} for status in statuses
-        ):
-            return EngineState.RUNNING
-        if any(status.state is SourceState.PAUSED for status in statuses):
-            return EngineState.PAUSED
-        if statuses:
-            return EngineState.STOPPED
-        return self._state
-
-    def _ensure_open(self) -> None:
-        if self._state is EngineState.CLOSED:
-            raise RuntimeError("Engine client is closed")
-
-
-def _raise_cleanup_errors(errors: list[Exception], summary: str) -> None:
-    if not errors:
-        return
-    first, *additional = errors
-    for error in additional:
-        first.add_note(f"Additional cleanup failure: {type(error).__name__}: {error}")
-    first.add_note(summary)
-    raise first
-
-
-__all__ = [
-    "CameraSourceFactory",
-    "InProcessEngineClient",
-    "LatestFrameGraphWorker",
-    "SourceController",
-    "SourceMailboxMetrics",
-    "VideoSourceFactory",
-]

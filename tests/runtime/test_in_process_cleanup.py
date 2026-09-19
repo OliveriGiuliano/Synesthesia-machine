@@ -43,16 +43,16 @@ def test_close_attempts_every_resource_after_failure_and_remains_idempotent(
     previews = _Closer()
     facade = _Closer()
     monkeypatch.setattr(
-        client,
+        client._body,
         "_sources",
         {
             UUID(int=1): cast(SourceController, failing_source),
             UUID(int=2): cast(SourceController, healthy_source),
         },
     )
-    monkeypatch.setattr(client, "_worker", cast(LatestFrameGraphWorker, worker))
-    monkeypatch.setattr(client, "_preview_broker", cast(PreviewBroker, previews))
-    monkeypatch.setattr(client, "_facade", cast(EngineFacade, facade))
+    monkeypatch.setattr(client._body, "_worker", cast(LatestFrameGraphWorker, worker))
+    monkeypatch.setattr(client._body, "_preview_broker", cast(PreviewBroker, previews))
+    monkeypatch.setattr(client._body, "_facade", cast(EngineFacade, facade))
 
     with pytest.raises(OSError, match="synthetic source close failure"):
         client.close()

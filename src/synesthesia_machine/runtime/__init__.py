@@ -14,13 +14,14 @@ from synesthesia_machine.runtime.profiling import RuntimeProfiler
 from synesthesia_machine.runtime.scheduler import Scheduler, TickResult
 
 if TYPE_CHECKING:
-    from synesthesia_machine.runtime.engine_client import EngineProtocolError, ProcessEngineClient
-    from synesthesia_machine.runtime.engine_facade import EngineFacade
-    from synesthesia_machine.runtime.in_process_engine import (
-        InProcessEngineClient,
+    from synesthesia_machine.runtime.engine_body import (
+        EngineBody,
         LatestFrameGraphWorker,
         TickObserver,
     )
+    from synesthesia_machine.runtime.engine_client import EngineProtocolError, ProcessEngineClient
+    from synesthesia_machine.runtime.engine_facade import EngineFacade
+    from synesthesia_machine.runtime.in_process_engine import InProcessEngineClient
     from synesthesia_machine.runtime.midi_export import (
         MidiExportError,
         MidiExportProgress,
@@ -41,6 +42,7 @@ if TYPE_CHECKING:
 __all__ = [
     "AttachedPreviewSlot",
     "CompiledNode",
+    "EngineBody",
     "EngineFacade",
     "EngineProtocolError",
     "EngineSession",
@@ -87,15 +89,19 @@ def __getattr__(name: str) -> object:
             "EngineProtocolError": EngineProtocolError,
             "ProcessEngineClient": ProcessEngineClient,
         }[name]
-    if name in {"InProcessEngineClient", "LatestFrameGraphWorker", "TickObserver"}:
-        from synesthesia_machine.runtime.in_process_engine import (
-            InProcessEngineClient,
+    if name == "InProcessEngineClient":
+        from synesthesia_machine.runtime.in_process_engine import InProcessEngineClient
+
+        return InProcessEngineClient
+    if name in {"EngineBody", "LatestFrameGraphWorker", "TickObserver"}:
+        from synesthesia_machine.runtime.engine_body import (
+            EngineBody,
             LatestFrameGraphWorker,
             TickObserver,
         )
 
         return {
-            "InProcessEngineClient": InProcessEngineClient,
+            "EngineBody": EngineBody,
             "LatestFrameGraphWorker": LatestFrameGraphWorker,
             "TickObserver": TickObserver,
         }[name]

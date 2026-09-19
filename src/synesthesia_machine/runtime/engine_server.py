@@ -17,7 +17,6 @@ from typing import Protocol, cast, get_args
 import cv2
 import psutil
 
-from synesthesia_machine.contracts.engine_client import EngineClient
 from synesthesia_machine.contracts.engine_messages import (
     ENGINE_PROTOCOL_VERSION,
     ActivateGraph,
@@ -69,7 +68,7 @@ from synesthesia_machine.diagnostics.logging_setup import (
 )
 from synesthesia_machine.graph.model import GraphSnapshot
 from synesthesia_machine.nodes import create_builtin_registry
-from synesthesia_machine.runtime.in_process_engine import InProcessEngineClient
+from synesthesia_machine.runtime.engine_body import EngineBody
 from synesthesia_machine.runtime.preview_channel import SharedMemoryPreviewWriter
 
 HEARTBEAT_INTERVAL_S = 0.25
@@ -146,15 +145,18 @@ def classify_remote_error(error: BaseException) -> RemoteErrorKind:
 class _EventPublisher:
     """Dumb wake/drain loop: heartbeats and compact previews.
 
-    It never clears preview state: the preview broker's activation clear is
-    the single clear site for the transport (and the writer it backs), and
-    the publisher only drives the writer's announce handshake and ships the
+    It is the child's preview publisher: the named seam that drives the
+    engine body's note/value preview publication (the body owns the
+    delivery cursors, so the publisher only pulls and ships). It never
+    clears preview state: the preview broker's activation clear is the
+    single clear site for the transport (and the writer it backs), and the
+    publisher only drives the writer's announce handshake and ships the
     compact previews, without blocking command dispatch or graph work.
     """
 
     def __init__(
         self,
-        engine: EngineClient,
+        engine: EngineBody,
         event_queue: EventQueueWriter,
         *,
         writer: SharedMemoryPreviewWriter,
@@ -314,13 +316,13 @@ class EngineServer:
         connection: DuplexConnection,
         event_queue: EventQueueWriter,
         *,
-        engine: InProcessEngineClient | None = None,
+        engine: EngineBody | None = None,
         events: _EventPublisher | None = None,
         heartbeat_interval_s: float = HEARTBEAT_INTERVAL_S,
     ) -> None:
         """Assemble the child's runtime around an injectable engine seam.
 
-        Production wiring (the in-process client on the builtin registry,
+        Production wiring (the engine body on the builtin registry,
         plus the event publisher) is the default; tests inject fakes so a
         real :class:`EngineServer` can be exercised without a child process.
         """
@@ -334,7 +336,7 @@ class EngineServer:
         self._preview_wake = threading.Event()
         self._preview_writer = SharedMemoryPreviewWriter()
         if engine is None:
-            engine = InProcessEngineClient(
+            engine = EngineBody(
                 create_builtin_registry(),
                 preview_dirty_notifier=self._preview_wake.set,
                 preview_transport=self._preview_writer,
