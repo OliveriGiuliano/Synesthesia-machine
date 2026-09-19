@@ -334,6 +334,12 @@ class VideoSourceService:
         self._head_container: Any | None = None
         self._head_in_use = False
         self._head_trigger = threading.Event()
+        # Set while the staged head is not being consumed by the presentation
+        # thread; the presentation thread clears it when a head consumption
+        # starts and sets it (under the lock) when the drain finishes, so the
+        # head worker's swap wait is event-driven (ticket 07).
+        self._head_free = threading.Event()
+        self._head_free.set()
         # The live decode container stays open across passes of one instance
         # (ADR-0024); it is re-opened only when the file changes (reload) or
         # the source is closed/stopped.
@@ -589,6 +595,7 @@ class VideoSourceService:
         self._release_containers()
         self._head_in_use = False
         self._head_trigger.clear()
+        self._head_free.set()
         self._head_queue = queue.Queue(self._head_frame_budget or 0)
         with self._lock:
             self._timeline.reset()
@@ -762,11 +769,20 @@ class VideoSourceService:
         staged head only immediately after a loop signal and drops the
         duplicate frames the restarted live pass decodes (matched by
         ``source_frame_index``). The two passes execute one shared machine
-        and cannot drift, which is what the boundary duplicate filter rests on.
+        and cannot drift, which is what the boundary duplicate filter rests
+        on. The worker idles between triggers: an idle timeout on the
+        trigger wait causes no restage, and only a pass start or the
+        presentation thread draining the staged head sets the trigger
+        (ADR-0024, ticket 07).
         """
 
         while not self._stop_event.is_set():
-            self._head_trigger.wait(timeout=0.05)
+            # A timeout is not a trigger: the idle worker re-waits at zero
+            # CPU; only a set trigger causes exactly one restage, so the
+            # worker idles between boundaries. The wait goes through the
+            # injectable clock so tests can fast-forward idle periods.
+            if not self._clock.wait(self._head_trigger, 0.05):
+                continue
             if self._stop_event.is_set():
                 return
             self._head_trigger.clear()
@@ -821,16 +837,23 @@ class VideoSourceService:
                 continue
             # Swap the fresh head in only while the presentation is not
             # draining the current one; give up after a bounded wait and let
-            # the next trigger retry.
+            # the next trigger retry. The presentation thread sets the
+            # head-free event when a drain finishes (under the lock), so
+            # this wait is event-driven rather than sleep-polling (ticket
+            # 07).
             deadline_ns = self._clock.monotonic_ns() + 2_000_000_000
-            while self._clock.monotonic_ns() < deadline_ns:
+            while True:
                 if self._stop_event.is_set():
                     return
                 with self._lock:
                     if not self._head_in_use:
                         self._head_queue = staged
                         break
-                time.sleep(0.02)
+                if self._clock.monotonic_ns() >= deadline_ns:
+                    # Bounded give-up: drop this staged head; the next
+                    # trigger restages.
+                    break
+                self._clock.wait(self._head_free, 0.1)
 
     def _presentation_loop(self) -> None:
         # Presentation-local loop-head state: after a loop signal the staged
@@ -860,6 +883,10 @@ class VideoSourceService:
                     using_head = False
                     with self._lock:
                         self._head_in_use = False
+                        self._head_free.set()
+                    # The staged head ran out before the pass ended: ask the
+                    # worker to refill it for the next boundary.
+                    self._head_trigger.set()
                 else:
                     if not self._passes_seek_filter(head_item.pts_seconds):
                         continue
@@ -876,6 +903,7 @@ class VideoSourceService:
                 using_head = False
                 with self._lock:
                     self._head_in_use = False
+                    self._head_free.set()
                     if self._state not in {SourceState.CLOSED, SourceState.ERROR}:
                         self._state = SourceState.ENDED
                 # Reset the complete source-clock component at natural EOF. Without this
@@ -889,6 +917,9 @@ class VideoSourceService:
                     self._source_frame_index = None
                     self._processed_index = 0
                     self._head_in_use = True
+                    # Consumption starts: the worker's swap wait must not see
+                    # a stale head-free set from an earlier drain.
+                    self._head_free.clear()
                     head_queue = self._head_queue
                 self._publish_reset(ResetReason.SOURCE_RESTARTED)
                 using_head = True
@@ -925,6 +956,7 @@ class VideoSourceService:
             self._source_frame_index = None
             self._processed_index = 0
             self._head_in_use = False
+            self._head_free.set()
         self._publish_reset(ResetReason.SOURCE_RESTARTED)
 
     def _passes_seek_filter(self, pts_seconds: float) -> bool:

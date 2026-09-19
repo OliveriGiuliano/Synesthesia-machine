@@ -74,3 +74,12 @@ proportionally worse for files with larger keyframe intervals.
   above are unchanged; only the mechanism that keeps the head from drifting
   from the live pass is different (one shared machine instead of two
   hand-kept copies).
+- 2026-09-20: The idling property is now enforced by the wait protocol,
+  not assumed (ticket 07). The worker's trigger wait distinguishes a
+  timeout (re-wait at zero CPU, no restage) from a latched trigger (exactly
+  one restage; a trigger set while the worker is mid-staging latches and is
+  honoured by the next iteration), and its swap wait is event-driven on a
+  head-free event the presentation thread sets when a head consumption
+  finishes (drain, seek, end, halt) instead of sleep-polling, keeping the
+  bounded give-up deadline. The presentation thread also sets the refill
+  trigger when a staged head drains before the pass ends.

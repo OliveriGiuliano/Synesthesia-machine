@@ -987,3 +987,336 @@ def test_loop_boundary_stays_seamless_when_prefix_frames_lack_pts(
                 )
     finally:
         source.close()
+
+
+class _HeadRealIdleClock(AdvancingClock):
+    """AdvancingClock whose head-worker trigger wait runs on real time.
+
+    A purely fake clock lets the head worker's idle 50 ms wait advance the
+    shared fake timeline as fast as the CPU runs, so the worker itself
+    elapses the quiescent windows the tests below observe. Routing only the
+    head worker's trigger wait through the wall clock keeps its idle tick
+    real-time while the test still fast-forwards the presentation timeline.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.head_trigger: threading.Event | None = None
+
+    def wait(self, event: threading.Event, timeout_s: float | None) -> bool:
+        if event is self.head_trigger:
+            return event.wait(timeout_s)
+        return super().wait(event, timeout_s)
+
+
+class _CountingContainer:
+    """Delegates to a real container, counting seek/decode calls per worker.
+
+    The workers' thread names (``video-head-``/``video-decode-``) are the
+    only handle a test has to tell the two kept-open containers apart.
+    """
+
+    def __init__(self, container: object, counts: dict[str, int]) -> None:
+        self._container = container
+        self._counts = counts
+
+    def _count(self, kind: str) -> None:
+        name = threading.current_thread().name
+        key = f"{kind}:head" if name.startswith("video-head-") else f"{kind}:live"
+        self._counts[key] = self._counts.get(key, 0) + 1
+
+    def seek(self, *args: object, **kwargs: object) -> None:
+        self._count("seek")
+        self._container.seek(*args, **kwargs)
+
+    def decode(self, *args: object, **kwargs: object) -> object:
+        self._count("decode")
+        return self._container.decode(*args, **kwargs)
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._container, name)
+
+    def __enter__(self) -> _CountingContainer:
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        self._container.close()
+        return False
+
+
+class _BarrierHeadContainer(_CountingContainer):
+    """Holds the head worker's first decode call behind an event.
+
+    Lets a test observe the worker mid-staging (seek done, frames not yet
+    converted) and set the trigger there.
+    """
+
+    def __init__(self, container: object, counts: dict[str, int], hold: threading.Event) -> None:
+        super().__init__(container, counts)
+        self._hold = hold
+        self._held = False
+
+    def decode(self, *args: object, **kwargs: object) -> object:
+        self._count("decode")
+        if threading.current_thread().name.startswith("video-head-") and not self._held:
+            self._held = True
+            self._hold.wait()
+        return self._container.decode(*args, **kwargs)
+
+
+def _install_counting_av(monkeypatch: pytest.MonkeyPatch, counts: dict[str, int]) -> None:
+    import synesthesia_machine.media.video_source as video_source_module
+
+    real_av = video_source_module.av
+
+    class _CountingAv:
+        time_base = real_av.time_base
+
+        def open(self, *args: object, **kwargs: object) -> _CountingContainer:
+            return _CountingContainer(real_av.open(*args, **kwargs), counts)
+
+    monkeypatch.setattr(video_source_module, "av", _CountingAv())
+
+
+def test_head_worker_idles_between_boundaries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An idle head worker performs no decode work until a boundary triggers it.
+
+    The old worker discarded its trigger-wait result, so every 50 ms idle
+    timeout fell through into a full restage (seek + pre-keyframe discard +
+    conversion) and the worker never idled. Here the presentation timeline
+    is driven by the fake clock while the head worker's idle tick runs on
+    real time: across a long quiescent window between two boundaries the
+    head container's seek/decode call count must stay flat, and must move
+    again once the next boundary's trigger arrives.
+    """
+
+    path = generate_test_video(
+        tmp_path / "idle-head.mp4",
+        width=64,
+        height=48,
+        frame_count=250,
+        fps=25,
+        codec="libx264",
+    )
+    counts: dict[str, int] = {}
+    _install_counting_av(monkeypatch, counts)
+    clock = _HeadRealIdleClock()
+    source = VideoSourceService(
+        SOURCE_ID,
+        path,
+        loop=True,
+        on_frame=lambda _frame: None,
+        clock=clock,
+    )
+    clock.head_trigger = source._head_trigger
+    dummy = threading.Event()
+
+    def head_work() -> int:
+        return counts.get("decode:head", 0) + counts.get("seek:head", 0)
+
+    source.play()
+    try:
+        # The first boundary triggers the worker's refill, so the head
+        # container's cumulative work reaches at least two seek/decode pairs
+        # (initial staging + refill) once the worker has settled.
+        deadline = time.monotonic() + 30.0
+        while time.monotonic() < deadline and head_work() < 4:
+            time.sleep(0.05)
+        assert head_work() >= 4, "the head worker never staged and refilled"
+        # Pause so the presentation thread blocks on its real-time pause
+        # wait: the fake timeline then advances only through this test, and
+        # no boundary or drain can set the trigger while paused. The worker's
+        # only remaining activity is whatever staging/swap was in flight,
+        # which the settle below drains.
+        source.pause()
+        deadline = time.monotonic() + 15.0
+        stable = 0.0
+        last_work = -1
+        while time.monotonic() < deadline:
+            work = head_work()
+            if work == last_work:
+                stable += 0.1
+                if stable >= 0.3:
+                    break
+            else:
+                stable = 0.0
+                last_work = work
+            time.sleep(0.1)
+        quiet_work = head_work()
+        # Four seconds of fake time with no boundary pending: an idle worker
+        # performs no decode work at all.
+        for _ in range(40):
+            clock.wait(dummy, 0.1)
+            time.sleep(0.005)
+        assert head_work() == quiet_work, (
+            f"head worker did work while idle ({quiet_work} -> {head_work()} "
+            "seek/decode calls): an idle timeout must not restage"
+        )
+        # Resuming runs the presentation to the next boundary, whose drain
+        # trigger must restage the head again.
+        source.resume()
+        deadline = time.monotonic() + 15.0
+        while time.monotonic() < deadline and head_work() <= quiet_work:
+            time.sleep(0.05)
+        assert head_work() > quiet_work, "the next boundary did not restage the head"
+    finally:
+        source.close()
+
+
+def test_head_trigger_set_mid_staging_is_not_lost(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A trigger set while the head worker is mid-staging is honoured later.
+
+    The worker's first head decode is held behind a barrier so the test can
+    set the trigger while the pass is in flight (the same shape as a
+    drain-complete trigger arriving mid-staging). Presentation is paused
+    for the gated window, so no boundary or drain can set another trigger:
+    after the barrier releases, the only trigger the worker can observe is
+    the latched mid-staging one, and it must restage on it.
+    """
+
+    path = generate_test_video(
+        tmp_path / "mid-staging.mp4",
+        width=64,
+        height=48,
+        frame_count=250,
+        fps=25,
+        codec="libx264",
+    )
+    counts: dict[str, int] = {}
+    hold = threading.Event()
+    import synesthesia_machine.media.video_source as video_source_module
+
+    real_av = video_source_module.av
+
+    class _BarrierAv:
+        time_base = real_av.time_base
+
+        def open(self, *args: object, **kwargs: object) -> _BarrierHeadContainer:
+            return _BarrierHeadContainer(real_av.open(*args, **kwargs), counts, hold)
+
+    monkeypatch.setattr(video_source_module, "av", _BarrierAv())
+    clock = _HeadRealIdleClock()
+    source = VideoSourceService(
+        SOURCE_ID, path, loop=True, on_frame=lambda _frame: None, clock=clock
+    )
+    clock.head_trigger = source._head_trigger
+    source.play()
+    try:
+        # Wait for the worker to enter the held head decode (mid-staging).
+        deadline = time.monotonic() + 15.0
+        while time.monotonic() < deadline and counts.get("decode:head", 0) == 0:
+            time.sleep(0.01)
+        assert counts.get("decode:head", 0) >= 1, "the head worker never started staging"
+        # Freeze the presentation so no boundary or drain can set another
+        # trigger during the gated window.
+        source.pause()
+        # A trigger arrives while the worker is held mid-staging.
+        source._head_trigger.set()
+        hold.set()
+        deadline = time.monotonic() + 15.0
+        while time.monotonic() < deadline and counts.get("decode:head", 0) < 2:
+            time.sleep(0.01)
+        assert counts.get("decode:head", 0) >= 2, (
+            "the trigger set mid-staging was lost: the worker never restaged"
+        )
+    finally:
+        source.close()
+
+
+def test_head_swap_gives_up_after_bounded_wait(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A head that stays in use past the bounded wait is dropped, not forced in.
+
+    The worker's swap waits for the presentation thread to finish draining
+    (the head-free event, driven by the injectable clock) and gives up after
+    the bounded deadline, dropping the freshly staged head; the next trigger
+    restages. Whitebox: the test marks the head in use itself, which the
+    presentation thread does whenever it starts consuming a staged head.
+    """
+
+    path = generate_test_video(
+        tmp_path / "swap-giveup.mp4",
+        width=64,
+        height=48,
+        frame_count=250,
+        fps=25,
+        codec="libx264",
+    )
+    counts: dict[str, int] = {}
+    _install_counting_av(monkeypatch, counts)
+    clock = _HeadRealIdleClock()
+    source = VideoSourceService(
+        SOURCE_ID,
+        path,
+        loop=True,
+        on_frame=lambda _frame: None,
+        clock=clock,
+    )
+    clock.head_trigger = source._head_trigger
+    dummy = threading.Event()
+    source.play()
+    try:
+        deadline = time.monotonic() + 30.0
+        ready = False
+        while time.monotonic() < deadline:
+            with source._lock:
+                ready = not source._head_in_use and source._head_queue.qsize() > 0
+            if ready:
+                break
+            time.sleep(0.02)
+        assert ready, "the initial head was never staged"
+        # Freeze the presentation so its loop/drain cycle cannot flip the
+        # head's in-use flag out from under the whitebox setting below.
+        source.pause()
+        # Let any in-flight staging/swap settle before sampling the queue.
+        deadline = time.monotonic() + 15.0
+        stable = 0.0
+        last_work = -1
+        while time.monotonic() < deadline:
+            work = counts.get("decode:head", 0)
+            if work == last_work:
+                stable += 0.1
+                if stable >= 0.3:
+                    break
+            else:
+                stable = 0.0
+                last_work = work
+            time.sleep(0.1)
+        first = source._head_queue
+        # Mark the head in use (as a LOOP signal would) and ask for a
+        # restage: the worker must stage but not swap it in.
+        source._head_in_use = True
+        source._head_trigger.set()
+        deadline = time.monotonic() + 15.0
+        while time.monotonic() < deadline and counts.get("decode:head", 0) < 2:
+            time.sleep(0.01)
+        assert counts.get("decode:head", 0) >= 2, "the triggered restage never ran"
+        # Run the fake clock past the worker's bounded swap wait (the
+        # worker's own swap wait advances the shared fake clock too, so the
+        # give-up lands quickly).
+        advanced = 0.0
+        while advanced < 4.0:
+            if source._head_queue is not first:
+                break
+            for _ in range(20):
+                clock.wait(dummy, 0.1)
+                time.sleep(0.005)
+            advanced += 2.0
+        assert source._head_queue is first, (
+            "the in-use head was swapped out: the bounded give-up did not drop the fresh head"
+        )
+        # Release and retrigger: the next restage must swap in a fresh queue.
+        source._head_in_use = False
+        source._head_free.set()
+        source._head_trigger.set()
+        deadline = time.monotonic() + 15.0
+        while time.monotonic() < deadline and source._head_queue is first:
+            time.sleep(0.02)
+        assert source._head_queue is not first, "the retried restage never swapped in"
+    finally:
+        source.close()
