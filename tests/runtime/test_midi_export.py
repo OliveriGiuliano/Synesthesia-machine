@@ -220,6 +220,33 @@ def test_export_drains_the_worker_mailbox_before_collecting(
     assert result.events
 
 
+def test_export_fails_when_the_observed_stream_is_incomplete(
+    export_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0025: the observed stream is the product. The engine keeps ticking
+    through observer failures (observation is diagnostic to the engine), so
+    the exporter itself detects the incomplete note stream and fails the
+    export instead of writing a truncated file."""
+    import synesthesia_machine.runtime.midi_export as midi_export_module
+
+    video, registry = export_env
+    document = _video_pitch_midi_document(video)
+
+    class FailingObserverClient(midi_export_module.InProcessEngineClient):
+        def __init__(self, registry, **kwargs):
+            def _boom(_source_node_id, _frame, _result, _plan) -> None:
+                raise RuntimeError("observer boom")
+
+            kwargs["tick_observer"] = _boom
+            super().__init__(registry, **kwargs)
+
+    monkeypatch.setattr(midi_export_module, "InProcessEngineClient", FailingObserverClient)
+
+    with pytest.raises(MidiExportError) as excinfo:
+        run_midi_export(document.snapshot(), registry=registry)
+    assert excinfo.value.code == "observation_failed"
+
+
 def test_eligibility_accepts_a_valid_video_midi_graph(export_env) -> None:
     from synesthesia_machine.runtime import midi_export_eligibility
 

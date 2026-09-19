@@ -207,6 +207,38 @@ def _describe_region_error(start_s: float, duration_s: float) -> str:
     )
 
 
+def _total_processed_index(
+    metadata: VideoMetadata,
+    *,
+    every: int,
+    region_start_s: float,
+    region_end_s: float | None,
+) -> int | None:
+    """Presented frames the source will deliver over its region.
+
+    ``None`` when the container reports neither a frame count nor a frame
+    rate; ``0`` for a degenerate region.  A whole-file region whose duration
+    is unknown counts every frame in the container.
+    """
+    if region_end_s is None:
+        if metadata.frame_count is not None and metadata.frame_count > 0:
+            return -(-metadata.frame_count // max(1, every))
+        return None
+    span = max(0.0, region_end_s - region_start_s)
+    if span <= 0.0:
+        return 0
+    if metadata.frame_count is not None and metadata.frame_count > 0:
+        if metadata.duration_s is None or metadata.duration_s <= 0.0:
+            return -(-metadata.frame_count // max(1, every))
+        region_frames = max(0.0, span / metadata.duration_s) * metadata.frame_count
+        return max(0, int(region_frames) // max(1, every))
+    if metadata.duration_s is not None and metadata.average_rate:
+        count = int(max(0.0, span) * metadata.average_rate) // max(1, every)
+        if count > 0:
+            return count
+    return None
+
+
 class VideoSourceService:
     """Lifecycle owner for one compiled Load Video source node."""
 
@@ -276,6 +308,15 @@ class VideoSourceService:
         self._region_start_s = region_start_s
         self._region_end_s = region_end_s
         self._pass_start_s = region_start_s
+        # ADR-0025: the presented-frame total of the active region,
+        # published in the status so run-to-end consumers (the MIDI export)
+        # read the source's own facts instead of re-deriving them.
+        self._total_index = _total_processed_index(
+            self._metadata,
+            every=self._process_every_nth_frame,
+            region_start_s=region_start_s,
+            region_end_s=region_end_s,
+        )
         # ADR-0024: a looping source keeps a bounded buffer of pre-decoded
         # loop-head frames so a pass boundary presents without stalling for
         # the restart cost. About one second of the region at the published
@@ -342,6 +383,8 @@ class VideoSourceService:
                 source_time_s=self._position_s,
                 source_frame_index=self._source_frame_index,
                 processed_index=self._processed_index,
+                total_index=self._total_index,
+                region_end_s=self._region_end_s,
                 skipped_by_selection=self._skipped_by_selection,
                 dropped_before_processing=dropped_before_processing,
                 warnings=self._warnings,

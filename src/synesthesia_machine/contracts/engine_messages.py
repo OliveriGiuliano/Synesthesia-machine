@@ -20,7 +20,7 @@ from synesthesia_machine.contracts.engine_client import (
 )
 from synesthesia_machine.contracts.runtime_values import LiteralValue
 
-ENGINE_PROTOCOL_VERSION = 16
+ENGINE_PROTOCOL_VERSION = 17
 
 
 class RemoteErrorKind(StrEnum):

@@ -8,6 +8,14 @@ the desired MIDI state reaching each MIDI output node (Send MIDI, Generate
 Audio); consecutive states are diffed into note-on/note-off events on the
 absolute video-time axis.
 
+Reliability (ADR-0025): the observed stream is the product, so before
+writing the exporter verifies that every processed source frame was observed
+at every MIDI output node; a mismatch fails the export with
+``observation_failed`` instead of truncating the file. Progress and the
+simulated timeline end are read from the statuses the sources publish
+(``total_index``, ``region_end_s``); the exporter no longer re-derives the
+sources' frame arithmetic.
+
 Callers must pass a registry whose output nodes are hardware-free (for
 example ``create_builtin_registry(midi_output_service_factory=
 NullMidiOutputService, synth_factory=NullDebugSynth)``) so the export never
@@ -17,7 +25,6 @@ opens a MIDI port, sends a note, or plays audio.
 from __future__ import annotations
 
 import logging
-import math
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -32,6 +39,7 @@ from synesthesia_machine.contracts import (
     MidiStateFrame,
     NoData,
     SourceState,
+    SourceStatus,
 )
 from synesthesia_machine.graph.model import GraphSnapshot, NodeModel
 from synesthesia_machine.media.source_config import VideoSourceConfig
@@ -39,7 +47,6 @@ from synesthesia_machine.media.video_source import (
     FrameCallback,
     PresentedSourceFrame,
     ResetCallback,
-    VideoMetadata,
     VideoSourceService,
     inspect_video,
 )
@@ -175,74 +182,6 @@ class _NullDeviceCatalogueService:
         pass
 
 
-class _SourceFrameCount:
-    __slots__ = (
-        "end_s",
-        "every",
-        "file_path",
-        "node_id",
-        "start_s",
-        "stream_index",
-        "timeline_end_s",
-        "total",
-    )
-
-    def __init__(
-        self,
-        node_id: UUID,
-        file_path: str,
-        stream_index: int,
-        every: int,
-        start_s: float = 0.0,
-        end_s: float = 0.0,
-    ) -> None:
-        self.node_id = node_id
-        self.file_path = file_path
-        self.stream_index = stream_index
-        self.every = every
-        self.start_s = start_s
-        self.end_s = end_s
-        metadata = inspect_video(file_path, stream_index=stream_index)
-        # A zero end means "until the end of the video"; both timestamps are
-        # clamped to the file so the progress denominator matches the pass
-        # the export actually simulates.
-        duration_s = metadata.duration_s
-        if end_s > 0.0:
-            self.timeline_end_s = end_s
-        elif duration_s is not None:
-            self.timeline_end_s = duration_s
-        else:
-            self.timeline_end_s = 0.0
-        self.total = _processed_frame_count(metadata, every, start_s, end_s)
-
-
-def _processed_frame_count(
-    metadata: VideoMetadata,
-    every: int,
-    start_s: float = 0.0,
-    end_s: float = 0.0,
-) -> int | None:
-    span = _region_span_s(metadata.duration_s, start_s, end_s)
-    if span <= 0.0:
-        return 0
-    if metadata.frame_count is not None and metadata.frame_count > 0:
-        if metadata.duration_s is None or metadata.duration_s <= 0.0:
-            return -(-metadata.frame_count // max(1, every))
-        region_frames = max(0.0, span / metadata.duration_s) * metadata.frame_count
-        return max(0, int(region_frames) // max(1, every))
-    if metadata.duration_s is not None and metadata.average_rate:
-        count = int(max(0.0, span) * metadata.average_rate) // max(1, every)
-        if count > 0:
-            return count
-    return None
-
-
-def _region_span_s(duration_s: float | None, start_s: float, end_s: float) -> float:
-    end = end_s if end_s > 0.0 else (duration_s if duration_s is not None else 0.0)
-    start = min(start_s, end) if end > 0.0 else min(start_s, duration_s or 0.0)
-    return max(0.0, end - start)
-
-
 def _int_parameter(node: NodeModel, parameter_id: str, default: int) -> int:
     """Read an integer node parameter with a tolerant fallback for odd values."""
 
@@ -254,16 +193,19 @@ def _int_parameter(node: NodeModel, parameter_id: str, default: int) -> int:
 
 def _scan_export_nodes(
     snapshot: GraphSnapshot, *, registry: NodeRegistry
-) -> tuple[list[_SourceFrameCount], list[UUID], bool, tuple[str, str] | None]:
+) -> tuple[list[UUID], list[UUID], bool, tuple[str, str] | None]:
     """One walk of the graph collecting the facts an export needs.
 
-    Returns (video sources, MIDI output node ids, saw a source at all, first
-    per-source problem in node order as a (code, message) pair). Both the
-    eligibility check and the export-time validation consume these facts so
-    the menu state and the exporter can never disagree about the rules.
+    Returns (video source node IDs, MIDI output node IDs, saw a source at
+    all, first per-source problem in node order as a (code, message) pair).
+    Both the eligibility check and the export-time validation consume these
+    facts so the menu state and the exporter can never disagree about the
+    rules.  The media probe is a readability gate only: the frame and
+    region facts an export needs are published by the sources in their
+    status (ADR-0025).
     """
 
-    sources: list[_SourceFrameCount] = []
+    source_node_ids: list[UUID] = []
     midi_output_ids: list[UUID] = []
     saw_source = False
     first_problem: tuple[str, str] | None = None
@@ -296,17 +238,9 @@ def _scan_export_nodes(
                 f"Load Video {definition.display_name} points to a file that cannot be read.",
             )
             continue
-        sources.append(
-            _SourceFrameCount(
-                node.id,
-                file_path,
-                _int_parameter(node, "stream_index", 0),
-                _int_parameter(node, "process_every_nth_frame", 1),
-                start_s=_float_parameter(node, "loop_start_s", 0.0),
-                end_s=_float_parameter(node, "loop_end_s", 0.0),
-            )
-        )
-    return sources, midi_output_ids, saw_source, first_problem
+        inspect_video(file_path, stream_index=_int_parameter(node, "stream_index", 0))
+        source_node_ids.append(node.id)
+    return source_node_ids, midi_output_ids, saw_source, first_problem
 
 
 def midi_export_eligibility(
@@ -336,10 +270,10 @@ def midi_export_eligibility(
 
 def _validate_export_inputs(
     snapshot: GraphSnapshot, *, registry: NodeRegistry
-) -> tuple[list[_SourceFrameCount], list[UUID]]:
-    """Return (video sources, MIDI output node IDs) or raise a stable-coded error."""
+) -> tuple[list[UUID], list[UUID]]:
+    """Return (video source node IDs, MIDI output node IDs) or raise a stable-coded error."""
 
-    sources, midi_output_ids, saw_source, first_problem = _scan_export_nodes(
+    source_node_ids, midi_output_ids, saw_source, first_problem = _scan_export_nodes(
         snapshot, registry=registry
     )
     if first_problem is not None:
@@ -351,16 +285,7 @@ def _validate_export_inputs(
             "no_midi_output",
             "The graph has no MIDI output node (Send MIDI or Generate Audio) to export.",
         )
-    return sources, midi_output_ids
-
-
-def _float_parameter(node: NodeModel, parameter_id: str, default: float) -> float:
-    """Read a float node parameter with a tolerant fallback for odd values."""
-
-    value = node.parameters.get(parameter_id, default)
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
-        return default
-    return max(0.0, float(value))
+    return source_node_ids, midi_output_ids
 
 
 def run_midi_export(
@@ -376,7 +301,7 @@ def run_midi_export(
     Raises :class:`MidiExportError` with a stable ``code`` on failure.
     """
 
-    sources, midi_output_ids = _validate_export_inputs(snapshot, registry=registry)
+    source_node_ids, midi_output_ids = _validate_export_inputs(snapshot, registry=registry)
     samples: dict[UUID, list[tuple[float, MidiStateFrame]]] = {
         node_id: [] for node_id in midi_output_ids
     }
@@ -419,7 +344,7 @@ def run_midi_export(
         device_catalogue_service=_NullDeviceCatalogueService(),
         tick_observer=_observe,
         # The export consumes no previews: skip the preview worker and broker
-        # so every tick stays on the pure graph path.
+        # so every tick stays on the pure graph path (ADR-0025).
         use_previews=False,
     )
     started = time.monotonic()
@@ -432,8 +357,7 @@ def run_midi_export(
             )
             raise MidiExportError("activation_failed", f"Export could not start: {detail}")
         client.play()
-        totals = [source.total for source in sources]
-        total = None if any(t is None for t in totals) else sum(t for t in totals if t is not None)
+        final_statuses: tuple[SourceStatus, ...] = ()
         while True:
             if stop_event is not None and stop_event.is_set():
                 raise MidiExportError("cancelled", "The MIDI export was cancelled.")
@@ -444,9 +368,10 @@ def run_midi_export(
             statuses = client.source_status()
             by_id = {status.node_id: status for status in statuses}
             processed = 0
+            totals: list[int | None] = []
             finished = True
-            for source in sources:
-                status = by_id.get(source.node_id)
+            for source_id in source_node_ids:
+                status = by_id.get(source_id)
                 if status is None:
                     raise MidiExportError(
                         "source_error", "A video source stopped reporting status."
@@ -458,9 +383,14 @@ def run_midi_export(
                 if status.state not in {SourceState.ENDED, SourceState.STOPPED}:
                     finished = False
                 processed += status.processed_index
+                totals.append(status.total_index)
+            total = (
+                None if any(t is None for t in totals) else sum(t for t in totals if t is not None)
+            )
             if progress is not None:
                 progress(MidiExportProgress(processed, total))
             if finished:
+                final_statuses = statuses
                 break
             time.sleep(_POLL_INTERVAL_S)
         # Sources report ENDED the moment their last frame is published, while the
@@ -470,10 +400,24 @@ def run_midi_export(
             raise MidiExportError(
                 "timeout", "The export finished but the engine was still processing frames."
             )
+        # Observation contract (ADR-0025): the engine keeps ticking through
+        # observer failures (observation is diagnostic to the engine), so the
+        # exporter proves completeness itself: every processed frame must
+        # have been observed at every MIDI output, or the note stream is
+        # incomplete.
+        expected_ticks = sum(status.processed_index for status in final_statuses)
+        for output_id in midi_output_ids:
+            if len(samples[output_id]) != expected_ticks:
+                raise MidiExportError(
+                    "observation_failed",
+                    "The export observed fewer MIDI states than the sources processed; "
+                    "the note stream would be incomplete, so the export failed instead "
+                    "of writing a truncated file.",
+                )
 
         with sample_lock:
             collected = {send_id: list(entries) for send_id, entries in samples.items()}
-        duration_s = _export_duration(collected, sources)
+        duration_s = _export_duration(collected, final_statuses)
         events = _diff_to_events(collected, duration_s)
         return MidiExportResult(tuple(events), duration_s)
     finally:
@@ -482,16 +426,14 @@ def run_midi_export(
 
 def _export_duration(
     collected: Mapping[UUID, list[tuple[float, MidiStateFrame]]],
-    sources: Sequence[_SourceFrameCount],
+    final_statuses: Sequence[SourceStatus],
 ) -> float:
     """End of the simulated timeline: the last captured event or the segment end."""
 
     last_sample = max(
         (time_s for entries in collected.values() for time_s, _ in entries), default=0.0
     )
-    segment_end = 0.0
-    for source in sources:
-        segment_end = max(segment_end, source.timeline_end_s)
+    segment_end = max((status.region_end_s or 0.0 for status in final_statuses), default=0.0)
     return max(last_sample, segment_end)
 
 

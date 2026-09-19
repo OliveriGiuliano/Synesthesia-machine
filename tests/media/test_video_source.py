@@ -162,6 +162,40 @@ def test_inspection_reads_metadata_without_starting_playback(tmp_path: Path) -> 
         source.close()
 
 
+def test_status_publishes_presented_frame_total_and_region_end(tmp_path: Path) -> None:
+    """ADR-0025: run-to-end consumers (offline MIDI export) read the
+    presented-frame total and segment end from the status the source
+    publishes instead of re-deriving its frame arithmetic."""
+    path = generate_test_video(tmp_path / "totals.mp4", frame_count=24, fps=12)
+
+    whole = VideoSourceService(SOURCE_ID, path, on_frame=lambda _frame: None)
+    try:
+        status = whole.status()
+        # A whole-file source plays the entire file: the published segment
+        # ends at the video's end.
+        assert status.total_index == 24
+        assert status.region_end_s == pytest.approx(2.0, abs=0.05)
+    finally:
+        whole.close()
+
+    region = VideoSourceService(
+        SOURCE_ID,
+        path,
+        loop_start_s=0.5,
+        loop_end_s=1.5,
+        on_frame=lambda _frame: None,
+    )
+    try:
+        status = region.status()
+        # The segment end is the configured region end, clamped to the file.
+        assert status.region_end_s == pytest.approx(1.5, abs=0.05)
+        # One second of a 12 fps file presents 12 frames per pass; the
+        # metadata-derived total is exact to a frame.
+        assert status.total_index == pytest.approx(12, abs=1)
+    finally:
+        region.close()
+
+
 def test_inspection_accepts_shell_quoted_pasted_video_path(tmp_path: Path) -> None:
     path = generate_test_video(tmp_path / "quoted path.mkv", width=32, height=24, frame_count=2)
 

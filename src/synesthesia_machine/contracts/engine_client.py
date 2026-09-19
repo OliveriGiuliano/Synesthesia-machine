@@ -153,6 +153,14 @@ class SourceStatus:
     source_time_s: float | None = None
     source_frame_index: int | None = None
     processed_index: int = 0
+    #: Processed index the source will have reached at the end of its active
+    #: region (ADR-0025); ``None`` when the container reports neither a frame
+    #: count nor a frame rate.  Camera sources publish ``None``.
+    total_index: int | None = None
+    #: End of the played segment in source time, clamped to the container
+    #: duration (ADR-0025); ``None`` when unknown.  Camera sources publish
+    #: ``None``.
+    region_end_s: float | None = None
     skipped_by_selection: int = 0
     dropped_before_processing: int = 0
     warnings: int = 0

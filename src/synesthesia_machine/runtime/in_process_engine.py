@@ -230,6 +230,7 @@ class LatestFrameGraphWorker:
             _LatestPreviewWorker(preview_broker) if preview_broker is not None else None
         )
         self._tick_observer = tick_observer
+        self._observer_failure_logged = False
         self._monotonic_ns = monotonic_ns
         self._execution_clock_ns = execution_clock_ns
         self._condition = threading.Condition()
@@ -478,13 +479,20 @@ class LatestFrameGraphWorker:
                         self._preview_worker.submit(result)
                     if self._tick_observer is not None:
                         # Observation is diagnostic: a broken observer must not
-                        # stop the tick loop that feeds the real outputs.
+                        # stop the tick loop that feeds the real outputs. One
+                        # traceback per worker (the first failure) pinpoints
+                        # the fault without flooding the log per tick; the
+                        # consumer of a run-to-end simulation verifies the
+                        # observed stream itself (ADR-0025).
                         try:
                             self._tick_observer(command.source_node_id, frame, result, plan)
                         except Exception:
-                            logging.getLogger(__name__).exception(
-                                "Tick observer failed for source %s", command.source_node_id
-                            )
+                            if not self._observer_failure_logged:
+                                self._observer_failure_logged = True
+                                logging.getLogger(__name__).exception(
+                                    "Tick observer failed for source %s",
+                                    command.source_node_id,
+                                )
                     completed_ns = self._monotonic_ns()
                     graph_duration_ns = max(0, self._execution_clock_ns() - graph_started_ns)
                     with self._condition:
