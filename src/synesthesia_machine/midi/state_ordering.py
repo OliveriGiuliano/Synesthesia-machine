@@ -16,8 +16,10 @@ panic-capable sink inherits correct ordering for free:
 
 The policy compares publish generations only; no clock participates in the
 ordering, so tests drive the race with explicit generations. It is not
-internally synchronized: each sink consults and records it under the lock
-that already serializes its own publish/panic path.
+internally synchronized: each sink applies it under the same discipline its
+publish/panic paths always used (the synth's publisher lock; the MIDI
+service records under its condition lock and reads the monotone watermark
+plainly, as before).
 """
 
 from __future__ import annotations

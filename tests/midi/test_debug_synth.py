@@ -364,8 +364,8 @@ def test_runtime_no_data_panics_with_the_ticks_publish_generation_latched() -> N
     # ADR-0022: a missing input must panic the synth with the publish
     # generation of the tick that lost the race, so a late in-flight state
     # from that tick cannot re-arm the silenced voices. As in the Send-MIDI
-    # sink, a continuous absence re-panics once, on the missing-to-data
-    # transition, not on every tick.
+    # sink, a continuous absence panics once, on its first missing tick,
+    # not on every tick.
     synth_factory = RecordingSynthFactory()
     definition = create_output_definitions(synth_factory=synth_factory)[0]
     runtime = definition.runtime_factory(AUDIO_NODE_ID)

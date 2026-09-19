@@ -1066,8 +1066,8 @@ def test_runtime_no_data_status_reset_and_close_lifecycle() -> None:
 def test_runtime_no_data_panics_with_the_ticks_publish_generation_latched() -> None:
     # The input-missing panic must carry the tick's publish generation
     # (ADR-0022) so a late in-flight state from that tick cannot re-arm the
-    # port, and it must latch like the absence it ends: one panic per
-    # missing-to-data transition, never one per tick.
+    # port, and it must latch like the absence it opens: one panic on the
+    # absence's first missing tick, never one per tick.
     service = _RecordingService()
     definition = create_midi_output_definitions(service_factory=lambda: service)[0]
     runtime = definition.runtime_factory(MIDI_ID)
