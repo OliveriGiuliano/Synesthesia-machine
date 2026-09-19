@@ -35,9 +35,12 @@ reset must live here, not in a wrapper") was an unnamed seam.
 - **The in-process placement is body + protocol hat.**
   `InProcessEngineClient` keeps the `EngineClient` protocol surface and
   holds no engine state: it wraps an `EngineBody` and delegates every
-  capability to it. Its client-only behaviours are `status()` (a
-  connected-or-closed `EngineStatus`), `restart()` (re-activation from the
-  body's last valid plan under `ENGINE_RESTARTED`), and `clear_previews()`.
+  capability to it, including `clear_previews()` (the body's
+  generation-bump clear is the single clear site). Its client-only
+  behaviours are `status()` (a connected-or-closed `EngineStatus`) and
+  `restart()` (re-activation from the body's last valid plan under
+  `ENGINE_RESTARTED`), the latter two of which read the body through
+  atomic paired reads so a concurrent activation cannot split the pair.
 - **The child placement runs the body directly.** `EngineServer` constructs
   `EngineBody(create_builtin_registry(), preview_transport=<shared-memory
   writer>)` and dispatches protocol commands onto the body. Its

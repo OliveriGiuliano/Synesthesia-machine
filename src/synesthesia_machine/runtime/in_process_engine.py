@@ -2,10 +2,10 @@
 
 The in-process placement composes the placement-independent engine body
 with the transport-independent ``EngineClient`` protocol. This client holds
-no engine state of its own: every method either delegates to the body or
-is client-only behaviour (a connected ``status``, a user restart from the
-body's last valid plan, and preview clearing). The spawned child placement
-never builds this class; it runs the body directly behind the wire.
+no engine state of its own: most methods delegate to the body, and the two
+client-only behaviours are the connected ``status`` projection and a user
+restart from the body's last valid plan. The spawned child placement never
+builds this class; it runs the body directly behind the wire.
 """
 
 from __future__ import annotations
@@ -172,13 +172,15 @@ class InProcessEngineClient:
     def status(self) -> EngineStatus:
         # The in-process placement never loses its connection: the only
         # state transitions are CLOSED after close() and everything else
-        # is CONNECTED.
+        # is CONNECTED. State and revision come from one atomic body read
+        # so a concurrent activation cannot split the pair.
+        state, graph_revision = self._body.status_snapshot()
         connection_state = (
             EngineConnectionState.CLOSED
-            if self._body.state is EngineState.CLOSED
+            if state is EngineState.CLOSED
             else EngineConnectionState.CONNECTED
         )
-        return EngineStatus(connection_state, graph_revision=self._body.graph_revision)
+        return EngineStatus(connection_state, graph_revision=graph_revision)
 
     def restart(self) -> EngineActivation | None:
         source = self._body.last_activation()

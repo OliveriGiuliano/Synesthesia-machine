@@ -950,6 +950,17 @@ class EngineBody:
                 runtime_errors=(worker.last_result.errors if worker and worker.last_result else ()),
             )
 
+    def status_snapshot(self) -> tuple[EngineState, int | None]:
+        """The engine's state and plan revision, read together under the lock.
+
+        In-process callers that project both values (the client's
+        ``status()``) use this so a concurrent activation cannot split the
+        pair, mirroring :meth:`last_activation`.
+        """
+
+        with self._lock:
+            return self._state, self._graph_revision
+
     def next_image_previews(self) -> tuple[ImagePreview, ...]:
         with self._preview_cursor_lock:
             previews = self._preview_broker.poll_images(self._image_sequences)

@@ -13,8 +13,10 @@ Use `synesthesia_machine.runtime` for `ExecutionPlan`, `CompiledNode`, `PortKey`
 `Scheduler`, `TickResult`, and `EngineFacade`. `EngineFacade` is a lazy public export so
 the graph compiler can import execution-plan types without an import cycle.
 
-`ProcessEngineClient` is the production UI boundary. `InProcessEngineClient` is the child-owned
-implementation and test seam; it is not permission to move hardware work back into the UI process.
+`ProcessEngineClient` is the production UI boundary. The spawned child runs
+`EngineBody` directly behind the wire; `InProcessEngineClient` is the in-process
+placement's protocol hat over the same body (ADR-0026). Neither is permission
+to move hardware work back into the UI process.
 
 ## Dependency direction
 
