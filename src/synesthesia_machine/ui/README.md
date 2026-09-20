@@ -15,10 +15,13 @@ settings, themes, and translations.
 - `DocumentLifecycleController` owns the document lifecycle behaviour off any window: the
   unsaved-changes replacement decision, open/save against the persistence facade, autosave
   recovery offers, and the recent-file list. `MainWindow` is its host, supplying dialogs, the
-  recent menu, status messages, and the autosave trigger through `DocumentLifecycleHost`, so each
-  behaviour is testable offscreen against a scripted host.
-- Recovery writes are owned by `AutosaveController`, which coalesces immutable snapshots on
-  a separate serial executor.
+  recent menu, and status messages, so each behaviour is testable offscreen against a scripted
+  host.
+- `AutosaveController` owns the whole autosave behaviour of the watched session: the debounce
+  trigger that re-arms on every session change, the immediate pre-replacement save, and the
+  recovery writes coalesced on a separate serial executor. The window supplies the delay
+  (read live from preferences) through a provider and may inject the clock, so the trigger
+  policy is testable offscreen without a real timer.
 - Device selectors are metadata-driven through `ParameterSpec.device_kind`. The UI consumes the
   engine catalogue and persists IDs; it never imports hardware backends.
 - Image algorithms, media decoding, MIDI/audio I/O, full-resolution arrays, and scheduler work do not

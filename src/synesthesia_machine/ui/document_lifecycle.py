@@ -253,12 +253,10 @@ class DocumentLifecycleController:
     # -- autosave and recovery ----------------------------------------------
 
     def autosave_now(self) -> None:
-        if not self._session.is_dirty:
-            return
-        self._autosave_controller.request(
-            self._session.document.snapshot(),
-            explicit_path=self._session.current_path,
-        )
+        # The trigger knowledge (snapshot + explicit path of the current
+        # document) lives in the AutosaveController; this delegate keeps the
+        # host protocol for the window and the scripted test hosts.
+        self._autosave_controller.autosave_now()
 
     def discard_recovery(self, document_id: UUID) -> None:
         self._autosave_controller.discard(document_id)

@@ -420,7 +420,6 @@ def test_stopped_engine_skips_redundant_periodic_refreshes(
             "_preview_timer",
             "_metrics_timer",
             "_device_refresh_timer",
-            "_autosave_timer",
             "_activation_timer",
         ):
             getattr(window, timer_name).stop()  # pyright: ignore[reportPrivateUsage]

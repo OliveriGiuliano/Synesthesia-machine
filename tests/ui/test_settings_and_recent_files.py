@@ -202,7 +202,8 @@ def test_main_window_applies_persisted_preferences_and_exposes_action(
     )
     try:
         assert window.preferences == preferences
-        assert window._autosave_timer.interval() == 75_000
+        window.session.add_node("synmachine.utility.number", (0.0, 0.0))
+        assert window.autosave_controller._own_timer.interval() == 75_000
         assert window.scene.grid_snap_enabled
         assert window.scene.grid_spacing == 30.0
         assert window.action_registry.require("preferences").isEnabled()

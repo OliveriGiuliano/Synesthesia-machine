@@ -8,13 +8,18 @@ from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import UUID
 
-from PySide6.QtCore import QObject, Signal, Slot
+from PySide6.QtCore import QObject, QTimer, Signal, Slot
 
 from synesthesia_machine.graph import GraphSnapshot
 from synesthesia_machine.persistence.autosave import AutosaveStore
+from synesthesia_machine.ui.engine_task_runner import QtUiClock
 from synesthesia_machine.ui.session import DocumentSession
+
+if TYPE_CHECKING:
+    from synesthesia_machine.ui.engine_bridge import UiClock
 
 # How long close() waits for queued recovery work to drain. Matches the
 # bounded worker-join timeouts used by the other UI background services.
@@ -28,7 +33,14 @@ class _AutosaveRequest:
 
 
 class AutosaveController(QObject):
-    """Write immutable snapshots off the UI thread and retain only the newest pending one."""
+    """Write recovery snapshots off the UI thread and own the autosave trigger.
+
+    The controller owns the whole autosave behaviour of the watched document:
+    the debounce trigger (re-armed by every session change), the immediate
+    pre-replacement save, the coalesced background writer, and the recovery
+    record maintenance. Callers only push snapshots through :meth:`request` or
+    ask for :meth:`autosave_now`.
+    """
 
     saved = Signal(object)
     failed = Signal(object)
@@ -40,6 +52,8 @@ class AutosaveController(QObject):
         parent: QObject | None = None,
         session: DocumentSession | None = None,
         executor: Executor | None = None,
+        clock: UiClock | None = None,
+        delay_provider: Callable[[], float] | None = None,
     ) -> None:
         super().__init__(parent)
         self._store = store
@@ -52,6 +66,18 @@ class AutosaveController(QObject):
                 thread_name_prefix="synmachine-ui-autosave",
             )
         )
+        # The default clock owns its timer so close() can stop it; an
+        # injected clock (tests, the production window) owns its own timer.
+        self._own_timer: QTimer | None = None
+        if clock is None:
+            self._own_timer = QTimer(self)
+            clock = QtUiClock(self._own_timer)
+        self._clock = clock
+        self._delay_provider = delay_provider
+        # Stable callback reference: schedule_once and cancel compare
+        # callbacks by identity, and a freshly fetched bound method would
+        # never match the one the clock is holding.
+        self._due = self.autosave_now
         self._future: Future[object] | None = None
         self._current: _AutosaveRequest | None = None
         self._pending: _AutosaveRequest | None = None
@@ -60,8 +86,7 @@ class AutosaveController(QObject):
         # discarded or the controller closes.
         self._tracked_documents: set[UUID] = set()
         # Explicit discard requests that arrived while a save for the same
-        # document was still on the worker; they run once that save
-        # settles.
+        # document was still on the worker; they run once that save settles.
         self._pending_discards: set[UUID] = set()
         # Every task on the worker, so close() can wait for queued
         # saves/discards with a bounded timeout.
@@ -69,6 +94,10 @@ class AutosaveController(QObject):
         self._closed = False
         if session is not None:
             session.dirtyChanged.connect(self._on_document_dirty_changed)
+            # Every rebuild re-arms the debounce; schedule() itself is a
+            # no-op for a clean document, mirroring the trigger chain the
+            # window owned before it moved here.
+            session.changed.connect(self.schedule)
         self._finished.connect(self._on_finished)
 
     def request(self, snapshot: GraphSnapshot, *, explicit_path: Path | None) -> None:
@@ -80,6 +109,41 @@ class AutosaveController(QObject):
             self._pending = request
             return
         self._start(request)
+
+    def autosave_now(self) -> None:
+        """Save the watched document immediately, bypassing the debounce.
+
+        This is both the debounce's fire callback and the entry point for the
+        synchronous pre-replacement save. The snapshot and the explicit path
+        come from the session, so no other object carries that knowledge; a
+        clean document or a closed controller is a no-op.
+        """
+        if self._closed or self._session is None:
+            return
+        if not self._session.is_dirty:
+            return
+        self.request(
+            self._session.document.snapshot(),
+            explicit_path=self._session.current_path,
+        )
+
+    def schedule(self) -> None:
+        """Re-arm the autosave debounce for the watched document.
+
+        Every session change (edits, engine-status projections, and every
+        other rebuild) funnels through here; a clean document never
+        schedules. The delay is read from the provider at schedule time, so
+        a preference change takes effect from the next re-arm, while an
+        armed debounce keeps the delay it was armed with.
+        """
+        if self._closed or self._session is None or self._delay_provider is None:
+            return
+        if not self._session.is_dirty:
+            return
+        delay_s = self._delay_provider()
+        if not delay_s > 0:
+            return
+        self._clock.schedule_once(int(delay_s * 1000), self._due)
 
     def discard(self, document_id: UUID) -> None:
         if self._closed:
@@ -102,6 +166,13 @@ class AutosaveController(QObject):
         if self._closed:
             return
         self._closed = True
+        # Cancel the pending debounce before draining: a fire during the
+        # drain is a no-op (the _closed gate in autosave_now), and stopping
+        # the self-owned timer keeps it from firing after the worker is
+        # already shut down.
+        self._clock.cancel(self._due)
+        if self._own_timer is not None:
+            self._own_timer.stop()
         request = self._pending
         self._pending = None
         if request is not None:
@@ -174,13 +245,17 @@ class AutosaveController(QObject):
 
     @Slot(bool)
     def _on_document_dirty_changed(self, dirty: bool) -> None:
-        if dirty or self._closed:
+        if dirty:
+            self.schedule()
+            return
+        if self._closed:
             return
         # The document went back to clean without a save (undo/redo to the
         # last saved state, or a replaced document): its recovery record
         # now matches, or is older than, what is on disk. A save still on
         # the worker is deferred: the finish handler runs the same flush
         # once it settles.
+        self._clock.cancel(self._due)
         self._flush_settled_discards()
 
     def _autosave_active_for(self, document_id: UUID) -> bool:

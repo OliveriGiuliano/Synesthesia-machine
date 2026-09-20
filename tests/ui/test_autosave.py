@@ -3,6 +3,7 @@
 import os
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 from uuid import UUID
@@ -221,3 +222,129 @@ def test_autosave_controller_close_completes_a_queued_discard(
     controller.close()
     assert records == {}
     controller.close()
+
+
+class _RecordingClock:
+    """UiClock test double that records schedules and fires callbacks on demand."""
+
+    def __init__(self) -> None:
+        self.scheduled: list[tuple[int, Callable[[], None]]] = []
+        self.cancelled: list[Callable[[], None]] = []
+        self.pending: Callable[[], None] | None = None
+
+    def schedule_once(self, delay_ms: int, callback: Callable[[], None]) -> None:
+        self.scheduled.append((delay_ms, callback))
+        self.pending = callback
+
+    def cancel(self, callback: Callable[[], None]) -> None:
+        self.cancelled.append(callback)
+        if self.pending is callback:
+            self.pending = None
+
+    def fire(self) -> None:
+        callback, self.pending = self.pending, None
+        if callback is not None:
+            callback()
+
+
+def test_autosave_trigger_arms_on_document_change_and_fires_a_save(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    store = AutosaveStore(tmp_path / "recovery")
+    session = DocumentSession(create_utility_registry())
+    clock = _RecordingClock()
+    controller = AutosaveController(
+        store, session=session, clock=clock, delay_provider=lambda: 60.0
+    )
+    saved: list[Path] = []
+    controller.saved.connect(saved.append)
+    try:
+        session.add_node("synmachine.utility.number", (0.0, 0.0))
+        # Every edit re-arms the debounce once: the arm that observes the
+        # dirty flag after the undo stack flips is the one that schedules.
+        assert [delay for delay, _ in clock.scheduled] == [60_000]
+
+        clock.fire()
+        deadline = time.monotonic() + 2.0
+        while not saved and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.005)
+        assert saved
+        assert store.discover()
+    finally:
+        controller.close()
+
+
+def test_autosave_trigger_never_arms_for_a_clean_document(tmp_path: Path) -> None:
+    store = AutosaveStore(tmp_path / "recovery")
+    session = DocumentSession(create_utility_registry())
+    clock = _RecordingClock()
+    controller = AutosaveController(
+        store, session=session, clock=clock, delay_provider=lambda: 60.0
+    )
+    try:
+        controller.schedule()
+        assert not clock.scheduled
+        # A disabled cadence (no provider) never schedules either.
+        disabled_clock = _RecordingClock()
+        disabled = AutosaveController(store, session=session, clock=disabled_clock)
+        try:
+            session.add_node("synmachine.utility.number", (0.0, 0.0))
+            assert not disabled_clock.scheduled
+        finally:
+            disabled.close()
+    finally:
+        controller.close()
+
+
+def test_autosave_trigger_cancels_the_debounce_when_the_document_returns_to_clean(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    store = AutosaveStore(tmp_path / "recovery")
+    session = DocumentSession(create_utility_registry())
+    clock = _RecordingClock()
+    controller = AutosaveController(
+        store, session=session, clock=clock, delay_provider=lambda: 60.0
+    )
+    try:
+        session.add_node("synmachine.utility.number", (0.0, 0.0))
+        stale = clock.scheduled[-1][1]
+        assert clock.pending is not None
+
+        session.undo_stack.undo()
+        assert not session.is_dirty
+        assert clock.pending is None
+        assert clock.cancelled
+
+        # A timer that fires after the document went clean is a no-op: it
+        # must not resurrect a recovery record for a document matching disk.
+        stale()
+        qapp.processEvents()
+        assert not store.discover()
+    finally:
+        controller.close()
+
+
+def test_autosave_trigger_reads_the_delay_from_the_provider_at_schedule_time(
+    tmp_path: Path,
+) -> None:
+    store = AutosaveStore(tmp_path / "recovery")
+    session = DocumentSession(create_utility_registry())
+    clock = _RecordingClock()
+    delays = {"seconds": 60.0}
+    controller = AutosaveController(
+        store,
+        session=session,
+        clock=clock,
+        delay_provider=lambda: delays["seconds"],
+    )
+    try:
+        session.add_node("synmachine.utility.number", (0.0, 0.0))
+        assert [delay for delay, _ in clock.scheduled] == [60_000]
+
+        # A preference change takes effect from the next re-arm.
+        delays["seconds"] = 75.0
+        session.add_node("synmachine.utility.number", (48.0, 0.0))
+        assert [delay for delay, _ in clock.scheduled] == [60_000, 75_000]
+    finally:
+        controller.close()

@@ -151,7 +151,12 @@ class MainWindow(QMainWindow):
         set_language(self.preferences.language)
         self.session = DocumentSession(registry, self)
         self.autosave_store = AutosaveStore(paths.recovery)
-        self.autosave_controller = AutosaveController(self.autosave_store, self, self.session)
+        self.autosave_controller = AutosaveController(
+            self.autosave_store,
+            self,
+            self.session,
+            delay_provider=lambda: float(self.preferences.autosave_delay_seconds),
+        )
         self.action_registry = ActionRegistry(self)
         self.scene = GraphScene(self.session, theme, self)
         self.scene.configure_grid_snap(
@@ -181,9 +186,6 @@ class MainWindow(QMainWindow):
         self._source_node_ids: tuple[UUID, ...] = ()
         self._source_node_ids_key: object | None = None
         self._midi_export_job: MidiExportJob | None = None
-        self._autosave_timer = QTimer(self)
-        self._autosave_timer.setSingleShot(True)
-        self._autosave_timer.setInterval(self.preferences.autosave_delay_seconds * 1000)
         self._activation_timer = QTimer(self)
         self._activation_timer.setSingleShot(True)
         self._activation_timer.setInterval(100)
@@ -683,7 +685,6 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self) -> None:
         self.session.changed.connect(self._refresh_document_ui)
-        self.session.changed.connect(self._schedule_autosave)
         self.session.runtimeChanged.connect(self._schedule_engine_activation)
         self.session.pathChanged.connect(self._refresh_document_ui)
         self.session.dirtyChanged.connect(self._on_dirty_changed)
@@ -697,7 +698,6 @@ class MainWindow(QMainWindow):
         # (dirty-document confirmation, recovery handling, recent files, status).
         self.view.openGraphFileRequested.connect(self._open_graph_file_from_drop)
         self.library.nodeActivated.connect(self._add_library_node)
-        self._autosave_timer.timeout.connect(self.document_lifecycle.autosave_now)
         # The activation timer's timeout is owned by the bridge's clock.
         self._preview_timer.timeout.connect(self._poll_previews)
         self.image_preview_dock.visibilityChanged.connect(self._on_image_preview_visibility_changed)
@@ -1735,16 +1735,10 @@ class MainWindow(QMainWindow):
 
     @Slot(bool)
     def _on_dirty_changed(self, dirty: bool) -> None:
+        # The autosave debounce is owned by the AutosaveController (it
+        # re-arms itself on the same session signals); the window only
+        # mirrors the dirty flag onto the title bar.
         self.setWindowModified(dirty)
-        if dirty:
-            self._autosave_timer.start()
-        else:
-            self._autosave_timer.stop()
-
-    @Slot()
-    def _schedule_autosave(self) -> None:
-        if self.session.is_dirty:
-            self._autosave_timer.start()
 
     @Slot(object)
     def _on_autosave_saved(self, path: object) -> None:
@@ -1802,7 +1796,6 @@ class MainWindow(QMainWindow):
         self._apply_shortcuts()
         if language_changed:
             set_language(preferences.language)
-        self._autosave_timer.setInterval(preferences.autosave_delay_seconds * 1000)
         self.scene.configure_grid_snap(
             enabled=preferences.grid_snap_enabled,
             spacing=preferences.grid_size,
@@ -2016,7 +2009,6 @@ class MainWindow(QMainWindow):
             job.cancel()
             job.close()
         self._activation_timer.stop()
-        self._autosave_timer.stop()
         self._preview_timer.stop()
         self._metrics_timer.stop()
         self._profiler_timer.stop()
