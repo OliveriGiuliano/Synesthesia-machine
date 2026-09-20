@@ -188,12 +188,16 @@ def inspect_video(path: str | Path, *, stream_index: int = 0) -> VideoMetadata:
 
 
 def _describe_region_error(start_s: float, duration_s: float) -> str:
-    """User-actionable message for a loop start at or past the video's end."""
+    """Non-fatal fact for a loop start the file cannot honour (ADR-0028).
+
+    The resolved region falls back to a playable segment instead of failing;
+    the message tells the user which setting was not honoured.
+    """
 
     return (
-        f"Start timestamp {start_s:.2f}s is at or past the end of the video "
-        f"({duration_s:.2f}s), so the loop region is empty. Set the start "
-        f"timestamp to a value before {duration_s:.2f}s."
+        f"Loop start {start_s:.2f}s is at or past the end of the video "
+        f"({duration_s:.2f}s), so the played region falls back to the "
+        f"beginning of the file."
     )
 
 
@@ -240,9 +244,11 @@ class VideoSourceService:
     narrower subsets inline on purpose.
 
     ``_state`` is committed by one role per transition: the API thread
-    commits READY, PLAYING, PAUSED, STOPPED, CLOSED and region ERROR; the
-    presentation thread commits ENDED at a natural pass end; any worker
-    commits ERROR through ``_fail``. Worker-side commits are guarded by
+    commits READY, PLAYING, PAUSED, STOPPED, CLOSED, and the ERROR for an
+    unstoppable stuck worker (ticket 08); the presentation thread commits
+    ENDED at a natural pass end; any worker commits ERROR through
+    ``_fail``. Configuration problems are published region facts, never
+    ERROR (ADR-0028). Worker-side commits are guarded by
     ``_pass_generation`` so a survivor from a superseded pass cannot
     overwrite a new pass's state; all commits happen under ``self._lock``.
 
@@ -295,34 +301,90 @@ class VideoSourceService:
         self._max_decode_failures = max_decode_failures
         self._metadata = inspect_video(file_path, stream_index=stream_index)
         self._stream_index = self._metadata.stream_index
-        # The played segment is [loop_start_s, loop_end_s); a zero end means
-        # "until the end of the video". Timestamps beyond the video's duration
-        # clamp to it, and an empty or inverted region falls back to
-        # [0, loop_end_s) (or the whole file) so the source always has a
-        # playable segment instead of failing to decode.
+        # ADR-0021/ADR-0028: the played region is resolved once per
+        # (configuration, probed metadata) by ``_resolve_region`` and shared
+        # with ``reload()``, so both commit the same region facts.
+        self._loop_start_s = loop_start_s
+        self._loop_end_s = loop_end_s
+        self._resolve_region()
+        self._pass_start_s = self._region_start_s
+
+        self._lock = threading.RLock()
+        self._decode_queue: queue.Queue[_DecodeItem] = queue.Queue(decode_queue_size)
+        # The injected clock owns the worker synchronization events; tests
+        # gain controllable primitives without reaching into service state.
+        self._stop_event = self._clock.stop_event
+        self._wake_event = self._clock.wake_event
+        self._timeline = PtsPlaybackTimeline(playback_speed)
+        self._decode_thread: threading.Thread | None = None
+        self._presentation_thread: threading.Thread | None = None
+        # ADR-0024 loop head: the worker stages frames in a private queue and
+        # swaps it in only while the presentation is not mid-consumption, so
+        # at most two bounded head buffers exist at once.
+        self._head_thread: threading.Thread | None = None
+        self._head_queue: queue.Queue[DecodedVideoFrame] = queue.Queue(self._head_frame_budget or 0)
+        self._head_container: Any | None = None
+        self._head_in_use = False
+        self._head_trigger = threading.Event()
+        # Set while the staged head is not being consumed by the presentation
+        # thread; the presentation thread clears it when a head consumption
+        # starts and sets it (under the lock) when the drain finishes, so the
+        # head worker's swap wait is event-driven (ticket 07).
+        self._head_free = threading.Event()
+        self._head_free.set()
+        # The live decode container stays open across passes of one instance
+        # (ADR-0024); it is re-opened only when the file changes (reload) or
+        # the source is closed/stopped.
+        self._live_container: Any | None = None
+        self._state = SourceState.READY
+        self._source_frame_index: int | None = None
+        self._processed_index = 0
+        self._skipped_by_selection = 0
+        self._warnings = 0
+        self._last_error = None
+        self._position_s = 0.0
+        self._seek_target_s = 0.0
+        self._seek_event = threading.Event()
+        self._seek_filter_pts: float | None = None
+        self._seek_generation = 0
+        self._applied_seek_generation = 0
+        self._pass_generation = 0
+
+    def _resolve_region(self) -> None:
+        """(Re-)resolve the played region and the facts derived from it.
+
+        Invoked from the constructor and from ``reload()`` so both commit the
+        same resolution: the sentinel rule, the clamping, and the ``[0, end)``
+        fallback (ADR-0021), plus the facts derived from the resolved region
+        (the ADR-0025 presented total and the ADR-0024 head budget).  A start
+        timestamp the file cannot honour is recorded as the non-fatal
+        ``region_error`` fact describing the fallback; it never forces
+        ``SourceState.ERROR`` (ADR-0028).  Only the API thread calls this.
+        """
+
         duration_s = self._metadata.duration_s
-        if loop_end_s > 0.0:
-            region_end_s: float | None = loop_end_s
+        if self._loop_end_s > 0.0:
+            region_end_s: float | None = self._loop_end_s
         elif duration_s is not None:
             region_end_s = duration_s
         else:
             region_end_s = None
         if duration_s is not None and region_end_s is not None:
             region_end_s = min(region_end_s, duration_s)
-        region_start_s = loop_start_s
+        region_start_s = self._loop_start_s
         if duration_s is not None:
             region_start_s = min(region_start_s, duration_s)
         if region_end_s is not None and region_start_s >= region_end_s:
             region_start_s = 0.0
             if region_end_s <= 0.0:
                 region_end_s = None
-        self._loop_start_s = loop_start_s
-        self._region_error: str | None = None
-        if duration_s is not None and loop_start_s >= duration_s:
-            self._region_error = _describe_region_error(loop_start_s, duration_s)
+        self._region_error = (
+            _describe_region_error(self._loop_start_s, duration_s)
+            if duration_s is not None and self._loop_start_s >= duration_s
+            else None
+        )
         self._region_start_s = region_start_s
         self._region_end_s = region_end_s
-        self._pass_start_s = region_start_s
         # ADR-0025: the presented-frame total of the active region,
         # published in the status so run-to-end consumers (the MIDI export)
         # read the source's own facts instead of re-deriving them.
@@ -340,54 +402,20 @@ class VideoSourceService:
         # with a degenerate region do not pre-decode.
         head_budget: int | None = None
         average_rate = self._metadata.average_rate
-        if loop and average_rate is not None and average_rate > 0.0 and region_end_s is not None:
+        if (
+            self._loop
+            and average_rate is not None
+            and average_rate > 0.0
+            and region_end_s is not None
+        ):
             region_frames = int(
-                max(0.0, region_end_s - region_start_s) * average_rate / process_every_nth_frame
+                max(0.0, region_end_s - region_start_s)
+                * average_rate
+                / self._process_every_nth_frame
             )
             if region_frames >= 1:
                 head_budget = min(int(average_rate), max(2, region_frames))
         self._head_frame_budget = head_budget
-
-        self._lock = threading.RLock()
-        self._decode_queue: queue.Queue[_DecodeItem] = queue.Queue(decode_queue_size)
-        # The injected clock owns the worker synchronization events; tests
-        # gain controllable primitives without reaching into service state.
-        self._stop_event = self._clock.stop_event
-        self._wake_event = self._clock.wake_event
-        self._timeline = PtsPlaybackTimeline(playback_speed)
-        self._decode_thread: threading.Thread | None = None
-        self._presentation_thread: threading.Thread | None = None
-        # ADR-0024 loop head: the worker stages frames in a private queue and
-        # swaps it in only while the presentation is not mid-consumption, so
-        # at most two bounded head buffers exist at once.
-        self._head_queue: queue.Queue[DecodedVideoFrame] = queue.Queue(head_budget or 0)
-        self._head_thread: threading.Thread | None = None
-        self._head_container: Any | None = None
-        self._head_in_use = False
-        self._head_trigger = threading.Event()
-        # Set while the staged head is not being consumed by the presentation
-        # thread; the presentation thread clears it when a head consumption
-        # starts and sets it (under the lock) when the drain finishes, so the
-        # head worker's swap wait is event-driven (ticket 07).
-        self._head_free = threading.Event()
-        self._head_free.set()
-        # The live decode container stays open across passes of one instance
-        # (ADR-0024); it is re-opened only when the file changes (reload) or
-        # the source is closed/stopped.
-        self._live_container: Any | None = None
-        self._state = SourceState.ERROR if self._region_error is not None else SourceState.READY
-        self._source_frame_index: int | None = None
-        self._processed_index = 0
-        self._skipped_by_selection = 0
-        self._warnings = 0
-        self._last_error = self._region_error
-        self._position_s = 0.0
-        self._seek_target_s = 0.0
-        self._seek_event = threading.Event()
-        self._seek_filter_pts: float | None = None
-        self._seek_generation = 0
-        self._applied_seek_generation = 0
-        self._pass_generation = 0
 
     @property
     def metadata(self) -> VideoMetadata:
@@ -407,6 +435,8 @@ class VideoSourceService:
                 processed_index=self._processed_index,
                 total_index=self._total_index,
                 region_end_s=self._region_end_s,
+                region_start_s=self._region_start_s,
+                region_error=self._region_error,
                 skipped_by_selection=self._skipped_by_selection,
                 dropped_before_processing=dropped_before_processing,
                 warnings=self._warnings,
@@ -419,12 +449,10 @@ class VideoSourceService:
         if state is SourceState.CLOSED:
             raise RuntimeError("Video source is closed")
         if state is SourceState.ERROR:
-            if self._region_error is None:
-                raise RuntimeError("Video source must be reloaded after an error")
-            # A configuration error (a start timestamp beyond the video's end)
-            # cannot be cleared by playing or reloading the same configuration;
-            # a corrected configuration replaces the source instead.
-            return
+            # ADR-0028: ERROR is produced only by runtime failures; a loop
+            # configuration the file cannot honour is a published region
+            # fact and plays the fallback region.
+            raise RuntimeError("Video source must be reloaded after an error")
         if state is SourceState.PLAYING:
             return
         if state is SourceState.PAUSED:
@@ -438,14 +466,6 @@ class VideoSourceService:
         A pending seek makes the pass start at the seek target; otherwise the
         pass starts at the configured segment start.
         """
-        if self._region_error is not None:
-            # Re-assert the configuration error for any pass start (including
-            # one after a stop) instead of starting workers for a region with
-            # no frames.
-            with self._lock:
-                self._state = SourceState.ERROR
-                self._last_error = self._region_error
-            return
         # Stopping (and waking) first lets a paused worker leave its
         # blocked state wait, so the join below cannot time out.
         self._stop_event.set()
@@ -567,20 +587,14 @@ class VideoSourceService:
             raise
         with self._lock:
             self._metadata = metadata
-            # Re-evaluate the region against the reloaded file: a longer file
-            # may make the previously empty region playable again.
-            duration_s = metadata.duration_s
-            self._region_error = (
-                _describe_region_error(self._loop_start_s, duration_s)
-                if duration_s is not None and self._loop_start_s >= duration_s
-                else None
-            )
-            if self._region_error is not None:
-                self._last_error = self._region_error
-                self._state = SourceState.ERROR
-            else:
-                self._last_error = None
-                self._state = SourceState.READY
+            # ADR-0028: re-resolve the whole region fact set (region, total,
+            # head budget) against the reloaded file, so the published region
+            # is consistent with the file's own duration. A start the new
+            # file cannot honour is published as the non-fatal region error
+            # fact; the state is READY either way.
+            self._resolve_region()
+            self._last_error = None
+            self._state = SourceState.READY
 
     def seek(self, source_time_s: float) -> None:
         """Jump playback to ``source_time_s`` (clamped to the played segment).

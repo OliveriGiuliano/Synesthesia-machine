@@ -618,7 +618,12 @@ class InspectorPanel(QWidget):
             return
         for status in statuses:
             if status.node_id == self._playback_node_id:
-                self._playback_controls.set_progress(status.source_time_s, status.duration_s)
+                self._playback_controls.set_progress(
+                    status.source_time_s,
+                    status.region_start_s,
+                    status.region_end_s,
+                    status.duration_s,
+                )
                 return
 
     def retranslate(self) -> None:

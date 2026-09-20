@@ -114,7 +114,11 @@ and exposed through one reusable editor group/view model.
   be selected. While `Loop` is on, playback replays only the segment between
   them, then returns to the start of the segment. A value of `0:00:00` means "the whole video"
   on that side, the start cannot be past the end, and both stay inside the file's duration.
-  Changing either timestamp restarts the source.
+  Changing either timestamp restarts the source. If a persisted loop start is
+  at or beyond the video's end (for example after a shorter file was
+  reloaded onto the same path), the engine plays the resolved fallback region
+  and reports the region error in the source status instead of failing the
+  source (ADR-0028).
 - **Playback controls:** for a Load Video node the inspector shows a progress slider and
   rewind/forward buttons that seek 5 or 15 seconds back and forward. The slider follows the
   engine's reported position; drag it to scrub, and the slider is not moved by telemetry while

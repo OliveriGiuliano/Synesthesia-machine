@@ -79,6 +79,40 @@ def test_export_collects_every_note_event_from_start_to_end(export_env) -> None:
     assert result.to_standard_midi_file()[:4] == b"MThd"
 
 
+def test_export_survives_a_stale_loop_start(export_env) -> None:
+    # ADR-0028: a persisted loop start beyond the video's length no longer
+    # traps the source in ERROR; the offline export simulates the fallback
+    # region [0, duration) to the end instead of failing with source_error.
+    video, registry = export_env
+    document = GraphDocument()
+    source = document.add_node(
+        "synmachine.input.load_video",
+        implementation_version=2,
+        parameters={"file_path": str(video), "loop_start_s": 5.0},
+    )
+    luminance = document.add_node("synmachine.image.to_luminance")
+    pitch = document.add_node("synmachine.synesthesia.channel_to_pitch")
+    send = document.add_node("synmachine.output.send_midi")
+    document.add_connection(source, "image", luminance, "image")
+    document.add_connection(luminance, "channel", pitch, "value")
+    document.add_connection(pitch, "midi", send, "midi")
+
+    result = run_midi_export(document.snapshot(), registry=registry)
+
+    # The whole fixture is the fallback region: the export reaches its end
+    # exactly like a start-to-end export and stops every sounding note.
+    assert result.duration_s == pytest.approx(HUE_FRAME_COUNT / 12.0, abs=0.05)
+    assert len(result.events) == HUE_FRAME_COUNT * 2
+    assert result.events[0].kind == "note_on"
+    open_notes = set()
+    for event in result.events:
+        if event.kind == "note_on":
+            open_notes.add((event.channel, event.note))
+        else:
+            open_notes.discard((event.channel, event.note))
+    assert open_notes == set()
+
+
 def test_export_rejects_camera_sources(export_env) -> None:
     video, registry = export_env
     document = _video_pitch_midi_document(video)

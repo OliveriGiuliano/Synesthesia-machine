@@ -650,17 +650,32 @@ class DocumentSession(QObject):
     def set_source_statuses(self, statuses: Sequence[SourceStatus]) -> None:
         """Remember the engine's source statuses for editor projection.
 
-        Only the editor-relevant fields (file, duration) gate a re-projection:
-        the time cursor moves every telemetry tick and must not re-project the
-        whole view model (ADR-0023).
+        Only the editor-relevant facts (file, duration, resolved region) gate a
+        re-projection: the time cursor moves every telemetry tick and must not
+        re-project the whole view model (ADR-0023), while a reload that changes
+        the published region must re-project the editor and playback bounds
+        (ADR-0028).
         """
 
         latest = {status.node_id: status for status in statuses}
         digest = {
-            node_id: (status.file_path, status.duration_s) for node_id, status in latest.items()
+            node_id: (
+                status.file_path,
+                status.duration_s,
+                status.region_start_s,
+                status.region_end_s,
+                status.region_error,
+            )
+            for node_id, status in latest.items()
         }
         if digest == {
-            node_id: (status.file_path, status.duration_s)
+            node_id: (
+                status.file_path,
+                status.duration_s,
+                status.region_start_s,
+                status.region_end_s,
+                status.region_error,
+            )
             for node_id, status in self._source_statuses.items()
         }:
             return

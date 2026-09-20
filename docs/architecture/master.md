@@ -757,9 +757,11 @@ reported through the per-source status telemetry (`SourceStatus.source_time_s`).
 - When looping, playback is confined to the segment `[loop_start_s, loop_end_s)`,
   then restarts at the segment start; 0.0 means the video start / video end.
 - An empty or inverted loop segment falls back to a valid one so a source always
-  has something to play; a loop start at or beyond the video's end is reported
-  as a region error (the source stays stopped and re-evaluates on reload)
-  instead of silently playing nothing.
+  has something to play. A loop start at or beyond the video's end is published
+  as a non-fatal region error fact and the source plays the resolved fallback
+  region (ADR-0028): configuration is never fatal, `SourceState.ERROR` means a
+  runtime failure, and `reload()` re-resolves the whole region fact set against
+  the reloaded file's duration.
 - Seek clamps to the played segment; a seek while stopped records the position for
   the next play.
 - Play starts from the current position; Stop resets to the start and resets emitted `processed_index`.

@@ -612,13 +612,14 @@ def test_stream_without_decodable_frames_still_fails(
         source.close()
 
 
-def test_loop_region_beyond_duration_errors_instead_of_playing_whole_file(
+def test_loop_region_beyond_duration_falls_back_and_still_plays(
     tmp_path: Path,
 ) -> None:
     # Timestamps past the video's real duration can be persisted (for
-    # instance typed before the engine published the duration). The region
-    # then has no frames, so the source must fail with a clear, actionable
-    # error instead of silently degrading to the whole file.
+    # instance typed before the engine published the duration). ADR-0028:
+    # the resolved region falls back to a playable segment, the source
+    # keeps playing it, and the region error is published as a non-fatal
+    # fact instead of bricking the source.
     path = generate_test_video(tmp_path / "oob-loop.mp4", frame_count=60, fps=12)  # 5 s video
     received: list[PresentedVideoFrame] = []
     source = VideoSourceService(
@@ -632,36 +633,70 @@ def test_loop_region_beyond_duration_errors_instead_of_playing_whole_file(
     )
     try:
         status = source.status()
-        assert status.state is SourceState.ERROR
-        assert status.last_error is not None
-        assert "20.00s" in status.last_error
-        assert "5.00s" in status.last_error
-        # Playing cannot clear a configuration error (a reload with the same
-        # configuration would not help either); it must not raise.
+        assert status.state is SourceState.READY
+        assert status.last_error is None
+        assert status.region_error is not None
+        assert "20.00s" in status.region_error
+        assert "5.00s" in status.region_error
+        # Both timestamps clamp to the duration; the resulting empty span
+        # falls back to the whole file.
+        assert status.region_start_s == 0.0
+        assert status.region_end_s == pytest.approx(5.0, abs=0.05)
+        # play() is never a silent no-op: the fallback region presents frames.
         source.play()
-        assert source.status().state is SourceState.ERROR
-        # A stop and subsequent play re-assert the error instead of starting
-        # a pass over the whole file.
-        source.stop()
+        assert _wait_until(lambda: len(received) > 10, timeout_s=10.0)
+    finally:
+        source.close()
+
+
+def test_stale_start_with_loop_off_falls_back_and_plays(tmp_path: Path) -> None:
+    # The ticket's brick-wall case: a persisted start at or past the
+    # duration on a loop-off source. ADR-0028: the source plays the
+    # fallback region and publishes the region error as a fact.
+    path = generate_test_video(tmp_path / "stale-start.mp4", frame_count=60, fps=12)  # 5 s video
+    received: list[PresentedVideoFrame] = []
+    source = VideoSourceService(
+        SOURCE_ID,
+        path,
+        loop=False,
+        loop_start_s=10.0,
+        loop_end_s=0.0,
+        on_frame=received.append,
+        clock=AdvancingClock(),
+    )
+    try:
+        status = source.status()
+        assert status.state is SourceState.READY
+        assert status.last_error is None
+        assert status.region_error is not None
+        assert status.region_start_s == 0.0
+        assert status.region_end_s == pytest.approx(5.0, abs=0.05)
         source.play()
-        assert source.status().state is SourceState.ERROR
-        assert source.status().last_error is not None
-        time.sleep(0.1)
-        assert not received
+        assert _wait_until(lambda: source.status().state is SourceState.ENDED, timeout_s=10.0)
+        assert len(received) > 10
     finally:
         source.close()
 
 
 @pytest.mark.parametrize(
-    ("start", "end", "expected_start", "expected_end"),
+    ("start", "end", "expected_start", "expected_end", "expected_error"),
     [
-        pytest.param(0.5, 1.5, 0.5, 1.5, id="in-range-untouched"),
-        pytest.param(1.0, 40.0, 1.0, 5.0, id="end-clamped-to-duration"),
+        pytest.param(0.5, 1.5, 0.5, 1.5, False, id="in-range-untouched"),
+        pytest.param(1.0, 40.0, 1.0, 5.0, False, id="end-clamped-to-duration"),
+        pytest.param(20.0, 40.0, 0.0, 5.0, True, id="both-beyond-duration"),
+        pytest.param(5.0, 0.0, 0.0, 5.0, True, id="start-at-duration-zero-end"),
     ],
 )
-def test_loop_region_clamps_to_the_video_duration(
-    tmp_path: Path, start: float, end: float, expected_start: float, expected_end: float
+def test_loop_region_resolved_facts_are_published(
+    tmp_path: Path,
+    start: float,
+    end: float,
+    expected_start: float,
+    expected_end: float,
+    expected_error: bool,
 ) -> None:
+    # ADR-0028: the region tests assert on the published status, not on
+    # private attributes.
     path = generate_test_video(tmp_path / "region.mp4", frame_count=60, fps=12)  # 5 s video
     source = VideoSourceService(
         SOURCE_ID,
@@ -671,59 +706,56 @@ def test_loop_region_clamps_to_the_video_duration(
         on_frame=lambda _frame: None,
     )
     try:
-        assert source._region_start_s == pytest.approx(expected_start, abs=0.05)  # pyright: ignore[reportPrivateUsage]
-        assert source._region_end_s == pytest.approx(expected_end, abs=0.05)  # pyright: ignore[reportPrivateUsage]
+        status = source.status()
+        assert status.state is SourceState.READY
+        assert status.last_error is None
+        assert status.region_start_s == pytest.approx(expected_start, abs=0.05)
+        assert status.region_end_s == pytest.approx(expected_end, abs=0.05)
+        if expected_error:
+            assert status.region_error is not None
+        else:
+            assert status.region_error is None
     finally:
         source.close()
 
 
-@pytest.mark.parametrize(
-    ("start", "end"),
-    [
-        pytest.param(20.0, 40.0, id="both-beyond-duration"),
-        pytest.param(40.0, 0.0, id="start-beyond-zero-end"),
-    ],
-)
-def test_loop_region_start_beyond_duration_is_rejected(
-    tmp_path: Path, start: float, end: float
-) -> None:
-    # A start timestamp at or past the video's end leaves an empty region:
-    # the source reports a configuration error instead of degrading to the
-    # whole file (which would silently ignore both timestamps).
-    path = generate_test_video(tmp_path / "region-reject.mp4", frame_count=60, fps=12)
+def test_reload_re_resolves_region_against_new_file(tmp_path: Path) -> None:
+    # ADR-0028: reload() publishes a region, total, and head budget
+    # consistent with the reloaded file's duration.
+    path = tmp_path / "reload.mp4"
+    generate_test_video(path, frame_count=120, fps=12)  # 10 s file
     source = VideoSourceService(
         SOURCE_ID,
         path,
         loop=True,
-        loop_start_s=start,
-        loop_end_s=end,
+        loop_start_s=7.0,
+        loop_end_s=0.0,
         on_frame=lambda _frame: None,
     )
     try:
         status = source.status()
-        assert status.state is SourceState.ERROR
-        assert status.last_error is not None
-    finally:
-        source.close()
-
-
-def test_loop_region_start_at_exactly_duration_is_rejected(tmp_path: Path) -> None:
-    path = generate_test_video(tmp_path / "region-edge.mp4", frame_count=60, fps=12)
-    probe = VideoSourceService(SOURCE_ID, path, on_frame=lambda _frame: None)
-    duration_s = probe.metadata.duration_s
-    probe.close()
-    assert duration_s is not None
-    source = VideoSourceService(
-        SOURCE_ID,
-        path,
-        loop=True,
-        loop_start_s=duration_s,
-        loop_end_s=duration_s + 10.0,
-        on_frame=lambda _frame: None,
-    )
-    try:
-        assert source.status().state is SourceState.ERROR
-        assert source.status().last_error is not None
+        assert status.region_start_s == pytest.approx(7.0, abs=0.05)
+        assert status.region_error is None
+        # The reloaded file is shorter: the start clamps to the new end,
+        # the region falls back, and the fact is published.
+        generate_test_video(path, frame_count=60, fps=12)  # 5 s file
+        source.reload()
+        status = source.status()
+        assert status.state is SourceState.READY
+        assert status.last_error is None
+        assert status.duration_s == pytest.approx(5.0, abs=0.1)
+        assert status.region_start_s == 0.0
+        assert status.region_end_s == pytest.approx(5.0, abs=0.05)
+        assert status.region_error is not None
+        # A longer file makes the persisted start valid again and clears
+        # the fact.
+        generate_test_video(path, frame_count=180, fps=12)  # 15 s file
+        source.reload()
+        status = source.status()
+        assert status.state is SourceState.READY
+        assert status.region_start_s == pytest.approx(7.0, abs=0.05)
+        assert status.region_end_s == pytest.approx(15.0, abs=0.1)
+        assert status.region_error is None
     finally:
         source.close()
 

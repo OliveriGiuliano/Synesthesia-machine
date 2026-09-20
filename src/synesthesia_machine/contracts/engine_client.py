@@ -161,6 +161,14 @@ class SourceStatus:
     #: duration (ADR-0025); ``None`` when unknown.  Camera sources publish
     #: ``None``.
     region_end_s: float | None = None
+    #: Start of the played segment in source time (ADR-0028); ``None`` when
+    #: the container reports no duration.  Camera sources publish ``None``.
+    region_start_s: float | None = None
+    #: Non-fatal region fact (ADR-0028): a message describing a loop
+    #: configuration the file cannot honour, whose resolved region is the
+    #: fallback; ``None`` when the configuration is honoured as-is.  Camera
+    #: sources and failed sources publish ``None``.
+    region_error: str | None = None
     skipped_by_selection: int = 0
     dropped_before_processing: int = 0
     warnings: int = 0

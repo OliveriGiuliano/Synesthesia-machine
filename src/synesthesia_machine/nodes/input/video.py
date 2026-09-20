@@ -55,6 +55,14 @@ class LoadVideoRuntime(NoDataRuntime):
 
 
 def _validate_load_video(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
+    """Ordering rule for the loop region.
+
+    Duration-dependent legality is deliberately not validated here: this
+    hook sees parameters only (ADR-0023 keeps validation I/O-free), so a
+    loop start the file cannot honour is the engine's published
+    ``region_error`` fact (ADR-0028), not an up-front rejection.
+    """
+
     start = parameters.get("loop_start_s")
     end = parameters.get("loop_end_s")
     if isinstance(start, float) and isinstance(end, float) and end > 0.0 and start >= end:

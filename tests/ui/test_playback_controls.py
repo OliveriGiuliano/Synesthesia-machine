@@ -27,7 +27,7 @@ def test_controls_disabled_until_the_engine_reports_progress(qapp: QApplication)
     assert not controls.rewind_5_button.isEnabled()
     assert not controls.forward_15_button.isEnabled()
 
-    controls.set_progress(1.0, 10.0)
+    controls.set_progress(1.0, 0.0, 10.0, 10.0)
 
     assert controls.progress_slider.isEnabled()
     assert controls.rewind_5_button.isEnabled()
@@ -37,7 +37,7 @@ def test_controls_disabled_until_the_engine_reports_progress(qapp: QApplication)
 def test_slider_release_seeks_to_the_scrubbed_position(qapp: QApplication) -> None:
     del qapp
     controls = VideoPlaybackControls()
-    controls.set_progress(3.0, 12.0)
+    controls.set_progress(3.0, 0.0, 12.0, 12.0)
     emitted = _capture_seeks(controls)
 
     assert controls.progress_slider.value() == 2_500
@@ -50,7 +50,7 @@ def test_slider_release_seeks_to_the_scrubbed_position(qapp: QApplication) -> No
 def test_nudge_buttons_seek_by_fifteen_and_five_seconds(qapp: QApplication) -> None:
     del qapp
     controls = VideoPlaybackControls()
-    controls.set_progress(10.0, 60.0)
+    controls.set_progress(10.0, 0.0, 60.0, 60.0)
     emitted = _capture_seeks(controls)
 
     controls.forward_5_button.click()
@@ -64,7 +64,7 @@ def test_nudge_buttons_seek_by_fifteen_and_five_seconds(qapp: QApplication) -> N
 def test_seeks_clamp_to_the_video_bounds(qapp: QApplication) -> None:
     del qapp
     controls = VideoPlaybackControls()
-    controls.set_progress(5.0, 60.0)
+    controls.set_progress(5.0, 0.0, 60.0, 60.0)
     emitted = _capture_seeks(controls)
 
     controls.rewind_15_button.click()
@@ -81,12 +81,33 @@ def test_seeks_clamp_to_the_video_bounds(qapp: QApplication) -> None:
 def test_position_label_shows_current_and_total_time(qapp: QApplication) -> None:
     del qapp
     controls = VideoPlaybackControls()
-    controls.set_progress(1.5, 30.0)
+    controls.set_progress(1.5, 0.0, 30.0, 30.0)
 
     label = controls.position_label
     assert isinstance(label, QLabel)
     assert "00:00:01.50" in label.text()
     assert "00:00:30" in label.text()
+
+
+def test_slider_spans_the_published_region(qapp: QApplication) -> None:
+    del qapp
+    controls = VideoPlaybackControls()
+    # The engine resolved the region to [10 s, 20 s): the slider must span
+    # that interval, not [0, duration] (ADR-0028).
+    controls.set_progress(15.0, 10.0, 20.0, 60.0)
+
+    assert controls.progress_slider.value() == 5_000
+    assert "00:00:20" in controls.position_label.text()
+    emitted = _capture_seeks(controls)
+    controls.forward_5_button.click()
+    controls.forward_15_button.click()  # 25 -> clamped to the region end
+    assert emitted == [20.0, 20.0]
+    controls.rewind_15_button.click()  # 5 -> clamped to the region start
+    assert emitted[-1] == 10.0
+    # An unknown region end falls back to the container duration as the
+    # scale's upper bound.
+    controls.set_progress(5.0, 0.0, None, 10.0)
+    assert controls.progress_slider.value() == 5_000
 
 
 def test_inspector_shows_playback_controls_only_for_video_sources(qapp: QApplication) -> None:
@@ -120,7 +141,7 @@ def test_inspector_forwards_video_seeks_to_its_consumers(qapp: QApplication) -> 
     inspector.videoSeekRequested.connect(record)
     controls = inspector.findChild(VideoPlaybackControls)
     assert controls is not None
-    controls.set_progress(10.0, 60.0)
+    controls.set_progress(10.0, 0.0, 60.0, 60.0)
     controls.forward_5_button.click()
 
     assert forwarded == [(video_id, 15.0)]
@@ -153,7 +174,7 @@ def test_engine_telemetry_does_not_fight_a_slider_the_user_is_holding(
     controls = VideoPlaybackControls()
     controls.show()
     qapp.processEvents()
-    controls.set_progress(10.0, 60.0)
+    controls.set_progress(10.0, 0.0, 60.0, 60.0)
 
     slider = controls.progress_slider
     point = slider.mapToGlobal(QPoint(slider.width() // 2, slider.height() // 2))
@@ -162,12 +183,12 @@ def test_engine_telemetry_does_not_fight_a_slider_the_user_is_holding(
     qapp.processEvents()
 
     # While the user holds the slider, engine telemetry must not move it.
-    controls.set_progress(55.0, 60.0)
+    controls.set_progress(55.0, 0.0, 60.0, 60.0)
     qapp.processEvents()
     assert slider.value() == held
 
     QTest.mouseRelease(slider, Qt.MouseButton.LeftButton, pos=point)
-    controls.set_progress(55.0, 60.0)
+    controls.set_progress(55.0, 0.0, 60.0, 60.0)
     qapp.processEvents()
     assert slider.value() == round(55.0 / 60.0 * 10_000)
 
