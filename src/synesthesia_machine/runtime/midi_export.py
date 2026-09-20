@@ -213,29 +213,30 @@ def _scan_export_nodes(
         definition = registry.get(node.type_id)
         if definition is None:
             continue
-        if definition.type_id in _MIDI_OUTPUT_TYPE_IDS:
+        if definition.execution.type_id in _MIDI_OUTPUT_TYPE_IDS:
             midi_output_ids.append(node.id)
             continue
-        if definition.execution_kind is not ExecutionKind.SOURCE:
+        if definition.execution.execution_kind is not ExecutionKind.SOURCE:
             continue
         saw_source = True
-        if definition.type_id == LOAD_CAMERA_TYPE_ID:
+        if definition.execution.type_id == LOAD_CAMERA_TYPE_ID:
             first_problem = first_problem or (
                 "camera_source",
                 "Exporting needs a finite timeline: camera sources cannot be exported.",
             )
             continue
-        if definition.type_id != LOAD_VIDEO_TYPE_ID:
+        if definition.execution.type_id != LOAD_VIDEO_TYPE_ID:
             first_problem = first_problem or (
                 "unsupported_source",
-                f"Source type {definition.type_id!r} cannot be exported.",
+                f"Source type {definition.execution.type_id!r} cannot be exported.",
             )
             continue
         file_path = str(node.parameters.get("file_path", ""))
         if not file_path or not Path(file_path).is_file():
             first_problem = first_problem or (
                 "missing_media",
-                f"Load Video {definition.display_name} points to a file that cannot be read.",
+                f"Load Video {definition.presentation.display_name} "
+                "points to a file that cannot be read.",
             )
             continue
         inspect_video(file_path, stream_index=_int_parameter(node, "stream_index", 0))

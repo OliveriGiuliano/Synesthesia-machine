@@ -21,6 +21,8 @@ from synesthesia_machine.nodes import (
     ExpectedNodeError,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePresentationIntent,
     OutputPortSpec,
     ParameterSpec,
     ParameterUpdateMode,
@@ -178,73 +180,82 @@ def create_temporal_definitions() -> tuple[NodeDefinition, ...]:
 
     return (
         NodeDefinition(
-            POSTERIZE_TIME_TYPE_ID,
-            1,
-            "Posterize Time",
-            "Image / Utility",
-            "Updates the picture only every few frames and holds it in between, like a lower "
-            "frame rate.",
-            (InputPortSpec("image", "Image", PortType.IMAGE),),
-            (OutputPortSpec("image", "Image", PortType.IMAGE),),
-            (
-                ParameterSpec(
-                    "interval_frames",
-                    "Interval frames",
-                    PortType.INT,
-                    2,
-                    help_text=(
-                        "Number of frames between updates; the output only changes once every N "
-                        "frames."
+            execution=NodeExecutionContract(
+                POSTERIZE_TIME_TYPE_ID,
+                1,
+                ExecutionKind.STATEFUL,
+                (InputPortSpec("image", "Image", PortType.IMAGE),),
+                (OutputPortSpec("image", "Image", PortType.IMAGE),),
+                (
+                    ParameterSpec(
+                        "interval_frames",
+                        "Interval frames",
+                        PortType.INT,
+                        2,
+                        help_text=(
+                            "Number of frames between updates; the output only changes once every "
+                            "N "
+                            "frames."
+                        ),
+                        minimum=1,
+                        maximum=600,
                     ),
-                    minimum=1,
-                    maximum=600,
                 ),
+                PosterizeTimeRuntime,
             ),
-            ExecutionKind.STATEFUL,
-            PosterizeTimeRuntime,
-            aliases=("temporal posterize", "frame sample and hold", "time quantize"),
+            presentation=NodePresentationIntent(
+                "Posterize Time",
+                "Image / Utility",
+                "Updates the picture only every few frames and holds it in between, like a lower "
+                "frame rate.",
+                aliases=("temporal posterize", "frame sample and hold", "time quantize"),
+            ),
         ),
         NodeDefinition(
-            HOLD_IMAGE_TYPE_ID,
-            1,
-            "Hold Image",
-            "Image / Utility",
-            "Delays the image by a few frames, like a short memory of the recent picture.",
-            (InputPortSpec("image", "Image", PortType.IMAGE),),
-            (OutputPortSpec("image", "Image", PortType.IMAGE),),
-            (
-                ParameterSpec(
-                    "delay_frames",
-                    "Delay frames",
-                    PortType.INT,
-                    1,
-                    help_text=(
-                        "Number of frames a value is kept before a newer one replaces it; the "
-                        "output is the oldest value in that window, so 1 still lags the "
-                        "source by one frame."
+            execution=NodeExecutionContract(
+                HOLD_IMAGE_TYPE_ID,
+                1,
+                ExecutionKind.STATEFUL,
+                (InputPortSpec("image", "Image", PortType.IMAGE),),
+                (OutputPortSpec("image", "Image", PortType.IMAGE),),
+                (
+                    ParameterSpec(
+                        "delay_frames",
+                        "Delay frames",
+                        PortType.INT,
+                        1,
+                        help_text=(
+                            "Number of frames a value is kept before a newer one replaces it; the "
+                            "output is the oldest value in that window, so 1 still lags the "
+                            "source by one frame."
+                        ),
+                        minimum=1,
+                        maximum=600,
+                        update_mode=ParameterUpdateMode.RECOMPILE,
                     ),
-                    minimum=1,
-                    maximum=600,
-                    update_mode=ParameterUpdateMode.RECOMPILE,
-                ),
-                ParameterSpec(
-                    "memory_limit_mb",
-                    "Memory limit (MiB)",
-                    PortType.INT,
-                    256,
-                    help_text=(
-                        "Memory budget for the held frames (frame size times delay). If the "
-                        "estimate exceeds it, the node fails until the delay or "
-                        "frame size is reduced."
+                    ParameterSpec(
+                        "memory_limit_mb",
+                        "Memory limit (MiB)",
+                        PortType.INT,
+                        256,
+                        help_text=(
+                            "Memory budget for the held frames (frame size times delay). If the "
+                            "estimate exceeds it, the node fails until the delay or "
+                            "frame size is reduced."
+                        ),
+                        minimum=1,
+                        maximum=4096,
+                        update_mode=ParameterUpdateMode.RECOMPILE,
                     ),
-                    minimum=1,
-                    maximum=4096,
-                    update_mode=ParameterUpdateMode.RECOMPILE,
                 ),
+                HoldImageRuntime,
             ),
-            ExecutionKind.STATEFUL,
-            HoldImageRuntime,
-            aliases=("delay image", "previous frame", "frame history"),
+            presentation=NodePresentationIntent(
+                "Hold Image",
+                "Image / Utility",
+                "Delays the image by a few frames, like a short memory of the recent picture.",
+                aliases=("delay image", "previous frame", "frame history"),
+            ),
         ),
     )
 

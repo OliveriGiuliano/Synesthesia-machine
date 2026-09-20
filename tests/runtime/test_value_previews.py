@@ -35,7 +35,13 @@ from synesthesia_machine.contracts import (
     RuntimeValue,
     read_only_float32,
 )
-from synesthesia_machine.nodes import ExecutionKind, NodeDefinition, OutputPortSpec
+from synesthesia_machine.nodes import (
+    ExecutionKind,
+    NodeDefinition,
+    NodeExecutionContract,
+    NodePresentationIntent,
+    OutputPortSpec,
+)
 from synesthesia_machine.runtime import (
     CompiledNode,
     ExecutionPlan,
@@ -88,11 +94,11 @@ def _value_preview_plan(
     """
 
     producer_definition = _definition(producer_type_id)
-    producer_output_type = producer_definition.outputs[0].value_type
+    producer_output_type = producer_definition.execution.outputs[0].value_type
     assert isinstance(producer_output_type, PortType)
     producer = CompiledNode(
         node_id=SCALAR_PRODUCER_ID,
-        definition=producer_definition,
+        definition=producer_definition.execution,
         output_types={"value": producer_output_type},
         is_demanded=producer_demanded,
     )
@@ -101,7 +107,7 @@ def _value_preview_plan(
     )
     consumer = CompiledNode(
         node_id=SCALAR_CONSUMER_ID,
-        definition=_definition("synmachine.utility.remap_number"),
+        definition=(_definition("synmachine.utility.remap_number")).execution,
         input_bindings=input_bindings,
         output_types={"value": PortType.FLOAT},
         is_demanded=consumer_demanded,
@@ -156,19 +162,23 @@ def _two_scalar_output_definition() -> NodeDefinition:
         return _ScalarStubRuntime(node_id)
 
     return NodeDefinition(
-        type_id="synmachine.test.two_scalar_outputs",
-        implementation_version=1,
-        display_name="Two Scalar Outputs",
-        category="Test",
-        description="Two connected INT/FLOAT outputs for value-preview routing tests.",
-        inputs=(),
-        outputs=(
-            OutputPortSpec("value_a", "Value A", PortType.FLOAT),
-            OutputPortSpec("value_b", "Value B", PortType.INT),
+        execution=NodeExecutionContract(
+            type_id="synmachine.test.two_scalar_outputs",
+            implementation_version=1,
+            inputs=(),
+            parameters=(),
+            outputs=(
+                OutputPortSpec("value_a", "Value A", PortType.FLOAT),
+                OutputPortSpec("value_b", "Value B", PortType.INT),
+            ),
+            execution_kind=ExecutionKind.STATELESS,
+            runtime_factory=factory,
         ),
-        parameters=(),
-        execution_kind=ExecutionKind.STATELESS,
-        runtime_factory=factory,
+        presentation=NodePresentationIntent(
+            display_name="Two Scalar Outputs",
+            category="Test",
+            description="Two connected INT/FLOAT outputs for value-preview routing tests.",
+        ),
     )
 
 
@@ -177,20 +187,20 @@ def _two_port_value_plan() -> ExecutionPlan:
 
     producer = CompiledNode(
         node_id=SCALAR_PRODUCER_ID,
-        definition=_two_scalar_output_definition(),
+        definition=(_two_scalar_output_definition()).execution,
         output_types={"value_a": PortType.FLOAT, "value_b": PortType.INT},
         is_demanded=True,
     )
     consumer_a = CompiledNode(
         node_id=SCALAR_CONSUMER_ID,
-        definition=_definition("synmachine.utility.remap_number"),
+        definition=(_definition("synmachine.utility.remap_number")).execution,
         input_bindings={"value": InputBinding(source=PortKey(SCALAR_PRODUCER_ID, "value_a"))},
         output_types={"value": PortType.FLOAT},
         is_demanded=True,
     )
     consumer_b = CompiledNode(
         node_id=SCALAR_CONSUMER_B_ID,
-        definition=_definition("synmachine.utility.remap_number"),
+        definition=(_definition("synmachine.utility.remap_number")).execution,
         input_bindings={"value": InputBinding(source=PortKey(SCALAR_PRODUCER_ID, "value_b"))},
         output_types={"value": PortType.FLOAT},
         is_demanded=True,

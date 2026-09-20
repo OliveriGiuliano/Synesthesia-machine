@@ -230,10 +230,10 @@ def test_group_moved_past_the_edge_is_kept_inside_the_graph_area(canvas: GraphSc
 def _anchor_size(definition, theme=DEFAULT_THEME) -> tuple[float, float]:
     return layout_node_size(
         theme,
-        title=definition.display_name,
-        ordinary_input_count=len(definition.input_ports()),
-        parameter_labels=tuple(parameter.label for parameter in definition.parameters),
-        output_count=len(definition.outputs),
+        title=definition.presentation.display_name,
+        ordinary_input_count=len(definition.execution.input_ports()),
+        parameter_labels=tuple(parameter.label for parameter in definition.execution.parameters),
+        output_count=len(definition.execution.outputs),
     )
 
 

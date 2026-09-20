@@ -33,6 +33,7 @@ from synesthesia_machine.nodes import (
     ParameterGroupSpec,
     ParameterSpec,
     PreviewDock,
+    SourceEditorFacts,
 )
 from synesthesia_machine.ui.connection_state import PREVIEW_VISIBLE_KEY
 from synesthesia_machine.ui.preview_families import pill_type_names
@@ -154,8 +155,15 @@ def _projected_parameter_spec(
     """Localise a parameter spec, then apply the node's mode-dependent editor intent."""
 
     spec = replace(parameter, label=tr(parameter.label), help_text=tr(parameter.help_text))
-    if definition.parameter_editor_resolver is not None:
-        spec = definition.parameter_editor_resolver(spec, parameters, status)
+    if definition.presentation.parameter_editor_resolver is not None:
+        # The resolver contract is headless: the editor projects the engine's
+        # published status onto the narrow facts a node's metadata may use.
+        facts = (
+            SourceEditorFacts(file_path=status.file_path or None, duration_s=status.duration_s)
+            if status is not None
+            else None
+        )
+        spec = definition.presentation.parameter_editor_resolver(spec, parameters, facts)
     return spec
 
 
@@ -189,7 +197,7 @@ def project_graph(
     for node in snapshot.nodes:
         definition = registry.require(node.type_id)
         status = source_statuses.get(node.id) if source_statuses is not None else None
-        parameters, _ = definition.parameter_values(node.parameters)
+        parameters, _ = definition.execution.parameter_values(node.parameters)
         connected_port_ids = {
             connection.destination_port_id
             for connection in snapshot.connections
@@ -204,7 +212,9 @@ def project_graph(
                 False,
                 connected=(node.id, port.id) in incoming,
             )
-            for port in definition.input_ports(connected_port_ids, include_next_variadic=True)
+            for port in definition.execution.input_ports(
+                connected_port_ids, include_next_variadic=True
+            )
         )
         connectable = tuple(
             PortViewModel(
@@ -218,7 +228,7 @@ def project_graph(
                 is_parameter=True,
                 connected=(node.id, parameter.id) in incoming,
             )
-            for parameter in definition.parameters
+            for parameter in definition.execution.parameters
             if parameter.connectable
         )
         outputs = tuple(
@@ -229,14 +239,14 @@ def project_graph(
                 _port_type_name(compilation, definition, parameters, node.id, port.id, True),
                 True,
             )
-            for port in definition.outputs
+            for port in definition.execution.outputs
         )
         for port in outputs:
             output_type_names[(node.id, port.port_id)] = port.type_name
         primary_input_type = next(
             (
                 resolved
-                for port in definition.inputs
+                for port in definition.execution.inputs
                 if (resolved := compilation.resolved_type(node.id, port.id, is_output=False))
                 is not None
             ),
@@ -248,7 +258,7 @@ def project_graph(
                 node.parameters.get(parameter.id, parameter.default),
                 (node.id, parameter.id) in incoming,
             )
-            for parameter in definition.parameters
+            for parameter in definition.execution.parameters
             if not parameter.applicable_input_types
             or primary_input_type is None
             or primary_input_type in parameter.applicable_input_types
@@ -263,21 +273,21 @@ def project_graph(
                     if parameter_id in parameter_by_id
                 ),
             )
-            for group in definition.parameter_groups
+            for group in definition.presentation.parameter_groups
             if any(parameter_id in parameter_by_id for parameter_id in group.parameter_ids)
         )
         nodes.append(
             NodeViewModel(
                 node.id,
                 node.type_id,
-                definition.execution_kind,
-                definition.preview_dock,
-                node.user_label or tr(definition.display_name),
+                definition.execution.execution_kind,
+                definition.presentation.preview_dock,
+                node.user_label or tr(definition.presentation.display_name),
                 # Keep the category untranslated: it is a stable palette key
                 # (node_category_color) as well as a display string; display
                 # sites translate it themselves.
-                definition.category,
-                tr(definition.description),
+                definition.presentation.category,
+                tr(definition.presentation.description),
                 node.position,
                 (*inputs, *connectable),
                 outputs,
@@ -394,7 +404,7 @@ def _type_name(
     is_output: bool,
     parameters: Mapping[str, ParameterValue],
 ) -> str:
-    expression = definition.port_type(port_id, is_output=is_output, parameters=parameters)
+    expression = definition.execution.port_type(port_id, is_output=is_output, parameters=parameters)
     if isinstance(expression, PortType):
         return expression.value
     return expression.name

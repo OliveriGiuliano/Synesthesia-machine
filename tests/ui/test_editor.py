@@ -40,6 +40,8 @@ from synesthesia_machine.graph import GraphCompiler, GraphDocument
 from synesthesia_machine.nodes import (
     ExecutionKind,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePresentationIntent,
     NodeRegistry,
     ParameterEditorHint,
     ParameterSpec,
@@ -359,8 +361,13 @@ def test_randomize_nodes_without_selection_generates_complete_graph(
         definitions = tuple(registry.require(node.type_id) for node in snapshot.nodes)
 
         assert GraphCompiler(registry).compile(snapshot).report.is_valid
-        assert any(definition.execution_kind is ExecutionKind.SOURCE for definition in definitions)
-        assert any(definition.execution_kind is ExecutionKind.SINK for definition in definitions)
+        assert any(
+            definition.execution.execution_kind is ExecutionKind.SOURCE
+            for definition in definitions
+        )
+        assert any(
+            definition.execution.execution_kind is ExecutionKind.SINK for definition in definitions
+        )
         assert snapshot.connections
         assert not generated_window.scene.selected_node_ids()
     finally:
@@ -385,7 +392,7 @@ def test_palette_and_graph_search_index_registry_aliases(window: MainWindow) -> 
     assert dialog.results.count() == 1
     selected = dialog.selected_candidate()
     assert selected is not None
-    assert selected.definition.type_id == "synmachine.utility.math"
+    assert selected.definition.execution.type_id == "synmachine.utility.math"
 
 
 def test_library_double_click_signal_pair_adds_exactly_one_node(window: MainWindow) -> None:
@@ -639,7 +646,7 @@ def test_odd_integer_editor_snaps_even_gaussian_kernel_values(qapp: QApplication
     spec = (
         create_application_registry()
         .require("synmachine.image.gaussian_blur")
-        .parameter("kernel_width")
+        .execution.parameter("kernel_width")
     )
     assert spec is not None
     assert spec.step == 2
@@ -671,8 +678,8 @@ def test_float_editor_preserves_and_clamps_tiny_positive_bounds(qapp: QApplicati
 def test_loop_range_editor_constrains_its_knobs(qapp: QApplication) -> None:
     del qapp
     definition = create_application_registry().require("synmachine.input.load_video")
-    start_spec = definition.parameter("loop_start_s")
-    end_spec = definition.parameter("loop_end_s")
+    start_spec = definition.execution.parameter("loop_start_s")
+    end_spec = definition.execution.parameter("loop_end_s")
     assert start_spec is not None and end_spec is not None
 
     # The loop end is represented by the loop start's dual-knob editor.
@@ -886,21 +893,21 @@ def test_builtin_slider_metadata_reserves_sliders_for_continuous_spectra() -> No
         ("synmachine.synesthesia.channel_to_pitch", "maximum_polyphony"),
     )
     for type_id, parameter_id in technical_parameters:
-        spec = registry.require(type_id).parameter(parameter_id)
+        spec = registry.require(type_id).execution.parameter(parameter_id)
         assert spec is not None
         editor = create_parameter_editor(
             ParameterViewModel(spec, spec.default, False), lambda _value: None
         )
         assert isinstance(editor, QSpinBox)
 
-    volume = registry.require("synmachine.output.generate_audio").parameter("volume")
+    volume = registry.require("synmachine.output.generate_audio").execution.parameter("volume")
     assert volume is not None
     volume_editor = create_parameter_editor(
         ParameterViewModel(volume, volume.default, False), lambda _value: None
     )
     assert isinstance(volume_editor, FloatRangeParameterEditor)
 
-    hue = registry.require("synmachine.image.hue").parameter("turns")
+    hue = registry.require("synmachine.image.hue").execution.parameter("turns")
     assert hue is not None
     hue_editor = create_parameter_editor(
         ParameterViewModel(hue, hue.default, False), lambda _value: None
@@ -913,7 +920,7 @@ def test_node_category_palette_is_unique_and_applied_to_library_names(
     qapp: QApplication,
 ) -> None:
     registry = create_application_registry()
-    categories = {definition.category for definition in registry.definitions()}
+    categories = {definition.presentation.category for definition in registry.definitions()}
     colors = {node_category_color(category).name() for category in categories}
     assert len(colors) == len(categories)
 
@@ -969,7 +976,9 @@ def test_node_category_palette_is_unique_and_applied_to_library_names(
     result = dialog.results.item(0)
     candidate = dialog.selected_candidate()
     assert candidate is not None
-    assert result.foreground().color() == node_category_color(candidate.definition.category)
+    assert result.foreground().color() == node_category_color(
+        candidate.definition.presentation.category
+    )
     dialog.close()
     library.close()
 
@@ -1172,16 +1181,20 @@ def test_connectable_parameter_keeps_disabled_literal_fallback_while_connected(
         connected_port_type=PortType.FLOAT,
     )
     sink = NodeDefinition(
-        "synmachine.test.connectable",
-        1,
-        "Connectable",
-        "Test",
-        "Connectable parameter test node.",
-        (),
-        (),
-        (parameter,),
-        ExecutionKind.SINK,
-        _NoopRuntime,
+        execution=NodeExecutionContract(
+            type_id="synmachine.test.connectable",
+            implementation_version=1,
+            inputs=(),
+            outputs=(),
+            parameters=(parameter,),
+            execution_kind=ExecutionKind.SINK,
+            runtime_factory=_NoopRuntime,
+        ),
+        presentation=NodePresentationIntent(
+            display_name="Connectable",
+            category="Test",
+            description="Connectable parameter test node.",
+        ),
     )
     registry = NodeRegistry((*create_utility_registry().definitions(), sink))
     editor_window = MainWindow(
@@ -1192,7 +1205,7 @@ def test_connectable_parameter_keeps_disabled_literal_fallback_while_connected(
         offer_recovery=False,
     )
     source = editor_window.session.add_node("synmachine.utility.number", (0.0, 0.0))
-    target = editor_window.session.add_node(sink.type_id, (250.0, 0.0))
+    target = editor_window.session.add_node(sink.execution.type_id, (250.0, 0.0))
     editor_window.session.add_connection(source, "value", target, "gain")
 
     item = editor_window.scene.node_items[target]

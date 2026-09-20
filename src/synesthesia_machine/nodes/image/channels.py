@@ -37,6 +37,9 @@ from synesthesia_machine.nodes import (
     ExpectedNodeError,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePersistenceDescriptor,
+    NodePresentationIntent,
     OutputPortSpec,
     ParameterEditorHint,
     ParameterSpec,
@@ -238,119 +241,146 @@ def create_channel_definitions() -> tuple[NodeDefinition, ...]:
     )
     return (
         NodeDefinition(
-            "synmachine.image.difference",
-            1,
-            "Difference",
-            "Image / Compositing",
-            "Shows only what is different between two images. Identical areas become black.",
-            (
-                InputPortSpec("a", "A", PortType.IMAGE),
-                InputPortSpec("b", "B", PortType.IMAGE),
-            ),
-            (OutputPortSpec("image", "Difference", PortType.IMAGE),),
-            (
-                ParameterSpec(
-                    "normalize",
-                    "Normalize",
-                    PortType.BOOL,
-                    False,
-                    help_text="When on, the difference is scaled to use the full 0 to 1 range.",
+            execution=NodeExecutionContract(
+                "synmachine.image.difference",
+                1,
+                ExecutionKind.STATELESS,
+                (
+                    InputPortSpec("a", "A", PortType.IMAGE),
+                    InputPortSpec("b", "B", PortType.IMAGE),
                 ),
-            ),
-            ExecutionKind.STATELESS,
-            DifferenceRuntime,
-            aliases=("image difference", "absolute difference", "diff"),
-        ),
-        NodeDefinition(
-            "synmachine.image.blend_images",
-            1,
-            "Blend Images",
-            "Image / Compositing",
-            "Mixes two images together. You choose how much of the top image shows and how the "
-            "colours combine.",
-            (
-                InputPortSpec("a", "A", PortType.IMAGE),
-                InputPortSpec("b", "B", PortType.IMAGE),
-                InputPortSpec("mask", "Mask", PortType.CHANNEL, required=False),
-            ),
-            (OutputPortSpec("image", "Image", PortType.IMAGE),),
-            blend_parameters,
-            ExecutionKind.STATELESS,
-            BlendImagesRuntime,
-            aliases=("blend", "composite", "mix images"),
-            parameter_validator=_validate_blend_parameters,
-        ),
-        NodeDefinition(
-            "synmachine.image.separate_channels",
-            2,
-            "Separate Channels",
-            "Image / Channel",
-            "Splits an image into its individual channels, for example R, G and B, so you can use "
-            "them separately.",
-            (InputPortSpec("image", "Image", PortType.IMAGE),),
-            tuple(
-                OutputPortSpec(f"channel_{index}", f"Channel {index}", PortType.CHANNEL)
-                for index in range(1, 4)
-            ),
-            (),
-            ExecutionKind.STATELESS,
-            SeparateChannelsRuntime,
-            aliases=("split channels", "rgb channels", "hsv channels"),
-            migrations={1: migrate_separate_channels_v1_to_v2},
-        ),
-        NodeDefinition(
-            "synmachine.image.combine_channels",
-            2,
-            "Combine Channels",
-            "Image / Channel",
-            "Joins separate channels back together into one image in the colour model you choose.",
-            tuple(
-                InputPortSpec(
-                    f"channel_{index}",
-                    f"Channel {index}",
-                    PortType.CHANNEL,
-                    required=False,
-                )
-                for index in range(1, 4)
-            ),
-            (OutputPortSpec("image", "Image", PortType.IMAGE),),
-            (
-                ParameterSpec(
-                    "target_colour_space",
-                    "Target colour space",
-                    PortType.STRING,
-                    ColorSpace.SRGB.value,
-                    help_text=(
-                        "Colour space that describes how the connected channels are combined into "
-                        "an image."
+                (OutputPortSpec("image", "Difference", PortType.IMAGE),),
+                (
+                    ParameterSpec(
+                        "normalize",
+                        "Normalize",
+                        PortType.BOOL,
+                        False,
+                        help_text="When on, the difference is scaled to use the full 0 to 1 range.",
                     ),
-                    # RGBA is not offered: the app's sources never carry an
-                    # alpha channel, so a fourth input would be dead weight.
-                    choices=tuple(
-                        space.value for space in ColorSpace if space is not ColorSpace.RGBA
-                    ),
-                    update_mode=ParameterUpdateMode.RECOMPILE,
                 ),
+                DifferenceRuntime,
             ),
-            ExecutionKind.STATELESS,
-            CombineChannelsRuntime,
-            handles_no_data=True,
-            required_input_resolver=_required_combine_inputs,
-            aliases=("merge channels", "assemble image", "channels to image"),
-            migrations={1: migrate_combine_channels_v1_to_v2},
+            presentation=NodePresentationIntent(
+                "Difference",
+                "Image / Compositing",
+                "Shows only what is different between two images. Identical areas become black.",
+                aliases=("image difference", "absolute difference", "diff"),
+            ),
         ),
         NodeDefinition(
-            "synmachine.image.to_luminance",
-            1,
-            "Image to Luminance",
-            "Image / Channel",
-            "Turns a colour image into a single black-and-white brightness channel.",
-            (InputPortSpec("image", "Image", PortType.IMAGE),),
-            (OutputPortSpec("channel", "Luminance", PortType.CHANNEL),),
-            (),
-            ExecutionKind.STATELESS,
-            ImageToLuminanceRuntime,
-            aliases=("grayscale", "greyscale", "luma"),
+            execution=NodeExecutionContract(
+                "synmachine.image.blend_images",
+                1,
+                ExecutionKind.STATELESS,
+                (
+                    InputPortSpec("a", "A", PortType.IMAGE),
+                    InputPortSpec("b", "B", PortType.IMAGE),
+                    InputPortSpec("mask", "Mask", PortType.CHANNEL, required=False),
+                ),
+                (OutputPortSpec("image", "Image", PortType.IMAGE),),
+                blend_parameters,
+                BlendImagesRuntime,
+                parameter_validator=_validate_blend_parameters,
+            ),
+            presentation=NodePresentationIntent(
+                "Blend Images",
+                "Image / Compositing",
+                "Mixes two images together. You choose how much of the top image shows and how the "
+                "colours combine.",
+                aliases=("blend", "composite", "mix images"),
+            ),
+        ),
+        NodeDefinition(
+            execution=NodeExecutionContract(
+                "synmachine.image.separate_channels",
+                2,
+                ExecutionKind.STATELESS,
+                (InputPortSpec("image", "Image", PortType.IMAGE),),
+                tuple(
+                    OutputPortSpec(f"channel_{index}", f"Channel {index}", PortType.CHANNEL)
+                    for index in range(1, 4)
+                ),
+                (),
+                SeparateChannelsRuntime,
+            ),
+            presentation=NodePresentationIntent(
+                "Separate Channels",
+                "Image / Channel",
+                "Splits an image into its individual channels, for example R, G and B, so you can "
+                "use "
+                "them separately.",
+                aliases=("split channels", "rgb channels", "hsv channels"),
+            ),
+            persistence=NodePersistenceDescriptor(
+                migrations={1: migrate_separate_channels_v1_to_v2},
+            ),
+        ),
+        NodeDefinition(
+            execution=NodeExecutionContract(
+                "synmachine.image.combine_channels",
+                2,
+                ExecutionKind.STATELESS,
+                tuple(
+                    InputPortSpec(
+                        f"channel_{index}",
+                        f"Channel {index}",
+                        PortType.CHANNEL,
+                        required=False,
+                    )
+                    for index in range(1, 4)
+                ),
+                (OutputPortSpec("image", "Image", PortType.IMAGE),),
+                (
+                    ParameterSpec(
+                        "target_colour_space",
+                        "Target colour space",
+                        PortType.STRING,
+                        ColorSpace.SRGB.value,
+                        help_text=(
+                            "Colour space that describes how the connected channels are combined "
+                            "into "
+                            "an image."
+                        ),
+                        # RGBA is not offered: the app's sources never carry an
+                        # alpha channel, so a fourth input would be dead weight.
+                        choices=tuple(
+                            space.value for space in ColorSpace if space is not ColorSpace.RGBA
+                        ),
+                        update_mode=ParameterUpdateMode.RECOMPILE,
+                    ),
+                ),
+                CombineChannelsRuntime,
+                handles_no_data=True,
+                required_input_resolver=_required_combine_inputs,
+            ),
+            presentation=NodePresentationIntent(
+                "Combine Channels",
+                "Image / Channel",
+                "Joins separate channels back together into one image in the colour model you "
+                "choose.",
+                aliases=("merge channels", "assemble image", "channels to image"),
+            ),
+            persistence=NodePersistenceDescriptor(
+                migrations={1: migrate_combine_channels_v1_to_v2},
+            ),
+        ),
+        NodeDefinition(
+            execution=NodeExecutionContract(
+                "synmachine.image.to_luminance",
+                1,
+                ExecutionKind.STATELESS,
+                (InputPortSpec("image", "Image", PortType.IMAGE),),
+                (OutputPortSpec("channel", "Luminance", PortType.CHANNEL),),
+                (),
+                ImageToLuminanceRuntime,
+            ),
+            presentation=NodePresentationIntent(
+                "Image to Luminance",
+                "Image / Channel",
+                "Turns a colour image into a single black-and-white brightness channel.",
+                aliases=("grayscale", "greyscale", "luma"),
+            ),
         ),
     )
 

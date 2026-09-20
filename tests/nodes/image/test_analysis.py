@@ -140,14 +140,14 @@ CV_MORPH_SHAPES = {
 
 
 def _definition(type_id: str) -> NodeDefinition:
-    return next(item for item in create_image_definitions() if item.type_id == type_id)
+    return next(item for item in create_image_definitions() if item.execution.type_id == type_id)
 
 
 def _parameters(
     definition: NodeDefinition,
     overrides: Mapping[str, object] | None = None,
 ) -> dict[str, ParameterValue]:
-    parameters, errors = definition.parameter_values(overrides or {})
+    parameters, errors = definition.execution.parameter_values(overrides or {})
     assert not errors
     return parameters
 
@@ -158,7 +158,7 @@ def _runtime_process(
     parameters: Mapping[str, ParameterValue],
     context: FrameContext,
 ) -> Mapping[str, RuntimeValue]:
-    return definition.runtime_factory(NODE_ID).process(inputs, parameters, context)
+    return definition.execution.runtime_factory(NODE_ID).process(inputs, parameters, context)
 
 
 def _process_image(
@@ -247,57 +247,59 @@ def test_batch4_definitions_propagate_no_data(type_id: str) -> None:
 
 
 def test_batch4_metadata_has_exact_order_ports_defaults_and_choices() -> None:
-    definitions = [item for item in create_image_definitions() if item.type_id in BATCH4_IDS]
-    assert tuple(item.type_id for item in definitions) == BATCH4_IDS
+    definitions = [
+        item for item in create_image_definitions() if item.execution.type_id in BATCH4_IDS
+    ]
+    assert tuple(item.execution.type_id for item in definitions) == BATCH4_IDS
 
     for definition in definitions:
-        assert definition.execution_kind is ExecutionKind.STATELESS
+        assert definition.execution.execution_kind is ExecutionKind.STATELESS
         assert (
-            tuple(parameter.id for parameter in definition.parameters)
-            == PARAMETER_IDS[definition.type_id]
+            tuple(parameter.id for parameter in definition.execution.parameters)
+            == PARAMETER_IDS[definition.execution.type_id]
         )
         assert (
-            tuple(parameter.default for parameter in definition.parameters)
-            == DEFAULTS[definition.type_id]
+            tuple(parameter.default for parameter in definition.execution.parameters)
+            == DEFAULTS[definition.execution.type_id]
         )
         assert {
-            parameter.id for parameter in definition.parameters if parameter.connectable
-        } == CONNECTABLE_IDS[definition.type_id]
+            parameter.id for parameter in definition.execution.parameters if parameter.connectable
+        } == CONNECTABLE_IDS[definition.execution.type_id]
 
     threshold = _definition("synmachine.image.threshold")
-    assert threshold.category == "Image / Analysis"
-    assert tuple((port.id, port.value_type) for port in threshold.inputs) == (
+    assert threshold.presentation.category == "Image / Analysis"
+    assert tuple((port.id, port.value_type) for port in threshold.execution.inputs) == (
         ("channel", PortType.CHANNEL),
     )
-    assert tuple((port.id, port.value_type) for port in threshold.outputs) == (
+    assert tuple((port.id, port.value_type) for port in threshold.execution.outputs) == (
         ("channel", PortType.CHANNEL),
     )
-    assert threshold.parameter("mode").choices == tuple(CV_THRESHOLDS)  # type: ignore[union-attr]
+    assert threshold.execution.parameter("mode").choices == tuple(CV_THRESHOLDS)  # type: ignore[union-attr]
     for parameter_id in ("threshold", "maximum"):
-        parameter = threshold.parameter(parameter_id)
+        parameter = threshold.execution.parameter(parameter_id)
         assert parameter is not None and parameter.connectable
         assert parameter.connected_port_type is PortType.FLOAT
 
     canny = _definition("synmachine.image.canny")
-    assert canny.category == "Image / Analysis"
-    assert canny.inputs[0].value_type is PortType.IMAGE
-    assert canny.outputs[0].value_type is PortType.CHANNEL
-    assert canny.parameter("aperture_size").choices == (3, 5, 7)  # type: ignore[union-attr]
+    assert canny.presentation.category == "Image / Analysis"
+    assert canny.execution.inputs[0].value_type is PortType.IMAGE
+    assert canny.execution.outputs[0].value_type is PortType.CHANNEL
+    assert canny.execution.parameter("aperture_size").choices == (3, 5, 7)  # type: ignore[union-attr]
 
     convolve = _definition("synmachine.image.convolve")
-    assert convolve.parameter("kernel").value_type is PortType.MATRIX  # type: ignore[union-attr]
-    assert convolve.parameter("normalization").choices == (  # type: ignore[union-attr]
+    assert convolve.execution.parameter("kernel").value_type is PortType.MATRIX  # type: ignore[union-attr]
+    assert convolve.execution.parameter("normalization").choices == (  # type: ignore[union-attr]
         "NONE",
         "SUM_TO_ONE",
         "ABSOLUTE_SUM_TO_ONE",
     )
     for type_id in IMAGE_OUTPUT_IDS:
         definition = _definition(type_id)
-        assert definition.category == "Image / Filter"
-        assert tuple(port.id for port in definition.inputs) == ("image",)
-        assert tuple(port.id for port in definition.outputs) == ("image",)
+        assert definition.presentation.category == "Image / Filter"
+        assert tuple(port.id for port in definition.execution.inputs) == ("image",)
+        assert tuple(port.id for port in definition.execution.outputs) == ("image",)
         assert {
-            parameter.id for parameter in definition.parameters if parameter.connectable
+            parameter.id for parameter in definition.execution.parameters if parameter.connectable
         } == CONNECTABLE_IDS[type_id]
 
 
@@ -703,7 +705,7 @@ def test_definition_validators_reject_invalid_batch4_literals(
     overrides: Mapping[str, object],
     message: str,
 ) -> None:
-    _, errors = _definition(type_id).parameter_values(overrides)
+    _, errors = _definition(type_id).execution.parameter_values(overrides)
     assert any(message in error for error in errors)
 
 

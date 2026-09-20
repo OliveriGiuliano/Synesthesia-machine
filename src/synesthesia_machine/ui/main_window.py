@@ -1012,7 +1012,7 @@ class MainWindow(QMainWindow):
         selected = dialog.selected_candidate()
         if selected is not None:
             node_id = self.session.add_node(
-                selected.definition.type_id,
+                selected.definition.execution.type_id,
                 (value.x(), value.y()),
             )
             self.scene.select_node_ids({node_id})

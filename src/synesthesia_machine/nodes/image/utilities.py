@@ -20,6 +20,9 @@ from synesthesia_machine.nodes import (
     ExecutionKind,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePersistenceDescriptor,
+    NodePresentationIntent,
     OutputPortSpec,
     ParameterSpec,
     StatelessRuntime,
@@ -59,35 +62,41 @@ def create_utility_definitions() -> tuple[NodeDefinition, ...]:
 
     return (
         NodeDefinition(
-            "synmachine.image.change_colour_space",
-            2,
-            "Change Colour Space",
-            "Image / Utility",
-            "Converts the image to a different colour model, for example from RGB to HSV.",
-            (InputPortSpec("image", "Image", PortType.IMAGE),),
-            (OutputPortSpec("image", "Image", PortType.IMAGE),),
-            (
-                ParameterSpec(
-                    "target_colour_space",
-                    "Target colour space",
-                    PortType.STRING,
-                    ColorSpace.HSV.value,
-                    help_text=(
-                        "Colour space the image is converted to, which also changes what its "
-                        "channels mean."
-                    ),
-                    # RGBA is not offered: sources never carry an alpha
-                    # channel, so converting into it would only add a
-                    # fourth channel that nothing downstream can use.
-                    choices=tuple(
-                        space.value for space in ColorSpace if space is not ColorSpace.RGBA
+            execution=NodeExecutionContract(
+                "synmachine.image.change_colour_space",
+                2,
+                ExecutionKind.STATELESS,
+                (InputPortSpec("image", "Image", PortType.IMAGE),),
+                (OutputPortSpec("image", "Image", PortType.IMAGE),),
+                (
+                    ParameterSpec(
+                        "target_colour_space",
+                        "Target colour space",
+                        PortType.STRING,
+                        ColorSpace.HSV.value,
+                        help_text=(
+                            "Colour space the image is converted to, which also changes what its "
+                            "channels mean."
+                        ),
+                        # RGBA is not offered: sources never carry an alpha
+                        # channel, so converting into it would only add a
+                        # fourth channel that nothing downstream can use.
+                        choices=tuple(
+                            space.value for space in ColorSpace if space is not ColorSpace.RGBA
+                        ),
                     ),
                 ),
+                ChangeColourSpaceRuntime,
             ),
-            ExecutionKind.STATELESS,
-            ChangeColourSpaceRuntime,
-            aliases=("convert colour", "convert color", "hsv", "lab", "ycrcb"),
-            migrations={1: migrate_change_colour_space_v1_to_v2},
+            presentation=NodePresentationIntent(
+                "Change Colour Space",
+                "Image / Utility",
+                "Converts the image to a different colour model, for example from RGB to HSV.",
+                aliases=("convert colour", "convert color", "hsv", "lab", "ycrcb"),
+            ),
+            persistence=NodePersistenceDescriptor(
+                migrations={1: migrate_change_colour_space_v1_to_v2},
+            ),
         ),
     )
 

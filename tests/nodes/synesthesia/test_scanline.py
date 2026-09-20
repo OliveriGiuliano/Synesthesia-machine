@@ -79,7 +79,7 @@ def _settings(minimum: int = 60, maximum: int = 62) -> CommonMusicalSettings:
 
 def _parameters(**overrides: object) -> Mapping[str, ParameterValue]:
     definition = create_scanline_definitions()[0]
-    values, errors = definition.parameter_values(
+    values, errors = definition.execution.parameter_values(
         {"midi_minimum": 60, "midi_maximum": 62, **overrides}
     )
     assert not errors
@@ -356,22 +356,22 @@ def test_scheduler_clock_error_is_recoverable_and_does_not_advance_scanline() ->
 
 def test_scanline_metadata_registry_clock_and_nonfinite_contracts() -> None:
     definition = create_scanline_definitions()[0]
-    assert definition.type_id == SCANLINE_TYPE_ID
-    assert definition.execution_kind is ExecutionKind.STATEFUL
-    assert tuple(port.id for port in definition.inputs) == ("value",)
-    assert tuple(port.id for port in definition.outputs) == ("midi",)
-    assert definition.parameter_groups[0].id == "musical"
-    parameters, errors = definition.parameter_values({})
+    assert definition.execution.type_id == SCANLINE_TYPE_ID
+    assert definition.execution.execution_kind is ExecutionKind.STATEFUL
+    assert tuple(port.id for port in definition.execution.inputs) == ("value",)
+    assert tuple(port.id for port in definition.execution.outputs) == ("midi",)
+    assert definition.presentation.parameter_groups[0].id == "musical"
+    parameters, errors = definition.execution.parameter_values({})
     assert not errors
     assert parameters["direction"] == BOTTOM_TO_TOP
     assert parameters["advance_rows"] == 1
     assert parameters["line_thickness"] == 1
     assert parameters["metric"] == VALUE
     assert parameters["aggregation"] == MEAN
-    assert definition.parameter("metric").choices == SCANLINE_METRICS  # type: ignore[union-attr]
+    assert definition.execution.parameter("metric").choices == SCANLINE_METRICS  # type: ignore[union-attr]
     registry = create_application_registry()
     assert len(registry.definitions()) >= 55
-    assert registry.require(SCANLINE_TYPE_ID).type_id == definition.type_id
+    assert registry.require(SCANLINE_TYPE_ID).execution.type_id == definition.execution.type_id
 
     channel = _channel([[np.nan, np.inf, -np.inf]])
     output = scanline_to_midi_state(
@@ -433,7 +433,7 @@ def _execution_plan(source: PortKey, **parameters: object) -> ExecutionPlan:
         (
             CompiledNode(
                 NODE,
-                create_scanline_definitions()[0],
+                create_scanline_definitions()[0].execution,
                 parameters=_parameters(**parameters),
                 input_bindings={"value": InputBinding(source)},
                 input_types={"value": PortType.CHANNEL},

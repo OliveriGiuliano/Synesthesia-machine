@@ -7,7 +7,11 @@ from types import MappingProxyType
 from uuid import UUID
 
 from synesthesia_machine.contracts.runtime_values import ParameterValue, PortType
-from synesthesia_machine.nodes import NodeDefinition, ParameterSpec, ParameterUpdateMode
+from synesthesia_machine.nodes import (
+    NodeExecutionContract,
+    ParameterSpec,
+    ParameterUpdateMode,
+)
 
 
 class ScalarConversion(StrEnum):
@@ -41,7 +45,7 @@ def _empty_port_types() -> dict[str, PortType]:
 @dataclass(frozen=True, slots=True)
 class CompiledNode:
     node_id: UUID
-    definition: NodeDefinition
+    definition: NodeExecutionContract
     parameters: Mapping[str, ParameterValue] = field(default_factory=_empty_parameters)
     input_bindings: Mapping[str, InputBinding] = field(default_factory=_empty_input_bindings)
     input_types: Mapping[str, PortType] = field(default_factory=_empty_port_types)

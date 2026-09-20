@@ -40,6 +40,9 @@ from synesthesia_machine.nodes import (
     ExecutionKind,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePersistenceDescriptor,
+    NodePresentationIntent,
     NodeRuntime,
     OutputPortSpec,
     ParameterEditorHint,
@@ -344,20 +347,26 @@ def _definition(
     migrations: Mapping[int, NodeMigration] | None = None,
 ) -> NodeDefinition:
     return NodeDefinition(
-        type_id,
-        implementation_version,
-        display_name,
-        "Image / Adjustment",
-        description,
-        (InputPortSpec("image", "Image / Channel" if dynamic else "Image", PortType.IMAGE),),
-        (OutputPortSpec("image", "Image / Channel" if dynamic else "Image", PortType.IMAGE),),
-        parameters,
-        ExecutionKind.STATELESS,
-        _factory(processor, f"invalid_{type_id.rsplit('.', 1)[1]}"),
-        aliases=aliases,
-        parameter_validator=combined_parameter_validator(parameters, validator),
-        port_type_resolver=dynamic_image_channel_resolver if dynamic else None,
-        migrations=migrations or {},
+        execution=NodeExecutionContract(
+            type_id,
+            implementation_version,
+            ExecutionKind.STATELESS,
+            (InputPortSpec("image", "Image / Channel" if dynamic else "Image", PortType.IMAGE),),
+            (OutputPortSpec("image", "Image / Channel" if dynamic else "Image", PortType.IMAGE),),
+            parameters,
+            _factory(processor, f"invalid_{type_id.rsplit('.', 1)[1]}"),
+            parameter_validator=combined_parameter_validator(parameters, validator),
+            port_type_resolver=dynamic_image_channel_resolver if dynamic else None,
+        ),
+        presentation=NodePresentationIntent(
+            display_name,
+            "Image / Adjustment",
+            description,
+            aliases=aliases,
+        ),
+        persistence=NodePersistenceDescriptor(
+            migrations=migrations or {},
+        ),
     )
 
 

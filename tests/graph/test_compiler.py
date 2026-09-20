@@ -218,9 +218,12 @@ def test_compiler_rejects_clock_mismatch_and_orders_deterministically() -> None:
     merge_definition = registry.require("test.merge")
     merge_definition = replace(
         merge_definition,
-        inputs=(
-            merge_definition.inputs[0],
-            InputPortSpec("other", "Other", PortType.FLOAT),
+        execution=replace(
+            merge_definition.execution,
+            inputs=(
+                merge_definition.execution.inputs[0],
+                InputPortSpec("other", "Other", PortType.FLOAT),
+            ),
         ),
     )
     registry = NodeRegistry((registry.require("test.source"), merge_definition))

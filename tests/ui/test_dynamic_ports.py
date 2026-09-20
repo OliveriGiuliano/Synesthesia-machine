@@ -23,6 +23,8 @@ from synesthesia_machine.nodes import (
     ExecutionKind,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePresentationIntent,
     NodeRegistry,
     OutputPortSpec,
     ParameterGroupSpec,
@@ -106,29 +108,37 @@ class _VariadicSumRuntime:
 
 def _variadic_registry() -> NodeRegistry:
     source = NodeDefinition(
-        "test.dynamic_source",
-        1,
-        "Source",
-        "Test",
-        "Static test source.",
-        (),
-        (OutputPortSpec("value", "Value", PortType.FLOAT),),
-        (),
-        ExecutionKind.STATELESS,
-        _ConstantRuntime,
+        execution=NodeExecutionContract(
+            type_id="test.dynamic_source",
+            implementation_version=1,
+            inputs=(),
+            outputs=(OutputPortSpec("value", "Value", PortType.FLOAT),),
+            parameters=(),
+            execution_kind=ExecutionKind.STATELESS,
+            runtime_factory=_ConstantRuntime,
+        ),
+        presentation=NodePresentationIntent(
+            display_name="Source",
+            category="Test",
+            description="Static test source.",
+        ),
     )
     variadic = NodeDefinition(
-        "test.dynamic_variadic",
-        1,
-        "Variadic sum",
-        "Test",
-        "General variadic test node.",
-        (),
-        (OutputPortSpec("value", "Value", PortType.FLOAT),),
-        (),
-        ExecutionKind.STATELESS,
-        _VariadicSumRuntime,
-        variadic_input=VariadicInputSpec("item", "Item", PortType.FLOAT, minimum_count=2),
+        execution=NodeExecutionContract(
+            type_id="test.dynamic_variadic",
+            implementation_version=1,
+            inputs=(),
+            outputs=(OutputPortSpec("value", "Value", PortType.FLOAT),),
+            parameters=(),
+            execution_kind=ExecutionKind.STATELESS,
+            runtime_factory=_VariadicSumRuntime,
+            variadic_input=VariadicInputSpec("item", "Item", PortType.FLOAT, minimum_count=2),
+        ),
+        presentation=NodePresentationIntent(
+            display_name="Variadic sum",
+            category="Test",
+            description="General variadic test node.",
+        ),
     )
     return NodeRegistry((source, variadic))
 
@@ -164,11 +174,11 @@ def test_common_musical_metadata_resolution_and_channel_to_pitch_are_stable() ->
         127,
     )
     definition = create_synesthesia_definitions()[0]
-    assert definition.type_id == CHANNEL_TO_PITCH_TYPE_ID
-    assert definition.parameters[: len(specs)] == specs
-    assert definition.parameter_groups[0].parameter_ids == COMMON_MUSICAL_PARAMETER_IDS
+    assert definition.execution.type_id == CHANNEL_TO_PITCH_TYPE_ID
+    assert definition.execution.parameters[: len(specs)] == specs
+    assert definition.presentation.parameter_groups[0].parameter_ids == COMMON_MUSICAL_PARAMETER_IDS
 
-    parameters, errors = definition.parameter_values(
+    parameters, errors = definition.execution.parameter_values(
         {
             "root_pitch_class": "D",
             "scale": "major",
@@ -206,8 +216,8 @@ def test_common_musical_metadata_resolution_and_channel_to_pitch_are_stable() ->
 
 def test_parameter_group_metadata_rejects_unknown_or_duplicate_members() -> None:
     definition = create_synesthesia_definitions()[0]
-    assert definition.parameter_groups[0].id == "musical"
-    assert len(set(definition.parameter_groups[0].parameter_ids)) == 9
+    assert definition.presentation.parameter_groups[0].id == "musical"
+    assert len(set(definition.presentation.parameter_groups[0].parameter_ids)) == 9
 
     with pytest.raises(ValueError, match="Duplicate grouped parameter ID"):
         ParameterGroupSpec("invalid", "Invalid", ("known", "known"))
@@ -216,29 +226,35 @@ def test_parameter_group_metadata_rejects_unknown_or_duplicate_members() -> None
     with pytest.raises(ValueError, match="reference unknown parameters: missing"):
         replace(
             definition,
-            parameters=(parameter,),
-            parameter_groups=(ParameterGroupSpec("invalid", "Invalid", ("missing",)),),
+            execution=replace(definition.execution, parameters=(parameter,)),
+            presentation=replace(
+                definition.presentation,
+                parameter_groups=(ParameterGroupSpec("invalid", "Invalid", ("missing",)),),
+            ),
         )
     with pytest.raises(ValueError, match="Duplicate grouped parameter ID"):
         replace(
             definition,
-            parameters=(parameter,),
-            parameter_groups=(
-                ParameterGroupSpec("first", "First", ("known",)),
-                ParameterGroupSpec("second", "Second", ("known",)),
+            execution=replace(definition.execution, parameters=(parameter,)),
+            presentation=replace(
+                definition.presentation,
+                parameter_groups=(
+                    ParameterGroupSpec("first", "First", ("known",)),
+                    ParameterGroupSpec("second", "Second", ("known",)),
+                ),
             ),
         )
 
 
 def test_variadic_metadata_validation_and_effective_socket_projection() -> None:
     definition = _variadic_registry().require("test.dynamic_variadic")
-    assert definition.input("item_10") is not None
-    assert definition.input("item_0") is None
-    assert definition.input("item_01") is None
-    assert tuple(port.id for port in definition.input_ports()) == ("item_1", "item_2")
+    assert definition.execution.input("item_10") is not None
+    assert definition.execution.input("item_0") is None
+    assert definition.execution.input("item_01") is None
+    assert tuple(port.id for port in definition.execution.input_ports()) == ("item_1", "item_2")
     assert tuple(
         port.id
-        for port in definition.input_ports(
+        for port in definition.execution.input_ports(
             ("item_1", "item_2", "item_10"), include_next_variadic=True
         )
     ) == ("item_1", "item_2", "item_3", "item_10")
@@ -248,12 +264,17 @@ def test_variadic_metadata_validation_and_effective_socket_projection() -> None:
     with pytest.raises(ValueError, match="must not overlap"):
         replace(
             definition,
-            inputs=(InputPortSpec("item_1", "Item 1", PortType.FLOAT),),
+            execution=replace(
+                definition.execution, inputs=(InputPortSpec("item_1", "Item 1", PortType.FLOAT),)
+            ),
         )
     with pytest.raises(ValueError, match="Parameter IDs must not overlap"):
         replace(
             definition,
-            parameters=(ParameterSpec("item_1", "Item 1", PortType.INT, 0),),
+            execution=replace(
+                definition.execution,
+                parameters=(ParameterSpec("item_1", "Item 1", PortType.INT, 0),),
+            ),
         )
 
 
@@ -341,9 +362,9 @@ def test_shared_musical_view_model_and_editor_cover_ranges_custom_mode_and_edits
     projection = project_graph(document.snapshot(), registry, compilation.report)
     node = next(node for node in projection.nodes if node.node_id == node_id)
     assert len(node.parameter_groups) == 1
-    assert tuple(parameter.spec.id for parameter in node.parameter_groups[0].parameters) == (
-        COMMON_MUSICAL_PARAMETER_IDS
-    )
+    assert tuple(
+        parameter.spec.id for parameter in node.parameter_groups[0].parameters
+    ) == (COMMON_MUSICAL_PARAMETER_IDS)
 
     edits: list[tuple[str, object]] = []
     editor = MusicalParameterEditor(

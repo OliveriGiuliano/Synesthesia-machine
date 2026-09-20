@@ -117,7 +117,7 @@ SYNESTHESIA_DESCRIPTION_DETAILS = {
 def test_catalogue_is_the_exact_current_64_definition_registry() -> None:
     registry = create_application_registry()
     snapshot = load_graph(CATALOGUE_PATH, registry)
-    expected = tuple(definition.type_id for definition in registry.definitions())
+    expected = tuple(definition.execution.type_id for definition in registry.definitions())
     actual = tuple(node.type_id for node in snapshot.nodes)
 
     assert len(expected) == len(actual) == len(set(actual)) == 64
@@ -137,12 +137,12 @@ def test_complex_synesthesia_nodes_have_explanatory_hover_descriptions() -> None
 
     for type_id, expected_details in SYNESTHESIA_DESCRIPTION_DETAILS.items():
         definition = registry.require(type_id)
-        description = definition.description.casefold()
+        description = definition.presentation.description.casefold()
 
-        assert definition.category == "Synesthesia"
+        assert definition.presentation.category == "Synesthesia"
         # Descriptions are plain-language tooltips; this floor only guards
         # against stub text, not against a particular writing style.
-        assert len(definition.description) >= 150
+        assert len(definition.presentation.description) >= 150
         assert all(detail in description for detail in expected_details)
 
 

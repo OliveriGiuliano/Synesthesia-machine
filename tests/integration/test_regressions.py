@@ -64,39 +64,43 @@ def test_requested_nodes_are_registered_with_stable_ids() -> None:
         "synmachine.utility.normalize",
         "synmachine.utility.curve",
     }
-    assert expected <= {definition.type_id for definition in registry.definitions()}
+    assert expected <= {definition.execution.type_id for definition in registry.definitions()}
     assert registry.get("synmachine.utility.channel_statistics") is None
 
 
 def test_live_scalar_parameters_are_exposed_with_safe_exclusions() -> None:
     registry = create_application_registry()
     resize = registry.require("synmachine.image.resize")
-    assert resize.parameter("width").connected_port_type is PortType.FLOAT  # type: ignore[union-attr]
-    assert resize.parameter("preserve_aspect").connected_port_type is PortType.BOOL  # type: ignore[union-attr]
-    aperture = registry.require("synmachine.image.canny").parameter("aperture_size")
+    assert resize.execution.parameter("width").connected_port_type is PortType.FLOAT  # type: ignore[union-attr]
+    assert resize.execution.parameter("preserve_aspect").connected_port_type is PortType.BOOL  # type: ignore[union-attr]
+    aperture = registry.require("synmachine.image.canny").execution.parameter("aperture_size")
     assert aperture is not None and aperture.connectable
     assert aperture.connected_value(4.8) == 5
 
     statistics = registry.require("synmachine.utility.statistics")
-    assert statistics.parameter("percentile").connectable  # type: ignore[union-attr]
-    assert not statistics.parameter("statistic").connectable  # type: ignore[union-attr]
-    assert not registry.require("synmachine.utility.buffer").parameter("capacity").connectable  # type: ignore[union-attr]
+    assert statistics.execution.parameter("percentile").connectable  # type: ignore[union-attr]
+    assert not statistics.execution.parameter("statistic").connectable  # type: ignore[union-attr]
+    assert (
+        not registry.require("synmachine.utility.buffer")
+        .execution.parameter("capacity")
+        .connectable
+    )  # type: ignore[union-attr]
     assert not any(
         parameter.connectable
-        for parameter in registry.require("synmachine.input.load_video").parameters
+        for parameter in registry.require("synmachine.input.load_video").execution.parameters
     )
 
 
 def test_scheduler_applies_rounds_and_bounds_connected_numeric_parameter() -> None:
     definition = create_application_registry().require("synmachine.image.resize")
-    parameters, errors = definition.parameter_values(
+    parameters, errors = definition.execution.parameter_values(
         {"width": 500, "height": 4, "preserve_aspect": False}
     )
     assert not errors
     external = UUID("00000000-0000-0000-0000-00000000a002")
     compiled = CompiledNode(
         NODE_ID,
-        definition,
+        definition.execution,
         parameters=parameters,
         input_bindings={
             "image": InputBinding(PortKey(external, "image")),
@@ -191,9 +195,9 @@ def test_buffer_statistics_and_modulo_accumulator_process_scalars() -> None:
     registry = create_application_registry()
     context = frame_context(clock_id=NODE_ID)
     buffer_definition = registry.require("synmachine.utility.buffer")
-    buffer_parameters, errors = buffer_definition.parameter_values({"capacity": 3})
+    buffer_parameters, errors = buffer_definition.execution.parameter_values({"capacity": 3})
     assert not errors
-    buffer_runtime = buffer_definition.runtime_factory(NODE_ID)
+    buffer_runtime = buffer_definition.execution.runtime_factory(NODE_ID)
     latest = None
     for value in (1.0, 2.0, 4.0, 8.0):
         latest = buffer_runtime.process({"value": value}, buffer_parameters, context)["values"]
@@ -201,17 +205,17 @@ def test_buffer_statistics_and_modulo_accumulator_process_scalars() -> None:
     assert latest.values == (2.0, 4.0, 8.0)
 
     statistics = registry.require("synmachine.utility.statistics")
-    statistics_parameters, errors = statistics.parameter_values({"statistic": "MEAN"})
+    statistics_parameters, errors = statistics.execution.parameter_values({"statistic": "MEAN"})
     assert not errors
-    mean = statistics.runtime_factory(NODE_ID).process(
+    mean = statistics.execution.runtime_factory(NODE_ID).process(
         {"values_1": latest}, statistics_parameters, context
     )["value"]
     assert mean == 14.0 / 3.0
 
     accumulator = registry.require("synmachine.utility.modulo_accumulator")
-    accumulator_parameters, errors = accumulator.parameter_values({"modulo": 5.0})
+    accumulator_parameters, errors = accumulator.execution.parameter_values({"modulo": 5.0})
     assert not errors
-    accumulator_runtime = accumulator.runtime_factory(NODE_ID)
+    accumulator_runtime = accumulator.execution.runtime_factory(NODE_ID)
     assert (
         accumulator_runtime.process({"value": 3.0}, accumulator_parameters, context)["value"] == 3.0
     )
@@ -222,9 +226,9 @@ def test_buffer_statistics_and_modulo_accumulator_process_scalars() -> None:
 
 def test_buffer_enforces_memory_limit_and_resets_on_descriptor_change() -> None:
     definition = create_application_registry().require("synmachine.utility.buffer")
-    parameters, errors = definition.parameter_values({"capacity": 600})
+    parameters, errors = definition.execution.parameter_values({"capacity": 600})
     assert not errors
-    runtime = definition.runtime_factory(NODE_ID)
+    runtime = definition.execution.runtime_factory(NODE_ID)
     context = frame_context(clock_id=NODE_ID)
     image = ImageFrame(
         read_only_float32(np.zeros((512, 512, 3), dtype=np.float32)),
@@ -241,7 +245,7 @@ def test_buffer_enforces_memory_limit_and_resets_on_descriptor_change() -> None:
     assert diagnostic.retained_bytes == 0
     assert diagnostic.estimated_retained_bytes > diagnostic.memory_limit_bytes
 
-    small_parameters, errors = definition.parameter_values({"capacity": 3})
+    small_parameters, errors = definition.execution.parameter_values({"capacity": 3})
     assert not errors
     generic = _channel()
     hue = ChannelFrame(
@@ -270,19 +274,19 @@ def test_dynamic_statistics_and_accumulator_respect_channel_descriptors() -> Non
         generic.context,
     )
     statistics = registry.require("synmachine.utility.statistics")
-    statistics_parameters, errors = statistics.parameter_values({"statistic": "MEAN"})
+    statistics_parameters, errors = statistics.execution.parameter_values({"statistic": "MEAN"})
     assert not errors
     with pytest.raises(ExpectedNodeError, match="matching descriptors"):
-        statistics.runtime_factory(NODE_ID).process(
+        statistics.execution.runtime_factory(NODE_ID).process(
             {"values_1": ValueArray(PortType.CHANNEL, (generic, hue))},
             statistics_parameters,
             generic.context,
         )
 
     accumulator = registry.require("synmachine.utility.modulo_accumulator")
-    accumulator_parameters, errors = accumulator.parameter_values({"modulo": 5.0})
+    accumulator_parameters, errors = accumulator.execution.parameter_values({"modulo": 5.0})
     assert not errors
-    runtime = accumulator.runtime_factory(NODE_ID)
+    runtime = accumulator.execution.runtime_factory(NODE_ID)
     runtime.process({"value": generic}, accumulator_parameters, generic.context)
     reset_value = runtime.process({"value": hue}, accumulator_parameters, hue.context)["value"]
     assert isinstance(reset_value, ChannelFrame)
@@ -298,13 +302,13 @@ def test_modulo_accumulator_rejects_fractional_modulo_for_integer_input() -> Non
     # contract violation, and the accumulator state must be untouched.
     registry = create_application_registry()
     accumulator = registry.require("synmachine.utility.modulo_accumulator")
-    fractional, errors = accumulator.parameter_values({"modulo": 2.5})
+    fractional, errors = accumulator.execution.parameter_values({"modulo": 2.5})
     assert not errors
-    runtime = accumulator.runtime_factory(NODE_ID)
+    runtime = accumulator.execution.runtime_factory(NODE_ID)
     with pytest.raises(ExpectedNodeError, match="whole number"):
         runtime.process({"value": 3}, fractional, frame_context(clock_id=NODE_ID))
     # Whole-number modulos stay integers on integer input...
-    whole, _ = accumulator.parameter_values({"modulo": 5.0})
+    whole, _ = accumulator.execution.parameter_values({"modulo": 5.0})
     assert runtime.process({"value": 7}, whole, frame_context(clock_id=NODE_ID))["value"] == 2
     # ...and fractional modulos are valid on fractional input.
     result = runtime.process({"value": 2.5}, fractional, frame_context(clock_id=NODE_ID))["value"]
@@ -320,9 +324,9 @@ def test_dynamic_normalize_curve_and_filter_preserve_channel_metadata() -> None:
         ("synmachine.utility.curve", {"curve": "SMOOTHSTEP"}),
     ):
         definition = registry.require(type_id)
-        parameters, errors = definition.parameter_values(overrides)
+        parameters, errors = definition.execution.parameter_values(overrides)
         assert not errors
-        output = definition.runtime_factory(NODE_ID).process(
+        output = definition.execution.runtime_factory(NODE_ID).process(
             {"value": source}, parameters, source.context
         )["value"]
         assert isinstance(output, ChannelFrame)
@@ -331,11 +335,11 @@ def test_dynamic_normalize_curve_and_filter_preserve_channel_metadata() -> None:
         assert not output.data.flags.writeable
 
     blur = registry.require("synmachine.image.gaussian_blur")
-    parameters, errors = blur.parameter_values({})
+    parameters, errors = blur.execution.parameter_values({})
     assert not errors
-    output = blur.runtime_factory(NODE_ID).process({"image": source}, parameters, source.context)[
-        "image"
-    ]
+    output = blur.execution.runtime_factory(NODE_ID).process(
+        {"image": source}, parameters, source.context
+    )["image"]
     assert isinstance(output, ChannelFrame)
     assert output.data.shape == source.data.shape
 
@@ -344,12 +348,14 @@ def test_normalize_definition_and_randomization_reject_reversed_output_range() -
     registry = create_application_registry()
     definition = registry.require("synmachine.utility.normalize")
 
-    _values, errors = definition.parameter_values({"output_minimum": 1.0, "output_maximum": 0.0})
+    _values, errors = definition.execution.parameter_values(
+        {"output_minimum": 1.0, "output_maximum": 0.0}
+    )
 
     assert errors == ["output maximum must not be below output minimum"]
 
     document = GraphDocument()
-    normalize_id = document.add_node(definition.type_id)
+    normalize_id = document.add_node(definition.execution.type_id)
     randomized = randomize_graph_parameters(document.snapshot(), registry, {normalize_id}, seed=24)
     normalize = randomized.node(normalize_id)
 
@@ -372,7 +378,7 @@ def test_random_graphs_are_complete_and_valid_across_seeds() -> None:
         source = next(
             node
             for node in snapshot.nodes
-            if registry.require(node.type_id).execution_kind is ExecutionKind.SOURCE
+            if registry.require(node.type_id).execution.execution_kind is ExecutionKind.SOURCE
         )
         context = frame_context(clock_id=source.id)
         image = ImageFrame(
@@ -398,11 +404,12 @@ def test_random_graphs_are_complete_and_valid_across_seeds() -> None:
             scheduler.close()
         assert tick.errors == ()
         definitions = [registry.require(node.type_id) for node in snapshot.nodes]
-        assert any(item.execution_kind is ExecutionKind.SOURCE for item in definitions)
-        assert any(item.execution_kind is ExecutionKind.SINK for item in definitions)
+        assert any(item.execution.execution_kind is ExecutionKind.SOURCE for item in definitions)
+        assert any(item.execution.execution_kind is ExecutionKind.SINK for item in definitions)
         assert snapshot.connections
         assert any(
-            dict(node.parameters) != registry.require(node.type_id).parameter_values({})[0]
+            dict(node.parameters)
+            != registry.require(node.type_id).execution.parameter_values({})[0]
             for node in snapshot.nodes
         )
         for node in snapshot.nodes:
@@ -468,8 +475,8 @@ def test_randomize_nodes_replaces_selection_with_random_sized_valid_subgraph() -
         assert selected.isdisjoint(node.id for node in randomized.nodes)
         assert replacement_ids == frozenset(node.id for node in randomized.nodes)
         definitions = tuple(registry.require(node.type_id) for node in randomized.nodes)
-        assert any(item.execution_kind is ExecutionKind.SOURCE for item in definitions)
-        assert any(item.execution_kind is ExecutionKind.SINK for item in definitions)
+        assert any(item.execution.execution_kind is ExecutionKind.SOURCE for item in definitions)
+        assert any(item.execution.execution_kind is ExecutionKind.SINK for item in definitions)
         size_deltas.append(len(replacement_ids) - len(selected))
 
     assert any(delta > 0 for delta in size_deltas)
@@ -489,9 +496,9 @@ def test_statistics_combines_multiple_direct_scalar_connections() -> None:
     registry = create_application_registry()
     context = frame_context(clock_id=NODE_ID)
     statistics = registry.require("synmachine.utility.statistics")
-    parameters, errors = statistics.parameter_values({"statistic": "MEAN"})
+    parameters, errors = statistics.execution.parameter_values({"statistic": "MEAN"})
     assert not errors
-    runtime = statistics.runtime_factory(NODE_ID)
+    runtime = statistics.execution.runtime_factory(NODE_ID)
 
     # Several independent single-value connections combine into one statistic.
     mean = runtime.process({"values_1": 1.0, "values_2": 3.0}, parameters, context)["value"]
@@ -502,7 +509,7 @@ def test_statistics_combines_multiple_direct_scalar_connections() -> None:
     # mapping; the statistic is computed over exactly those samples.
     assert runtime.process({"values_2": 3.0}, parameters, context)["value"] == 3.0
 
-    min_parameters, _ = statistics.parameter_values({"statistic": "MINIMUM"})
+    min_parameters, _ = statistics.execution.parameter_values({"statistic": "MINIMUM"})
     minimum = runtime.process(
         {"values_1": 5, "values_2": 2, "values_3": 9}, min_parameters, context
     )["value"]
@@ -516,7 +523,7 @@ def test_statistics_combines_multiple_direct_scalar_connections() -> None:
     assert mixed_min == 2.5
     assert isinstance(mixed_min, float)
 
-    max_parameters, _ = statistics.parameter_values({"statistic": "MAXIMUM"})
+    max_parameters, _ = statistics.execution.parameter_values({"statistic": "MAXIMUM"})
     mixed_max = runtime.process({"values_1": 1, "values_2": 7.5}, max_parameters, context)["value"]
     assert mixed_max == 7.5
     assert isinstance(mixed_max, float)
@@ -580,9 +587,9 @@ def test_statistics_non_whole_mean_of_ints_is_a_stable_expected_error() -> None:
     registry = create_application_registry()
     context = frame_context(clock_id=NODE_ID)
     statistics = registry.require("synmachine.utility.statistics")
-    parameters, errors = statistics.parameter_values({"statistic": "MEAN"})
+    parameters, errors = statistics.execution.parameter_values({"statistic": "MEAN"})
     assert not errors
-    runtime = statistics.runtime_factory(NODE_ID)
+    runtime = statistics.execution.runtime_factory(NODE_ID)
 
     with pytest.raises(ExpectedNodeError, match="not a whole number"):
         runtime.process({"values_1": 1, "values_2": 2}, parameters, context)
@@ -648,9 +655,9 @@ def test_statistics_combines_multiple_direct_image_connections() -> None:
     dark = make_image(0.0)
     bright = make_image(2.0)
     statistics = registry.require("synmachine.utility.statistics")
-    parameters, errors = statistics.parameter_values({"statistic": "MEAN"})
+    parameters, errors = statistics.execution.parameter_values({"statistic": "MEAN"})
     assert not errors
-    result = statistics.runtime_factory(NODE_ID).process(
+    result = statistics.execution.runtime_factory(NODE_ID).process(
         {"values_1": dark, "values_2": bright}, parameters, context
     )["value"]
 

@@ -77,13 +77,15 @@ def test_scheduler_resets_only_state_owners_in_selected_source_component() -> No
     state_definition = make_definition(
         "test.engine_state", input_type=PortType.FLOAT, execution_kind=ExecutionKind.STATEFUL
     )
-    state_definition = replace(state_definition, runtime_factory=factory)
+    state_definition = replace(
+        state_definition, execution=replace(state_definition.execution, runtime_factory=factory)
+    )
     registry = NodeRegistry((source_definition, state_definition))
     document = GraphDocument()
-    document.add_node(source_definition.type_id, node_id=source_a)
-    document.add_node(state_definition.type_id, node_id=state_a)
-    document.add_node(source_definition.type_id, node_id=source_b)
-    document.add_node(state_definition.type_id, node_id=state_b)
+    document.add_node(source_definition.execution.type_id, node_id=source_a)
+    document.add_node(state_definition.execution.type_id, node_id=state_a)
+    document.add_node(source_definition.execution.type_id, node_id=source_b)
+    document.add_node(state_definition.execution.type_id, node_id=state_b)
     document.add_connection(source_a, "value", state_a, "value")
     document.add_connection(source_b, "value", state_b, "value")
     plan = GraphCompiler(registry).compile(document.snapshot()).plan

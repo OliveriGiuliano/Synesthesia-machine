@@ -84,7 +84,7 @@ def test_compatible_definitions_offer_variadic_input_sockets() -> None:
     offered = {
         port_id
         for definition, port_id in session.compatible_definitions(source, "value", True)
-        if definition.type_id == "synmachine.utility.statistics"
+        if definition.execution.type_id == "synmachine.utility.statistics"
     }
 
     assert offered == {"values_1"}
@@ -104,7 +104,8 @@ def test_compatible_definitions_skip_variadic_families_needing_more_than_one_soc
     source = session.add_node("synmachine.synesthesia.channel_to_pitch", (0.0, 0.0))
 
     offered = {
-        definition.type_id for definition, _ in session.compatible_definitions(source, "midi", True)
+        definition.execution.type_id
+        for definition, _ in session.compatible_definitions(source, "midi", True)
     }
     assert MIDI_MERGE_TYPE_ID not in offered
     # Fixed MIDI inputs (Send MIDI) are unaffected by the variadic skip...

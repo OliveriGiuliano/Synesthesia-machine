@@ -27,6 +27,8 @@ from synesthesia_machine.nodes import (
     ExecutionKind,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePresentationIntent,
     OutputPortSpec,
     ParameterSpec,
     PureFunctionRuntime,
@@ -396,137 +398,147 @@ def extract_flow_cells(
 def create_optical_flow_definitions() -> tuple[NodeDefinition, ...]:
     return (
         NodeDefinition(
-            OPTICAL_FLOW_TYPE_ID,
-            1,
-            "Optical Flow",
-            "Synesthesia",
-            (
-                "Detects movement between two images, for example between the last frame and the "
-                "current one, and turns it into notes. The pitch follows the direction, position, "
-                "or speed of the motion, and the volume follows how strong the motion is."
+            execution=NodeExecutionContract(
+                OPTICAL_FLOW_TYPE_ID,
+                1,
+                ExecutionKind.STATELESS,
+                (
+                    InputPortSpec("current", "Current", PortType.IMAGE),
+                    InputPortSpec("reference", "Reference", PortType.IMAGE),
+                ),
+                (OutputPortSpec("midi", "MIDI state", PortType.MIDI_STATE),),
+                (
+                    *common_musical_parameter_specs(),
+                    ParameterSpec(
+                        "flow_preset",
+                        "Flow preset",
+                        PortType.STRING,
+                        BALANCED,
+                        help_text=(
+                            "Chooses the optical-flow computation preset: Fast, Balanced, or "
+                            "Accurate; faster presets are less precise but cheaper."
+                        ),
+                        choices=FLOW_PRESETS,
+                    ),
+                    ParameterSpec(
+                        "minimum_motion_magnitude",
+                        "Minimum motion magnitude",
+                        PortType.FLOAT,
+                        0.5,
+                        help_text=(
+                            "Pixels moving slower than this are treated as static and do not "
+                            "produce "
+                            "notes."
+                        ),
+                        minimum=0.0,
+                    ),
+                    ParameterSpec(
+                        "pitch_feature",
+                        "Pitch feature",
+                        PortType.STRING,
+                        DIRECTION,
+                        help_text=(
+                            "Chooses which flow property decides the pitch: Direction of motion, "
+                            "its "
+                            "Horizontal or Vertical position, or its Magnitude."
+                        ),
+                        choices=PITCH_FEATURES,
+                    ),
+                    ParameterSpec(
+                        "velocity_feature",
+                        "Velocity feature",
+                        PortType.STRING,
+                        MEAN_MAGNITUDE,
+                        help_text="Chooses which flow property decides the note velocity.",
+                        choices=VELOCITY_FEATURES,
+                    ),
+                    ParameterSpec(
+                        "grid_rows",
+                        "Grid rows",
+                        PortType.INT,
+                        4,
+                        help_text=(
+                            "Sets how many horizontal bands divide the image; each band becomes "
+                            "one "
+                            "row of cells."
+                        ),
+                        minimum=1,
+                        maximum=64,
+                    ),
+                    ParameterSpec(
+                        "grid_columns",
+                        "Grid columns",
+                        PortType.INT,
+                        4,
+                        help_text=(
+                            "Sets how many vertical bands divide the image; each band becomes one "
+                            "column of cells."
+                        ),
+                        minimum=1,
+                        maximum=64,
+                    ),
+                    ParameterSpec(
+                        "aggregation",
+                        "Aggregation",
+                        PortType.STRING,
+                        CELL_NOTES,
+                        help_text=(
+                            "Chooses how the cells become notes: Cell notes plays one note per "
+                            "grid "
+                            "cell, and Global histogram pools all cells into one histogram."
+                        ),
+                        choices=AGGREGATIONS,
+                    ),
+                    ParameterSpec(
+                        "magnitude_minimum",
+                        "Magnitude minimum",
+                        PortType.FLOAT,
+                        0.0,
+                        help_text=("Lowest flow magnitude mapped to the minimum velocity."),
+                        minimum=0.0,
+                    ),
+                    ParameterSpec(
+                        "magnitude_maximum",
+                        "Magnitude maximum",
+                        PortType.FLOAT,
+                        10.0,
+                        help_text=("Highest flow magnitude mapped to the maximum velocity."),
+                        minimum=0.0,
+                    ),
+                    ParameterSpec(
+                        "analysis_max_dimension",
+                        "Analysis max dimension",
+                        PortType.INT,
+                        0,
+                        help_text=(
+                            "Caps the longest side of the frame used for motion analysis, in "
+                            "pixels. "
+                            "Zero analyses the full-resolution frame; smaller values trade fine "
+                            "motion detail for speed on slower machines. Measured displacements "
+                            "are "
+                            "rescaled to the original frame, so the magnitude ranges keep their "
+                            "meaning."
+                        ),
+                        minimum=0,
+                        maximum=4096,
+                        connectable=True,
+                        connected_port_type=PortType.FLOAT,
+                    ),
+                ),
+                OpticalFlowRuntime,
+                parameter_validator=_validate_parameters,
             ),
-            (
-                InputPortSpec("current", "Current", PortType.IMAGE),
-                InputPortSpec("reference", "Reference", PortType.IMAGE),
+            presentation=NodePresentationIntent(
+                "Optical Flow",
+                "Synesthesia",
+                "Detects movement between two images, for example between the last frame and "
+                "the "
+                "current one, and turns it into notes. The pitch follows the direction, "
+                "position, "
+                "or speed of the motion, and the volume follows how strong the motion is.",
+                aliases=("motion grid", "farneback notes", "motion to pitch"),
+                parameter_groups=(COMMON_MUSICAL_PARAMETER_GROUP,),
             ),
-            (OutputPortSpec("midi", "MIDI state", PortType.MIDI_STATE),),
-            (
-                *common_musical_parameter_specs(),
-                ParameterSpec(
-                    "flow_preset",
-                    "Flow preset",
-                    PortType.STRING,
-                    BALANCED,
-                    help_text=(
-                        "Chooses the optical-flow computation preset: Fast, Balanced, or "
-                        "Accurate; faster presets are less precise but cheaper."
-                    ),
-                    choices=FLOW_PRESETS,
-                ),
-                ParameterSpec(
-                    "minimum_motion_magnitude",
-                    "Minimum motion magnitude",
-                    PortType.FLOAT,
-                    0.5,
-                    help_text=(
-                        "Pixels moving slower than this are treated as static and do not produce "
-                        "notes."
-                    ),
-                    minimum=0.0,
-                ),
-                ParameterSpec(
-                    "pitch_feature",
-                    "Pitch feature",
-                    PortType.STRING,
-                    DIRECTION,
-                    help_text=(
-                        "Chooses which flow property decides the pitch: Direction of motion, its "
-                        "Horizontal or Vertical position, or its Magnitude."
-                    ),
-                    choices=PITCH_FEATURES,
-                ),
-                ParameterSpec(
-                    "velocity_feature",
-                    "Velocity feature",
-                    PortType.STRING,
-                    MEAN_MAGNITUDE,
-                    help_text="Chooses which flow property decides the note velocity.",
-                    choices=VELOCITY_FEATURES,
-                ),
-                ParameterSpec(
-                    "grid_rows",
-                    "Grid rows",
-                    PortType.INT,
-                    4,
-                    help_text=(
-                        "Sets how many horizontal bands divide the image; each band becomes one "
-                        "row of cells."
-                    ),
-                    minimum=1,
-                    maximum=64,
-                ),
-                ParameterSpec(
-                    "grid_columns",
-                    "Grid columns",
-                    PortType.INT,
-                    4,
-                    help_text=(
-                        "Sets how many vertical bands divide the image; each band becomes one "
-                        "column of cells."
-                    ),
-                    minimum=1,
-                    maximum=64,
-                ),
-                ParameterSpec(
-                    "aggregation",
-                    "Aggregation",
-                    PortType.STRING,
-                    CELL_NOTES,
-                    help_text=(
-                        "Chooses how the cells become notes: Cell notes plays one note per grid "
-                        "cell, and Global histogram pools all cells into one histogram."
-                    ),
-                    choices=AGGREGATIONS,
-                ),
-                ParameterSpec(
-                    "magnitude_minimum",
-                    "Magnitude minimum",
-                    PortType.FLOAT,
-                    0.0,
-                    help_text=("Lowest flow magnitude mapped to the minimum velocity."),
-                    minimum=0.0,
-                ),
-                ParameterSpec(
-                    "magnitude_maximum",
-                    "Magnitude maximum",
-                    PortType.FLOAT,
-                    10.0,
-                    help_text=("Highest flow magnitude mapped to the maximum velocity."),
-                    minimum=0.0,
-                ),
-                ParameterSpec(
-                    "analysis_max_dimension",
-                    "Analysis max dimension",
-                    PortType.INT,
-                    0,
-                    help_text=(
-                        "Caps the longest side of the frame used for motion analysis, in pixels. "
-                        "Zero analyses the full-resolution frame; smaller values trade fine "
-                        "motion detail for speed on slower machines. Measured displacements are "
-                        "rescaled to the original frame, so the magnitude ranges keep their "
-                        "meaning."
-                    ),
-                    minimum=0,
-                    maximum=4096,
-                    connectable=True,
-                    connected_port_type=PortType.FLOAT,
-                ),
-            ),
-            ExecutionKind.STATELESS,
-            OpticalFlowRuntime,
-            aliases=("motion grid", "farneback notes", "motion to pitch"),
-            parameter_validator=_validate_parameters,
-            parameter_groups=(COMMON_MUSICAL_PARAMETER_GROUP,),
         ),
     )
 

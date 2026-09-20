@@ -31,6 +31,8 @@ from synesthesia_machine.nodes import (
     ExpectedNodeError,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePresentationIntent,
     ParameterSpec,
     ParameterUpdateMode,
     ResetReason,
@@ -112,55 +114,62 @@ def create_midi_output_definitions(
 ) -> tuple[NodeDefinition, ...]:
     return (
         NodeDefinition(
-            SEND_MIDI_TYPE_ID,
-            1,
-            "Send MIDI",
-            "Output / MIDI",
-            "Sends the notes to a MIDI device such as a synth or a music program.",
-            (InputPortSpec("midi", "MIDI State", PortType.MIDI_STATE),),
-            (),
-            (
-                ParameterSpec(
-                    "output_port",
-                    "MIDI output port",
-                    PortType.STRING,
-                    "",
-                    help_text=(
-                        "Select a MIDI output detected by the engine. No output keeps this node "
-                        "silent."
+            execution=NodeExecutionContract(
+                SEND_MIDI_TYPE_ID,
+                1,
+                ExecutionKind.SINK,
+                (InputPortSpec("midi", "MIDI State", PortType.MIDI_STATE),),
+                (),
+                (
+                    ParameterSpec(
+                        "output_port",
+                        "MIDI output port",
+                        PortType.STRING,
+                        "",
+                        help_text=(
+                            "Select a MIDI output detected by the engine. No output keeps this "
+                            "node "
+                            "silent."
+                        ),
+                        update_mode=ParameterUpdateMode.RECOMPILE,
+                        device_kind=DeviceKind.MIDI_OUTPUT,
                     ),
-                    update_mode=ParameterUpdateMode.RECOMPILE,
-                    device_kind=DeviceKind.MIDI_OUTPUT,
-                ),
-                ParameterSpec(
-                    "velocity_update_policy",
-                    "Velocity update policy",
-                    PortType.STRING,
-                    VelocityUpdatePolicy.IGNORE_WHILE_HELD.value,
-                    help_text=(
-                        "How a velocity change is delivered for a note that is already sounding: "
-                        "Ignore keeps the original velocity, Retrigger releases the note and "
-                        "presses it again, and Repeat note-on sends another note-on message."
+                    ParameterSpec(
+                        "velocity_update_policy",
+                        "Velocity update policy",
+                        PortType.STRING,
+                        VelocityUpdatePolicy.IGNORE_WHILE_HELD.value,
+                        help_text=(
+                            "How a velocity change is delivered for a note that is already "
+                            "sounding: "
+                            "Ignore keeps the original velocity, Retrigger releases the note and "
+                            "presses it again, and Repeat note-on sends another note-on message."
+                        ),
+                        choices=tuple(policy.value for policy in VelocityUpdatePolicy),
                     ),
-                    choices=tuple(policy.value for policy in VelocityUpdatePolicy),
-                ),
-                ParameterSpec(
-                    "velocity_change_threshold",
-                    "Velocity change threshold",
-                    PortType.INT,
-                    4,
-                    help_text=(
-                        "A note is only re-sent when its velocity changes by at least this much."
+                    ParameterSpec(
+                        "velocity_change_threshold",
+                        "Velocity change threshold",
+                        PortType.INT,
+                        4,
+                        help_text=(
+                            "A note is only re-sent when its velocity changes by at least this "
+                            "much."
+                        ),
+                        minimum=0,
+                        maximum=127,
                     ),
-                    minimum=0,
-                    maximum=127,
                 ),
+                partial(SendMidiRuntime, service_factory=service_factory),
+                cache_policy=CachePolicy.NEVER,
+                handles_no_data=True,
             ),
-            ExecutionKind.SINK,
-            partial(SendMidiRuntime, service_factory=service_factory),
-            cache_policy=CachePolicy.NEVER,
-            handles_no_data=True,
-            aliases=("midi output", "send notes", "rtmidi"),
+            presentation=NodePresentationIntent(
+                "Send MIDI",
+                "Output / MIDI",
+                "Sends the notes to a MIDI device such as a synth or a music program.",
+                aliases=("midi output", "send notes", "rtmidi"),
+            ),
         ),
     )
 

@@ -20,6 +20,8 @@ from synesthesia_machine.nodes.base import (
     ExpectedNodeError,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePresentationIntent,
     OutputPortSpec,
     ParameterSpec,
     StatelessRuntime,
@@ -132,79 +134,88 @@ def create_scalar_bridge_definitions() -> tuple[NodeDefinition, ...]:
 
     return (
         NodeDefinition(
-            "synmachine.utility.remap_number",
-            1,
-            "Remap Number",
-            "Utility / Scalar",
-            "Takes a number from one range and puts it into another, for example from 0 to 100 "
-            "into 0 to 1.",
-            (InputPortSpec("value", "Value", PortType.FLOAT),),
-            (OutputPortSpec("value", "Value", PortType.FLOAT),),
-            (
-                _connected_float_parameter(
-                    "input_minimum",
-                    "Input minimum",
-                    0.0,
-                    help_text="Lowest input value; it maps to the output minimum.",
-                ),
-                _connected_float_parameter(
-                    "input_maximum",
-                    "Input maximum",
-                    1.0,
-                    help_text="Highest input value; it maps to the output maximum.",
-                ),
-                _connected_float_parameter(
-                    "output_minimum",
-                    "Output minimum",
-                    0.0,
-                    help_text="Value output when the input is at its lowest.",
-                ),
-                _connected_float_parameter(
-                    "output_maximum",
-                    "Output maximum",
-                    1.0,
-                    help_text="Value output when the input is at its highest.",
-                ),
-                ParameterSpec(
-                    "clamp",
-                    "Clamp",
-                    PortType.BOOL,
-                    False,
-                    help_text=(
-                        "When on, inputs outside the input range are clamped to the output range; "
-                        "when off they pass through unchanged."
+            execution=NodeExecutionContract(
+                "synmachine.utility.remap_number",
+                1,
+                ExecutionKind.STATELESS,
+                (InputPortSpec("value", "Value", PortType.FLOAT),),
+                (OutputPortSpec("value", "Value", PortType.FLOAT),),
+                (
+                    _connected_float_parameter(
+                        "input_minimum",
+                        "Input minimum",
+                        0.0,
+                        help_text="Lowest input value; it maps to the output minimum.",
+                    ),
+                    _connected_float_parameter(
+                        "input_maximum",
+                        "Input maximum",
+                        1.0,
+                        help_text="Highest input value; it maps to the output maximum.",
+                    ),
+                    _connected_float_parameter(
+                        "output_minimum",
+                        "Output minimum",
+                        0.0,
+                        help_text="Value output when the input is at its lowest.",
+                    ),
+                    _connected_float_parameter(
+                        "output_maximum",
+                        "Output maximum",
+                        1.0,
+                        help_text="Value output when the input is at its highest.",
+                    ),
+                    ParameterSpec(
+                        "clamp",
+                        "Clamp",
+                        PortType.BOOL,
+                        False,
+                        help_text=(
+                            "When on, inputs outside the input range are clamped to the output "
+                            "range; "
+                            "when off they pass through unchanged."
+                        ),
                     ),
                 ),
+                RemapNumberRuntime,
+                parameter_validator=_validate_remap,
             ),
-            ExecutionKind.STATELESS,
-            RemapNumberRuntime,
-            aliases=("map range", "scale number", "normalize number"),
-            parameter_validator=_validate_remap,
+            presentation=NodePresentationIntent(
+                "Remap Number",
+                "Utility / Scalar",
+                "Takes a number from one range and puts it into another, for example from 0 to 100 "
+                "into 0 to 1.",
+                aliases=("map range", "scale number", "normalize number"),
+            ),
         ),
         NodeDefinition(
-            "synmachine.utility.float_to_integer",
-            1,
-            "Float to Integer",
-            "Utility / Scalar",
-            "Turns a decimal number into a whole number, rounding it the way you choose.",
-            (InputPortSpec("value", "Value", PortType.FLOAT),),
-            (OutputPortSpec("value", "Value", PortType.INT),),
-            (
-                ParameterSpec(
-                    "mode",
-                    "Mode",
-                    PortType.STRING,
-                    IntegerConversionMode.ROUND.value,
-                    help_text=(
-                        "Chooses how a float is turned into an integer: Round, Floor, Ceil, or "
-                        "Truncate."
+            execution=NodeExecutionContract(
+                "synmachine.utility.float_to_integer",
+                1,
+                ExecutionKind.STATELESS,
+                (InputPortSpec("value", "Value", PortType.FLOAT),),
+                (OutputPortSpec("value", "Value", PortType.INT),),
+                (
+                    ParameterSpec(
+                        "mode",
+                        "Mode",
+                        PortType.STRING,
+                        IntegerConversionMode.ROUND.value,
+                        help_text=(
+                            "Chooses how a float is turned into an integer: Round, Floor, Ceil, or "
+                            "Truncate."
+                        ),
+                        choices=tuple(mode.value for mode in IntegerConversionMode),
                     ),
-                    choices=tuple(mode.value for mode in IntegerConversionMode),
                 ),
+                FloatToIntegerRuntime,
             ),
-            ExecutionKind.STATELESS,
-            FloatToIntegerRuntime,
-            aliases=("round to integer", "float to int", "integer conversion"),
+            presentation=NodePresentationIntent(
+                "Float to Integer",
+                "Utility / Scalar",
+                "Turns a decimal number into a whole number, rounding it the way you choose.",
+                aliases=("round to integer", "float to int", "integer conversion"),
+            ),
         ),
     )
 

@@ -23,6 +23,8 @@ from synesthesia_machine.nodes import (
     ExpectedNodeError,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePresentationIntent,
     OutputPortSpec,
     ParameterEditorHint,
     ParameterSpec,
@@ -210,110 +212,122 @@ def scanline_to_midi_state(
 def create_scanline_definitions() -> tuple[NodeDefinition, ...]:
     return (
         NodeDefinition(
-            SCANLINE_TYPE_ID,
-            1,
-            "Scanline",
-            "Synesthesia",
-            (
+            execution=NodeExecutionContract(
+                SCANLINE_TYPE_ID,
+                1,
+                ExecutionKind.STATEFUL,
+                (InputPortSpec("value", "Value", PortType.CHANNEL),),
+                (OutputPortSpec("midi", "MIDI state", PortType.MIDI_STATE),),
+                (
+                    *common_musical_parameter_specs(),
+                    ParameterSpec(
+                        "direction",
+                        "Direction",
+                        PortType.STRING,
+                        BOTTOM_TO_TOP,
+                        help_text=(
+                            "Chooses how the scan line moves across the image: bottom to top, top "
+                            "to "
+                            "bottom, or ping pong."
+                        ),
+                        choices=(BOTTOM_TO_TOP, TOP_TO_BOTTOM, PING_PONG),
+                    ),
+                    ParameterSpec(
+                        "advance_rows",
+                        "Advance rows",
+                        PortType.INT,
+                        1,
+                        help_text=(
+                            "Rows the scan line moves per frame; larger values move faster across "
+                            "the "
+                            "image."
+                        ),
+                        minimum=1,
+                        maximum=8192,
+                    ),
+                    ParameterSpec(
+                        "line_thickness",
+                        "Line thickness",
+                        PortType.INT,
+                        1,
+                        help_text=(
+                            "Number of rows read at once under the scan line; thicker lines are "
+                            "less "
+                            "sensitive to noise."
+                        ),
+                        minimum=1,
+                        maximum=8192,
+                    ),
+                    ParameterSpec(
+                        "metric",
+                        "Scan metric",
+                        PortType.STRING,
+                        VALUE,
+                        help_text=(
+                            "Selects what is measured under the scan line: Value reads the "
+                            "normalized "
+                            "channel samples; Contrast measures the normalized row-to-row "
+                            "variation "
+                            "inside the line band, ignores Aggregation, and needs a line thicker "
+                            "than "
+                            "one row to be non-zero."
+                        ),
+                        choices=SCANLINE_METRICS,
+                    ),
+                    ParameterSpec(
+                        "aggregation",
+                        "Aggregation",
+                        PortType.STRING,
+                        MEAN,
+                        help_text=(
+                            "Chooses how the values under the line are combined: Mean averages "
+                            "them, "
+                            "and Maximum uses the strongest."
+                        ),
+                        choices=(MEAN, MAXIMUM),
+                    ),
+                    ParameterSpec(
+                        "activation_threshold",
+                        "Activation threshold",
+                        PortType.FLOAT,
+                        0.0,
+                        help_text=(
+                            "Rows below this normalized value stay silent; stronger rows play "
+                            "notes."
+                        ),
+                        minimum=0.0,
+                        maximum=1.0,
+                        editor_hint=ParameterEditorHint.SLIDER,
+                    ),
+                    ParameterSpec(
+                        "velocity_curve_exponent",
+                        "Velocity curve exponent",
+                        PortType.FLOAT,
+                        1.0,
+                        help_text=(
+                            "Shapes the velocity response; values above 1 make quiet rows quieter "
+                            "and "
+                            "loud rows louder."
+                        ),
+                        minimum=0.01,
+                        maximum=16.0,
+                        editor_hint=ParameterEditorHint.SLIDER,
+                    ),
+                ),
+                ScanlineRuntime,
+                parameter_validator=_validate_parameters,
+            ),
+            presentation=NodePresentationIntent(
+                "Scanline",
+                "Synesthesia",
                 "Sends a line across the picture, like a scanner, and turns each row it passes "
-                "into notes from left to right; stronger values play louder. You choose the sweep "
+                "into notes from left to right; stronger values play louder. You choose the "
+                "sweep "
                 "direction — up, down, or back and forth — and how fast the line advances. A "
-                "reset sends the line back to the start."
+                "reset sends the line back to the start.",
+                aliases=("scanning score", "row scanner", "image scan sequencer"),
+                parameter_groups=(COMMON_MUSICAL_PARAMETER_GROUP,),
             ),
-            (InputPortSpec("value", "Value", PortType.CHANNEL),),
-            (OutputPortSpec("midi", "MIDI state", PortType.MIDI_STATE),),
-            (
-                *common_musical_parameter_specs(),
-                ParameterSpec(
-                    "direction",
-                    "Direction",
-                    PortType.STRING,
-                    BOTTOM_TO_TOP,
-                    help_text=(
-                        "Chooses how the scan line moves across the image: bottom to top, top to "
-                        "bottom, or ping pong."
-                    ),
-                    choices=(BOTTOM_TO_TOP, TOP_TO_BOTTOM, PING_PONG),
-                ),
-                ParameterSpec(
-                    "advance_rows",
-                    "Advance rows",
-                    PortType.INT,
-                    1,
-                    help_text=(
-                        "Rows the scan line moves per frame; larger values move faster across the "
-                        "image."
-                    ),
-                    minimum=1,
-                    maximum=8192,
-                ),
-                ParameterSpec(
-                    "line_thickness",
-                    "Line thickness",
-                    PortType.INT,
-                    1,
-                    help_text=(
-                        "Number of rows read at once under the scan line; thicker lines are less "
-                        "sensitive to noise."
-                    ),
-                    minimum=1,
-                    maximum=8192,
-                ),
-                ParameterSpec(
-                    "metric",
-                    "Scan metric",
-                    PortType.STRING,
-                    VALUE,
-                    help_text=(
-                        "Selects what is measured under the scan line: Value reads the normalized "
-                        "channel samples; Contrast measures the normalized row-to-row variation "
-                        "inside the line band, ignores Aggregation, and needs a line thicker than "
-                        "one row to be non-zero."
-                    ),
-                    choices=SCANLINE_METRICS,
-                ),
-                ParameterSpec(
-                    "aggregation",
-                    "Aggregation",
-                    PortType.STRING,
-                    MEAN,
-                    help_text=(
-                        "Chooses how the values under the line are combined: Mean averages them, "
-                        "and Maximum uses the strongest."
-                    ),
-                    choices=(MEAN, MAXIMUM),
-                ),
-                ParameterSpec(
-                    "activation_threshold",
-                    "Activation threshold",
-                    PortType.FLOAT,
-                    0.0,
-                    help_text=(
-                        "Rows below this normalized value stay silent; stronger rows play notes."
-                    ),
-                    minimum=0.0,
-                    maximum=1.0,
-                    editor_hint=ParameterEditorHint.SLIDER,
-                ),
-                ParameterSpec(
-                    "velocity_curve_exponent",
-                    "Velocity curve exponent",
-                    PortType.FLOAT,
-                    1.0,
-                    help_text=(
-                        "Shapes the velocity response; values above 1 make quiet rows quieter and "
-                        "loud rows louder."
-                    ),
-                    minimum=0.01,
-                    maximum=16.0,
-                    editor_hint=ParameterEditorHint.SLIDER,
-                ),
-            ),
-            ExecutionKind.STATEFUL,
-            ScanlineRuntime,
-            aliases=("scanning score", "row scanner", "image scan sequencer"),
-            parameter_validator=_validate_parameters,
-            parameter_groups=(COMMON_MUSICAL_PARAMETER_GROUP,),
         ),
     )
 

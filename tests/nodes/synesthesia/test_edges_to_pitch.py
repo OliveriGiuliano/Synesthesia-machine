@@ -195,14 +195,14 @@ def test_all_contour_pitch_features_produce_finite_notes(feature: str) -> None:
 
 def test_runtime_errors_are_recoverable_and_definition_is_registered() -> None:
     definition = create_edges_to_pitch_definitions()[0]
-    assert definition.type_id == EDGES_TO_PITCH_TYPE_ID
-    assert definition.execution_kind is ExecutionKind.STATELESS
-    assert tuple(port.id for port in definition.inputs) == ("edges",)
+    assert definition.execution.type_id == EDGES_TO_PITCH_TYPE_ID
+    assert definition.execution.execution_kind is ExecutionKind.STATELESS
+    assert tuple(port.id for port in definition.execution.inputs) == ("edges",)
     registry = create_application_registry()
     assert len(registry.definitions()) >= 56
-    assert registry.require(EDGES_TO_PITCH_TYPE_ID).type_id == EDGES_TO_PITCH_TYPE_ID
+    assert registry.require(EDGES_TO_PITCH_TYPE_ID).execution.type_id == EDGES_TO_PITCH_TYPE_ID
 
-    parameters, errors = definition.parameter_values({})
+    parameters, errors = definition.execution.parameter_values({})
     assert not errors
     runtime = EdgesToPitchRuntime(NODE)
     with pytest.raises(ExpectedNodeError, match="clock does not match") as captured:
@@ -216,7 +216,7 @@ def test_runtime_errors_are_recoverable_and_definition_is_registered() -> None:
 
 def test_scheduler_suppresses_edges_node_for_no_data() -> None:
     definition = create_edges_to_pitch_definitions()[0]
-    parameters, errors = definition.parameter_values({})
+    parameters, errors = definition.execution.parameter_values({})
     assert not errors
     source = PortKey(SOURCE, "edges")
     scheduler = Scheduler(
@@ -226,7 +226,7 @@ def test_scheduler_suppresses_edges_node_for_no_data() -> None:
             (
                 CompiledNode(
                     NODE,
-                    definition,
+                    definition.execution,
                     parameters=parameters,
                     input_bindings={"edges": InputBinding(source)},
                     input_types={"edges": PortType.CHANNEL},
@@ -258,5 +258,5 @@ def test_nonfinite_input_is_sanitized_and_invalid_ranges_are_rejected() -> None:
     )
     assert isinstance(features, tuple)
     definition = create_edges_to_pitch_definitions()[0]
-    _, errors = definition.parameter_values({"pitch_minimum": 1.0, "pitch_maximum": 1.0})
+    _, errors = definition.execution.parameter_values({"pitch_minimum": 1.0, "pitch_maximum": 1.0})
     assert any("greater than minimum" in error for error in errors)

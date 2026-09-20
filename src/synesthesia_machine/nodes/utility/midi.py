@@ -19,6 +19,8 @@ from synesthesia_machine.nodes import (
     ExecutionKind,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePresentationIntent,
     OutputPortSpec,
     ParameterSpec,
     PureFunctionRuntime,
@@ -140,75 +142,89 @@ def create_midi_utility_definitions() -> tuple[NodeDefinition, ...]:
     midi_output = (OutputPortSpec("midi", "MIDI state", PortType.MIDI_STATE),)
     return (
         NodeDefinition(
-            MULTIPLY_VELOCITY_TYPE_ID,
-            1,
-            "Multiply Velocity",
-            "Utility / MIDI",
-            "Turns the volume of every active note up or down.",
-            midi_input,
-            midi_output,
-            (
-                ParameterSpec(
-                    "factor",
-                    "Factor",
-                    PortType.FLOAT,
-                    1.0,
-                    help_text=(
-                        "Multiplies the velocity of every note by this factor; 1 is unchanged."
+            execution=NodeExecutionContract(
+                MULTIPLY_VELOCITY_TYPE_ID,
+                1,
+                ExecutionKind.STATELESS,
+                midi_input,
+                midi_output,
+                (
+                    ParameterSpec(
+                        "factor",
+                        "Factor",
+                        PortType.FLOAT,
+                        1.0,
+                        help_text=(
+                            "Multiplies the velocity of every note by this factor; 1 is unchanged."
+                        ),
+                        minimum=0.0,
+                        connectable=True,
+                        connected_port_type=PortType.FLOAT,
                     ),
-                    minimum=0.0,
-                    connectable=True,
-                    connected_port_type=PortType.FLOAT,
                 ),
+                MultiplyVelocityRuntime,
+                parameter_validator=_validate_multiply_parameters,
             ),
-            ExecutionKind.STATELESS,
-            MultiplyVelocityRuntime,
-            aliases=("velocity scale", "midi gain", "scale velocity"),
-            parameter_validator=_validate_multiply_parameters,
+            presentation=NodePresentationIntent(
+                "Multiply Velocity",
+                "Utility / MIDI",
+                "Turns the volume of every active note up or down.",
+                aliases=("velocity scale", "midi gain", "scale velocity"),
+            ),
         ),
         NodeDefinition(
-            TRANSPOSE_TYPE_ID,
-            1,
-            "Transpose",
-            "Utility / MIDI",
-            "Moves all the notes up or down by a number of semitones. Notes that fall outside the "
-            "MIDI range are dropped.",
-            midi_input,
-            midi_output,
-            (
-                ParameterSpec(
-                    "semitones",
-                    "Semitones",
-                    PortType.INT,
-                    0,
-                    help_text=(
-                        "Number of semitones the note numbers shift by; negative values go down."
+            execution=NodeExecutionContract(
+                TRANSPOSE_TYPE_ID,
+                1,
+                ExecutionKind.STATELESS,
+                midi_input,
+                midi_output,
+                (
+                    ParameterSpec(
+                        "semitones",
+                        "Semitones",
+                        PortType.INT,
+                        0,
+                        help_text=(
+                            "Number of semitones the note numbers shift by; negative values go "
+                            "down."
+                        ),
+                        minimum=-127,
+                        maximum=127,
+                        connectable=True,
+                        connected_port_type=PortType.INT,
                     ),
-                    minimum=-127,
-                    maximum=127,
-                    connectable=True,
-                    connected_port_type=PortType.INT,
                 ),
+                TransposeRuntime,
             ),
-            ExecutionKind.STATELESS,
-            TransposeRuntime,
-            aliases=("Pitch Up or Down", "pitch shift", "semitone shift"),
+            presentation=NodePresentationIntent(
+                "Transpose",
+                "Utility / MIDI",
+                "Moves all the notes up or down by a number of semitones. Notes that fall outside "
+                "the "
+                "MIDI range are dropped.",
+                aliases=("Pitch Up or Down", "pitch shift", "semitone shift"),
+            ),
         ),
         NodeDefinition(
-            MIDI_MERGE_TYPE_ID,
-            1,
-            "MIDI Merge",
-            "Utility / MIDI",
-            "Combines several MIDI note streams into one. Where notes overlap, the loudest one "
-            "wins.",
-            (),
-            midi_output,
-            (),
-            ExecutionKind.STATELESS,
-            MidiMergeRuntime,
-            aliases=("combine midi", "mix midi", "many to one midi"),
-            variadic_input=VariadicInputSpec(
-                "midi", "MIDI state", PortType.MIDI_STATE, minimum_count=2
+            execution=NodeExecutionContract(
+                MIDI_MERGE_TYPE_ID,
+                1,
+                ExecutionKind.STATELESS,
+                (),
+                midi_output,
+                (),
+                MidiMergeRuntime,
+                variadic_input=VariadicInputSpec(
+                    "midi", "MIDI state", PortType.MIDI_STATE, minimum_count=2
+                ),
+            ),
+            presentation=NodePresentationIntent(
+                "MIDI Merge",
+                "Utility / MIDI",
+                "Combines several MIDI note streams into one. Where notes overlap, the loudest one "
+                "wins.",
+                aliases=("combine midi", "mix midi", "many to one midi"),
             ),
         ),
     )

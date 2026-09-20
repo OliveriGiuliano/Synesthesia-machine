@@ -74,9 +74,9 @@ def test_separate_channels_are_read_only_views_with_descriptor_ranges() -> None:
     definition = next(
         definition
         for definition in create_image_definitions()
-        if definition.type_id == "synmachine.image.separate_channels"
+        if definition.execution.type_id == "synmachine.image.separate_channels"
     )
-    outputs = definition.runtime_factory(NODE_ID).process({"image": hsv}, {}, hsv.context)
+    outputs = definition.execution.runtime_factory(NODE_ID).process({"image": hsv}, {}, hsv.context)
     hue = outputs["channel_1"]
     assert isinstance(hue, ChannelFrame)
     assert hue.semantic is ChannelSemantic.HUE and hue.cyclic

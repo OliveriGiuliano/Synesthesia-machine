@@ -100,7 +100,7 @@ CONNECTABLE_IDS: Mapping[str, frozenset[str]] = {
 
 
 def _definition(type_id: str) -> NodeDefinition:
-    return next(item for item in create_image_definitions() if item.type_id == type_id)
+    return next(item for item in create_image_definitions() if item.execution.type_id == type_id)
 
 
 def _process(
@@ -110,11 +110,13 @@ def _process(
     connected: Mapping[str, RuntimeValue] | None = None,
 ) -> ImageFrame:
     definition = _definition(type_id)
-    parameters, errors = definition.parameter_values(overrides or {})
+    parameters, errors = definition.execution.parameter_values(overrides or {})
     assert not errors
     inputs: dict[str, RuntimeValue] = {"image": image}
     inputs.update(connected or {})
-    output = definition.runtime_factory(NODE_ID).process(inputs, parameters, image.context)["image"]
+    output = definition.execution.runtime_factory(NODE_ID).process(
+        inputs, parameters, image.context
+    )["image"]
     assert isinstance(output, ImageFrame)
     return output
 
@@ -155,24 +157,26 @@ def test_batch2_defaults_conform_without_mutating_rgba(
 
 
 def test_batch2_metadata_has_stable_complete_ids_and_connectability() -> None:
-    definitions = [item for item in create_image_definitions() if item.type_id in BATCH2_IDS]
-    assert tuple(item.type_id for item in definitions) == BATCH2_IDS
+    definitions = [
+        item for item in create_image_definitions() if item.execution.type_id in BATCH2_IDS
+    ]
+    assert tuple(item.execution.type_id for item in definitions) == BATCH2_IDS
     for definition in definitions:
-        assert definition.execution_kind is ExecutionKind.STATELESS
-        assert definition.category == "Image / Adjustment"
-        assert tuple(port.id for port in definition.inputs) == ("image",)
-        assert tuple(port.id for port in definition.outputs) == ("image",)
+        assert definition.execution.execution_kind is ExecutionKind.STATELESS
+        assert definition.presentation.category == "Image / Adjustment"
+        assert tuple(port.id for port in definition.execution.inputs) == ("image",)
+        assert tuple(port.id for port in definition.execution.outputs) == ("image",)
         assert (
-            tuple(parameter.id for parameter in definition.parameters)
-            == PARAMETER_IDS[definition.type_id]
+            tuple(parameter.id for parameter in definition.execution.parameters)
+            == PARAMETER_IDS[definition.execution.type_id]
         )
         assert {
-            parameter.id for parameter in definition.parameters if parameter.connectable
-        } == CONNECTABLE_IDS[definition.type_id]
+            parameter.id for parameter in definition.execution.parameters if parameter.connectable
+        } == CONNECTABLE_IDS[definition.execution.type_id]
 
     hue = _definition("synmachine.image.hue")
-    turns = hue.parameter("turns")
-    assert hue.implementation_version == 2
+    turns = hue.execution.parameter("turns")
+    assert hue.execution.implementation_version == 2
     assert turns is not None
     assert (turns.minimum, turns.maximum) == (0.0, 1.0)
     assert turns.editor_hint is ParameterEditorHint.SLIDER
@@ -485,7 +489,7 @@ def test_divide_scalar_near_zero_policies_are_explicit(rgb_image: ImageFrame) ->
 def test_retired_channel_selection_is_rejected_at_validation() -> None:
     # CHANNEL_4 is no longer an offered choice; the literal is rejected and
     # the parameter falls back to its COLOUR default.
-    values, errors = _definition("synmachine.image.brightness").parameter_values(
+    values, errors = _definition("synmachine.image.brightness").execution.parameter_values(
         {"channels": "CHANNEL_4"}
     )
     assert len(errors) == 1
@@ -521,13 +525,13 @@ def test_retired_channel_selection_is_rejected_at_validation() -> None:
 def test_definition_validators_reject_invalid_literals(
     type_id: str, overrides: Mapping[str, object], message: str
 ) -> None:
-    _, errors = _definition(type_id).parameter_values(overrides)
+    _, errors = _definition(type_id).execution.parameter_values(overrides)
     assert any(message in error for error in errors)
 
 
 @pytest.mark.parametrize("type_id", ["synmachine.image.saturation"])
 def test_non_negative_factor_definitions_accept_zero(type_id: str) -> None:
-    _, errors = _definition(type_id).parameter_values({"factor": 0.0})
+    _, errors = _definition(type_id).execution.parameter_values({"factor": 0.0})
     assert not errors
 
 

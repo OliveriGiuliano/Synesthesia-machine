@@ -25,6 +25,8 @@ from synesthesia_machine.nodes import (
     ExecutionKind,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePresentationIntent,
     OutputPortSpec,
     ParameterSpec,
     ParameterUpdateMode,
@@ -112,17 +114,21 @@ def _definition(
     implementation_version: int = 1,
 ) -> NodeDefinition:
     return NodeDefinition(
-        type_id,
-        implementation_version,
-        type_id,
-        "Test",
-        "Atomic plan replacement test node.",
-        (InputPortSpec("value", "Value", PortType.FLOAT),) if has_input else (),
-        (OutputPortSpec("value", "Value", PortType.FLOAT),),
-        parameters,
-        execution_kind,
-        factory,
-        cache_policy=CachePolicy.NEVER,
+        execution=NodeExecutionContract(
+            type_id=type_id,
+            implementation_version=implementation_version,
+            inputs=(InputPortSpec("value", "Value", PortType.FLOAT),) if has_input else (),
+            outputs=(OutputPortSpec("value", "Value", PortType.FLOAT),),
+            parameters=parameters,
+            execution_kind=execution_kind,
+            runtime_factory=factory,
+            cache_policy=CachePolicy.NEVER,
+        ),
+        presentation=NodePresentationIntent(
+            display_name=type_id,
+            category="Test",
+            description="Atomic plan replacement test node.",
+        ),
     )
 
 
@@ -355,7 +361,7 @@ def test_demand_lifecycle_change_prevents_stale_runtime_reuse() -> None:
     definition = _definition("test.atomic.demand", factory, has_input=False)
     demanded = CompiledNode(
         STATE_NODE,
-        definition,
+        definition.execution,
         clock_id=SOURCE_A,
         is_static=False,
         is_demanded=True,
@@ -383,14 +389,16 @@ def test_implementation_version_change_is_not_runtime_compatible() -> None:
         has_input=False,
         implementation_version=1,
     )
-    new_definition = replace(old_definition, implementation_version=2)
+    new_definition = replace(
+        old_definition, execution=replace(old_definition.execution, implementation_version=2)
+    )
     old_node = CompiledNode(
         STATE_NODE,
-        old_definition,
+        old_definition.execution,
         clock_id=SOURCE_A,
         is_static=False,
     )
-    new_node = replace(old_node, definition=new_definition)
+    new_node = replace(old_node, definition=new_definition.execution)
     old_scheduler = Scheduler(ExecutionPlan(DOCUMENT_ID, 1, (old_node,), frozenset({STATE_NODE})))
     replacement = Scheduler.prepare_replacement(
         ExecutionPlan(DOCUMENT_ID, 2, (new_node,), frozenset({STATE_NODE})),
@@ -637,10 +645,8 @@ def test_source_scoped_transport_preserves_other_sources_and_aggregate_state() -
 
 def test_quiesce_failure_rolls_back_sources_runtimes_and_revision() -> None:
     runtime_factory = _TrackingRuntimeFactory()
-    load_video = replace(
-        create_input_definitions()[0],
-        runtime_factory=runtime_factory,
-    )
+    base = create_input_definitions()[0]
+    load_video = replace(base, execution=replace(base.execution, runtime_factory=runtime_factory))
     source_factory = _FakeVideoFactory()
     client = InProcessEngineClient(
         NodeRegistry((load_video,)),

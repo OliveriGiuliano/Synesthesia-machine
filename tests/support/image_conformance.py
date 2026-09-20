@@ -46,25 +46,25 @@ def assert_scheduler_propagates_no_data(
     definition: NodeDefinition,
     parameters: Mapping[str, object],
 ) -> None:
-    values, errors = definition.parameter_values(parameters)
+    values, errors = definition.execution.parameter_values(parameters)
     assert not errors
-    node_id = uuid5(_DOCUMENT, definition.type_id)
-    required_input = next(port for port in definition.inputs if port.required)
+    node_id = uuid5(_DOCUMENT, definition.execution.type_id)
+    required_input = next(port for port in definition.execution.inputs if port.required)
     if isinstance(required_input.value_type, TypeVariable):
         raise AssertionError("conformance helper requires a concrete input type")
     input_types = {
         port.id: port.value_type
-        for port in definition.inputs
+        for port in definition.execution.inputs
         if isinstance(port.value_type, PortType)
     }
     output_types = {
         port.id: port.value_type
-        for port in definition.outputs
+        for port in definition.execution.outputs
         if isinstance(port.value_type, PortType)
     }
     compiled = CompiledNode(
         node_id,
-        definition,
+        definition.execution,
         parameters=values,
         input_bindings={
             required_input.id: InputBinding(PortKey(_EXTERNAL_SOURCE, required_input.id))

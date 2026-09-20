@@ -32,6 +32,8 @@ from synesthesia_machine.nodes import (
     ExpectedNodeError,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePresentationIntent,
     ParameterEditorHint,
     ParameterSpec,
     ResetReason,
@@ -293,92 +295,100 @@ def create_output_definitions(
 ) -> tuple[NodeDefinition, ...]:
     return (
         NodeDefinition(
-            GENERATE_AUDIO_TYPE_ID,
-            1,
-            "Play MIDI as Audio",
-            "Output / Audio",
-            "Plays the notes as sound using a small built-in synth, so you can hear what the "
-            "graph does.",
-            (InputPortSpec("midi", "MIDI State", PortType.MIDI_STATE),),
-            (),
-            (
-                ParameterSpec(
-                    "enabled",
-                    "Enable audio output",
-                    PortType.BOOL,
-                    False,
-                    help_text=(
-                        "When on, notes are sounded through the audio output; when off the node "
-                        "stays silent."
+            execution=NodeExecutionContract(
+                GENERATE_AUDIO_TYPE_ID,
+                1,
+                ExecutionKind.SINK,
+                (InputPortSpec("midi", "MIDI State", PortType.MIDI_STATE),),
+                (),
+                (
+                    ParameterSpec(
+                        "enabled",
+                        "Enable audio output",
+                        PortType.BOOL,
+                        False,
+                        help_text=(
+                            "When on, notes are sounded through the audio output; when off the "
+                            "node "
+                            "stays silent."
+                        ),
+                    ),
+                    ParameterSpec(
+                        "waveform",
+                        "Waveform",
+                        PortType.STRING,
+                        SynthWaveform.SINE.value,
+                        help_text=(
+                            "Shape of the sound each note makes: Sine is smooth, Triangle is "
+                            "softer, "
+                            "and Square is harsh."
+                        ),
+                        choices=tuple(waveform.value for waveform in SynthWaveform),
+                    ),
+                    ParameterSpec(
+                        "volume",
+                        "Master volume",
+                        PortType.FLOAT,
+                        0.15,
+                        help_text="Loudness of the audio output; 0 is silent and 1 is full volume.",
+                        minimum=0.0,
+                        maximum=1.0,
+                        editor_hint=ParameterEditorHint.SLIDER,
+                    ),
+                    ParameterSpec(
+                        "attack_ms",
+                        "Attack (ms)",
+                        PortType.FLOAT,
+                        10.0,
+                        help_text="Milliseconds a note takes to reach full volume after it is "
+                        "pressed.",
+                        minimum=0.0,
+                        maximum=2000.0,
+                        editor_hint=ParameterEditorHint.SLIDER,
+                    ),
+                    ParameterSpec(
+                        "release_ms",
+                        "Release (ms)",
+                        PortType.FLOAT,
+                        80.0,
+                        help_text="Milliseconds a note takes to fade out after it is released.",
+                        minimum=0.0,
+                        maximum=5000.0,
+                        editor_hint=ParameterEditorHint.SLIDER,
+                    ),
+                    ParameterSpec(
+                        "max_voices",
+                        "Maximum voices",
+                        PortType.INT,
+                        32,
+                        help_text=(
+                            "Maximum number of notes sounding at once; when the limit is reached "
+                            "the "
+                            "quietest notes are dropped."
+                        ),
+                        minimum=1,
+                        maximum=128,
+                    ),
+                    ParameterSpec(
+                        "output_device",
+                        "Output audio device",
+                        PortType.STRING,
+                        "",
+                        help_text="Select a detected audio output, or use the system default.",
+                        device_kind=DeviceKind.AUDIO_OUTPUT,
                     ),
                 ),
-                ParameterSpec(
-                    "waveform",
-                    "Waveform",
-                    PortType.STRING,
-                    SynthWaveform.SINE.value,
-                    help_text=(
-                        "Shape of the sound each note makes: Sine is smooth, Triangle is softer, "
-                        "and Square is harsh."
-                    ),
-                    choices=tuple(waveform.value for waveform in SynthWaveform),
-                ),
-                ParameterSpec(
-                    "volume",
-                    "Master volume",
-                    PortType.FLOAT,
-                    0.15,
-                    help_text="Loudness of the audio output; 0 is silent and 1 is full volume.",
-                    minimum=0.0,
-                    maximum=1.0,
-                    editor_hint=ParameterEditorHint.SLIDER,
-                ),
-                ParameterSpec(
-                    "attack_ms",
-                    "Attack (ms)",
-                    PortType.FLOAT,
-                    10.0,
-                    help_text="Milliseconds a note takes to reach full volume after it is pressed.",
-                    minimum=0.0,
-                    maximum=2000.0,
-                    editor_hint=ParameterEditorHint.SLIDER,
-                ),
-                ParameterSpec(
-                    "release_ms",
-                    "Release (ms)",
-                    PortType.FLOAT,
-                    80.0,
-                    help_text="Milliseconds a note takes to fade out after it is released.",
-                    minimum=0.0,
-                    maximum=5000.0,
-                    editor_hint=ParameterEditorHint.SLIDER,
-                ),
-                ParameterSpec(
-                    "max_voices",
-                    "Maximum voices",
-                    PortType.INT,
-                    32,
-                    help_text=(
-                        "Maximum number of notes sounding at once; when the limit is reached the "
-                        "quietest notes are dropped."
-                    ),
-                    minimum=1,
-                    maximum=128,
-                ),
-                ParameterSpec(
-                    "output_device",
-                    "Output audio device",
-                    PortType.STRING,
-                    "",
-                    help_text="Select a detected audio output, or use the system default.",
-                    device_kind=DeviceKind.AUDIO_OUTPUT,
-                ),
+                partial(GenerateAudioRuntime, synth_factory=synth_factory),
+                cache_policy=CachePolicy.NEVER,
+                handles_no_data=True,
             ),
-            ExecutionKind.SINK,
-            partial(GenerateAudioRuntime, synth_factory=synth_factory),
-            cache_policy=CachePolicy.NEVER,
-            handles_no_data=True,
-            aliases=("debug synth", "synthesizer", "sound"),
+            presentation=NodePresentationIntent(
+                "Play MIDI as Audio",
+                "Output / Audio",
+                "Plays the notes as sound using a small built-in synth, so you can hear what the "
+                "graph does.",
+                aliases=("debug synth", "synthesizer", "sound"),
+            ),
         ),
     )
 

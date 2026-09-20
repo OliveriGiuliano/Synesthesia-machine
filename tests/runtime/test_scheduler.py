@@ -31,6 +31,8 @@ from synesthesia_machine.nodes import (
     ExecutionKind,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePresentationIntent,
     NodeRegistry,
     OutputPortSpec,
 )
@@ -206,16 +208,20 @@ def test_outputless_demanded_sink_executes_once_per_tick() -> None:
         return ProbeRuntime(node_id, counters)
 
     sink_definition = NodeDefinition(
-        "test.outputless_sink",
-        1,
-        "Outputless Sink",
-        "Test",
-        "Consumes a value without publishing outputs.",
-        (InputPortSpec("value", "Value", PortType.FLOAT),),
-        (),
-        (),
-        ExecutionKind.SINK,
-        sink_factory,
+        execution=NodeExecutionContract(
+            type_id="test.outputless_sink",
+            implementation_version=1,
+            outputs=(),
+            parameters=(),
+            inputs=(InputPortSpec("value", "Value", PortType.FLOAT),),
+            execution_kind=ExecutionKind.SINK,
+            runtime_factory=sink_factory,
+        ),
+        presentation=NodePresentationIntent(
+            display_name="Outputless Sink",
+            category="Test",
+            description="Consumes a value without publishing outputs.",
+        ),
     )
     registry = NodeRegistry((make_definition("test.source"), sink_definition))
     document = GraphDocument()
@@ -365,16 +371,20 @@ def test_timing_hook_and_immutable_inputs_are_exposed_at_runtime_boundary() -> N
         return MutatingRuntime(node_id, counters)
 
     definition = NodeDefinition(
-        "test.mutating",
-        1,
-        "Mutating",
-        "Test",
-        "Attempts to mutate input mapping.",
-        (InputPortSpec("value", "Value", PortType.FLOAT),),
-        (OutputPortSpec("value", "Value", PortType.FLOAT),),
-        (),
-        ExecutionKind.STATELESS,
-        factory,
+        execution=NodeExecutionContract(
+            type_id="test.mutating",
+            implementation_version=1,
+            parameters=(),
+            inputs=(InputPortSpec("value", "Value", PortType.FLOAT),),
+            outputs=(OutputPortSpec("value", "Value", PortType.FLOAT),),
+            execution_kind=ExecutionKind.STATELESS,
+            runtime_factory=factory,
+        ),
+        presentation=NodePresentationIntent(
+            display_name="Mutating",
+            category="Test",
+            description="Attempts to mutate input mapping.",
+        ),
     )
     registry = NodeRegistry((make_definition("test.source"), definition))
     document = GraphDocument()
@@ -418,16 +428,20 @@ def test_scheduler_rejects_wrong_unknown_and_clock_mismatched_outputs() -> None:
 
     counters: dict[UUID, RuntimeCounters] = {}
     unknown_definition = NodeDefinition(
-        "test.unknown_output",
-        1,
-        "Unknown output",
-        "Test",
-        "Returns an undeclared output.",
-        (),
-        (OutputPortSpec("value", "Value", PortType.FLOAT),),
-        (),
-        ExecutionKind.STATELESS,
-        lambda node_id: UnknownOutputRuntime(node_id, counters),
+        execution=NodeExecutionContract(
+            type_id="test.unknown_output",
+            implementation_version=1,
+            inputs=(),
+            parameters=(),
+            outputs=(OutputPortSpec("value", "Value", PortType.FLOAT),),
+            execution_kind=ExecutionKind.STATELESS,
+            runtime_factory=lambda node_id: UnknownOutputRuntime(node_id, counters),
+        ),
+        presentation=NodePresentationIntent(
+            display_name="Unknown output",
+            category="Test",
+            description="Returns an undeclared output.",
+        ),
     )
     unknown_document = GraphDocument()
     unknown_node = unknown_document.add_node("test.unknown_output", node_id=NODE_B)
@@ -459,7 +473,7 @@ def test_scheduler_rejects_wrong_unknown_and_clock_mismatched_outputs() -> None:
         (
             CompiledNode(
                 clock_node,
-                clock_definition,
+                clock_definition.execution,
                 output_types={"value": PortType.IMAGE},
                 clock_id=CLOCK_ID,
                 is_static=False,

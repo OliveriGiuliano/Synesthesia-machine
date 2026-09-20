@@ -86,8 +86,8 @@ def _graph_round_trip(root: Path) -> str:
     document = GraphDocument()
     definition = registry.require("synmachine.utility.number")
     node_id = document.add_node(
-        definition.type_id,
-        implementation_version=definition.implementation_version,
+        definition.execution.type_id,
+        implementation_version=definition.execution.implementation_version,
         parameters={"number_type": "FLOAT", "float_value": 42.0},
     )
     graph_path = root / "release-smoke.synmachine.json"
@@ -230,7 +230,10 @@ def _autosave_and_diagnostics(root: Path) -> str:
     registry = create_application_registry()
     document = GraphDocument()
     definition = registry.require("synmachine.utility.number")
-    document.add_node(definition.type_id, implementation_version=definition.implementation_version)
+    document.add_node(
+        definition.execution.type_id,
+        implementation_version=definition.execution.implementation_version,
+    )
     store = AutosaveStore(root / "recovery")
     recovery_path = store.save(document.snapshot())
     discovered = store.discover()

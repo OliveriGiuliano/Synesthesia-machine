@@ -259,17 +259,17 @@ def _camera_definition():
     return next(
         definition
         for definition in create_input_definitions()
-        if definition.type_id == LOAD_CAMERA_TYPE_ID
+        if definition.execution.type_id == LOAD_CAMERA_TYPE_ID
     )
 
 
 def test_load_camera_definition_has_stable_restart_source_contract() -> None:
     definition = _camera_definition()
 
-    assert definition.display_name == "Load Camera"
-    assert definition.execution_kind is ExecutionKind.SOURCE
-    assert tuple(port.id for port in definition.outputs) == ("image", "processed_index")
-    assert tuple(parameter.id for parameter in definition.parameters) == (
+    assert definition.presentation.display_name == "Load Camera"
+    assert definition.execution.execution_kind is ExecutionKind.SOURCE
+    assert tuple(port.id for port in definition.execution.outputs) == ("image", "processed_index")
+    assert tuple(parameter.id for parameter in definition.execution.parameters) == (
         "device_id",
         "requested_width",
         "requested_height",
@@ -280,20 +280,20 @@ def test_load_camera_definition_has_stable_restart_source_contract() -> None:
     )
     assert all(
         parameter.update_mode is ParameterUpdateMode.RESTART_SOURCE
-        for parameter in definition.parameters
+        for parameter in definition.execution.parameters
     )
-    assert definition.parameter("device_id").default == "opencv:0"  # type: ignore[union-attr]
-    assert definition.parameter("requested_width").default == 1280  # type: ignore[union-attr]
-    assert definition.parameter("requested_height").default == 720  # type: ignore[union-attr]
-    assert definition.parameter("requested_fps").default == 30.0  # type: ignore[union-attr]
-    assert definition.parameter("backend_preference").choices == (  # type: ignore[union-attr]
+    assert definition.execution.parameter("device_id").default == "opencv:0"  # type: ignore[union-attr]
+    assert definition.execution.parameter("requested_width").default == 1280  # type: ignore[union-attr]
+    assert definition.execution.parameter("requested_height").default == 720  # type: ignore[union-attr]
+    assert definition.execution.parameter("requested_fps").default == 30.0  # type: ignore[union-attr]
+    assert definition.execution.parameter("backend_preference").choices == (  # type: ignore[union-attr]
         "AUTO",
         "MEDIA_FOUNDATION",
         "DIRECTSHOW",
         "V4L2",
     )
-    assert definition.parameter("process_every_nth_frame").minimum == 1  # type: ignore[union-attr]
-    assert definition.aliases == ("camera", "webcam", "live camera")
+    assert definition.execution.parameter("process_every_nth_frame").minimum == 1  # type: ignore[union-attr]
+    assert definition.presentation.aliases == ("camera", "webcam", "live camera")
 
 
 @pytest.mark.parametrize(

@@ -87,7 +87,7 @@ def generate_random_graph(
         node_id = _random_uuid(generator)
         document.add_node(
             type_id,
-            implementation_version=definition.implementation_version,
+            implementation_version=definition.execution.implementation_version,
             node_id=node_id,
             position=(x_position, generator.uniform(-72.0, 72.0)),
         )
@@ -270,18 +270,18 @@ def _randomized_node(
     definition: NodeDefinition,
     generator: random.Random,
 ) -> NodeModel:
-    current, _errors = definition.parameter_values(node.parameters)
+    current, _errors = definition.execution.parameter_values(node.parameters)
     for _attempt in range(32):
         candidate = {
             parameter.id: _random_parameter_value(
-                definition.type_id,
+                definition.execution.type_id,
                 parameter,
                 current[parameter.id],
                 generator,
             )
-            for parameter in definition.parameters
+            for parameter in definition.execution.parameters
         }
-        values, errors = definition.parameter_values(candidate)
+        values, errors = definition.execution.parameter_values(candidate)
         if not errors and values != current:
             return replace(node, parameters=values)
     return node
@@ -388,12 +388,12 @@ def _replace_node_set(
             candidates = _replacement_definitions(original_definition, definitions)
             definition = generator.choice(candidates)
             parameters: dict[str, LiteralValue] = (
-                dict(node.parameters) if definition.type_id == node.type_id else {}
+                dict(node.parameters) if definition.execution.type_id == node.type_id else {}
             )
             replacement_node = NodeModel(
                 id_map[node.id],
-                definition.type_id,
-                definition.implementation_version,
+                definition.execution.type_id,
+                definition.execution.implementation_version,
                 parameters=parameters,
                 position=node.position,
                 size=node.size,
@@ -461,17 +461,20 @@ def _replacement_definitions(
     original: NodeDefinition,
     definitions: tuple[NodeDefinition, ...],
 ) -> tuple[NodeDefinition, ...]:
-    if original.execution_kind is ExecutionKind.SOURCE or original.variadic_input is not None:
+    if (
+        original.execution.execution_kind is ExecutionKind.SOURCE
+        or original.execution.variadic_input is not None
+    ):
         return (original,)
-    input_ids = tuple(port.id for port in original.inputs)
-    output_ids = tuple(port.id for port in original.outputs)
+    input_ids = tuple(port.id for port in original.execution.inputs)
+    output_ids = tuple(port.id for port in original.execution.outputs)
     candidates = tuple(
         definition
         for definition in definitions
-        if definition.execution_kind is original.execution_kind
-        and definition.variadic_input is None
-        and tuple(port.id for port in definition.inputs) == input_ids
-        and tuple(port.id for port in definition.outputs) == output_ids
+        if definition.execution.execution_kind is original.execution.execution_kind
+        and definition.execution.variadic_input is None
+        and tuple(port.id for port in definition.execution.inputs) == input_ids
+        and tuple(port.id for port in definition.execution.outputs) == output_ids
     )
     return candidates or (original,)
 
@@ -493,12 +496,12 @@ def _insert_random_node(
     unary_definitions = [
         definition
         for definition in registry.definitions()
-        if definition.execution_kind is not ExecutionKind.SOURCE
-        and definition.variadic_input is None
-        and len(definition.inputs) == 1
-        and len(definition.outputs) == 1
-        and definition.required_inputs(definition.parameter_values({})[0])
-        == frozenset({definition.inputs[0].id})
+        if definition.execution.execution_kind is not ExecutionKind.SOURCE
+        and definition.execution.variadic_input is None
+        and len(definition.execution.inputs) == 1
+        and len(definition.execution.outputs) == 1
+        and definition.execution.required_inputs(definition.execution.parameter_values({})[0])
+        == frozenset({definition.execution.inputs[0].id})
     ]
     generator.shuffle(unary_definitions)
     nodes = {node.id: node for node in snapshot.nodes}
@@ -514,8 +517,8 @@ def _insert_random_node(
             node = _randomized_node(
                 NodeModel(
                     node_id,
-                    definition.type_id,
-                    definition.implementation_version,
+                    definition.execution.type_id,
+                    definition.execution.implementation_version,
                     position=position,
                 ),
                 definition,
@@ -532,12 +535,12 @@ def _insert_random_node(
                         connection.source_node_id,
                         connection.source_port_id,
                         node_id,
-                        definition.inputs[0].id,
+                        definition.execution.inputs[0].id,
                     ),
                     ConnectionModel(
                         _random_uuid(generator),
                         node_id,
-                        definition.outputs[0].id,
+                        definition.execution.outputs[0].id,
                         connection.destination_node_id,
                         connection.destination_port_id,
                     ),
@@ -558,9 +561,9 @@ def _add_random_standalone_node(
     definitions = [
         definition
         for definition in registry.definitions()
-        if definition.execution_kind is not ExecutionKind.SOURCE
-        and definition.outputs
-        and not definition.required_inputs(definition.parameter_values({})[0])
+        if definition.execution.execution_kind is not ExecutionKind.SOURCE
+        and definition.execution.outputs
+        and not definition.execution.required_inputs(definition.execution.parameter_values({})[0])
     ]
     generator.shuffle(definitions)
     selected_nodes = [node for node in snapshot.nodes if node.id in replacement_ids]
@@ -571,8 +574,8 @@ def _add_random_standalone_node(
         node = _randomized_node(
             NodeModel(
                 node_id,
-                definition.type_id,
-                definition.implementation_version,
+                definition.execution.type_id,
+                definition.execution.implementation_version,
                 position=(
                     anchor_x + generator.uniform(-100.0, 100.0),
                     anchor_y + generator.uniform(-100.0, 100.0),

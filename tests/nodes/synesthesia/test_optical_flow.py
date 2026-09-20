@@ -148,7 +148,7 @@ def _settings(
 
 
 def _parameters(**overrides: object) -> Mapping[str, ParameterValue]:
-    values, errors = create_optical_flow_definitions()[0].parameter_values(overrides)
+    values, errors = create_optical_flow_definitions()[0].execution.parameter_values(overrides)
     assert not errors
     return values
 
@@ -370,7 +370,7 @@ def test_scheduler_no_data_suppresses_optical_flow_invocation() -> None:
             (
                 CompiledNode(
                     NODE,
-                    definition,
+                    definition.execution,
                     parameters=_parameters(),
                     input_bindings={
                         "current": InputBinding(current_source),
@@ -398,21 +398,21 @@ def test_scheduler_no_data_suppresses_optical_flow_invocation() -> None:
 
 def test_definition_presets_registry_and_range_validation_contracts() -> None:
     definition = create_optical_flow_definitions()[0]
-    assert definition.type_id == OPTICAL_FLOW_TYPE_ID
-    assert definition.execution_kind is ExecutionKind.STATELESS
-    assert tuple(port.id for port in definition.inputs) == ("current", "reference")
-    assert definition.parameter("flow_preset").choices == (FAST, BALANCED, ACCURATE)  # type: ignore[union-attr]
-    assert definition.parameter("grid_rows").default == 4  # type: ignore[union-attr]
-    assert definition.parameter("grid_columns").default == 4  # type: ignore[union-attr]
-    assert definition.parameter_groups[0].id == "musical"
+    assert definition.execution.type_id == OPTICAL_FLOW_TYPE_ID
+    assert definition.execution.execution_kind is ExecutionKind.STATELESS
+    assert tuple(port.id for port in definition.execution.inputs) == ("current", "reference")
+    assert definition.execution.parameter("flow_preset").choices == (FAST, BALANCED, ACCURATE)  # type: ignore[union-attr]
+    assert definition.execution.parameter("grid_rows").default == 4  # type: ignore[union-attr]
+    assert definition.execution.parameter("grid_columns").default == 4  # type: ignore[union-attr]
+    assert definition.presentation.parameter_groups[0].id == "musical"
     registry = create_application_registry()
     assert len(registry.definitions()) == 64
-    assert registry.require(OPTICAL_FLOW_TYPE_ID).type_id == OPTICAL_FLOW_TYPE_ID
+    assert registry.require(OPTICAL_FLOW_TYPE_ID).execution.type_id == OPTICAL_FLOW_TYPE_ID
     for overrides, expected in (
         ({"minimum_motion_magnitude": float("nan")}, "finite"),
         ({"magnitude_minimum": 1.0, "magnitude_maximum": 1.0}, "magnitude maximum"),
     ):
-        _, errors = definition.parameter_values(overrides)
+        _, errors = definition.execution.parameter_values(overrides)
         assert any(expected in error for error in errors)
 
 
@@ -510,7 +510,7 @@ def test_reduced_analysis_recovers_original_scale_translation() -> None:
 
 
 def test_analysis_max_dimension_rejects_negative_values_and_caps_midi_mapping() -> None:
-    _, errors = create_optical_flow_definitions()[0].parameter_values(
+    _, errors = create_optical_flow_definitions()[0].execution.parameter_values(
         {"analysis_max_dimension": -1}
     )
     assert errors and "analysis_max_dimension" in " ".join(errors)

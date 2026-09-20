@@ -92,7 +92,7 @@ def _settings(minimum: int = 60, maximum: int = 63) -> CommonMusicalSettings:
 
 
 def _parameters(**overrides: object) -> Mapping[str, ParameterValue]:
-    values, errors = create_fourier_definitions()[0].parameter_values(
+    values, errors = create_fourier_definitions()[0].execution.parameter_values(
         {
             "midi_minimum": 60,
             "midi_maximum": 63,
@@ -330,7 +330,7 @@ def test_scheduler_no_data_suppresses_fourier_invocation() -> None:
             (
                 CompiledNode(
                     NODE,
-                    definition,
+                    definition.execution,
                     parameters=_parameters(),
                     input_bindings={"value": InputBinding(source)},
                     input_types={"value": PortType.CHANNEL},
@@ -353,13 +353,13 @@ def test_scheduler_no_data_suppresses_fourier_invocation() -> None:
 
 def test_definition_registry_nonfinite_and_range_validation_contracts() -> None:
     definition = create_fourier_definitions()[0]
-    assert definition.type_id == FOURIER_TYPE_ID
-    assert definition.execution_kind is ExecutionKind.STATEFUL
-    assert tuple(port.id for port in definition.inputs) == ("value",)
-    assert definition.parameter_groups[0].id == "musical"
+    assert definition.execution.type_id == FOURIER_TYPE_ID
+    assert definition.execution.execution_kind is ExecutionKind.STATEFUL
+    assert tuple(port.id for port in definition.execution.inputs) == ("value",)
+    assert definition.presentation.parameter_groups[0].id == "musical"
     registry = create_application_registry()
     assert len(registry.definitions()) >= 57
-    assert registry.require(FOURIER_TYPE_ID).type_id == FOURIER_TYPE_ID
+    assert registry.require(FOURIER_TYPE_ID).execution.type_id == FOURIER_TYPE_ID
 
     values = np.array([[np.nan, np.inf], [-np.inf, 1.0]], dtype=np.float32)
     output = _runtime_state(FourierRuntime(NODE), _channel(values))
@@ -369,7 +369,7 @@ def test_definition_registry_nonfinite_and_range_validation_contracts() -> None:
         ({"frequency_minimum": 1.0, "frequency_maximum": 1.0}, "frequency range"),
         ({"amplitude_floor": 1.0, "amplitude_ceiling": 1.0}, "amplitude ceiling"),
     ):
-        _, errors = definition.parameter_values(overrides)
+        _, errors = definition.execution.parameter_values(overrides)
         assert any(expected in error for error in errors)
 
 
@@ -573,5 +573,7 @@ def test_analysis_max_dimension_covers_caps_and_rejects_negative_values() -> Non
     assert run(0).notes == run(1024).notes
     with pytest.raises(ValueError, match="non-negative"):
         run(-1)
-    _, errors = create_fourier_definitions()[0].parameter_values({"analysis_max_dimension": -1})
+    _, errors = create_fourier_definitions()[0].execution.parameter_values(
+        {"analysis_max_dimension": -1}
+    )
     assert "analysis_max_dimension" in " ".join(errors)

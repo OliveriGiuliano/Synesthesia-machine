@@ -25,6 +25,9 @@ from synesthesia_machine.nodes import (
     ExecutionKind,
     ExpectedNodeError,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePersistenceDescriptor,
+    NodePresentationIntent,
     OutputPortSpec,
     ParameterSpec,
     StatelessRuntime,
@@ -151,51 +154,58 @@ def _flatten_samples(values: Iterable[RuntimeValue]) -> list[RuntimeValue]:
 def create_analysis_definitions() -> tuple[NodeDefinition, ...]:
     return (
         NodeDefinition(
-            "synmachine.utility.statistics",
-            2,
-            "Statistics",
-            "Utility / Analysis",
-            "Calculates a statistic (mean, median, minimum, maximum, and more) across everything "
-            "connected to it, or across a Buffer of values. For numbers it returns one number; "
-            "for images and channels it calculates the statistic pixel by pixel.",
-            (),
-            (OutputPortSpec("value", "Value", T),),
-            (
-                ParameterSpec(
-                    "statistic",
-                    "Statistic",
-                    PortType.STRING,
-                    "MEAN",
-                    help_text=(
-                        "Chooses the value that summarizes the samples: Mean, Median, Minimum, "
-                        "Maximum, Standard deviation, or Percentile."
-                    ),
-                    choices=(
+            execution=NodeExecutionContract(
+                "synmachine.utility.statistics",
+                2,
+                ExecutionKind.STATELESS,
+                (),
+                (OutputPortSpec("value", "Value", T),),
+                (
+                    ParameterSpec(
+                        "statistic",
+                        "Statistic",
+                        PortType.STRING,
                         "MEAN",
-                        "MEDIAN",
-                        "MINIMUM",
-                        "MAXIMUM",
-                        "STANDARD_DEVIATION",
-                        "PERCENTILE",
+                        help_text=(
+                            "Chooses the value that summarizes the samples: Mean, Median, Minimum, "
+                            "Maximum, Standard deviation, or Percentile."
+                        ),
+                        choices=(
+                            "MEAN",
+                            "MEDIAN",
+                            "MINIMUM",
+                            "MAXIMUM",
+                            "STANDARD_DEVIATION",
+                            "PERCENTILE",
+                        ),
+                    ),
+                    ParameterSpec(
+                        "percentile",
+                        "Percentile",
+                        PortType.FLOAT,
+                        50.0,
+                        help_text=(
+                            "Percentile reported when the statistic is Percentile, from 0 to 100."
+                        ),
+                        minimum=0.0,
+                        maximum=100.0,
                     ),
                 ),
-                ParameterSpec(
-                    "percentile",
-                    "Percentile",
-                    PortType.FLOAT,
-                    50.0,
-                    help_text=(
-                        "Percentile reported when the statistic is Percentile, from 0 to 100."
-                    ),
-                    minimum=0.0,
-                    maximum=100.0,
-                ),
+                StatisticsRuntime,
+                variadic_input=VariadicInputSpec("values", "Value", T_ARRAY, minimum_count=1),
             ),
-            ExecutionKind.STATELESS,
-            StatisticsRuntime,
-            aliases=("array statistics", "mean", "median", "standard deviation"),
-            variadic_input=VariadicInputSpec("values", "Value", T_ARRAY, minimum_count=1),
-            migrations={1: migrate_statistics_v1_to_v2},
+            presentation=NodePresentationIntent(
+                "Statistics",
+                "Utility / Analysis",
+                "Calculates a statistic (mean, median, minimum, maximum, and more) across "
+                "everything "
+                "connected to it, or across a Buffer of values. For numbers it returns one number; "
+                "for images and channels it calculates the statistic pixel by pixel.",
+                aliases=("array statistics", "mean", "median", "standard deviation"),
+            ),
+            persistence=NodePersistenceDescriptor(
+                migrations={1: migrate_statistics_v1_to_v2},
+            ),
         ),
     )
 

@@ -40,6 +40,9 @@ from synesthesia_machine.nodes import (
     ExpectedNodeError,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePersistenceDescriptor,
+    NodePresentationIntent,
     NodeRuntime,
     OutputPortSpec,
     ParameterEditorHint,
@@ -411,20 +414,26 @@ def _definition(
     migrations: Mapping[int, NodeMigration] | None = None,
 ) -> NodeDefinition:
     return NodeDefinition(
-        type_id,
-        implementation_version,
-        display_name,
-        "Image / Filter",
-        description,
-        (InputPortSpec("image", "Image / Channel", PortType.IMAGE),),
-        (OutputPortSpec("image", "Image / Channel", PortType.IMAGE),),
-        parameters,
-        ExecutionKind.STATELESS,
-        _factory(processor, f"invalid_{type_id.rsplit('.', 1)[1]}"),
-        aliases=aliases,
-        parameter_validator=combined_parameter_validator(parameters, validator),
-        port_type_resolver=dynamic_image_channel_resolver,
-        migrations=migrations or {},
+        execution=NodeExecutionContract(
+            type_id,
+            implementation_version,
+            ExecutionKind.STATELESS,
+            (InputPortSpec("image", "Image / Channel", PortType.IMAGE),),
+            (OutputPortSpec("image", "Image / Channel", PortType.IMAGE),),
+            parameters,
+            _factory(processor, f"invalid_{type_id.rsplit('.', 1)[1]}"),
+            parameter_validator=combined_parameter_validator(parameters, validator),
+            port_type_resolver=dynamic_image_channel_resolver,
+        ),
+        presentation=NodePresentationIntent(
+            display_name,
+            "Image / Filter",
+            description,
+            aliases=aliases,
+        ),
+        persistence=NodePersistenceDescriptor(
+            migrations=migrations or {},
+        ),
     )
 
 
@@ -823,34 +832,44 @@ def create_filter_definitions() -> tuple[NodeDefinition, ...]:
             migrations={1: migrate_adjustment_channel_selection_v1_to_v2},
         ),
         NodeDefinition(
-            "synmachine.image.threshold",
-            1,
-            "Threshold",
-            "Image / Analysis",
-            "Compares every pixel to a brightness limit and rewrites it according to the mode you "
-            "choose: for example, pixels above the limit become one value and the rest another, "
-            "or one side is set to zero.",
-            (InputPortSpec("channel", "Channel", PortType.CHANNEL),),
-            (OutputPortSpec("channel", "Channel", PortType.CHANNEL),),
-            threshold_parameters,
-            ExecutionKind.STATELESS,
-            _threshold_factory,
-            aliases=("binary", "cutoff"),
-            parameter_validator=combined_parameter_validator(threshold_parameters, None),
+            execution=NodeExecutionContract(
+                "synmachine.image.threshold",
+                1,
+                ExecutionKind.STATELESS,
+                (InputPortSpec("channel", "Channel", PortType.CHANNEL),),
+                (OutputPortSpec("channel", "Channel", PortType.CHANNEL),),
+                threshold_parameters,
+                _threshold_factory,
+                parameter_validator=combined_parameter_validator(threshold_parameters, None),
+            ),
+            presentation=NodePresentationIntent(
+                "Threshold",
+                "Image / Analysis",
+                "Compares every pixel to a brightness limit and rewrites it according to the mode "
+                "you "
+                "choose: for example, pixels above the limit become one value and the rest "
+                "another, "
+                "or one side is set to zero.",
+                aliases=("binary", "cutoff"),
+            ),
         ),
         NodeDefinition(
-            "synmachine.image.canny",
-            1,
-            "Canny",
-            "Image / Analysis",
-            "Finds the outlines in the image and outputs a black-and-white map of the edges.",
-            (InputPortSpec("image", "Image", PortType.IMAGE),),
-            (OutputPortSpec("channel", "Channel", PortType.CHANNEL),),
-            canny_parameters,
-            ExecutionKind.STATELESS,
-            _canny_factory,
-            aliases=("edges", "edge detection"),
-            parameter_validator=combined_parameter_validator(canny_parameters, _validate_canny),
+            execution=NodeExecutionContract(
+                "synmachine.image.canny",
+                1,
+                ExecutionKind.STATELESS,
+                (InputPortSpec("image", "Image", PortType.IMAGE),),
+                (OutputPortSpec("channel", "Channel", PortType.CHANNEL),),
+                canny_parameters,
+                _canny_factory,
+                parameter_validator=combined_parameter_validator(canny_parameters, _validate_canny),
+            ),
+            presentation=NodePresentationIntent(
+                "Canny",
+                "Image / Analysis",
+                "Finds the outlines in the image and outputs a black-and-white map of the edges.",
+                aliases=("edges", "edge detection"),
+            ),
         ),
         _definition(
             "synmachine.image.convolve",

@@ -15,7 +15,7 @@ def _definition():
     return next(
         definition
         for definition in create_input_definitions()
-        if definition.type_id is LOAD_VIDEO_TYPE_ID
+        if definition.execution.type_id is LOAD_VIDEO_TYPE_ID
     )
 
 
@@ -30,9 +30,9 @@ def _status(file_path: str = "/videos/a.mp4", duration_s: float | None = 120.5) 
 
 def _resolve(parameter_id: str, values: dict[str, object], status: SourceStatus | None):
     definition = _definition()
-    spec = definition.parameter(parameter_id)
+    spec = definition.execution.parameter(parameter_id)
     assert spec is not None
-    resolved = definition.parameter_editor_resolver(spec, values, status)
+    resolved = definition.presentation.parameter_editor_resolver(spec, values, status)
     assert resolved is not None
     return resolved
 
@@ -55,10 +55,10 @@ def test_resolver_binds_both_loop_editors_to_the_full_range() -> None:
 
 def test_editors_stay_unbounded_without_a_matching_status() -> None:
     values: dict[str, object] = {"file_path": "/videos/a.mp4"}
-    spec = _definition().parameter("loop_start_s")
+    spec = _definition().execution.parameter("loop_start_s")
     assert spec is not None
 
-    resolved = _definition().parameter_editor_resolver(spec, values, None)
+    resolved = _definition().presentation.parameter_editor_resolver(spec, values, None)
     assert resolved is None or resolved is spec or resolved.maximum is None
 
     # A status for a different file must not bound this node's editors.
@@ -77,7 +77,7 @@ def test_editors_stay_unbounded_without_a_configured_file() -> None:
 
 
 def spec_without_file():
-    return _definition().parameter("loop_start_s")
+    return _definition().execution.parameter("loop_start_s")
 
 
 def test_resolver_is_pure_and_never_probes_the_filesystem() -> None:
@@ -94,7 +94,9 @@ def test_resolver_is_pure_and_never_probes_the_filesystem() -> None:
 
 def test_non_loop_parameters_are_untouched_by_the_resolver() -> None:
     definition = _definition()
-    spec = definition.parameter("playback_speed")
+    spec = definition.execution.parameter("playback_speed")
     assert spec is not None
-    resolved = definition.parameter_editor_resolver(spec, {"file_path": "/videos/a.mp4"}, _status())
+    resolved = definition.presentation.parameter_editor_resolver(
+        spec, {"file_path": "/videos/a.mp4"}, _status()
+    )
     assert resolved is None or resolved is spec or resolved.minimum == spec.minimum

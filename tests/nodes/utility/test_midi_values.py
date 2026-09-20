@@ -21,6 +21,8 @@ from synesthesia_machine.graph import GraphCompiler, GraphDocument
 from synesthesia_machine.nodes import (
     ExecutionKind,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePresentationIntent,
     NodeRegistry,
     OutputPortSpec,
     ResetReason,
@@ -145,9 +147,9 @@ def test_unary_runtime_clock_mismatch_is_recoverable(
     definition = next(
         definition
         for definition in create_midi_utility_definitions()
-        if definition.type_id == type_id
+        if definition.execution.type_id == type_id
     )
-    parameters, validation_errors = definition.parameter_values({})
+    parameters, validation_errors = definition.execution.parameter_values({})
     assert not validation_errors
     source_key = PortKey(SOURCE_A, "midi")
     plan = ExecutionPlan(
@@ -156,7 +158,7 @@ def test_unary_runtime_clock_mismatch_is_recoverable(
         (
             CompiledNode(
                 UTILITY,
-                definition,
+                definition.execution,
                 parameters=parameters,
                 input_bindings={"midi": InputBinding(source_key)},
                 input_types={"midi": PortType.MIDI_STATE},
@@ -194,20 +196,23 @@ def test_midi_utility_definitions_have_stable_ports_parameters_alias_and_variadi
     None
 ):
     definitions = create_midi_utility_definitions()
-    assert tuple(definition.type_id for definition in definitions) == (
+    assert tuple(definition.execution.type_id for definition in definitions) == (
         MULTIPLY_VELOCITY_TYPE_ID,
         TRANSPOSE_TYPE_ID,
         MIDI_MERGE_TYPE_ID,
     )
     multiply, transpose, merge = definitions
-    assert multiply.parameter("factor").connectable  # type: ignore[union-attr]
-    assert multiply.parameter("factor").connected_port_type is PortType.FLOAT  # type: ignore[union-attr]
-    assert transpose.display_name == "Transpose"
-    assert "Pitch Up or Down" in transpose.aliases
-    assert transpose.parameter("semitones").connectable  # type: ignore[union-attr]
-    assert transpose.parameter("semitones").connected_port_type is PortType.FLOAT  # type: ignore[union-attr]
-    assert merge.variadic_input is not None and merge.variadic_input.minimum_count == 2
-    assert tuple(port.id for port in merge.input_ports()) == ("midi_1", "midi_2")
+    assert multiply.execution.parameter("factor").connectable  # type: ignore[union-attr]
+    assert multiply.execution.parameter("factor").connected_port_type is PortType.FLOAT  # type: ignore[union-attr]
+    assert transpose.presentation.display_name == "Transpose"
+    assert "Pitch Up or Down" in transpose.presentation.aliases
+    assert transpose.execution.parameter("semitones").connectable  # type: ignore[union-attr]
+    assert transpose.execution.parameter("semitones").connected_port_type is PortType.FLOAT  # type: ignore[union-attr]
+    assert (
+        merge.execution.variadic_input is not None
+        and merge.execution.variadic_input.minimum_count == 2
+    )
+    assert tuple(port.id for port in merge.execution.input_ports()) == ("midi_1", "midi_2")
 
 
 class _MidiSourceRuntime:
@@ -234,16 +239,20 @@ class _MidiSourceRuntime:
 
 def _runtime_registry() -> NodeRegistry:
     source = NodeDefinition(
-        "test.midi_value_source",
-        1,
-        "MIDI source",
-        "Test",
-        "Static MIDI fixture source.",
-        (),
-        (OutputPortSpec("midi", "MIDI state", PortType.MIDI_STATE),),
-        (),
-        ExecutionKind.STATELESS,
-        _MidiSourceRuntime,
+        execution=NodeExecutionContract(
+            type_id="test.midi_value_source",
+            implementation_version=1,
+            inputs=(),
+            parameters=(),
+            outputs=(OutputPortSpec("midi", "MIDI state", PortType.MIDI_STATE),),
+            execution_kind=ExecutionKind.STATELESS,
+            runtime_factory=_MidiSourceRuntime,
+        ),
+        presentation=NodePresentationIntent(
+            display_name="MIDI source",
+            category="Test",
+            description="Static MIDI fixture source.",
+        ),
     )
     return NodeRegistry((source, *create_midi_utility_definitions()))
 
@@ -316,7 +325,7 @@ def test_compiler_rejects_missing_and_different_clock_variadic_merge_inputs() ->
 
 def test_registry_contains_all_midi_value_utilities() -> None:
     registry_ids = {
-        definition.type_id for definition in create_application_registry().definitions()
+        definition.execution.type_id for definition in create_application_registry().definitions()
     }
     assert {MULTIPLY_VELOCITY_TYPE_ID, TRANSPOSE_TYPE_ID, MIDI_MERGE_TYPE_ID} <= registry_ids
     assert len(registry_ids) >= 54

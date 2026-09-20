@@ -17,7 +17,6 @@ from synesthesia_machine.contracts import (
     ParameterValue,
     PortType,
     RuntimeValue,
-    SourceStatus,
     read_only_float32,
 )
 from synesthesia_machine.media import (
@@ -37,9 +36,12 @@ from synesthesia_machine.nodes import (
     ExpectedNodeError,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePresentationIntent,
     OutputPortSpec,
     ParameterEditorHint,
     ParameterSpec,
+    SourceEditorFacts,
     StatelessRuntime,
 )
 from synesthesia_machine.nodes.image.runtime_support import (
@@ -167,11 +169,11 @@ _CROP_BOUND_IDS = frozenset({"left", "top", "right", "bottom"})
 def _crop_parameter_editor(
     spec: ParameterSpec,
     values: Mapping[str, ParameterValue],
-    status: SourceStatus | None,
+    facts: SourceEditorFacts | None,
 ) -> ParameterSpec:
     """Present normalized crop bounds as 0..1 sliders; pixel bounds stay plain fields."""
 
-    del status
+    del facts
     if spec.id not in _CROP_BOUND_IDS:
         return spec
     if (
@@ -187,273 +189,302 @@ def create_dimension_definitions() -> tuple[NodeDefinition, ...]:
     image_output = (OutputPortSpec("image", "Image / Channel", PortType.IMAGE),)
     return (
         NodeDefinition(
-            "synmachine.image.resize",
-            1,
-            "Resize",
-            "Image / Dimension",
-            "Changes the size of the image. You can stretch it or keep its proportions.",
-            image_input,
-            image_output,
-            (
-                ParameterSpec(
-                    "width",
-                    "Width",
-                    PortType.INT,
-                    500,
-                    help_text="Target width of the image in pixels.",
-                    minimum=1,
-                    maximum=8192,
-                    connectable=True,
-                    connected_port_type=PortType.INT,
-                ),
-                ParameterSpec(
-                    "height",
-                    "Height",
-                    PortType.INT,
-                    500,
-                    help_text="Target height of the image in pixels.",
-                    minimum=1,
-                    maximum=8192,
-                    connectable=True,
-                    connected_port_type=PortType.INT,
-                ),
-                ParameterSpec(
-                    "preserve_aspect",
-                    "Preserve aspect",
-                    PortType.BOOL,
-                    True,
-                    help_text=(
-                        "When on, the aspect ratio is kept and the target size becomes a bounding "
-                        "box; when off the image is stretched to the exact size."
+            execution=NodeExecutionContract(
+                "synmachine.image.resize",
+                1,
+                ExecutionKind.STATELESS,
+                image_input,
+                image_output,
+                (
+                    ParameterSpec(
+                        "width",
+                        "Width",
+                        PortType.INT,
+                        500,
+                        help_text="Target width of the image in pixels.",
+                        minimum=1,
+                        maximum=8192,
+                        connectable=True,
+                        connected_port_type=PortType.INT,
+                    ),
+                    ParameterSpec(
+                        "height",
+                        "Height",
+                        PortType.INT,
+                        500,
+                        help_text="Target height of the image in pixels.",
+                        minimum=1,
+                        maximum=8192,
+                        connectable=True,
+                        connected_port_type=PortType.INT,
+                    ),
+                    ParameterSpec(
+                        "preserve_aspect",
+                        "Preserve aspect",
+                        PortType.BOOL,
+                        True,
+                        help_text=(
+                            "When on, the aspect ratio is kept and the target size becomes a "
+                            "bounding "
+                            "box; when off the image is stretched to the exact size."
+                        ),
+                    ),
+                    ParameterSpec(
+                        "fit_mode",
+                        "Fit mode",
+                        PortType.STRING,
+                        FitMode.CONTAIN.value,
+                        help_text=(
+                            "Chooses how the target width and height are applied: Contain fits the "
+                            "picture inside the box, Cover fills the box and crops the overflow, "
+                            "and "
+                            "Stretch distorts the picture to the exact size."
+                        ),
+                        choices=tuple(mode.value for mode in FitMode),
+                    ),
+                    ParameterSpec(
+                        "interpolation",
+                        "Interpolation",
+                        PortType.STRING,
+                        Interpolation.AUTO.value,
+                        help_text=(
+                            "Chooses the resampling used when pixels are mixed. Automatic picks "
+                            "the "
+                            "best method for the size change; Nearest keeps hard edges, and Cubic "
+                            "and "
+                            "Lanczos are smoother but slower."
+                        ),
+                        choices=tuple(mode.value for mode in Interpolation),
                     ),
                 ),
-                ParameterSpec(
-                    "fit_mode",
-                    "Fit mode",
-                    PortType.STRING,
-                    FitMode.CONTAIN.value,
-                    help_text=(
-                        "Chooses how the target width and height are applied: Contain fits the "
-                        "picture inside the box, Cover fills the box and crops the overflow, and "
-                        "Stretch distorts the picture to the exact size."
-                    ),
-                    choices=tuple(mode.value for mode in FitMode),
-                ),
-                ParameterSpec(
-                    "interpolation",
-                    "Interpolation",
-                    PortType.STRING,
-                    Interpolation.AUTO.value,
-                    help_text=(
-                        "Chooses the resampling used when pixels are mixed. Automatic picks the "
-                        "best method for the size change; Nearest keeps hard edges, and Cubic and "
-                        "Lanczos are smoother but slower."
-                    ),
-                    choices=tuple(mode.value for mode in Interpolation),
-                ),
+                ResizeRuntime,
+                port_type_resolver=dynamic_image_channel_resolver,
             ),
-            ExecutionKind.STATELESS,
-            ResizeRuntime,
-            port_type_resolver=dynamic_image_channel_resolver,
-            aliases=("scale", "image size", "resample"),
+            presentation=NodePresentationIntent(
+                "Resize",
+                "Image / Dimension",
+                "Changes the size of the image. You can stretch it or keep its proportions.",
+                aliases=("scale", "image size", "resample"),
+            ),
         ),
         NodeDefinition(
-            "synmachine.image.crop",
-            1,
-            "Crop",
-            "Image / Dimension",
-            "Cuts out a rectangular area of the image.",
-            image_input,
-            image_output,
-            (
-                ParameterSpec(
-                    "coordinate_mode",
-                    "Coordinates",
-                    PortType.STRING,
-                    CoordinateMode.NORMALIZED.value,
-                    help_text=(
-                        "Normalized measures the crop box as fractions of the image size (0 to "
-                        "1); Pixels measures it in raw pixels."
+            execution=NodeExecutionContract(
+                "synmachine.image.crop",
+                1,
+                ExecutionKind.STATELESS,
+                image_input,
+                image_output,
+                (
+                    ParameterSpec(
+                        "coordinate_mode",
+                        "Coordinates",
+                        PortType.STRING,
+                        CoordinateMode.NORMALIZED.value,
+                        help_text=(
+                            "Normalized measures the crop box as fractions of the image size (0 to "
+                            "1); Pixels measures it in raw pixels."
+                        ),
+                        choices=tuple(mode.value for mode in CoordinateMode),
                     ),
-                    choices=tuple(mode.value for mode in CoordinateMode),
-                ),
-                ParameterSpec(
-                    "left",
-                    "Left",
-                    PortType.FLOAT,
-                    0.0,
-                    help_text="Left edge of the crop box, in the units of the Coordinates setting.",
-                ),
-                ParameterSpec(
-                    "top",
-                    "Top",
-                    PortType.FLOAT,
-                    0.0,
-                    help_text="Top edge of the crop box, in the units of the Coordinates setting.",
-                ),
-                ParameterSpec(
-                    "right",
-                    "Right",
-                    PortType.FLOAT,
-                    1.0,
-                    help_text=(
-                        "Right edge of the crop box, in the units of the Coordinates setting."
+                    ParameterSpec(
+                        "left",
+                        "Left",
+                        PortType.FLOAT,
+                        0.0,
+                        help_text="Left edge of the crop box, in the units of the Coordinates "
+                        "setting.",
+                    ),
+                    ParameterSpec(
+                        "top",
+                        "Top",
+                        PortType.FLOAT,
+                        0.0,
+                        help_text="Top edge of the crop box, in the units of the Coordinates "
+                        "setting.",
+                    ),
+                    ParameterSpec(
+                        "right",
+                        "Right",
+                        PortType.FLOAT,
+                        1.0,
+                        help_text=(
+                            "Right edge of the crop box, in the units of the Coordinates setting."
+                        ),
+                    ),
+                    ParameterSpec(
+                        "bottom",
+                        "Bottom",
+                        PortType.FLOAT,
+                        1.0,
+                        help_text=(
+                            "Bottom edge of the crop box, in the units of the Coordinates setting."
+                        ),
+                    ),
+                    ParameterSpec(
+                        "out_of_bounds",
+                        "Out of bounds",
+                        PortType.STRING,
+                        CropOutOfBounds.CLAMP.value,
+                        help_text=(
+                            "Chooses what happens when the box extends past the image: Clamp cuts "
+                            "it "
+                            "to the image, Pad fills the rest with the pad colour, and Error makes "
+                            "the node fail."
+                        ),
+                        choices=tuple(policy.value for policy in CropOutOfBounds),
+                    ),
+                    ParameterSpec(
+                        "pad_colour",
+                        "Pad colour",
+                        PortType.COLOR,
+                        ColorValue(0.0, 0.0, 0.0, 0.0),
+                        help_text=(
+                            "Colour used to fill the areas outside the image when Out of bounds is "
+                            "Pad."
+                        ),
+                        applicable_input_types=(PortType.IMAGE,),
                     ),
                 ),
-                ParameterSpec(
-                    "bottom",
-                    "Bottom",
-                    PortType.FLOAT,
-                    1.0,
-                    help_text=(
-                        "Bottom edge of the crop box, in the units of the Coordinates setting."
-                    ),
-                ),
-                ParameterSpec(
-                    "out_of_bounds",
-                    "Out of bounds",
-                    PortType.STRING,
-                    CropOutOfBounds.CLAMP.value,
-                    help_text=(
-                        "Chooses what happens when the box extends past the image: Clamp cuts it "
-                        "to the image, Pad fills the rest with the pad colour, and Error makes "
-                        "the node fail."
-                    ),
-                    choices=tuple(policy.value for policy in CropOutOfBounds),
-                ),
-                ParameterSpec(
-                    "pad_colour",
-                    "Pad colour",
-                    PortType.COLOR,
-                    ColorValue(0.0, 0.0, 0.0, 0.0),
-                    help_text=(
-                        "Colour used to fill the areas outside the image when Out of bounds is Pad."
-                    ),
-                    applicable_input_types=(PortType.IMAGE,),
-                ),
+                CropRuntime,
+                parameter_validator=_validate_crop,
+                port_type_resolver=dynamic_image_channel_resolver,
             ),
-            ExecutionKind.STATELESS,
-            CropRuntime,
-            aliases=("trim", "bounds", "roi"),
-            parameter_validator=_validate_crop,
-            parameter_editor_resolver=_crop_parameter_editor,
-            port_type_resolver=dynamic_image_channel_resolver,
+            presentation=NodePresentationIntent(
+                "Crop",
+                "Image / Dimension",
+                "Cuts out a rectangular area of the image.",
+                aliases=("trim", "bounds", "roi"),
+                parameter_editor_resolver=_crop_parameter_editor,
+            ),
         ),
         NodeDefinition(
-            "synmachine.image.flip",
-            1,
-            "Flip",
-            "Image / Utility",
-            "Mirrors the image horizontally, vertically, or both.",
-            image_input,
-            image_output,
-            (
-                ParameterSpec(
-                    "mode",
-                    "Mode",
-                    PortType.STRING,
-                    FlipMode.HORIZONTAL.value,
-                    help_text="Direction the image is flipped in: horizontal, vertical, or both.",
-                    choices=tuple(mode.value for mode in FlipMode),
+            execution=NodeExecutionContract(
+                "synmachine.image.flip",
+                1,
+                ExecutionKind.STATELESS,
+                image_input,
+                image_output,
+                (
+                    ParameterSpec(
+                        "mode",
+                        "Mode",
+                        PortType.STRING,
+                        FlipMode.HORIZONTAL.value,
+                        help_text="Direction the image is flipped in: horizontal, vertical, or "
+                        "both.",
+                        choices=tuple(mode.value for mode in FlipMode),
+                    ),
                 ),
+                FlipRuntime,
+                port_type_resolver=dynamic_image_channel_resolver,
             ),
-            ExecutionKind.STATELESS,
-            FlipRuntime,
-            aliases=("mirror", "reverse"),
-            port_type_resolver=dynamic_image_channel_resolver,
+            presentation=NodePresentationIntent(
+                "Flip",
+                "Image / Utility",
+                "Mirrors the image horizontally, vertically, or both.",
+                aliases=("mirror", "reverse"),
+            ),
         ),
         NodeDefinition(
-            "synmachine.image.rotate",
-            1,
-            "Rotate",
-            "Image / Utility",
-            "Turns the image by an angle around a point you choose.",
-            image_input,
-            image_output,
-            (
-                ParameterSpec(
-                    "angle_degrees",
-                    "Angle (degrees)",
-                    PortType.FLOAT,
-                    0.0,
-                    help_text=(
-                        "Angle the image is rotated by, in degrees; positive values rotate "
-                        "counter-clockwise."
+            execution=NodeExecutionContract(
+                "synmachine.image.rotate",
+                1,
+                ExecutionKind.STATELESS,
+                image_input,
+                image_output,
+                (
+                    ParameterSpec(
+                        "angle_degrees",
+                        "Angle (degrees)",
+                        PortType.FLOAT,
+                        0.0,
+                        help_text=(
+                            "Angle the image is rotated by, in degrees; positive values rotate "
+                            "counter-clockwise."
+                        ),
+                        connectable=True,
+                        connected_port_type=PortType.FLOAT,
                     ),
-                    connectable=True,
-                    connected_port_type=PortType.FLOAT,
-                ),
-                ParameterSpec(
-                    "centre_x",
-                    "Centre X",
-                    PortType.FLOAT,
-                    0.5,
-                    help_text="Rotation centre as a fraction of the image width (0 to 1).",
-                    minimum=0.0,
-                    maximum=1.0,
-                    connectable=True,
-                    connected_port_type=PortType.FLOAT,
-                    editor_hint=ParameterEditorHint.SLIDER,
-                ),
-                ParameterSpec(
-                    "centre_y",
-                    "Centre Y",
-                    PortType.FLOAT,
-                    0.5,
-                    help_text="Rotation centre as a fraction of the image height (0 to 1).",
-                    minimum=0.0,
-                    maximum=1.0,
-                    connectable=True,
-                    connected_port_type=PortType.FLOAT,
-                    editor_hint=ParameterEditorHint.SLIDER,
-                ),
-                ParameterSpec(
-                    "expand_canvas",
-                    "Expand canvas",
-                    PortType.BOOL,
-                    False,
-                    help_text=(
-                        "When on, the output grows so the whole rotated image fits; when off the "
-                        "canvas keeps its size."
+                    ParameterSpec(
+                        "centre_x",
+                        "Centre X",
+                        PortType.FLOAT,
+                        0.5,
+                        help_text="Rotation centre as a fraction of the image width (0 to 1).",
+                        minimum=0.0,
+                        maximum=1.0,
+                        connectable=True,
+                        connected_port_type=PortType.FLOAT,
+                        editor_hint=ParameterEditorHint.SLIDER,
+                    ),
+                    ParameterSpec(
+                        "centre_y",
+                        "Centre Y",
+                        PortType.FLOAT,
+                        0.5,
+                        help_text="Rotation centre as a fraction of the image height (0 to 1).",
+                        minimum=0.0,
+                        maximum=1.0,
+                        connectable=True,
+                        connected_port_type=PortType.FLOAT,
+                        editor_hint=ParameterEditorHint.SLIDER,
+                    ),
+                    ParameterSpec(
+                        "expand_canvas",
+                        "Expand canvas",
+                        PortType.BOOL,
+                        False,
+                        help_text=(
+                            "When on, the output grows so the whole rotated image fits; when off "
+                            "the "
+                            "canvas keeps its size."
+                        ),
+                    ),
+                    ParameterSpec(
+                        "interpolation",
+                        "Interpolation",
+                        PortType.STRING,
+                        Interpolation.AUTO.value,
+                        help_text=(
+                            "Chooses the resampling used when pixels are mixed. Automatic picks "
+                            "the "
+                            "best method for the size change; Nearest keeps hard edges, and Cubic "
+                            "and "
+                            "Lanczos are smoother but slower."
+                        ),
+                        choices=tuple(mode.value for mode in Interpolation),
+                    ),
+                    ParameterSpec(
+                        "border_mode",
+                        "Border mode",
+                        PortType.STRING,
+                        BorderMode.REFLECT_101.value,
+                        help_text=(
+                            "Chooses how pixels outside the image edge are treated: Reflect "
+                            "mirrors "
+                            "the edge, Repeat copies the edge, Constant fills with black, and Wrap "
+                            "continues from the opposite edge."
+                        ),
+                        choices=tuple(mode.value for mode in BorderMode),
+                    ),
+                    ParameterSpec(
+                        "border_colour",
+                        "Border colour",
+                        PortType.COLOR,
+                        ColorValue(0.0, 0.0, 0.0, 0.0),
+                        help_text="Colour painted into the areas outside the original image.",
+                        applicable_input_types=(PortType.IMAGE,),
                     ),
                 ),
-                ParameterSpec(
-                    "interpolation",
-                    "Interpolation",
-                    PortType.STRING,
-                    Interpolation.AUTO.value,
-                    help_text=(
-                        "Chooses the resampling used when pixels are mixed. Automatic picks the "
-                        "best method for the size change; Nearest keeps hard edges, and Cubic and "
-                        "Lanczos are smoother but slower."
-                    ),
-                    choices=tuple(mode.value for mode in Interpolation),
-                ),
-                ParameterSpec(
-                    "border_mode",
-                    "Border mode",
-                    PortType.STRING,
-                    BorderMode.REFLECT_101.value,
-                    help_text=(
-                        "Chooses how pixels outside the image edge are treated: Reflect mirrors "
-                        "the edge, Repeat copies the edge, Constant fills with black, and Wrap "
-                        "continues from the opposite edge."
-                    ),
-                    choices=tuple(mode.value for mode in BorderMode),
-                ),
-                ParameterSpec(
-                    "border_colour",
-                    "Border colour",
-                    PortType.COLOR,
-                    ColorValue(0.0, 0.0, 0.0, 0.0),
-                    help_text="Colour painted into the areas outside the original image.",
-                    applicable_input_types=(PortType.IMAGE,),
-                ),
+                RotateRuntime,
+                port_type_resolver=dynamic_image_channel_resolver,
             ),
-            ExecutionKind.STATELESS,
-            RotateRuntime,
-            aliases=("turn", "angle", "transform"),
-            port_type_resolver=dynamic_image_channel_resolver,
+            presentation=NodePresentationIntent(
+                "Rotate",
+                "Image / Utility",
+                "Turns the image by an angle around a point you choose.",
+                aliases=("turn", "angle", "transform"),
+            ),
         ),
     )
 

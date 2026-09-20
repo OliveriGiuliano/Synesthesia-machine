@@ -287,10 +287,12 @@ class GraphScene(QGraphicsScene):
         # edge in French.
         width, height = layout_node_size(
             self.theme,
-            title=tr(definition.display_name),
-            ordinary_input_count=len(definition.input_ports()),
-            parameter_labels=tuple(parameter.label for parameter in definition.parameters),
-            output_count=len(definition.outputs),
+            title=tr(definition.presentation.display_name),
+            ordinary_input_count=len(definition.execution.input_ports()),
+            parameter_labels=tuple(
+                parameter.label for parameter in definition.execution.parameters
+            ),
+            output_count=len(definition.execution.outputs),
         )
         return self.clamp_position_to_scene(position.x(), position.y(), width, height)
 

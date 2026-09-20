@@ -15,7 +15,7 @@ from tools.validate_graphs import validate_paths
 
 from synesthesia_machine.app.registry import create_application_registry
 from synesthesia_machine.graph import GraphCompiler
-from synesthesia_machine.nodes import migrate_node_data
+from synesthesia_machine.nodes import NodePersistenceDescriptor, migrate_node_data
 from synesthesia_machine.nodes.image.adjustments import (
     migrate_clamp_v1_to_v2,
     migrate_hue_v1_to_v2,
@@ -143,10 +143,11 @@ def test_definition_migrations_apply_multiple_steps_sequentially_and_purely() ->
 
         return migrate
 
+    base = make_definition("test.node")
     definition = replace(
-        make_definition("test.node"),
-        implementation_version=2,
-        migrations={0: step(1), 1: step(2)},
+        base,
+        execution=replace(base.execution, implementation_version=2),
+        persistence=NodePersistenceDescriptor(migrations={0: step(1), 1: step(2)}),
     )
     source: JsonObject = {
         "id": "70000000-0000-0000-0000-000000000020",
@@ -156,7 +157,9 @@ def test_definition_migrations_apply_multiple_steps_sequentially_and_purely() ->
     }
     original = deepcopy(source)
 
-    result = migrate_node_data("test.node", definition.migrations, source, target_version=2)
+    result = migrate_node_data(
+        "test.node", definition.persistence.migrations, source, target_version=2
+    )
 
     assert source == original
     assert tuple((step.from_version, step.to_version) for step in result.steps) == ((0, 1), (1, 2))

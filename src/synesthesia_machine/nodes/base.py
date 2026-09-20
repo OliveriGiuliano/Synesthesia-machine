@@ -7,7 +7,7 @@ import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
-from typing import Protocol, runtime_checkable
+from typing import Protocol, cast, runtime_checkable
 from uuid import UUID
 
 from synesthesia_machine.contracts.engine_client import (
@@ -15,7 +15,6 @@ from synesthesia_machine.contracts.engine_client import (
     MidiOutputStatus,
     NodeMemoryDiagnostic,
     ResetReason,
-    SourceStatus,
 )
 from synesthesia_machine.contracts.engine_client import (
     NodeExecutionError as NodeExecutionError,
@@ -178,14 +177,6 @@ class ParameterSpec:
         if error is not None:
             msg = f"Invalid default for parameter {self.id!r}: {error}"
             raise ValueError(msg)
-        if self.connectable is True and self.connected_port_type is None:
-            if self.value_type in {PortType.FLOAT, PortType.INT}:
-                object.__setattr__(self, "connected_port_type", PortType.FLOAT)
-            elif self.value_type is PortType.BOOL:
-                object.__setattr__(self, "connected_port_type", PortType.BOOL)
-            else:
-                msg = f"Connectable parameter {self.id!r} requires connected_port_type"
-                raise ValueError(msg)
 
     def validate(self, value: object) -> str | None:
         if not _matches_port_type(value, self.value_type):
@@ -206,15 +197,16 @@ class ParameterSpec:
     def sanitize_value(self, value: object) -> ParameterValue:
         """Clamp and snap an authored value to this parameter's declared constraints."""
 
-        if not _matches_port_type(value, self.value_type):
-            raise ValueError(f"expected {self.value_type.value}, got {type(value).__name__}")
-        converted: ParameterValue
+        converted = self._check_literal(value)
         if self.value_type is PortType.FLOAT:
-            if not isinstance(value, float):
-                raise ValueError(f"expected FLOAT, got {type(value).__name__}")
-            numeric = value
-            if not math.isfinite(numeric):
+            # ``_check_literal`` already enforced the type; repeat the check so
+            # the numeric narrowing below is visible to the type checker.
+            if not isinstance(converted, float):
+                msg = f"expected {self.value_type.value}, got {type(converted).__name__}"
+                raise ValueError(msg)
+            if not math.isfinite(converted):
                 raise ValueError("must be finite")
+            numeric = float(converted)
             if self.minimum is not None:
                 numeric = max(numeric, float(self.minimum))
             if self.maximum is not None:
@@ -230,16 +222,17 @@ class ParameterSpec:
                     )
             converted = numeric
         elif self.value_type is PortType.INT:
-            if not isinstance(value, int) or isinstance(value, bool):
-                raise ValueError(f"expected INT, got {type(value).__name__}")
-            numeric_int = value
+            if not isinstance(converted, int) or isinstance(converted, bool):
+                msg = f"expected {self.value_type.value}, got {type(converted).__name__}"
+                raise ValueError(msg)
+            numeric = int(converted)
             if self.minimum is not None:
-                numeric_int = max(numeric_int, int(self.minimum))
+                numeric = max(numeric, int(self.minimum))
             if self.maximum is not None:
-                numeric_int = min(numeric_int, int(self.maximum))
+                numeric = min(numeric, int(self.maximum))
             if self.step is not None:
                 origin = self._step_origin()
-                step_index = math.floor((numeric_int - origin) / self.step + 0.5)
+                step_index = math.floor((numeric - origin) / self.step + 0.5)
                 if self.minimum is not None:
                     step_index = max(
                         step_index,
@@ -250,7 +243,7 @@ class ParameterSpec:
                         step_index,
                         math.floor((int(self.maximum) - origin) / self.step),
                     )
-                numeric_int = origin + step_index * self.step
+                numeric = origin + step_index * self.step
             if self.choices:
                 integer_choices = tuple(
                     choice
@@ -258,49 +251,90 @@ class ParameterSpec:
                     if isinstance(choice, int) and not isinstance(choice, bool)
                 )
                 if integer_choices:
-                    numeric_int = min(
+                    numeric = min(
                         integer_choices,
-                        key=lambda choice: abs(choice - numeric_int),
+                        key=lambda choice: abs(choice - numeric),
                     )
-            converted = numeric_int
-        else:
-            converted = _as_parameter_value(value)
+            converted = numeric
         error = self.validate(converted)
         if error is not None:
             raise ValueError(error)
-        return _as_parameter_value(converted)
+        return converted
 
     def _step_origin(self) -> int:
         return int(self.minimum) if self.minimum is not None else 0
 
+    def _check_literal(self, value: object) -> ParameterValue:
+        """Strict type gate for authored and default values.
+
+        This is the single type check of the value ladder: ``validate``
+        reports on the same predicate (``_matches_port_type``), and both
+        ``sanitize_value`` and ``connected_value`` pass through it before
+        applying constraints, so whatever the ladder produces is what
+        ``validate`` accepts — asserted once by the ladder consistency
+        test rather than re-derived at each call site.
+        """
+
+        if self.value_type is PortType.FLOAT and isinstance(value, float):
+            return value
+        if (
+            self.value_type is PortType.INT
+            and isinstance(value, int)
+            and not isinstance(value, bool)
+        ):
+            return value
+        if self.value_type is PortType.BOOL and isinstance(value, bool):
+            return value
+        if self.value_type is PortType.STRING and isinstance(value, str):
+            return value
+        if self.value_type is PortType.COLOR and isinstance(value, ColorValue):
+            return value
+        if self.value_type is PortType.MATRIX and isinstance(value, NumericMatrix):
+            return value
+        msg = f"expected {self.value_type.value}, got {type(value).__name__}"
+        raise ValueError(msg)
+
     def connected_value(self, value: object) -> float | int | bool:
         """Coerce and bound a live socket value to this parameter's literal contract."""
 
-        converted: float | int | bool
-        if self.value_type is PortType.FLOAT:
-            if not isinstance(value, (int, float)) or isinstance(value, bool):
-                raise ValueError(f"expected numeric scalar, got {type(value).__name__}")
-            converted = float(value)
-            if not math.isfinite(converted):
-                raise ValueError("expected a finite numeric scalar")
-        elif self.value_type is PortType.INT:
-            if not isinstance(value, (int, float)) or isinstance(value, bool):
-                raise ValueError(f"expected numeric scalar, got {type(value).__name__}")
-            numeric = float(value)
-            if not math.isfinite(numeric):
-                raise ValueError("expected a finite numeric scalar")
-            converted = round(numeric)
-        elif self.value_type is PortType.BOOL:
-            if not isinstance(value, bool):
-                raise ValueError(f"expected BOOL, got {type(value).__name__}")
-            converted = value
-        else:
-            raise ValueError(f"{self.value_type.value} parameters do not accept live scalar input")
+        converted = self._check_live_scalar(value)
+        # ``_check_live_scalar`` emits scalars only, and ``sanitize_value`` maps
+        # scalars to scalars, so the ladder cannot widen the value's type.
+        return cast("float | int | bool", self.sanitize_value(converted))
 
-        sanitized = self.sanitize_value(converted)
-        if isinstance(sanitized, (float, int, bool)):
-            return sanitized
-        raise TypeError("Connected scalar sanitization produced a non-scalar value")
+    def _check_live_scalar(self, value: object) -> float | int | bool:
+        """Coerce a live socket value to this parameter's declared scalar type.
+
+        Numeric parameter cables intentionally share one modulation type:
+        int values convert to float, and float values round to int, which
+        lets every numeric scalar output drive every numeric control without
+        littering graphs with conversion nodes.
+        """
+
+        if self.value_type is PortType.FLOAT:
+            if isinstance(value, float):
+                return value
+            if isinstance(value, int) and not isinstance(value, bool):
+                return float(value)
+            msg = f"expected numeric scalar, got {type(value).__name__}"
+            raise ValueError(msg)
+        if self.value_type is PortType.INT:
+            if isinstance(value, int) and not isinstance(value, bool):
+                return value
+            if isinstance(value, float):
+                if not math.isfinite(value):
+                    msg = "expected a finite numeric scalar"
+                    raise ValueError(msg)
+                return round(value)
+            msg = f"expected numeric scalar, got {type(value).__name__}"
+            raise ValueError(msg)
+        if self.value_type is PortType.BOOL:
+            if isinstance(value, bool):
+                return value
+            msg = f"expected BOOL, got {type(value).__name__}"
+            raise ValueError(msg)
+        msg = f"{self.value_type.value} parameters do not accept live scalar input"
+        raise ValueError(msg)
 
 
 @dataclass(frozen=True, slots=True)
@@ -463,8 +497,24 @@ type RuntimeFactory = Callable[[UUID], NodeRuntime]
 type PortTypeResolver = Callable[[str, bool, Mapping[str, ParameterValue]], PortTypeExpression]
 type RequiredInputResolver = Callable[[Mapping[str, ParameterValue]], Sequence[str]]
 type ParameterValidator = Callable[[Mapping[str, ParameterValue]], Sequence[str]]
+
+
+@dataclass(frozen=True, slots=True)
+class SourceEditorFacts:
+    """Source-published facts the editor resolver may use.
+
+    A narrow projection of the engine's published ``SourceStatus``, built by
+    the editor: node metadata is headless and must not name the engine's
+    device-status record, so resolvers receive only the two facts they can
+    act on (nodes README dependency rule).
+    """
+
+    file_path: str | None = None
+    duration_s: float | None = None
+
+
 type ParameterEditorResolver = Callable[
-    [ParameterSpec, Mapping[str, ParameterValue], SourceStatus | None], ParameterSpec
+    [ParameterSpec, Mapping[str, ParameterValue], SourceEditorFacts | None], ParameterSpec
 ]
 
 
@@ -497,32 +547,36 @@ type SourceConfigBuilder = Callable[[Mapping[str, object]], object]
 
 
 @dataclass(frozen=True, slots=True)
-class NodeDefinition:
+class NodeExecutionContract:
+    """Everything the compiler, scheduler, and engine read from a node.
+
+    Compiled plans carry this record rather than the full definition, so
+    presentation intent and persistence material never reach the engine's
+    working set. Both processes build contracts from their own registries;
+    the record itself never crosses the process boundary.
+
+    ``parameters`` holds the socket-resolved specs: construction runs the
+    one normalization pass that settles ``connectable`` and
+    ``connected_port_type`` from the node's execution kind and cache policy,
+    so the specs an author writes are normalized copies, not the stored
+    objects.
+    """
+
     type_id: str
     implementation_version: int
-    display_name: str
-    category: str
-    description: str
+    execution_kind: ExecutionKind
     inputs: tuple[InputPortSpec, ...]
     outputs: tuple[OutputPortSpec, ...]
     parameters: tuple[ParameterSpec, ...]
-    execution_kind: ExecutionKind
     runtime_factory: RuntimeFactory
+    variadic_input: VariadicInputSpec | None = None
     cache_policy: CachePolicy = CachePolicy.AUTO
-    realtime_safe: bool = True
     handles_no_data: bool = False
     port_type_resolver: PortTypeResolver | None = None
     required_input_resolver: RequiredInputResolver | None = None
-    aliases: tuple[str, ...] = ()
     parameter_validator: ParameterValidator | None = None
-    parameter_editor_resolver: ParameterEditorResolver | None = None
-    variadic_input: VariadicInputSpec | None = None
-    parameter_groups: tuple[ParameterGroupSpec, ...] = ()
-    migrations: Mapping[int, NodeMigration] = field(default_factory=dict[int, NodeMigration])
-    media_parameter_id: str | None = None
     source_outputs: SourceOutputContract | None = None
     source_config_builder: SourceConfigBuilder | None = None
-    preview_dock: PreviewDock | None = None
 
     def __post_init__(self) -> None:
         if not _TYPE_ID.fullmatch(self.type_id):
@@ -531,6 +585,9 @@ class NodeDefinition:
         if self.implementation_version < 1:
             msg = "implementation_version must be at least 1"
             raise ValueError(msg)
+        # One normalization pass over the authored specs: this is the only
+        # place the record rewrites its inputs, so the authored-vs-stored
+        # difference is a single documented policy, not scattered rewrites.
         object.__setattr__(
             self,
             "parameters",
@@ -542,21 +599,12 @@ class NodeDefinition:
         _ensure_unique((port.id for port in self.inputs), "input port")
         _ensure_unique((port.id for port in self.outputs), "output port")
         _ensure_unique((parameter.id for parameter in self.parameters), "parameter")
-        _ensure_unique((group.id for group in self.parameter_groups), "parameter group")
-        fixed_input_ids = {port.id for port in self.inputs}
-        parameter_ids = {parameter.id for parameter in self.parameters}
-        overlapping_inputs = fixed_input_ids & parameter_ids
+        overlapping_inputs = {port.id for port in self.inputs} & {
+            parameter.id for parameter in self.parameters
+        }
         if overlapping_inputs:
             names = ", ".join(sorted(overlapping_inputs))
             raise ValueError(f"Input ports and parameters share stable IDs: {names}")
-        grouped_parameter_ids = tuple(
-            parameter_id for group in self.parameter_groups for parameter_id in group.parameter_ids
-        )
-        _ensure_unique(grouped_parameter_ids, "grouped parameter")
-        unknown_grouped = set(grouped_parameter_ids) - parameter_ids
-        if unknown_grouped:
-            names = ", ".join(sorted(unknown_grouped))
-            raise ValueError(f"Parameter groups reference unknown parameters: {names}")
         if self.variadic_input is not None:
             if any(self.variadic_input.index(port.id) is not None for port in self.inputs):
                 raise ValueError("Fixed input IDs must not overlap the variadic input family")
@@ -564,10 +612,6 @@ class NodeDefinition:
                 self.variadic_input.index(parameter.id) is not None for parameter in self.parameters
             ):
                 raise ValueError("Parameter IDs must not overlap the variadic input family")
-        if any(not alias.strip() for alias in self.aliases):
-            msg = "Node aliases must not be empty"
-            raise ValueError(msg)
-        _ensure_unique((alias.casefold() for alias in self.aliases), "node alias")
         if self.source_outputs is not None:
             if self.execution_kind is not ExecutionKind.SOURCE:
                 msg = f"Non-source node {self.type_id!r} must not declare a source output contract"
@@ -588,18 +632,6 @@ class NodeDefinition:
         ):
             msg = f"Non-source node {self.type_id!r} must not declare a source config builder"
             raise ValueError(msg)
-        if self.media_parameter_id is not None:
-            parameter = self.parameter(self.media_parameter_id)
-            if parameter is None:
-                msg = (
-                    f"Media reference parameter {self.media_parameter_id!r} "
-                    f"of {self.type_id!r} is not declared in its parameters"
-                )
-                raise ValueError(msg)
-            if parameter.value_type is not PortType.STRING:
-                msg = f"Media reference parameter {self.media_parameter_id!r} must be a string"
-                raise ValueError(msg)
-        _check_migration_chain(self.type_id, self.implementation_version, self.migrations)
 
     def input(self, port_id: str) -> InputPortSpec | None:
         fixed = next((port for port in self.inputs if port.id == port_id), None)
@@ -693,6 +725,98 @@ class NodeDefinition:
         return frozenset(required)
 
 
+@dataclass(frozen=True, slots=True)
+class NodePersistenceDescriptor:
+    """The part of a node definition the persistence stack reads.
+
+    The per-version payload steps and the parameter that carries a media
+    reference. ``implementation_version`` lives on the execution contract —
+    it is the record that declares what a payload version is, and the
+    compiler and the migration walker both read it.
+    """
+
+    migrations: Mapping[int, NodeMigration] = field(default_factory=dict[int, NodeMigration])
+    media_parameter_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class NodePresentationIntent:
+    """The part of a node definition the editor reads.
+
+    Display copy, library-search aliases, preview-dock routing, parameter
+    grouping, and the editor resolver that adjusts parameter specs using
+    published source facts. Only the editor runs the resolver, and it
+    receives ``SourceEditorFacts`` — a narrow projection the editor builds
+    from the engine's published status — never the engine status record
+    itself, so node metadata stays headless.
+    """
+
+    display_name: str
+    category: str
+    description: str
+    aliases: tuple[str, ...] = ()
+    preview_dock: PreviewDock | None = None
+    parameter_groups: tuple[ParameterGroupSpec, ...] = ()
+    parameter_editor_resolver: ParameterEditorResolver | None = None
+
+    def __post_init__(self) -> None:
+        if any(not alias.strip() for alias in self.aliases):
+            msg = "Node aliases must not be empty"
+            raise ValueError(msg)
+        _ensure_unique((alias.casefold() for alias in self.aliases), "node alias")
+
+
+@dataclass(frozen=True, slots=True)
+class NodeDefinition:
+    """The record a node author writes; what the registry stores.
+
+    The authoring surface is split along the consumers' projections:
+    ``execution`` (compiler, scheduler, engine), ``presentation`` (editor),
+    ``persistence`` (graph I/O). A node kind omits what it does not use —
+    a scalar transform has no persistence descriptor, a source carries all
+    three. ``__post_init__`` checks the invariants that span records:
+    parameter groups reference declared parameters, the media-reference
+    parameter is a declared STRING parameter, and the migration chain
+    reaches the contract's implementation version.
+    """
+
+    execution: NodeExecutionContract
+    presentation: NodePresentationIntent
+    persistence: NodePersistenceDescriptor | None = None
+
+    def __post_init__(self) -> None:
+        parameter_ids = {parameter.id for parameter in self.execution.parameters}
+        grouped_parameter_ids = tuple(
+            parameter_id
+            for group in self.presentation.parameter_groups
+            for parameter_id in group.parameter_ids
+        )
+        _ensure_unique(grouped_parameter_ids, "grouped parameter")
+        unknown_grouped = set(grouped_parameter_ids) - parameter_ids
+        if unknown_grouped:
+            names = ", ".join(sorted(unknown_grouped))
+            raise ValueError(f"Parameter groups reference unknown parameters: {names}")
+        persistence = self.persistence
+        if persistence is not None and persistence.media_parameter_id is not None:
+            parameter = self.execution.parameter(persistence.media_parameter_id)
+            if parameter is None:
+                msg = (
+                    f"Media reference parameter {persistence.media_parameter_id!r} "
+                    f"of {self.execution.type_id!r} is not declared in its parameters"
+                )
+                raise ValueError(msg)
+            if parameter.value_type is not PortType.STRING:
+                msg = (
+                    f"Media reference parameter {persistence.media_parameter_id!r} must be a string"
+                )
+                raise ValueError(msg)
+        _check_migration_chain(
+            self.execution.type_id,
+            self.execution.implementation_version,
+            persistence.migrations if persistence is not None else {},
+        )
+
+
 class ExpectedNodeError(Exception):
     """Recoverable node failure that should produce structured ``NoData`` output."""
 
@@ -774,6 +898,13 @@ def _resolve_parameter_socket(
             connected_port_type = PortType.FLOAT
         elif parameter.value_type is PortType.BOOL:
             connected_port_type = PortType.BOOL
+        elif parameter.connected_port_type is None:
+            # Non-scalar connectable parameters must declare the socket type
+            # explicitly; the derivation above cannot invent one. This rule
+            # moved from ParameterSpec validation to the contract's
+            # normalization pass, which is the only place specs are rewritten.
+            msg = f"Connectable parameter {parameter.id!r} requires connected_port_type"
+            raise ValueError(msg)
     else:
         connected_port_type = None
     return replace(

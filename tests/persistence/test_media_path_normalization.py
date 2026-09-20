@@ -47,8 +47,8 @@ def test_saved_graph_persists_relative_media_paths_in_posix_form(tmp_path: Path)
     document = GraphDocument()
     definition = registry.require(LOAD_VIDEO_TYPE_ID)
     node_id = document.add_node(
-        definition.type_id,
-        implementation_version=definition.implementation_version,
+        definition.execution.type_id,
+        implementation_version=definition.execution.implementation_version,
         parameters={"file_path": "media/reference.mp4", "loop": False},
     )
     media = tmp_path / "media"
@@ -80,8 +80,8 @@ def test_windows_saved_document_resolves_on_posix_host(tmp_path: Path) -> None:
     document = GraphDocument()
     definition = registry.require(LOAD_VIDEO_TYPE_ID)
     document.add_node(
-        definition.type_id,
-        implementation_version=definition.implementation_version,
+        definition.execution.type_id,
+        implementation_version=definition.execution.implementation_version,
         parameters={"file_path": "media\\reference.mp4", "loop": False},
     )
     graph_path = tmp_path / "graph.synmachine.json"

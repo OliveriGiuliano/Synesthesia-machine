@@ -22,6 +22,8 @@ from synesthesia_machine.nodes import (
     ExpectedNodeError,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePresentationIntent,
     OutputPortSpec,
     ParameterSpec,
     StatelessRuntime,
@@ -119,113 +121,123 @@ def _validate_normalize_parameters(parameters: Mapping[str, ParameterValue]) -> 
 def create_transform_definitions() -> tuple[NodeDefinition, ...]:
     return (
         NodeDefinition(
-            "synmachine.utility.normalize",
-            1,
-            "Normalize",
-            "Utility / Transform",
-            "Scales a value into a range you choose (by default 0 to 1).",
-            (InputPortSpec("value", "Value", T),),
-            (OutputPortSpec("value", "Normalized", T),),
-            (
-                ParameterSpec(
-                    "mode",
-                    "Range",
-                    PortType.STRING,
-                    "DATA_RANGE",
-                    help_text=(
-                        "Data range reads the smallest and largest values present in the input; "
-                        "Explicit uses the input minimum and maximum below."
+            execution=NodeExecutionContract(
+                "synmachine.utility.normalize",
+                1,
+                ExecutionKind.STATELESS,
+                (InputPortSpec("value", "Value", T),),
+                (OutputPortSpec("value", "Normalized", T),),
+                (
+                    ParameterSpec(
+                        "mode",
+                        "Range",
+                        PortType.STRING,
+                        "DATA_RANGE",
+                        help_text=(
+                            "Data range reads the smallest and largest values present in the "
+                            "input; "
+                            "Explicit uses the input minimum and maximum below."
+                        ),
+                        choices=("DATA_RANGE", "EXPLICIT"),
                     ),
-                    choices=("DATA_RANGE", "EXPLICIT"),
+                    ParameterSpec(
+                        "input_minimum",
+                        "Input minimum",
+                        PortType.FLOAT,
+                        0.0,
+                        help_text="Lowest input value when the range is explicit.",
+                    ),
+                    ParameterSpec(
+                        "input_maximum",
+                        "Input maximum",
+                        PortType.FLOAT,
+                        1.0,
+                        help_text="Highest input value when the range is explicit.",
+                    ),
+                    ParameterSpec(
+                        "output_minimum",
+                        "Output minimum",
+                        PortType.FLOAT,
+                        0.0,
+                        help_text="Lowest value the node outputs.",
+                    ),
+                    ParameterSpec(
+                        "output_maximum",
+                        "Output maximum",
+                        PortType.FLOAT,
+                        1.0,
+                        help_text="Highest value the node outputs.",
+                    ),
                 ),
-                ParameterSpec(
-                    "input_minimum",
-                    "Input minimum",
-                    PortType.FLOAT,
-                    0.0,
-                    help_text="Lowest input value when the range is explicit.",
-                ),
-                ParameterSpec(
-                    "input_maximum",
-                    "Input maximum",
-                    PortType.FLOAT,
-                    1.0,
-                    help_text="Highest input value when the range is explicit.",
-                ),
-                ParameterSpec(
-                    "output_minimum",
-                    "Output minimum",
-                    PortType.FLOAT,
-                    0.0,
-                    help_text="Lowest value the node outputs.",
-                ),
-                ParameterSpec(
-                    "output_maximum",
-                    "Output maximum",
-                    PortType.FLOAT,
-                    1.0,
-                    help_text="Highest value the node outputs.",
-                ),
+                NormalizeRuntime,
+                parameter_validator=_validate_normalize_parameters,
             ),
-            ExecutionKind.STATELESS,
-            NormalizeRuntime,
-            aliases=("normalize range", "unit range", "scale values"),
-            parameter_validator=_validate_normalize_parameters,
+            presentation=NodePresentationIntent(
+                "Normalize",
+                "Utility / Transform",
+                "Scales a value into a range you choose (by default 0 to 1).",
+                aliases=("normalize range", "unit range", "scale values"),
+            ),
         ),
         NodeDefinition(
-            "synmachine.utility.curve",
-            1,
-            "Curve",
-            "Utility / Transform",
-            "Bends a value along a curve, so equal changes in the input give bigger or smaller "
-            "changes in the output.",
-            (InputPortSpec("value", "Value", T),),
-            (OutputPortSpec("value", "Curved", T),),
-            (
-                ParameterSpec(
-                    "curve",
-                    "Curve",
-                    PortType.STRING,
-                    "POWER",
-                    help_text=(
-                        "Chooses the curve shape applied to the value: Power, Sigmoid, "
-                        "Smoothstep, or Exponential."
+            execution=NodeExecutionContract(
+                "synmachine.utility.curve",
+                1,
+                ExecutionKind.STATELESS,
+                (InputPortSpec("value", "Value", T),),
+                (OutputPortSpec("value", "Curved", T),),
+                (
+                    ParameterSpec(
+                        "curve",
+                        "Curve",
+                        PortType.STRING,
+                        "POWER",
+                        help_text=(
+                            "Chooses the curve shape applied to the value: Power, Sigmoid, "
+                            "Smoothstep, or Exponential."
+                        ),
+                        choices=("POWER", "SIGMOID", "SMOOTHSTEP", "EXPONENTIAL"),
                     ),
-                    choices=("POWER", "SIGMOID", "SMOOTHSTEP", "EXPONENTIAL"),
-                ),
-                ParameterSpec(
-                    "exponent",
-                    "Exponent",
-                    PortType.FLOAT,
-                    1.0,
-                    help_text=(
-                        "Used by the Power curve: raises the absolute value to this power, "
-                        "keeping the sign."
+                    ParameterSpec(
+                        "exponent",
+                        "Exponent",
+                        PortType.FLOAT,
+                        1.0,
+                        help_text=(
+                            "Used by the Power curve: raises the absolute value to this power, "
+                            "keeping the sign."
+                        ),
+                        minimum=1e-12,
                     ),
-                    minimum=1e-12,
-                ),
-                ParameterSpec(
-                    "gain",
-                    "Gain",
-                    PortType.FLOAT,
-                    4.0,
-                    help_text=(
-                        "Steepness of the Sigmoid and Exponential curves; higher values make the "
-                        "bend sharper."
+                    ParameterSpec(
+                        "gain",
+                        "Gain",
+                        PortType.FLOAT,
+                        4.0,
+                        help_text=(
+                            "Steepness of the Sigmoid and Exponential curves; higher values make "
+                            "the "
+                            "bend sharper."
+                        ),
+                        minimum=1e-12,
                     ),
-                    minimum=1e-12,
+                    ParameterSpec(
+                        "midpoint",
+                        "Midpoint",
+                        PortType.FLOAT,
+                        0.5,
+                        help_text="Centre of the Sigmoid curve; the input value that maps to 0.5.",
+                    ),
                 ),
-                ParameterSpec(
-                    "midpoint",
-                    "Midpoint",
-                    PortType.FLOAT,
-                    0.5,
-                    help_text="Centre of the Sigmoid curve; the input value that maps to 0.5.",
-                ),
+                CurveRuntime,
             ),
-            ExecutionKind.STATELESS,
-            CurveRuntime,
-            aliases=("response curve", "power curve", "sigmoid", "smoothstep"),
+            presentation=NodePresentationIntent(
+                "Curve",
+                "Utility / Transform",
+                "Bends a value along a curve, so equal changes in the input give bigger or smaller "
+                "changes in the output.",
+                aliases=("response curve", "power curve", "sigmoid", "smoothstep"),
+            ),
         ),
     )
 

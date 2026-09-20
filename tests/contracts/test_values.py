@@ -45,7 +45,7 @@ def test_node_definition_rejects_input_parameter_id_collisions() -> None:
 
     with pytest.raises(ValueError, match="share stable IDs: value"):
         replace(
-            definition,
+            definition.execution,
             parameters=(ParameterSpec("value", "Value", PortType.FLOAT, 0.0),),
         )
 
@@ -80,13 +80,13 @@ def test_node_definition_accepts_contiguous_migration_runs() -> None:
         implementation_version=2,
         migrations={0: _migration_step, 1: _migration_step},
     )
-    assert set(legacy.migrations) == {0, 1}
+    assert set(legacy.persistence.migrations) == {0, 1}
     single = make_definition(
         "test.chain_single",
         implementation_version=2,
         migrations={1: _migration_step},
     )
-    assert set(single.migrations) == {1}
+    assert set(single.persistence.migrations) == {1}
 
 
 def test_builtin_definitions_admit_their_migration_chains() -> None:

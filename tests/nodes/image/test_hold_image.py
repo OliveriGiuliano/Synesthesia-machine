@@ -89,15 +89,17 @@ def _scheduler(
     node_ids: tuple[UUID, ...] = (HOLD_ID,),
     node_clock_id: UUID | None = SOURCE_ID,
 ) -> Scheduler:
-    definition = next(d for d in create_temporal_definitions() if d.type_id == HOLD_IMAGE_TYPE_ID)
-    parameters, errors = definition.parameter_values(
+    definition = next(
+        d for d in create_temporal_definitions() if d.execution.type_id == HOLD_IMAGE_TYPE_ID
+    )
+    parameters, errors = definition.execution.parameter_values(
         {"delay_frames": delay_frames, "memory_limit_mb": memory_limit_mb}
     )
     assert not errors
     nodes = tuple(
         CompiledNode(
             node_id,
-            definition,
+            definition.execution,
             parameters=parameters,
             input_bindings={"image": InputBinding(PortKey(SOURCE_ID, "image"))},
             input_types={"image": PortType.IMAGE},
@@ -147,14 +149,18 @@ def _facade_tick(facade: EngineFacade, image: ImageFrame):
 
 
 def test_hold_image_metadata_is_exact_and_registered_last() -> None:
-    definition = next(d for d in create_temporal_definitions() if d.type_id == HOLD_IMAGE_TYPE_ID)
-    parameters = definition.parameters
+    definition = next(
+        d for d in create_temporal_definitions() if d.execution.type_id == HOLD_IMAGE_TYPE_ID
+    )
+    parameters = definition.execution.parameters
 
-    assert definition.type_id == HOLD_IMAGE_TYPE_ID
-    assert definition.display_name == "Hold Image"
-    assert definition.execution_kind is ExecutionKind.STATEFUL
-    assert [(port.id, port.value_type) for port in definition.inputs] == [("image", PortType.IMAGE)]
-    assert [(port.id, port.value_type) for port in definition.outputs] == [
+    assert definition.execution.type_id == HOLD_IMAGE_TYPE_ID
+    assert definition.presentation.display_name == "Hold Image"
+    assert definition.execution.execution_kind is ExecutionKind.STATEFUL
+    assert [(port.id, port.value_type) for port in definition.execution.inputs] == [
+        ("image", PortType.IMAGE)
+    ]
+    assert [(port.id, port.value_type) for port in definition.execution.outputs] == [
         ("image", PortType.IMAGE)
     ]
     assert [parameter.id for parameter in parameters] == ["delay_frames", "memory_limit_mb"]
@@ -165,10 +171,10 @@ def test_hold_image_metadata_is_exact_and_registered_last() -> None:
         (256, 1, 4096),
     ]
     assert all(parameter.update_mode is ParameterUpdateMode.RECOMPILE for parameter in parameters)
-    assert create_image_definitions()[-1].type_id == HOLD_IMAGE_TYPE_ID
+    assert create_image_definitions()[-1].execution.type_id == HOLD_IMAGE_TYPE_ID
     registry = create_application_registry()
     assert len(registry.definitions()) >= 51
-    assert registry.require(HOLD_IMAGE_TYPE_ID).type_id == HOLD_IMAGE_TYPE_ID
+    assert registry.require(HOLD_IMAGE_TYPE_ID).execution.type_id == HOLD_IMAGE_TYPE_ID
 
 
 @pytest.mark.parametrize("delay_frames", [1, 3])

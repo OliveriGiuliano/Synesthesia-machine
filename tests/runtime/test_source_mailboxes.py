@@ -32,6 +32,8 @@ from synesthesia_machine.nodes import (
     ExecutionKind,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePresentationIntent,
     ResetReason,
 )
 from synesthesia_machine.nodes.input import create_input_definitions
@@ -213,17 +215,21 @@ class _ResettableVideoFactory:
 
 def _slow_sink_definition(factory: _BlockingSinkFactory) -> NodeDefinition:
     return NodeDefinition(
-        "test.runtime.slow_image_sink",
-        1,
-        "Slow image sink",
-        "Test",
-        "Deliberately blocks graph execution to exercise source backpressure.",
-        (InputPortSpec("image", "Image", PortType.IMAGE),),
-        (),
-        (),
-        ExecutionKind.SINK,
-        factory,
-        cache_policy=CachePolicy.NEVER,
+        execution=NodeExecutionContract(
+            type_id="test.runtime.slow_image_sink",
+            implementation_version=1,
+            outputs=(),
+            parameters=(),
+            inputs=(InputPortSpec("image", "Image", PortType.IMAGE),),
+            execution_kind=ExecutionKind.SINK,
+            runtime_factory=factory,
+            cache_policy=CachePolicy.NEVER,
+        ),
+        presentation=NodePresentationIntent(
+            display_name="Slow image sink",
+            category="Test",
+            description="Deliberately blocks graph execution to exercise source backpressure.",
+        ),
     )
 
 

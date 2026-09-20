@@ -280,14 +280,14 @@ def test_channel_shape_and_clock_must_match() -> None:
 
 def test_definition_exposes_exact_ports_and_approved_defaults() -> None:
     definition = create_synesthesia_definitions()[0]
-    assert definition.type_id == CHANNEL_TO_PITCH_TYPE_ID
-    assert tuple(port.id for port in definition.inputs) == (
+    assert definition.execution.type_id == CHANNEL_TO_PITCH_TYPE_ID
+    assert tuple(port.id for port in definition.execution.inputs) == (
         "value",
         "parameter_a",
         "parameter_b",
     )
-    assert definition.output("midi") is not None
-    parameters, errors = definition.parameter_values({})
+    assert definition.execution.output("midi") is not None
+    parameters, errors = definition.execution.parameter_values({})
     assert errors == []
     assert parameters["root_pitch_class"] == "C"
     assert parameters["scale"] == "chromatic"

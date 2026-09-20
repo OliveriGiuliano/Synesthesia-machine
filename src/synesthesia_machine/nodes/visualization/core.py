@@ -18,6 +18,9 @@ from synesthesia_machine.nodes.base import (
     ExecutionKind,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePersistenceDescriptor,
+    NodePresentationIntent,
     ParameterSpec,
     PreviewDock,
     StatelessRuntime,
@@ -67,117 +70,136 @@ def create_visualization_definitions() -> tuple[NodeDefinition, ...]:
 
     return (
         NodeDefinition(
-            DISPLAY_IMAGE_DATA_TYPE_ID,
-            2,
-            "Display Image Data",
-            "Visualization",
-            "Shows an image as a preview on your screen.",
-            (InputPortSpec("image", "Image", PortType.IMAGE),),
-            (),
-            (
-                ParameterSpec(
-                    "fit_mode",
-                    "Fit mode",
-                    PortType.STRING,
-                    FitMode.CONTAIN.value,
-                    help_text=(
-                        "Chooses how the picture fits the panel: Stretch fills it exactly, "
-                        "Contain fits it inside with letterboxing, and Cover fills it and crops "
-                        "the overflow."
+            execution=NodeExecutionContract(
+                DISPLAY_IMAGE_DATA_TYPE_ID,
+                2,
+                ExecutionKind.VISUALIZER,
+                (InputPortSpec("image", "Image", PortType.IMAGE),),
+                (),
+                (
+                    ParameterSpec(
+                        "fit_mode",
+                        "Fit mode",
+                        PortType.STRING,
+                        FitMode.CONTAIN.value,
+                        help_text=(
+                            "Chooses how the picture fits the panel: Stretch fills it exactly, "
+                            "Contain fits it inside with letterboxing, and Cover fills it and "
+                            "crops "
+                            "the overflow."
+                        ),
+                        choices=tuple(mode.value for mode in FitMode),
                     ),
-                    choices=tuple(mode.value for mode in FitMode),
+                    ParameterSpec(
+                        "checkerboard_alpha",
+                        "Checkerboard alpha",
+                        PortType.BOOL,
+                        True,
+                        help_text="Draws a checkerboard behind transparent areas of the image.",
+                    ),
+                    ParameterSpec(
+                        "value_display_mode",
+                        "Value display",
+                        PortType.STRING,
+                        "DISPLAY_TRANSFORM",
+                        help_text="Chooses how the image values are converted to colours for "
+                        "display.",
+                        choices=("DISPLAY_TRANSFORM",),
+                    ),
+                    ParameterSpec(
+                        "show_histogram",
+                        "Show histogram",
+                        PortType.BOOL,
+                        False,
+                        help_text="Shows a histogram of the image values below the picture.",
+                    ),
                 ),
-                ParameterSpec(
-                    "checkerboard_alpha",
-                    "Checkerboard alpha",
-                    PortType.BOOL,
-                    True,
-                    help_text="Draws a checkerboard behind transparent areas of the image.",
-                ),
-                ParameterSpec(
-                    "value_display_mode",
-                    "Value display",
-                    PortType.STRING,
-                    "DISPLAY_TRANSFORM",
-                    help_text="Chooses how the image values are converted to colours for display.",
-                    choices=("DISPLAY_TRANSFORM",),
-                ),
-                ParameterSpec(
-                    "show_histogram",
-                    "Show histogram",
-                    PortType.BOOL,
-                    False,
-                    help_text="Shows a histogram of the image values below the picture.",
-                ),
+                _VisualizerRuntime,
+                cache_policy=CachePolicy.NEVER,
             ),
-            ExecutionKind.VISUALIZER,
-            _VisualizerRuntime,
-            cache_policy=CachePolicy.NEVER,
-            preview_dock=PreviewDock.IMAGE,
-            aliases=("image preview", "view image", "monitor image"),
-            migrations={1: migrate_display_image_data_v1_to_v2},
+            presentation=NodePresentationIntent(
+                "Display Image Data",
+                "Visualization",
+                "Shows an image as a preview on your screen.",
+                preview_dock=PreviewDock.IMAGE,
+                aliases=("image preview", "view image", "monitor image"),
+            ),
+            persistence=NodePersistenceDescriptor(
+                migrations={1: migrate_display_image_data_v1_to_v2},
+            ),
         ),
         NodeDefinition(
-            CHANNEL_DISPLAY_TYPE_ID,
-            2,
-            "Channel Display",
-            "Visualization",
-            "Shows a channel as a preview on your screen.",
-            (InputPortSpec("channel", "Channel", PortType.CHANNEL),),
-            (),
-            (
-                ParameterSpec(
-                    "fit_mode",
-                    "Fit mode",
-                    PortType.STRING,
-                    FitMode.CONTAIN.value,
-                    help_text=(
-                        "Chooses how the picture fits the panel: Stretch fills it exactly, "
-                        "Contain fits it inside with letterboxing, and Cover fills it and crops "
-                        "the overflow."
+            execution=NodeExecutionContract(
+                CHANNEL_DISPLAY_TYPE_ID,
+                2,
+                ExecutionKind.VISUALIZER,
+                (InputPortSpec("channel", "Channel", PortType.CHANNEL),),
+                (),
+                (
+                    ParameterSpec(
+                        "fit_mode",
+                        "Fit mode",
+                        PortType.STRING,
+                        FitMode.CONTAIN.value,
+                        help_text=(
+                            "Chooses how the picture fits the panel: Stretch fills it exactly, "
+                            "Contain fits it inside with letterboxing, and Cover fills it and "
+                            "crops "
+                            "the overflow."
+                        ),
+                        choices=tuple(mode.value for mode in FitMode),
                     ),
-                    choices=tuple(mode.value for mode in FitMode),
-                ),
-                ParameterSpec(
-                    "value_display_mode",
-                    "Value display",
-                    PortType.STRING,
-                    "NOMINAL_RANGE",
-                    help_text=(
-                        "Chooses how the channel values are converted to colours; only the "
-                        "nominal range mode is available."
+                    ParameterSpec(
+                        "value_display_mode",
+                        "Value display",
+                        PortType.STRING,
+                        "NOMINAL_RANGE",
+                        help_text=(
+                            "Chooses how the channel values are converted to colours; only the "
+                            "nominal range mode is available."
+                        ),
+                        choices=("NOMINAL_RANGE",),
                     ),
-                    choices=("NOMINAL_RANGE",),
+                    ParameterSpec(
+                        "show_histogram",
+                        "Show histogram",
+                        PortType.BOOL,
+                        False,
+                        help_text="Shows a histogram of the channel values below the picture.",
+                    ),
                 ),
-                ParameterSpec(
-                    "show_histogram",
-                    "Show histogram",
-                    PortType.BOOL,
-                    False,
-                    help_text="Shows a histogram of the channel values below the picture.",
-                ),
+                _VisualizerRuntime,
+                cache_policy=CachePolicy.NEVER,
             ),
-            ExecutionKind.VISUALIZER,
-            _VisualizerRuntime,
-            cache_policy=CachePolicy.NEVER,
-            preview_dock=PreviewDock.IMAGE,
-            aliases=("channel preview", "view channel", "monitor channel"),
-            migrations={1: migrate_channel_display_v1_to_v2},
+            presentation=NodePresentationIntent(
+                "Channel Display",
+                "Visualization",
+                "Shows a channel as a preview on your screen.",
+                preview_dock=PreviewDock.IMAGE,
+                aliases=("channel preview", "view channel", "monitor channel"),
+            ),
+            persistence=NodePersistenceDescriptor(
+                migrations={1: migrate_channel_display_v1_to_v2},
+            ),
         ),
         NodeDefinition(
-            NOTE_VISUALIZER_TYPE_ID,
-            1,
-            "Note Visualizer",
-            "Visualization",
-            "Shows the notes the graph is playing right now.",
-            (InputPortSpec("midi", "MIDI State", PortType.MIDI_STATE),),
-            (),
-            (),
-            ExecutionKind.VISUALIZER,
-            _VisualizerRuntime,
-            cache_policy=CachePolicy.NEVER,
-            preview_dock=PreviewDock.NOTE,
-            aliases=("midi preview", "piano", "notes"),
+            execution=NodeExecutionContract(
+                NOTE_VISUALIZER_TYPE_ID,
+                1,
+                ExecutionKind.VISUALIZER,
+                (InputPortSpec("midi", "MIDI State", PortType.MIDI_STATE),),
+                (),
+                (),
+                _VisualizerRuntime,
+                cache_policy=CachePolicy.NEVER,
+            ),
+            presentation=NodePresentationIntent(
+                "Note Visualizer",
+                "Visualization",
+                "Shows the notes the graph is playing right now.",
+                preview_dock=PreviewDock.NOTE,
+                aliases=("midi preview", "piano", "notes"),
+            ),
         ),
     )
 

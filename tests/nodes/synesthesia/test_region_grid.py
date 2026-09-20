@@ -87,7 +87,7 @@ def _settings(
 
 
 def _parameters(**overrides: object) -> Mapping[str, ParameterValue]:
-    values, errors = create_region_grid_definitions()[0].parameter_values(
+    values, errors = create_region_grid_definitions()[0].execution.parameter_values(
         {"midi_minimum": 60, "midi_maximum": 63, **overrides}
     )
     assert not errors
@@ -193,23 +193,26 @@ def test_invalid_region_measurement_requests_are_rejected(
 
 def test_definition_and_registry_expose_region_grid_as_stateless_synesthesia() -> None:
     definition = create_region_grid_definitions()[0]
-    assert definition.type_id == REGION_GRID_TYPE_ID
-    assert definition.execution_kind is ExecutionKind.STATELESS
-    assert definition.category == "Synesthesia"
-    assert tuple(port.id for port in definition.inputs) == ("image",)
-    assert tuple(port.value_type for port in definition.outputs) == (PortType.MIDI_STATE,)
-    assert definition.parameter("metric").choices == REGION_METRICS  # type: ignore[union-attr]
-    assert definition.parameter("activation_threshold").editor_hint is ParameterEditorHint.SLIDER  # type: ignore[union-attr]
-    assert definition.parameter_groups[0].id == "musical"
-    assert "grid of cells" in definition.description.casefold()
+    assert definition.execution.type_id == REGION_GRID_TYPE_ID
+    assert definition.execution.execution_kind is ExecutionKind.STATELESS
+    assert definition.presentation.category == "Synesthesia"
+    assert tuple(port.id for port in definition.execution.inputs) == ("image",)
+    assert tuple(port.value_type for port in definition.execution.outputs) == (PortType.MIDI_STATE,)
+    assert definition.execution.parameter("metric").choices == REGION_METRICS  # type: ignore[union-attr]
+    assert (
+        definition.execution.parameter("activation_threshold").editor_hint
+        is ParameterEditorHint.SLIDER
+    )  # type: ignore[union-attr]
+    assert definition.presentation.parameter_groups[0].id == "musical"
+    assert "grid of cells" in definition.presentation.description.casefold()
 
     registry = create_application_registry()
     assert len(registry.definitions()) == 64
-    assert registry.require(REGION_GRID_TYPE_ID).type_id == REGION_GRID_TYPE_ID
+    assert registry.require(REGION_GRID_TYPE_ID).execution.type_id == REGION_GRID_TYPE_ID
 
 
 def test_parameter_validation_reports_non_finite_threshold() -> None:
-    _, errors = create_region_grid_definitions()[0].parameter_values(
+    _, errors = create_region_grid_definitions()[0].execution.parameter_values(
         {"activation_threshold": float("nan")}
     )
     assert any("finite" in error for error in errors)

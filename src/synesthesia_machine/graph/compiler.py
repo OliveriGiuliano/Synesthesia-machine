@@ -389,16 +389,17 @@ class GraphCompiler:
                 )
                 continue
             definitions[node_id] = definition
-            if node.implementation_version != definition.implementation_version:
+            if node.implementation_version != definition.execution.implementation_version:
                 issues.append(
                     _error(
                         "node_version_mismatch",
                         f"Node {node.type_id!r} requires implementation version "
-                        f"{definition.implementation_version}, got {node.implementation_version}",
+                        f"{definition.execution.implementation_version}, "
+                        f"got {node.implementation_version}",
                         node_id,
                     )
                 )
-            values, errors = definition.parameter_values(node.parameters)
+            values, errors = definition.execution.parameter_values(node.parameters)
             parameter_values[node_id] = values
             for message in errors:
                 issues.append(_error("invalid_parameter", message, node_id))
@@ -440,7 +441,7 @@ class GraphCompiler:
             destination_definition = definitions.get(connection.destination_node_id)
             if source_definition is None or destination_definition is None:
                 continue
-            if source_definition.output(connection.source_port_id) is None:
+            if source_definition.execution.output(connection.source_port_id) is None:
                 issues.append(
                     _error(
                         "unknown_output_port",
@@ -451,8 +452,12 @@ class GraphCompiler:
                     )
                 )
                 continue
-            destination_parameter = destination_definition.parameter(connection.destination_port_id)
-            if destination_definition.input(connection.destination_port_id) is None and not (
+            destination_parameter = destination_definition.execution.parameter(
+                connection.destination_port_id
+            )
+            if destination_definition.execution.input(
+                connection.destination_port_id
+            ) is None and not (
                 destination_parameter is not None and destination_parameter.connectable
             ):
                 issues.append(
@@ -503,11 +508,13 @@ class GraphCompiler:
             connected_inputs[connection.destination_node_id].add(connection.destination_port_id)
         for node_id, definition in definitions.items():
             node_parameters = parameters.get(node_id, {})
-            base_ids = {port.id for port in definition.input_ports(connected_inputs[node_id])}
-            for port in definition.input_ports(
+            base_ids = {
+                port.id for port in definition.execution.input_ports(connected_inputs[node_id])
+            }
+            for port in definition.execution.input_ports(
                 connected_inputs[node_id], include_next_variadic=True
             ):
-                expression = definition.port_type(
+                expression = definition.execution.port_type(
                     port.id, is_output=False, parameters=node_parameters
                 )
                 expressions[(node_id, port.id, False)] = expression
@@ -515,12 +522,12 @@ class GraphCompiler:
                     next_only.add((node_id, port.id, False))
                 if isinstance(expression, (TypeVariable, ArrayTypeVariable)):
                     groups.add((node_id, expression.name), expression.allowed_types)
-            for parameter in definition.parameters:
+            for parameter in definition.execution.parameters:
                 if not parameter.connectable or parameter.connected_port_type is None:
                     continue
                 expressions[(node_id, parameter.id, False)] = parameter.connected_port_type
-            for port in definition.outputs:
-                expression = definition.port_type(
+            for port in definition.execution.outputs:
+                expression = definition.execution.port_type(
                     port.id, is_output=True, parameters=node_parameters
                 )
                 expressions[(node_id, port.id, True)] = expression
@@ -644,8 +651,10 @@ class GraphCompiler:
             connected[connection.destination_node_id].add(connection.destination_port_id)
         for node_id, definition in definitions.items():
             node_ports = connected.get(node_id, set())
-            for port_id in sorted(definition.required_inputs(parameters.get(node_id, {}))):
-                family = definition.variadic_input
+            for port_id in sorted(
+                definition.execution.required_inputs(parameters.get(node_id, {}))
+            ):
+                family = definition.execution.variadic_input
                 if family is not None and port_id == family.id_prefix:
                     # Family-level requirement: any minimum_count of the
                     # family's sockets satisfy it, so a freed lower-index
@@ -688,7 +697,7 @@ class GraphCompiler:
             definition = definitions.get(node_id)
             if definition is None:
                 continue
-            if definition.execution_kind is ExecutionKind.SOURCE:
+            if definition.execution.execution_kind is ExecutionKind.SOURCE:
                 clocks[node_id] = node_id
                 continue
             incoming_clocks = {
@@ -727,7 +736,7 @@ class GraphCompiler:
         explicit = {
             node_id
             for node_id, definition in definitions.items()
-            if definition.execution_kind in {ExecutionKind.SINK, ExecutionKind.VISUALIZER}
+            if definition.execution.execution_kind in {ExecutionKind.SINK, ExecutionKind.VISUALIZER}
         }
         if explicit:
             return frozenset(explicit)
@@ -790,12 +799,12 @@ class GraphCompiler:
         }
         output_types = {
             port.id: _settled_type(resolved_types, (node.id, port.id, True))
-            for port in definition.outputs
+            for port in definition.execution.outputs
         }
-        is_static = clock_id is None and definition.cache_policy is not CachePolicy.NEVER
+        is_static = clock_id is None and definition.execution.cache_policy is not CachePolicy.NEVER
         return CompiledNode(
             node_id=node.id,
-            definition=definition,
+            definition=definition.execution,
             parameters=parameters,
             input_bindings=bindings,
             input_types=input_types,
@@ -825,8 +834,8 @@ def _input_socket_ids(
     definition: NodeDefinition, connected_port_ids: Iterable[str] = ()
 ) -> tuple[str, ...]:
     return (
-        *(port.id for port in definition.input_ports(connected_port_ids)),
-        *(parameter.id for parameter in definition.parameters if parameter.connectable),
+        *(port.id for port in definition.execution.input_ports(connected_port_ids)),
+        *(parameter.id for parameter in definition.execution.parameters if parameter.connectable),
     )
 
 

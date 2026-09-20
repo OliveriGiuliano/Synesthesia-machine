@@ -113,7 +113,7 @@ def _wait(service: MidiOutputService) -> None:
 def _parameters(
     definition: NodeDefinition, overrides: Mapping[str, object] | None = None
 ) -> dict[str, ParameterValue]:
-    parameters, errors = definition.parameter_values(overrides or {})
+    parameters, errors = definition.execution.parameter_values(overrides or {})
     assert errors == []
     return parameters
 
@@ -142,18 +142,18 @@ def test_send_midi_definition_is_demand_root_with_safe_defaults() -> None:
     definition = create_midi_output_definitions()[0]
     parameters = _parameters(definition)
 
-    assert definition.type_id == SEND_MIDI_TYPE_ID
-    assert definition.execution_kind is ExecutionKind.SINK
-    assert definition.cache_policy is CachePolicy.NEVER
-    assert definition.handles_no_data
+    assert definition.execution.type_id == SEND_MIDI_TYPE_ID
+    assert definition.execution.execution_kind is ExecutionKind.SINK
+    assert definition.execution.cache_policy is CachePolicy.NEVER
+    assert definition.execution.handles_no_data
     assert parameters == {
         "output_port": "",
         "velocity_update_policy": "Ignore while held",
         "velocity_change_threshold": 4,
     }
-    output_port = definition.parameter("output_port")
-    velocity_policy = definition.parameter("velocity_update_policy")
-    velocity_threshold = definition.parameter("velocity_change_threshold")
+    output_port = definition.execution.parameter("output_port")
+    velocity_policy = definition.execution.parameter("velocity_update_policy")
+    velocity_threshold = definition.execution.parameter("velocity_change_threshold")
     assert output_port is not None
     assert velocity_policy is not None
     assert velocity_threshold is not None
@@ -1043,7 +1043,7 @@ class _RecordingService:
 def test_runtime_no_data_status_reset_and_close_lifecycle() -> None:
     service = _RecordingService()
     definition = create_midi_output_definitions(service_factory=lambda: service)[0]
-    runtime = definition.runtime_factory(MIDI_ID)
+    runtime = definition.execution.runtime_factory(MIDI_ID)
     parameters = _parameters(definition, {"output_port": TARGET})
     midi = _frame({(0, 60): 100})
 
@@ -1070,7 +1070,7 @@ def test_runtime_no_data_panics_with_the_ticks_publish_generation_latched() -> N
     # absence's first missing tick, never one per tick.
     service = _RecordingService()
     definition = create_midi_output_definitions(service_factory=lambda: service)[0]
-    runtime = definition.runtime_factory(MIDI_ID)
+    runtime = definition.execution.runtime_factory(MIDI_ID)
     parameters = _parameters(definition, {"output_port": TARGET})
 
     first = _frame({(0, 60): 100}, tick_index=1, publish_generation=1)

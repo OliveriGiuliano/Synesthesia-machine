@@ -458,15 +458,15 @@ def _node_from_data(value: object, registry: NodeRegistry, index: int) -> NodeMo
         f"{path}.implementation_version",
         minimum=0,
     )
-    if version < definition.implementation_version:
+    if version < definition.execution.implementation_version:
         try:
             data = cast(
                 "dict[str, object]",
                 migrate_node_data(
                     type_id,
-                    definition.migrations,
+                    definition.persistence.migrations if definition.persistence is not None else {},
                     cast("JsonObject", data),
-                    target_version=definition.implementation_version,
+                    target_version=definition.execution.implementation_version,
                 ).data,
             )
         except ValueError as error:
@@ -489,11 +489,11 @@ def _node_from_data(value: object, registry: NodeRegistry, index: int) -> NodeMo
     version = _expect_int(
         data["implementation_version"], f"{path}.implementation_version", minimum=1
     )
-    if version != definition.implementation_version:
+    if version != definition.execution.implementation_version:
         raise GraphPersistenceError(
             "unsupported_node_version",
             f"{type_id!r} version {version} is not supported; expected "
-            f"{definition.implementation_version}",
+            f"{definition.execution.implementation_version}",
             path,
         )
     position = _expect_pair(data["position"], f"{path}.position")

@@ -134,13 +134,13 @@ def _many_image_target_plan(count: int) -> ExecutionPlan:
     port_ids = tuple(f"image_{index}" for index in range(count))
     producer = CompiledNode(
         SOURCE_ID,
-        registry.require("synmachine.input.load_video"),
+        registry.require("synmachine.input.load_video").execution,
         output_types={port_id: PortType.IMAGE for port_id in port_ids},
     )
     consumers = tuple(
         CompiledNode(
             UUID(int=0x700 + index),
-            registry.require(DISPLAY_IMAGE_DATA_TYPE_ID),
+            registry.require(DISPLAY_IMAGE_DATA_TYPE_ID).execution,
             input_bindings={"image": InputBinding(PortKey(SOURCE_ID, port_id))},
             input_types={"image": PortType.IMAGE},
         )
@@ -159,9 +159,11 @@ def test_visualizer_definitions_are_permanent_demand_roots_with_stable_defaults(
     image = registry.require(DISPLAY_IMAGE_DATA_TYPE_ID)
     notes = registry.require(NOTE_VISUALIZER_TYPE_ID)
 
-    assert image.execution_kind is notes.execution_kind is ExecutionKind.VISUALIZER
-    assert image.cache_policy is notes.cache_policy is CachePolicy.NEVER
-    values, errors = image.parameter_values({})
+    assert (
+        image.execution.execution_kind is notes.execution.execution_kind is ExecutionKind.VISUALIZER
+    )
+    assert image.execution.cache_policy is notes.execution.cache_policy is CachePolicy.NEVER
+    values, errors = image.execution.parameter_values({})
     assert not errors
     assert values["fit_mode"] == "CONTAIN"
     assert values["checkerboard_alpha"] is True

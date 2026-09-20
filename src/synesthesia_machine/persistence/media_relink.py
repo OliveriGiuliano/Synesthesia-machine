@@ -23,9 +23,10 @@ _FINGERPRINT_BLOCK_SIZE = 1024 * 1024
 # persistence resolves them from the declarations instead of special-casing
 # one node type and parameter name.
 _MEDIA_PARAMETER_IDS: Mapping[str, str] = {
-    definition.type_id: parameter_id
+    definition.execution.type_id: parameter_id
     for definition in create_input_definitions()
-    if (parameter_id := definition.media_parameter_id) is not None
+    if definition.persistence is not None
+    and (parameter_id := definition.persistence.media_parameter_id) is not None
 }
 
 

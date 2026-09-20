@@ -25,6 +25,8 @@ from synesthesia_machine.nodes import (
     ExecutionKind,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePresentationIntent,
     OutputPortSpec,
     ParameterEditorHint,
     ParameterSpec,
@@ -218,76 +220,82 @@ def _cell_measurements(
 def create_region_grid_definitions() -> tuple[NodeDefinition, ...]:
     return (
         NodeDefinition(
-            REGION_GRID_TYPE_ID,
-            1,
-            "Region Grid to Notes",
-            "Synesthesia",
-            (
+            execution=NodeExecutionContract(
+                REGION_GRID_TYPE_ID,
+                1,
+                ExecutionKind.STATELESS,
+                (InputPortSpec("image", "Image", PortType.IMAGE),),
+                (OutputPortSpec("midi", "MIDI state", PortType.MIDI_STATE),),
+                (
+                    *common_musical_parameter_specs(),
+                    ParameterSpec(
+                        "metric",
+                        "Region metric",
+                        PortType.STRING,
+                        BRIGHTNESS,
+                        help_text=(
+                            "Selects what is measured inside every grid cell. Brightness uses "
+                            "linear-light luminance; Contrast uses normalized RMS variation; "
+                            "Saturation and Value use HSV; Red, Green, and Blue use sRGB channels."
+                        ),
+                        choices=REGION_METRICS,
+                    ),
+                    ParameterSpec(
+                        "grid_rows",
+                        "Grid rows",
+                        PortType.INT,
+                        4,
+                        help_text=(
+                            "Sets how many horizontal bands divide the image; each band becomes "
+                            "one "
+                            "row of cells."
+                        ),
+                        minimum=1,
+                        maximum=64,
+                    ),
+                    ParameterSpec(
+                        "grid_columns",
+                        "Grid columns",
+                        PortType.INT,
+                        4,
+                        help_text=(
+                            "Sets how many vertical bands divide the image; each band becomes one "
+                            "column of cells."
+                        ),
+                        minimum=1,
+                        maximum=64,
+                    ),
+                    ParameterSpec(
+                        "activation_threshold",
+                        "Activation threshold",
+                        PortType.FLOAT,
+                        0.5,
+                        help_text=(
+                            "Cells at or below this normalized measurement stay silent. Above it, "
+                            "velocity rises from the minimum to the maximum velocity as the "
+                            "measured "
+                            "value approaches 1."
+                        ),
+                        minimum=0.0,
+                        maximum=1.0,
+                        editor_hint=ParameterEditorHint.SLIDER,
+                    ),
+                ),
+                RegionGridRuntime,
+                parameter_validator=_validate_parameters,
+            ),
+            presentation=NodePresentationIntent(
+                "Region Grid to Notes",
+                "Synesthesia",
                 "Splits the picture into a grid of cells and lets each cell play its own note. "
-                "You choose what to measure in each cell (brightness, contrast, colour strength, "
-                "...). A cell plays only when the measurement passes your threshold, and stronger "
-                "measurements play louder."
+                "You choose what to measure in each cell (brightness, contrast, colour "
+                "strength, "
+                "...). A cell plays only when the measurement passes your threshold, and "
+                "stronger "
+                "measurements play louder.",
+                aliases=("image grid notes", "spatial regions", "grid threshold sequencer"),
+                parameter_groups=(COMMON_MUSICAL_PARAMETER_GROUP,),
             ),
-            (InputPortSpec("image", "Image", PortType.IMAGE),),
-            (OutputPortSpec("midi", "MIDI state", PortType.MIDI_STATE),),
-            (
-                *common_musical_parameter_specs(),
-                ParameterSpec(
-                    "metric",
-                    "Region metric",
-                    PortType.STRING,
-                    BRIGHTNESS,
-                    help_text=(
-                        "Selects what is measured inside every grid cell. Brightness uses "
-                        "linear-light luminance; Contrast uses normalized RMS variation; "
-                        "Saturation and Value use HSV; Red, Green, and Blue use sRGB channels."
-                    ),
-                    choices=REGION_METRICS,
-                ),
-                ParameterSpec(
-                    "grid_rows",
-                    "Grid rows",
-                    PortType.INT,
-                    4,
-                    help_text=(
-                        "Sets how many horizontal bands divide the image; each band becomes one "
-                        "row of cells."
-                    ),
-                    minimum=1,
-                    maximum=64,
-                ),
-                ParameterSpec(
-                    "grid_columns",
-                    "Grid columns",
-                    PortType.INT,
-                    4,
-                    help_text=(
-                        "Sets how many vertical bands divide the image; each band becomes one "
-                        "column of cells."
-                    ),
-                    minimum=1,
-                    maximum=64,
-                ),
-                ParameterSpec(
-                    "activation_threshold",
-                    "Activation threshold",
-                    PortType.FLOAT,
-                    0.5,
-                    help_text=(
-                        "Cells at or below this normalized measurement stay silent. Above it, "
-                        "velocity rises from the minimum to the maximum velocity as the measured "
-                        "value approaches 1."
-                    ),
-                    minimum=0.0,
-                    maximum=1.0,
-                    editor_hint=ParameterEditorHint.SLIDER,
-                ),
-            ),
-            ExecutionKind.STATELESS,
-            RegionGridRuntime,
-            aliases=("image grid notes", "spatial regions", "grid threshold sequencer"),
-            parameter_validator=_validate_parameters,
-            parameter_groups=(COMMON_MUSICAL_PARAMETER_GROUP,),
         ),
     )
 

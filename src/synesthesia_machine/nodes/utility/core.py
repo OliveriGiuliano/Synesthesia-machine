@@ -20,6 +20,9 @@ from synesthesia_machine.nodes.base import (
     ExpectedNodeError,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePersistenceDescriptor,
+    NodePresentationIntent,
     OutputPortSpec,
     ParameterSpec,
     StatelessRuntime,
@@ -210,186 +213,217 @@ def create_utility_registry() -> NodeRegistry:
     """Return a registry containing the stable scalar utility catalogue."""
     definitions = (
         NodeDefinition(
-            "synmachine.utility.number",
-            1,
-            "Number",
-            "Utility",
-            "A fixed number that never changes.",
-            (),
-            (OutputPortSpec("value", "Value", PortType.FLOAT),),
-            (
-                ParameterSpec(
-                    "number_type",
-                    "Type",
-                    PortType.STRING,
-                    "FLOAT",
-                    help_text=("Chooses the type of number this node outputs: Float or Integer."),
-                    choices=("FLOAT", "INT"),
-                ),
-                ParameterSpec(
-                    "float_value",
-                    "Float value",
-                    PortType.FLOAT,
-                    0.0,
-                    help_text="The float value this node outputs; used when the type is Float.",
-                ),
-                ParameterSpec(
-                    "int_value",
-                    "Integer value",
-                    PortType.INT,
-                    0,
-                    help_text="The integer value this node outputs; used when the type is Integer.",
-                ),
-            ),
-            ExecutionKind.STATELESS,
-            NumberRuntime,
-            cache_policy=CachePolicy.STATIC,
-            port_type_resolver=_number_port_type,
-            aliases=("constant", "literal", "scalar"),
-            migrations={0: migrate_number_v0_to_v1},
-        ),
-        NodeDefinition(
-            "synmachine.utility.pass_through",
-            1,
-            "Pass Through",
-            "Utility",
-            "Passes the value through to the next node, unchanged.",
-            (InputPortSpec("value", "Value", T),),
-            (OutputPortSpec("value", "Value", T),),
-            (),
-            ExecutionKind.STATELESS,
-            PassThroughRuntime,
-            aliases=("identity", "passthrough", "relay"),
-        ),
-        NodeDefinition(
-            "synmachine.utility.conditional",
-            1,
-            "Conditional",
-            "Utility",
-            "Picks one of several values based on a condition, like an if/else.",
-            (
-                InputPortSpec("condition", "Condition", PortType.BOOL),
-                InputPortSpec("if_true", "If true", T),
-                InputPortSpec("if_false", "If false", T),
-            ),
-            (OutputPortSpec("value", "Value", T),),
-            (),
-            ExecutionKind.STATELESS,
-            ConditionalRuntime,
-            aliases=("if", "select", "switch"),
-        ),
-        NodeDefinition(
-            "synmachine.utility.compare",
-            1,
-            "Compare",
-            "Utility",
-            "Compares two numbers: is one bigger, smaller, equal to, or close to the other?",
-            (InputPortSpec("a", "A", PortType.FLOAT), InputPortSpec("b", "B", PortType.FLOAT)),
-            (OutputPortSpec("value", "Value", PortType.BOOL),),
-            (
-                ParameterSpec(
-                    "operation",
-                    "Operation",
-                    PortType.STRING,
-                    "EQ",
-                    help_text="Chooses the comparison applied to the two connected values.",
-                    choices=("EQ", "NE", "LT", "LE", "GT", "GE", "APPROX"),
-                ),
-                ParameterSpec(
-                    "absolute_tolerance",
-                    "Absolute tolerance",
-                    PortType.FLOAT,
-                    1e-9,
-                    help_text=(
-                        "Tolerance used by the Approx comparison: two values match if they differ "
-                        "by no more than this amount."
+            execution=NodeExecutionContract(
+                "synmachine.utility.number",
+                1,
+                ExecutionKind.STATELESS,
+                (),
+                (OutputPortSpec("value", "Value", PortType.FLOAT),),
+                (
+                    ParameterSpec(
+                        "number_type",
+                        "Type",
+                        PortType.STRING,
+                        "FLOAT",
+                        help_text=(
+                            "Chooses the type of number this node outputs: Float or Integer."
+                        ),
+                        choices=("FLOAT", "INT"),
                     ),
-                    minimum=0.0,
-                ),
-                ParameterSpec(
-                    "relative_tolerance",
-                    "Relative tolerance",
-                    PortType.FLOAT,
-                    1e-9,
-                    help_text=(
-                        "Tolerance used by the Approx comparison: two values match if they differ "
-                        "by no more than this fraction of the other value."
+                    ParameterSpec(
+                        "float_value",
+                        "Float value",
+                        PortType.FLOAT,
+                        0.0,
+                        help_text="The float value this node outputs; used when the type is Float.",
                     ),
-                    minimum=0.0,
+                    ParameterSpec(
+                        "int_value",
+                        "Integer value",
+                        PortType.INT,
+                        0,
+                        help_text="The integer value this node outputs; used when the type is "
+                        "Integer.",
+                    ),
                 ),
+                NumberRuntime,
+                cache_policy=CachePolicy.STATIC,
+                port_type_resolver=_number_port_type,
             ),
-            ExecutionKind.STATELESS,
-            CompareRuntime,
-            aliases=("comparison", "equals", "relational"),
+            presentation=NodePresentationIntent(
+                "Number",
+                "Utility",
+                "A fixed number that never changes.",
+                aliases=("constant", "literal", "scalar"),
+            ),
+            persistence=NodePersistenceDescriptor(
+                migrations={0: migrate_number_v0_to_v1},
+            ),
         ),
         NodeDefinition(
-            "synmachine.utility.logic",
-            1,
-            "Logic Operation",
-            "Utility",
-            "Combines true/false values with AND, OR, XOR, NAND, NOR, or XNOR.",
-            (InputPortSpec("a", "A", PortType.BOOL), InputPortSpec("b", "B", PortType.BOOL)),
-            (OutputPortSpec("value", "Value", PortType.BOOL),),
-            (
-                ParameterSpec(
-                    "operation",
-                    "Operation",
-                    PortType.STRING,
-                    "AND",
-                    help_text=(
-                        "Chooses the logic operation applied to the connected values, treating "
-                        "nonzero as true."
-                    ),
-                    choices=("AND", "OR", "XOR", "NAND", "NOR", "XNOR"),
-                ),
+            execution=NodeExecutionContract(
+                "synmachine.utility.pass_through",
+                1,
+                ExecutionKind.STATELESS,
+                (InputPortSpec("value", "Value", T),),
+                (OutputPortSpec("value", "Value", T),),
+                (),
+                PassThroughRuntime,
             ),
-            ExecutionKind.STATELESS,
-            LogicRuntime,
-            aliases=("boolean", "and", "or", "xor"),
+            presentation=NodePresentationIntent(
+                "Pass Through",
+                "Utility",
+                "Passes the value through to the next node, unchanged.",
+                aliases=("identity", "passthrough", "relay"),
+            ),
         ),
         NodeDefinition(
-            "synmachine.utility.math",
-            1,
-            "Math",
-            "Utility",
-            "Does arithmetic on numbers: add, subtract, multiply, divide, and many other "
-            "operations, from powers to rounding and trigonometry.",
-            (
-                InputPortSpec("a", "A", PortType.FLOAT),
-                InputPortSpec("b", "B", PortType.FLOAT, required=False),
+            execution=NodeExecutionContract(
+                "synmachine.utility.conditional",
+                1,
+                ExecutionKind.STATELESS,
+                (
+                    InputPortSpec("condition", "Condition", PortType.BOOL),
+                    InputPortSpec("if_true", "If true", T),
+                    InputPortSpec("if_false", "If false", T),
+                ),
+                (OutputPortSpec("value", "Value", T),),
+                (),
+                ConditionalRuntime,
             ),
-            (OutputPortSpec("value", "Value", PortType.FLOAT),),
-            (
-                ParameterSpec(
-                    "operation",
-                    "Operation",
-                    PortType.STRING,
-                    "ADD",
-                    help_text="Chooses the calculation applied to the connected values.",
-                    choices=(
+            presentation=NodePresentationIntent(
+                "Conditional",
+                "Utility",
+                "Picks one of several values based on a condition, like an if/else.",
+                aliases=("if", "select", "switch"),
+            ),
+        ),
+        NodeDefinition(
+            execution=NodeExecutionContract(
+                "synmachine.utility.compare",
+                1,
+                ExecutionKind.STATELESS,
+                (InputPortSpec("a", "A", PortType.FLOAT), InputPortSpec("b", "B", PortType.FLOAT)),
+                (OutputPortSpec("value", "Value", PortType.BOOL),),
+                (
+                    ParameterSpec(
+                        "operation",
+                        "Operation",
+                        PortType.STRING,
+                        "EQ",
+                        help_text="Chooses the comparison applied to the two connected values.",
+                        choices=("EQ", "NE", "LT", "LE", "GT", "GE", "APPROX"),
+                    ),
+                    ParameterSpec(
+                        "absolute_tolerance",
+                        "Absolute tolerance",
+                        PortType.FLOAT,
+                        1e-9,
+                        help_text=(
+                            "Tolerance used by the Approx comparison: two values match if they "
+                            "differ "
+                            "by no more than this amount."
+                        ),
+                        minimum=0.0,
+                    ),
+                    ParameterSpec(
+                        "relative_tolerance",
+                        "Relative tolerance",
+                        PortType.FLOAT,
+                        1e-9,
+                        help_text=(
+                            "Tolerance used by the Approx comparison: two values match if they "
+                            "differ "
+                            "by no more than this fraction of the other value."
+                        ),
+                        minimum=0.0,
+                    ),
+                ),
+                CompareRuntime,
+            ),
+            presentation=NodePresentationIntent(
+                "Compare",
+                "Utility",
+                "Compares two numbers: is one bigger, smaller, equal to, or close to the other?",
+                aliases=("comparison", "equals", "relational"),
+            ),
+        ),
+        NodeDefinition(
+            execution=NodeExecutionContract(
+                "synmachine.utility.logic",
+                1,
+                ExecutionKind.STATELESS,
+                (InputPortSpec("a", "A", PortType.BOOL), InputPortSpec("b", "B", PortType.BOOL)),
+                (OutputPortSpec("value", "Value", PortType.BOOL),),
+                (
+                    ParameterSpec(
+                        "operation",
+                        "Operation",
+                        PortType.STRING,
+                        "AND",
+                        help_text=(
+                            "Chooses the logic operation applied to the connected values, treating "
+                            "nonzero as true."
+                        ),
+                        choices=("AND", "OR", "XOR", "NAND", "NOR", "XNOR"),
+                    ),
+                ),
+                LogicRuntime,
+            ),
+            presentation=NodePresentationIntent(
+                "Logic Operation",
+                "Utility",
+                "Combines true/false values with AND, OR, XOR, NAND, NOR, or XNOR.",
+                aliases=("boolean", "and", "or", "xor"),
+            ),
+        ),
+        NodeDefinition(
+            execution=NodeExecutionContract(
+                "synmachine.utility.math",
+                1,
+                ExecutionKind.STATELESS,
+                (
+                    InputPortSpec("a", "A", PortType.FLOAT),
+                    InputPortSpec("b", "B", PortType.FLOAT, required=False),
+                ),
+                (OutputPortSpec("value", "Value", PortType.FLOAT),),
+                (
+                    ParameterSpec(
+                        "operation",
+                        "Operation",
+                        PortType.STRING,
                         "ADD",
-                        "SUBTRACT",
-                        "MULTIPLY",
-                        "DIVIDE",
-                        "MODULO",
-                        "POWER",
-                        "MINIMUM",
-                        "MAXIMUM",
-                        "ABS",
-                        "NEGATE",
-                        "FLOOR",
-                        "CEIL",
-                        "ROUND",
-                        "SIN",
-                        "COS",
-                        "TAN",
+                        help_text="Chooses the calculation applied to the connected values.",
+                        choices=(
+                            "ADD",
+                            "SUBTRACT",
+                            "MULTIPLY",
+                            "DIVIDE",
+                            "MODULO",
+                            "POWER",
+                            "MINIMUM",
+                            "MAXIMUM",
+                            "ABS",
+                            "NEGATE",
+                            "FLOOR",
+                            "CEIL",
+                            "ROUND",
+                            "SIN",
+                            "COS",
+                            "TAN",
+                        ),
                     ),
                 ),
+                MathRuntime,
+                required_input_resolver=_math_required,
             ),
-            ExecutionKind.STATELESS,
-            MathRuntime,
-            required_input_resolver=_math_required,
-            aliases=("arithmetic", "calculator", "add", "subtract", "multiply", "divide"),
+            presentation=NodePresentationIntent(
+                "Math",
+                "Utility",
+                "Does arithmetic on numbers: add, subtract, multiply, divide, and many other "
+                "operations, from powers to rounding and trigonometry.",
+                aliases=("arithmetic", "calculator", "add", "subtract", "multiply", "divide"),
+            ),
         ),
         *create_midi_utility_definitions(),
         *create_scalar_bridge_definitions(),

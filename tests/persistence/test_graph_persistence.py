@@ -197,7 +197,10 @@ def test_atomic_save_load_and_backup(tmp_path: Path) -> None:
     save_graph(path, document.snapshot())
 
     assert path.with_name(f"{path.name}.bak").read_text(encoding="utf-8") == first_content
-    assert load_graph(path, create_utility_registry()).nodes[0].parameters["float_value"] == 9.0
+    assert (
+        load_graph(path, create_utility_registry()).nodes[0].parameters["float_value"]
+        == 9.0
+    )
 
 
 def test_graph_json_and_file_reads_are_bounded_before_parsing(

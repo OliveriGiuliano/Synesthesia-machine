@@ -63,18 +63,21 @@ COMPATIBILITY_CATALOGUE_PATH = Path(
 
 def test_image_catalogue_has_exact_stable_order_and_unique_type_ids() -> None:
     definitions = create_image_definitions()
-    type_ids = tuple(definition.type_id for definition in definitions)
+    type_ids = tuple(definition.execution.type_id for definition in definitions)
 
     assert type_ids == EXPECTED_IMAGE_TYPE_IDS
     assert len(type_ids) == len(set(type_ids)) == 35
-    assert tuple(definition.type_id for definition in create_catalogue_definitions()) == type_ids
+    assert (
+        tuple(definition.execution.type_id for definition in create_catalogue_definitions())
+        == type_ids
+    )
 
 
 def test_image_core_facade_preserves_runtime_and_catalogue_imports() -> None:
     assert FacadeChangeColourSpaceRuntime is ChangeColourSpaceRuntime
     assert create_facade_definitions is create_catalogue_definitions
     assert create_image_definitions is create_catalogue_definitions
-    assert tuple(definition.type_id for definition in create_utility_definitions()) == (
+    assert tuple(definition.execution.type_id for definition in create_utility_definitions()) == (
         "synmachine.image.change_colour_space",
     )
 
@@ -82,7 +85,7 @@ def test_image_core_facade_preserves_runtime_and_catalogue_imports() -> None:
 def test_builtin_registry_preserves_compatibility_catalogue_as_50_definition_subset() -> None:
     registry = create_application_registry()
     definitions = registry.definitions()
-    type_ids = tuple(definition.type_id for definition in definitions)
+    type_ids = tuple(definition.execution.type_id for definition in definitions)
     compatibility_ids = {
         node.type_id for node in load_graph(COMPATIBILITY_CATALOGUE_PATH, registry).nodes
     }

@@ -26,7 +26,7 @@ BATCH1_IDS = (
 
 
 def _definition(type_id: str):
-    return next(item for item in create_image_definitions() if item.type_id == type_id)
+    return next(item for item in create_image_definitions() if item.execution.type_id == type_id)
 
 
 def _process(
@@ -36,43 +36,45 @@ def _process(
     connected: Mapping[str, RuntimeValue] | None = None,
 ) -> ImageFrame:
     definition = _definition(type_id)
-    parameters, errors = definition.parameter_values(overrides or {})
+    parameters, errors = definition.execution.parameter_values(overrides or {})
     assert not errors
     inputs: dict[str, RuntimeValue] = {"image": image}
     inputs.update(connected or {})
-    output = definition.runtime_factory(NODE_ID).process(inputs, parameters, image.context)["image"]
+    output = definition.execution.runtime_factory(NODE_ID).process(
+        inputs, parameters, image.context
+    )["image"]
     assert isinstance(output, ImageFrame)
     return output
 
 
 def test_crop_bound_editors_are_sliders_in_normalized_mode() -> None:
     definition = _definition("synmachine.image.crop")
-    resolver = definition.parameter_editor_resolver
+    resolver = definition.presentation.parameter_editor_resolver
     assert resolver is not None
-    values, errors = definition.parameter_values({})
+    values, errors = definition.execution.parameter_values({})
     assert not errors
     for bound_id in ("left", "top", "right", "bottom"):
-        spec = definition.parameter(bound_id)
+        spec = definition.execution.parameter(bound_id)
         assert spec is not None
         resolved = resolver(spec, values, None)
         assert (resolved.minimum, resolved.maximum) == (0.0, 1.0)
         assert resolved.editor_hint is ParameterEditorHint.SLIDER
-    mode = definition.parameter("coordinate_mode")
+    mode = definition.execution.parameter("coordinate_mode")
     assert mode is not None
     assert resolver(mode, values, None) is mode
 
 
 def test_crop_bound_editors_are_plain_fields_in_pixels_mode() -> None:
     definition = _definition("synmachine.image.crop")
-    resolver = definition.parameter_editor_resolver
+    resolver = definition.presentation.parameter_editor_resolver
     assert resolver is not None
-    values, errors = definition.parameter_values({"coordinate_mode": "PIXELS"})
+    values, errors = definition.execution.parameter_values({"coordinate_mode": "PIXELS"})
     assert not errors
     for bound_id in ("left", "top", "right", "bottom"):
-        spec = definition.parameter(bound_id)
+        spec = definition.execution.parameter(bound_id)
         assert spec is not None
         assert resolver(spec, values, None) is spec
-    mode = definition.parameter("coordinate_mode")
+    mode = definition.execution.parameter("coordinate_mode")
     assert mode is not None
     assert resolver(mode, values, None) is mode
 
@@ -145,15 +147,15 @@ def test_crop_normalized_and_pixel_padding_have_exclusive_bounds(rgb_image: Imag
 
 def test_crop_rejects_empty_and_error_policy_out_of_bounds(rgb_image: ImageFrame) -> None:
     definition = _definition("synmachine.image.crop")
-    parameters, errors = definition.parameter_values(
+    parameters, errors = definition.execution.parameter_values(
         {"coordinate_mode": "PIXELS", "left": -1.0, "right": 2.0, "out_of_bounds": "ERROR"}
     )
     assert not errors
     with pytest.raises(ExpectedNodeError, match="outside"):
-        definition.runtime_factory(NODE_ID).process(
+        definition.execution.runtime_factory(NODE_ID).process(
             {"image": rgb_image}, parameters, rgb_image.context
         )
-    _, empty_errors = definition.parameter_values({"left": 0.5, "right": 0.5})
+    _, empty_errors = definition.execution.parameter_values({"left": 0.5, "right": 0.5})
     assert "right must be greater than left" in empty_errors
 
 
@@ -231,16 +233,20 @@ def test_rotate_expansion_contains_custom_centre_transform(rgb_image: ImageFrame
 
 
 def test_batch1_metadata_has_stable_complete_ids() -> None:
-    definitions = {item.type_id: item for item in create_image_definitions()}
+    definitions = {item.execution.type_id: item for item in create_image_definitions()}
     assert set(BATCH1_IDS) <= definitions.keys()
-    assert [parameter.id for parameter in definitions["synmachine.image.resize"].parameters] == [
+    assert [
+        parameter.id for parameter in definitions["synmachine.image.resize"].execution.parameters
+    ] == [
         "width",
         "height",
         "preserve_aspect",
         "fit_mode",
         "interpolation",
     ]
-    assert [parameter.id for parameter in definitions["synmachine.image.crop"].parameters] == [
+    assert [
+        parameter.id for parameter in definitions["synmachine.image.crop"].execution.parameters
+    ] == [
         "coordinate_mode",
         "left",
         "top",
@@ -249,6 +255,6 @@ def test_batch1_metadata_has_stable_complete_ids() -> None:
         "out_of_bounds",
         "pad_colour",
     ]
-    angle = definitions["synmachine.image.rotate"].parameter("angle_degrees")
+    angle = definitions["synmachine.image.rotate"].execution.parameter("angle_degrees")
     assert angle is not None
     assert angle.connectable

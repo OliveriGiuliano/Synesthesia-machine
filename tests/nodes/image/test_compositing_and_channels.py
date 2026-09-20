@@ -47,14 +47,14 @@ ALPHA_POLICIES = ("COMPOSITE", "PRESERVE_A", "PRESERVE_B")
 
 
 def _definition(type_id: str) -> NodeDefinition:
-    return next(item for item in create_image_definitions() if item.type_id == type_id)
+    return next(item for item in create_image_definitions() if item.execution.type_id == type_id)
 
 
 def _parameters(
     definition: NodeDefinition,
     overrides: Mapping[str, object] | None = None,
 ) -> dict[str, ParameterValue]:
-    parameters, errors = definition.parameter_values(overrides or {})
+    parameters, errors = definition.execution.parameter_values(overrides or {})
     assert not errors
     return parameters
 
@@ -70,7 +70,7 @@ def _process(
     context = next(
         value.context for value in inputs.values() if isinstance(value, (ImageFrame, ChannelFrame))
     )
-    return definition.runtime_factory(node_id).process(
+    return definition.execution.runtime_factory(node_id).process(
         inputs,
         _parameters(definition, overrides),
         context,
@@ -166,42 +166,44 @@ def _combine(
 
 
 def test_batch5_metadata_has_exact_order_ports_defaults_and_policies() -> None:
-    definitions = [item for item in create_image_definitions() if item.type_id in BATCH5_IDS]
-    assert tuple(item.type_id for item in definitions) == BATCH5_IDS
+    definitions = [
+        item for item in create_image_definitions() if item.execution.type_id in BATCH5_IDS
+    ]
+    assert tuple(item.execution.type_id for item in definitions) == BATCH5_IDS
 
     blend, separate, combine, luminance = definitions
-    assert tuple(port.id for port in blend.inputs) == ("a", "b", "mask")
-    assert tuple(port.required for port in blend.inputs) == (True, True, False)
-    assert tuple(parameter.id for parameter in blend.parameters) == (
+    assert tuple(port.id for port in blend.execution.inputs) == ("a", "b", "mask")
+    assert tuple(port.required for port in blend.execution.inputs) == (True, True, False)
+    assert tuple(parameter.id for parameter in blend.execution.parameters) == (
         "blend_mode",
         "opacity",
         "alpha_policy",
     )
-    assert tuple(parameter.default for parameter in blend.parameters) == (
+    assert tuple(parameter.default for parameter in blend.execution.parameters) == (
         "NORMAL",
         1.0,
         "COMPOSITE",
     )
-    assert blend.parameters[0].choices == BLEND_MODES
-    assert blend.parameters[1].connectable
-    assert blend.parameters[1].connected_port_type is PortType.FLOAT
-    assert blend.parameters[2].choices == ALPHA_POLICIES
+    assert blend.execution.parameters[0].choices == BLEND_MODES
+    assert blend.execution.parameters[1].connectable
+    assert blend.execution.parameters[1].connected_port_type is PortType.FLOAT
+    assert blend.execution.parameters[2].choices == ALPHA_POLICIES
 
-    assert tuple(port.id for port in separate.outputs) == (
+    assert tuple(port.id for port in separate.execution.outputs) == (
         "channel_1",
         "channel_2",
         "channel_3",
     )
-    assert not separate.parameters
+    assert not separate.execution.parameters
 
-    assert tuple(port.id for port in combine.inputs) == (
+    assert tuple(port.id for port in combine.execution.inputs) == (
         "channel_1",
         "channel_2",
         "channel_3",
     )
-    assert all(not port.required for port in combine.inputs)
-    assert combine.handles_no_data
-    target = combine.parameters[0]
+    assert all(not port.required for port in combine.execution.inputs)
+    assert combine.execution.handles_no_data
+    target = combine.execution.parameters[0]
     assert target.id == "target_colour_space"
     assert target.default == ColorSpace.SRGB.value
     assert target.update_mode is ParameterUpdateMode.RECOMPILE
@@ -209,9 +211,9 @@ def test_batch5_metadata_has_exact_order_ports_defaults_and_policies() -> None:
         space.value for space in ColorSpace if space is not ColorSpace.RGBA
     )
 
-    assert tuple(port.id for port in luminance.inputs) == ("image",)
-    assert tuple(port.id for port in luminance.outputs) == ("channel",)
-    assert not luminance.parameters
+    assert tuple(port.id for port in luminance.execution.inputs) == ("image",)
+    assert tuple(port.id for port in luminance.execution.outputs) == ("channel",)
+    assert not luminance.execution.parameters
 
 
 @pytest.mark.parametrize(
@@ -229,14 +231,14 @@ def test_scheduler_propagates_no_data_for_standard_batch5_nodes(type_id: str) ->
 def test_combine_required_inputs_follow_target_descriptor() -> None:
     definition = _definition("synmachine.image.combine_channels")
     srgb_parameters = _parameters(definition)
-    assert definition.required_inputs(srgb_parameters) == frozenset(
+    assert definition.execution.required_inputs(srgb_parameters) == frozenset(
         {"channel_1", "channel_2", "channel_3"}
     )
     # RGBA is not an offered target, so no four-channel requirement is reachable.
-    parameters, errors = definition.parameter_values({"target_colour_space": "RGBA"})
+    parameters, errors = definition.execution.parameter_values({"target_colour_space": "RGBA"})
     assert errors
     assert parameters["target_colour_space"] == "SRGB"
-    assert definition.required_inputs(parameters) == frozenset(
+    assert definition.execution.required_inputs(parameters) == frozenset(
         {"channel_1", "channel_2", "channel_3"}
     )
 
@@ -409,7 +411,7 @@ def test_blend_rejects_mask_shape_and_clock_mismatches(
 def test_blend_parameter_validation_rejects_non_finite_opacity() -> None:
     definition = _definition("synmachine.image.blend_images")
     for opacity in (float("nan"), float("inf"), float("-inf")):
-        _, errors = definition.parameter_values({"opacity": opacity})
+        _, errors = definition.execution.parameter_values({"opacity": opacity})
         assert errors
         assert "opacity" in errors[0]
 

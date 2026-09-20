@@ -71,7 +71,7 @@ CONNECTABLE_IDS = {
 
 
 def _definition(type_id: str) -> NodeDefinition:
-    return next(item for item in create_image_definitions() if item.type_id == type_id)
+    return next(item for item in create_image_definitions() if item.execution.type_id == type_id)
 
 
 def _process(
@@ -82,7 +82,7 @@ def _process(
     context: FrameContext | None = None,
 ) -> ImageFrame:
     definition = _definition(type_id)
-    parameters, errors = definition.parameter_values(overrides or {})
+    parameters, errors = definition.execution.parameter_values(overrides or {})
     assert not errors
     return _runtime_process(definition, image, parameters, context=context)
 
@@ -94,7 +94,7 @@ def _runtime_process(
     *,
     context: FrameContext | None = None,
 ) -> ImageFrame:
-    output = definition.runtime_factory(NODE_ID).process(
+    output = definition.execution.runtime_factory(NODE_ID).process(
         {"image": image}, parameters, context or image.context
     )["image"]
     assert isinstance(output, ImageFrame)
@@ -137,27 +137,29 @@ def test_batch3_defaults_conform_without_mutating_rgba(
 
 
 def test_batch3_metadata_has_stable_ids_defaults_and_scalar_parameter_inputs() -> None:
-    definitions = [item for item in create_image_definitions() if item.type_id in BATCH3_IDS]
-    assert tuple(item.type_id for item in definitions) == BATCH3_IDS
+    definitions = [
+        item for item in create_image_definitions() if item.execution.type_id in BATCH3_IDS
+    ]
+    assert tuple(item.execution.type_id for item in definitions) == BATCH3_IDS
     for definition in definitions:
-        assert definition.execution_kind is ExecutionKind.STATELESS
-        assert definition.category == "Image / Filter"
-        assert tuple(port.id for port in definition.inputs) == ("image",)
-        assert tuple(port.id for port in definition.outputs) == ("image",)
+        assert definition.execution.execution_kind is ExecutionKind.STATELESS
+        assert definition.presentation.category == "Image / Filter"
+        assert tuple(port.id for port in definition.execution.inputs) == ("image",)
+        assert tuple(port.id for port in definition.execution.outputs) == ("image",)
         assert (
-            tuple(parameter.id for parameter in definition.parameters)
-            == PARAMETER_IDS[definition.type_id]
+            tuple(parameter.id for parameter in definition.execution.parameters)
+            == PARAMETER_IDS[definition.execution.type_id]
         )
         assert (
-            tuple(parameter.default for parameter in definition.parameters)
-            == DEFAULTS[definition.type_id]
+            tuple(parameter.default for parameter in definition.execution.parameters)
+            == DEFAULTS[definition.execution.type_id]
         )
         assert {
-            parameter.id for parameter in definition.parameters if parameter.connectable
-        } == CONNECTABLE_IDS[definition.type_id]
+            parameter.id for parameter in definition.execution.parameters if parameter.connectable
+        } == CONNECTABLE_IDS[definition.execution.type_id]
 
     noise = _definition("synmachine.image.add_noise")
-    noise_type = noise.parameter("noise_type")
+    noise_type = noise.execution.parameter("noise_type")
     assert noise_type is not None
     assert noise_type.choices == ("GAUSSIAN", "UNIFORM", "SALT_AND_PEPPER")
 
@@ -522,10 +524,10 @@ def test_filter_channel_selection_excludes_alpha(type_id: str) -> None:
     # ADR-0015: sources never carry a fourth (alpha) channel, so the
     # user-facing channel selection does not offer CHANNEL_4.
     definition = _definition(type_id)
-    spec = next(p for p in definition.parameters if p.id == "channels")
+    spec = next(p for p in definition.execution.parameters if p.id == "channels")
     assert "CHANNEL_4" not in spec.choices
 
-    values, errors = definition.parameter_values({"channels": "CHANNEL_4"})
+    values, errors = definition.execution.parameter_values({"channels": "CHANNEL_4"})
     assert len(errors) == 1
     assert "expected one of" in errors[0]
     assert values["channels"] == "COLOUR"
@@ -578,7 +580,7 @@ def test_definition_validators_reject_invalid_filter_literals(
     overrides: Mapping[str, object],
     message: str,
 ) -> None:
-    _, errors = _definition(type_id).parameter_values(overrides)
+    _, errors = _definition(type_id).execution.parameter_values(overrides)
     assert any(message in error for error in errors)
 
 
@@ -601,7 +603,7 @@ def test_malformed_runtime_parameters_produce_recoverable_errors(
     rgb_image: ImageFrame,
 ) -> None:
     definition = _definition(type_id)
-    parameters, errors = definition.parameter_values({})
+    parameters, errors = definition.execution.parameter_values({})
     assert not errors
     parameters.update(mutations)
     with pytest.raises(ExpectedNodeError, match=message):

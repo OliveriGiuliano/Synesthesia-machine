@@ -25,6 +25,8 @@ from synesthesia_machine.nodes import (
     ExpectedNodeError,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePresentationIntent,
     OutputPortSpec,
     ParameterSpec,
     ParameterUpdateMode,
@@ -223,57 +225,69 @@ def _array_item(value: RuntimeValue) -> ImageFrame | ChannelFrame | float | int:
 def create_temporal_definitions() -> tuple[NodeDefinition, ...]:
     return (
         NodeDefinition(
-            "synmachine.utility.modulo_accumulator",
-            1,
-            "Modulo Accumulator",
-            "Utility / Temporal",
-            "Adds the input to a running total every frame. When the total passes the limit, it "
-            "wraps around, keeping the remainder.",
-            (InputPortSpec("value", "Value", T),),
-            (OutputPortSpec("value", "Accumulated", T),),
-            (
-                ParameterSpec(
-                    "modulo",
-                    "Modulo",
-                    PortType.FLOAT,
-                    1.0,
-                    help_text=(
-                        "Value the accumulator wraps around; the output is the accumulated total "
-                        "taken modulo this value."
+            execution=NodeExecutionContract(
+                "synmachine.utility.modulo_accumulator",
+                1,
+                ExecutionKind.STATEFUL,
+                (InputPortSpec("value", "Value", T),),
+                (OutputPortSpec("value", "Accumulated", T),),
+                (
+                    ParameterSpec(
+                        "modulo",
+                        "Modulo",
+                        PortType.FLOAT,
+                        1.0,
+                        help_text=(
+                            "Value the accumulator wraps around; the output is the accumulated "
+                            "total "
+                            "taken modulo this value."
+                        ),
+                        minimum=1e-12,
                     ),
-                    minimum=1e-12,
                 ),
+                ModuloAccumulatorRuntime,
             ),
-            ExecutionKind.STATEFUL,
-            ModuloAccumulatorRuntime,
-            aliases=("wrapped accumulator", "mod accumulator"),
+            presentation=NodePresentationIntent(
+                "Modulo Accumulator",
+                "Utility / Temporal",
+                "Adds the input to a running total every frame. When the total passes the limit, "
+                "it "
+                "wraps around, keeping the remainder.",
+                aliases=("wrapped accumulator", "mod accumulator"),
+            ),
         ),
         NodeDefinition(
-            "synmachine.utility.buffer",
-            1,
-            "Buffer",
-            "Utility / Temporal",
-            "Remembers the last few values (numbers, images, or channels) and passes them on as a "
-            "group each frame.",
-            (InputPortSpec("value", "Value", T),),
-            (OutputPortSpec("values", "Values", T_ARRAY),),
-            (
-                ParameterSpec(
-                    "capacity",
-                    "Capacity",
-                    PortType.INT,
-                    8,
-                    help_text=(
-                        "Number of past frames kept in the buffer; the buffer is capped at 256 MiB."
+            execution=NodeExecutionContract(
+                "synmachine.utility.buffer",
+                1,
+                ExecutionKind.STATEFUL,
+                (InputPortSpec("value", "Value", T),),
+                (OutputPortSpec("values", "Values", T_ARRAY),),
+                (
+                    ParameterSpec(
+                        "capacity",
+                        "Capacity",
+                        PortType.INT,
+                        8,
+                        help_text=(
+                            "Number of past frames kept in the buffer; the buffer is capped at 256 "
+                            "MiB."
+                        ),
+                        minimum=1,
+                        maximum=600,
+                        update_mode=ParameterUpdateMode.RECOMPILE,
                     ),
-                    minimum=1,
-                    maximum=600,
-                    update_mode=ParameterUpdateMode.RECOMPILE,
                 ),
+                BufferRuntime,
             ),
-            ExecutionKind.STATEFUL,
-            BufferRuntime,
-            aliases=("fifo", "history", "window"),
+            presentation=NodePresentationIntent(
+                "Buffer",
+                "Utility / Temporal",
+                "Remembers the last few values (numbers, images, or channels) and passes them on "
+                "as a "
+                "group each frame.",
+                aliases=("fifo", "history", "window"),
+            ),
         ),
     )
 

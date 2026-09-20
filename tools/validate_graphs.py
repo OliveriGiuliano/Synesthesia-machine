@@ -121,8 +121,8 @@ def _node_migration_steps(raw_nodes: object, registry: NodeRegistry) -> int:
         ):
             continue
         definition = registry.get(type_id)
-        if definition is not None and version < definition.implementation_version:
-            steps += definition.implementation_version - version
+        if definition is not None and version < definition.execution.implementation_version:
+            steps += definition.execution.implementation_version - version
     return steps
 
 

@@ -112,17 +112,17 @@ def _wait_until(predicate: Callable[[], bool], timeout_s: float = 5.0) -> bool:
 
 def test_load_video_definition_has_stable_source_contract() -> None:
     definition = create_input_definitions()[0]
-    assert definition.type_id == LOAD_VIDEO_TYPE_ID
-    assert definition.execution_kind is ExecutionKind.SOURCE
-    assert tuple(port.id for port in definition.outputs) == ("image", "processed_index")
-    assert definition.parameter("process_every_nth_frame").minimum == 1  # type: ignore[union-attr]
-    assert definition.parameter("playback_speed").default == 1.0  # type: ignore[union-attr]
-    assert definition.parameter("playback_speed").minimum == 0.25  # type: ignore[union-attr]
-    assert definition.parameter("playback_speed").maximum == 4.0  # type: ignore[union-attr]
-    assert definition.parameter("playback_speed").update_mode is (  # type: ignore[union-attr]
+    assert definition.execution.type_id == LOAD_VIDEO_TYPE_ID
+    assert definition.execution.execution_kind is ExecutionKind.SOURCE
+    assert tuple(port.id for port in definition.execution.outputs) == ("image", "processed_index")
+    assert definition.execution.parameter("process_every_nth_frame").minimum == 1  # type: ignore[union-attr]
+    assert definition.execution.parameter("playback_speed").default == 1.0  # type: ignore[union-attr]
+    assert definition.execution.parameter("playback_speed").minimum == 0.25  # type: ignore[union-attr]
+    assert definition.execution.parameter("playback_speed").maximum == 4.0  # type: ignore[union-attr]
+    assert definition.execution.parameter("playback_speed").update_mode is (  # type: ignore[union-attr]
         ParameterUpdateMode.RESTART_SOURCE
     )
-    assert definition.parameter("file_path").update_mode is (  # type: ignore[union-attr]
+    assert definition.execution.parameter("file_path").update_mode is (  # type: ignore[union-attr]
         ParameterUpdateMode.RESTART_SOURCE
     )
 

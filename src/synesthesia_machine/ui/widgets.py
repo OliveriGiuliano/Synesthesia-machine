@@ -185,7 +185,7 @@ class NodeLibrary(QWidget):
             haystack = _definition_search_text(definition)
             if normalized and not all(token in haystack for token in normalized.split()):
                 continue
-            category_path = _category_path(definition.category)
+            category_path = _category_path(definition.presentation.category)
             parent: QTreeWidgetItem | None = None
             for depth in range(1, len(category_path) + 1):
                 path = category_path[:depth]
@@ -201,13 +201,13 @@ class NodeLibrary(QWidget):
                     groups[path] = group
                 parent = group
             assert parent is not None
-            item = QTreeWidgetItem(parent, [tr(definition.display_name)])
-            item.setForeground(0, QBrush(node_category_color(definition.category)))
-            item.setData(0, _TYPE_ROLE, definition.type_id)
-            item.setData(0, _CATEGORY_ROLE, definition.category)
-            item.setToolTip(0, format_tooltip(tr(definition.description)))
-            item.setStatusTip(0, tr(definition.description))
-            if definition.type_id == selected:
+            item = QTreeWidgetItem(parent, [tr(definition.presentation.display_name)])
+            item.setForeground(0, QBrush(node_category_color(definition.presentation.category)))
+            item.setData(0, _TYPE_ROLE, definition.execution.type_id)
+            item.setData(0, _CATEGORY_ROLE, definition.presentation.category)
+            item.setToolTip(0, format_tooltip(tr(definition.presentation.description)))
+            item.setStatusTip(0, tr(definition.presentation.description))
+            if definition.execution.type_id == selected:
                 self.tree.setCurrentItem(item)
         self.tree.expandAll()
 
@@ -246,14 +246,14 @@ def _library_group_label(path: tuple[str, ...]) -> str:
 
 
 def _library_sort_key(definition: NodeDefinition) -> tuple[object, ...]:
-    path = _category_path(definition.category)
+    path = _category_path(definition.presentation.category)
     root = path[0]
     return (
         _LIBRARY_ROOT_ORDER.get(root, len(_LIBRARY_ROOT_ORDER)),
         root.casefold(),
         0 if len(path) == 1 else 1,
         *(part.casefold() for part in path[1:]),
-        definition.display_name.casefold(),
+        definition.presentation.display_name.casefold(),
     )
 
 
@@ -329,11 +329,12 @@ class NodeSearchDialog(QDialog):
                 continue
             suffix = f"  ·  {candidate.port_id}" if candidate.port_id is not None else ""
             item = QListWidgetItem(
-                f"{tr(definition.display_name)}  —  {tr(definition.category)}{suffix}"
+                f"{tr(definition.presentation.display_name)}  —  "
+                f"{tr(definition.presentation.category)}{suffix}"
             )
-            item.setForeground(QBrush(node_category_color(definition.category)))
+            item.setForeground(QBrush(node_category_color(definition.presentation.category)))
             item.setData(_INDEX_ROLE, index)
-            item.setToolTip(format_tooltip(tr(definition.description)))
+            item.setToolTip(format_tooltip(tr(definition.presentation.description)))
             self.results.addItem(item)
         if self.results.count():
             self.results.setCurrentRow(0)
@@ -647,14 +648,14 @@ class InspectorPanel(QWidget):
 def _definition_search_text(definition: NodeDefinition) -> str:
     return " ".join(
         (
-            definition.display_name,
-            definition.category,
-            definition.description,
-            definition.type_id,
-            *definition.aliases,
-            tr(definition.display_name),
-            tr(definition.category),
-            tr(definition.description),
+            definition.presentation.display_name,
+            definition.presentation.category,
+            definition.presentation.description,
+            definition.execution.type_id,
+            *definition.presentation.aliases,
+            tr(definition.presentation.display_name),
+            tr(definition.presentation.category),
+            tr(definition.presentation.description),
         )
     ).casefold()
 

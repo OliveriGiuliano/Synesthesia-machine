@@ -12,10 +12,10 @@ class NodeRegistry:
             self.register(definition)
 
     def register(self, definition: NodeDefinition) -> None:
-        if definition.type_id in self._definitions:
-            msg = f"Node type already registered: {definition.type_id}"
+        if definition.execution.type_id in self._definitions:
+            msg = f"Node type already registered: {definition.execution.type_id}"
             raise ValueError(msg)
-        self._definitions[definition.type_id] = definition
+        self._definitions[definition.execution.type_id] = definition
 
     def get(self, type_id: str) -> NodeDefinition | None:
         return self._definitions.get(type_id)

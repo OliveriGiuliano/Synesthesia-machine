@@ -58,7 +58,7 @@ def _parameters(
     definition: NodeDefinition,
     overrides: Mapping[str, object] | None = None,
 ) -> dict[str, ParameterValue]:
-    parameters, errors = definition.parameter_values(overrides or {})
+    parameters, errors = definition.execution.parameter_values(overrides or {})
     assert not errors
     return parameters
 
@@ -69,7 +69,7 @@ def _process(
     overrides: Mapping[str, object] | None = None,
 ) -> RuntimeValue:
     definition = _definition(type_id)
-    output = definition.runtime_factory(NODE_ID).process(
+    output = definition.execution.runtime_factory(NODE_ID).process(
         inputs,
         _parameters(definition, overrides),
         _context(1),
@@ -124,41 +124,48 @@ def test_batch6_metadata_has_exact_order_ports_defaults_and_policies() -> None:
     scalar_definitions = create_scalar_bridge_definitions()
     visualization = _definition(CHANNEL_DISPLAY_TYPE_ID)
     definitions = (*scalar_definitions, visualization)
-    assert tuple(definition.type_id for definition in definitions) == BATCH6_IDS
+    assert tuple(definition.execution.type_id for definition in definitions) == BATCH6_IDS
 
     remap, conversion, channel_display = definitions
-    assert tuple(port.id for port in remap.inputs) == ("value",)
-    assert tuple(port.id for port in remap.outputs) == ("value",)
-    assert tuple(parameter.id for parameter in remap.parameters) == (
+    assert tuple(port.id for port in remap.execution.inputs) == ("value",)
+    assert tuple(port.id for port in remap.execution.outputs) == ("value",)
+    assert tuple(parameter.id for parameter in remap.execution.parameters) == (
         "input_minimum",
         "input_maximum",
         "output_minimum",
         "output_maximum",
         "clamp",
     )
-    assert tuple(parameter.default for parameter in remap.parameters) == (0.0, 1.0, 0.0, 1.0, False)
-    assert all(parameter.connectable for parameter in remap.parameters[:4])
+    assert tuple(parameter.default for parameter in remap.execution.parameters) == (
+        0.0,
+        1.0,
+        0.0,
+        1.0,
+        False,
+    )
+    assert all(parameter.connectable for parameter in remap.execution.parameters[:4])
     assert all(
-        parameter.connected_port_type is PortType.FLOAT for parameter in remap.parameters[:4]
+        parameter.connected_port_type is PortType.FLOAT
+        for parameter in remap.execution.parameters[:4]
     )
 
-    assert tuple(port.id for port in conversion.inputs) == ("value",)
-    assert tuple(port.id for port in conversion.outputs) == ("value",)
-    assert conversion.outputs[0].value_type is PortType.INT
-    assert conversion.parameters[0].id == "mode"
-    assert conversion.parameters[0].default == "ROUND"
-    assert conversion.parameters[0].choices == CONVERSION_MODES
+    assert tuple(port.id for port in conversion.execution.inputs) == ("value",)
+    assert tuple(port.id for port in conversion.execution.outputs) == ("value",)
+    assert conversion.execution.outputs[0].value_type is PortType.INT
+    assert conversion.execution.parameters[0].id == "mode"
+    assert conversion.execution.parameters[0].default == "ROUND"
+    assert conversion.execution.parameters[0].choices == CONVERSION_MODES
 
-    assert channel_display.execution_kind is ExecutionKind.VISUALIZER
-    assert channel_display.cache_policy is CachePolicy.NEVER
-    assert tuple(port.id for port in channel_display.inputs) == ("channel",)
-    assert not channel_display.outputs
-    assert tuple(parameter.id for parameter in channel_display.parameters) == (
+    assert channel_display.execution.execution_kind is ExecutionKind.VISUALIZER
+    assert channel_display.execution.cache_policy is CachePolicy.NEVER
+    assert tuple(port.id for port in channel_display.execution.inputs) == ("channel",)
+    assert not channel_display.execution.outputs
+    assert tuple(parameter.id for parameter in channel_display.execution.parameters) == (
         "fit_mode",
         "value_display_mode",
         "show_histogram",
     )
-    assert tuple(parameter.default for parameter in channel_display.parameters) == (
+    assert tuple(parameter.default for parameter in channel_display.execution.parameters) == (
         "CONTAIN",
         "NOMINAL_RANGE",
         False,
@@ -167,7 +174,7 @@ def test_batch6_metadata_has_exact_order_ports_defaults_and_policies() -> None:
 
 @pytest.mark.parametrize("type_id", BATCH6_IDS)
 def test_batch6_definitions_are_registered(type_id: str) -> None:
-    assert create_application_registry().require(type_id).type_id == type_id
+    assert create_application_registry().require(type_id).execution.type_id == type_id
 
 
 @pytest.mark.parametrize("definition", create_scalar_bridge_definitions())
@@ -239,7 +246,7 @@ def test_remap_number_ieee_non_finite_policy(
 
 def test_remap_number_rejects_equal_literal_and_connected_input_endpoints() -> None:
     definition = _definition("synmachine.utility.remap_number")
-    _, errors = definition.parameter_values({"input_minimum": 2.0, "input_maximum": 2.0})
+    _, errors = definition.execution.parameter_values({"input_minimum": 2.0, "input_maximum": 2.0})
     assert errors and "input endpoints" in errors[0]
     with pytest.raises(ExpectedNodeError, match="must not be equal") as captured:
         _process(
@@ -334,9 +341,12 @@ def test_channel_display_is_a_default_demand_root() -> None:
 
 def test_utility_entry_point_preserves_compatibility_definitions() -> None:
     registry = create_utility_registry()
-    assert registry.require("synmachine.utility.number").type_id == "synmachine.utility.number"
+    assert (
+        registry.require("synmachine.utility.number").execution.type_id
+        == "synmachine.utility.number"
+    )
     assert registry.get("synmachine.utility.channel_statistics") is None
-    current_ids = {definition.type_id for definition in registry.definitions()}
+    current_ids = {definition.execution.type_id for definition in registry.definitions()}
     assert len(COMPATIBILITY_UTILITY_IDS) == 8
     assert current_ids >= COMPATIBILITY_UTILITY_IDS
 

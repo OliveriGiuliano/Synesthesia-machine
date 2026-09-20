@@ -16,14 +16,14 @@ def generate_catalogue(path: str | Path = "examples/catalogue/current.synmachine
     registry = create_application_registry()
     nodes: list[NodeModel] = []
     for index, definition in enumerate(registry.definitions(), start=1):
-        parameters, errors = definition.parameter_values({})
+        parameters, errors = definition.execution.parameter_values({})
         if errors:
-            raise RuntimeError(f"Invalid defaults for {definition.type_id}: {errors}")
+            raise RuntimeError(f"Invalid defaults for {definition.execution.type_id}: {errors}")
         nodes.append(
             NodeModel(
                 UUID(f"65000000-0000-0000-0000-{index:012d}"),
-                definition.type_id,
-                definition.implementation_version,
+                definition.execution.type_id,
+                definition.execution.implementation_version,
                 parameters=parameters,
                 position=((index - 1) % 5 * 320.0, (index - 1) // 5 * 260.0),
             )

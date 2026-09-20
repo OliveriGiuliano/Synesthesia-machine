@@ -42,6 +42,8 @@ from synesthesia_machine.nodes import (
     CachePolicy,
     ExecutionKind,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePresentationIntent,
     ResetReason,
 )
 from synesthesia_machine.nodes.output import (
@@ -200,7 +202,7 @@ def _midi_state(
 def _parameters(
     definition: NodeDefinition, overrides: Mapping[str, object] | None = None
 ) -> dict[str, ParameterValue]:
-    parameters, errors = definition.parameter_values(overrides or {})
+    parameters, errors = definition.execution.parameter_values(overrides or {})
     assert errors == []
     return parameters
 
@@ -224,9 +226,9 @@ def _source_audio_scheduler(
     audio_definition = create_output_definitions(synth_factory=synth_factory)[0]
     registry = NodeRegistry((source_definition, audio_definition))
     document = GraphDocument()
-    source_id = document.add_node(source_definition.type_id, node_id=MIDI_SOURCE_ID)
+    source_id = document.add_node(source_definition.execution.type_id, node_id=MIDI_SOURCE_ID)
     audio_id = document.add_node(
-        audio_definition.type_id,
+        audio_definition.execution.type_id,
         node_id=AUDIO_NODE_ID,
         parameters={"enabled": True},
     )
@@ -245,10 +247,10 @@ def test_generate_audio_definition_is_opt_in_sink_and_demands_its_branch() -> No
     )
     definition = create_output_definitions(synth_factory=synth_factory)[0]
     parameters = _parameters(definition)
-    assert definition.type_id == GENERATE_AUDIO_TYPE_ID
-    assert definition.execution_kind is ExecutionKind.SINK
-    assert definition.cache_policy is CachePolicy.NEVER
-    assert definition.handles_no_data
+    assert definition.execution.type_id == GENERATE_AUDIO_TYPE_ID
+    assert definition.execution.execution_kind is ExecutionKind.SINK
+    assert definition.execution.cache_policy is CachePolicy.NEVER
+    assert definition.execution.handles_no_data
     assert parameters == {
         "enabled": False,
         "waveform": "SINE",
@@ -261,8 +263,8 @@ def test_generate_audio_definition_is_opt_in_sink_and_demands_its_branch() -> No
 
     registry = NodeRegistry((source_definition, definition))
     document = GraphDocument()
-    source_id = document.add_node(source_definition.type_id)
-    audio_id = document.add_node(definition.type_id)
+    source_id = document.add_node(source_definition.execution.type_id)
+    audio_id = document.add_node(definition.execution.type_id)
     document.add_connection(source_id, "value", audio_id, "midi")
     plan = GraphCompiler(registry).compile(document.snapshot()).plan
     assert plan is not None
@@ -283,7 +285,7 @@ def test_generate_audio_definition_is_opt_in_sink_and_demands_its_branch() -> No
 def test_runtime_opens_lazily_updates_state_and_replaces_changed_configuration() -> None:
     synth_factory = RecordingSynthFactory()
     definition = create_output_definitions(synth_factory=synth_factory)[0]
-    runtime = definition.runtime_factory(AUDIO_NODE_ID)
+    runtime = definition.execution.runtime_factory(AUDIO_NODE_ID)
     midi = _midi_state({(2, 69): 96})
     disabled = _parameters(definition)
     runtime.process({"midi": midi}, disabled, midi.context)
@@ -368,7 +370,7 @@ def test_runtime_no_data_panics_with_the_ticks_publish_generation_latched() -> N
     # not on every tick.
     synth_factory = RecordingSynthFactory()
     definition = create_output_definitions(synth_factory=synth_factory)[0]
-    runtime = definition.runtime_factory(AUDIO_NODE_ID)
+    runtime = definition.execution.runtime_factory(AUDIO_NODE_ID)
     enabled = _parameters(definition, {"enabled": True})
     first = _midi_state({(0, 60): 100}, tick_index=1, publish_generation=1)
     runtime.process({"midi": first}, enabled, first.context)
@@ -415,9 +417,9 @@ def test_facade_no_data_panics_audio_sink_with_the_ticks_generation() -> None:
     audio_definition = create_output_definitions(synth_factory=synth_factory)[0]
     registry = NodeRegistry((source_definition, audio_definition))
     document = GraphDocument()
-    source_id = document.add_node(source_definition.type_id, node_id=MIDI_SOURCE_ID)
+    source_id = document.add_node(source_definition.execution.type_id, node_id=MIDI_SOURCE_ID)
     audio_id = document.add_node(
-        audio_definition.type_id, node_id=AUDIO_NODE_ID, parameters={"enabled": True}
+        audio_definition.execution.type_id, node_id=AUDIO_NODE_ID, parameters={"enabled": True}
     )
     document.add_connection(source_id, "value", audio_id, "midi")
     facade = EngineFacade(registry)
@@ -517,8 +519,8 @@ def test_audio_open_failure_becomes_recoverable_scheduler_error() -> None:
     audio_definition = create_output_definitions(synth_factory=fail_factory)[0]
     registry = NodeRegistry((source_definition, audio_definition))
     document = GraphDocument()
-    source_id = document.add_node(source_definition.type_id)
-    audio_id = document.add_node(audio_definition.type_id, parameters={"enabled": True})
+    source_id = document.add_node(source_definition.execution.type_id)
+    audio_id = document.add_node(audio_definition.execution.type_id, parameters={"enabled": True})
     document.add_connection(source_id, "value", audio_id, "midi")
     plan = GraphCompiler(registry).compile(document.snapshot()).plan
     assert plan is not None
@@ -911,16 +913,20 @@ def _panic_probe_definition(instances: list[PanicProbeRuntime]) -> NodeDefinitio
         return runtime
 
     return NodeDefinition(
-        "test.panic_sink",
-        1,
-        "Panic Sink",
-        "Test",
-        "Records global panic propagation.",
-        (),
-        (),
-        (),
-        ExecutionKind.SINK,
-        factory,
+        execution=NodeExecutionContract(
+            type_id="test.panic_sink",
+            implementation_version=1,
+            inputs=(),
+            outputs=(),
+            parameters=(),
+            execution_kind=ExecutionKind.SINK,
+            runtime_factory=factory,
+        ),
+        presentation=NodePresentationIntent(
+            display_name="Panic Sink",
+            category="Test",
+            description="Records global panic propagation.",
+        ),
     )
 
 

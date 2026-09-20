@@ -29,7 +29,7 @@ CHANNEL_DISPLAY_ID = UUID("52000000-0000-0000-0000-000000000009")
 def test_compatibility_catalogue_preserves_each_historical_definition_once() -> None:
     registry = create_application_registry()
     snapshot = load_graph(CATALOGUE_PATH, registry)
-    expected = tuple(definition.type_id for definition in registry.definitions())
+    expected = tuple(definition.execution.type_id for definition in registry.definitions())
     actual = tuple(node.type_id for node in snapshot.nodes)
 
     # Loading the v3 file applies the v3-to-v4 migration, which drops the

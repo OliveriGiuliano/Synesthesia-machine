@@ -21,6 +21,8 @@ from synesthesia_machine.nodes import (
     ExecutionKind,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePresentationIntent,
     OutputPortSpec,
     ResetReason,
 )
@@ -66,16 +68,20 @@ def _probe_definition(probes: list[_GenerationProbe]) -> NodeDefinition:
         return probe
 
     return NodeDefinition(
-        "test.generation_probe",
-        1,
-        "test.generation_probe",
-        "Test",
-        "Records the publish generation of each tick.",
-        (InputPortSpec("value", "Value", PortType.MIDI_STATE),),
-        (OutputPortSpec("value", "Value", PortType.MIDI_STATE),),
-        (),
-        ExecutionKind.SINK,
-        factory,
+        execution=NodeExecutionContract(
+            type_id="test.generation_probe",
+            implementation_version=1,
+            parameters=(),
+            inputs=(InputPortSpec("value", "Value", PortType.MIDI_STATE),),
+            outputs=(OutputPortSpec("value", "Value", PortType.MIDI_STATE),),
+            execution_kind=ExecutionKind.SINK,
+            runtime_factory=factory,
+        ),
+        presentation=NodePresentationIntent(
+            display_name="test.generation_probe",
+            category="Test",
+            description="Records the publish generation of each tick.",
+        ),
     )
 
 

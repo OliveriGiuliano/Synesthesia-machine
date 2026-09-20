@@ -229,14 +229,14 @@ class DocumentSession(QObject):
         initial_parameters: dict[str, LiteralValue] = {}
         if parameters is not None:
             for parameter_id, value in parameters.items():
-                spec = definition.parameter(parameter_id)
+                spec = definition.execution.parameter(parameter_id)
                 if spec is None:
                     raise KeyError(f"Unknown parameter {parameter_id!r} on {type_id}")
                 initial_parameters[parameter_id] = spec.sanitize_value(value)
         node = NodeModel(
             uuid4(),
             type_id,
-            definition.implementation_version,
+            definition.execution.implementation_version,
             position=position,
             parameters=initial_parameters,
         )
@@ -369,7 +369,7 @@ class DocumentSession(QObject):
         node = self.document.node(node_id)
         if node is None:
             raise KeyError(f"Unknown node: {node_id}")
-        parameter = self.registry.require(node.type_id).parameter(parameter_id)
+        parameter = self.registry.require(node.type_id).execution.parameter(parameter_id)
         if parameter is None:
             raise KeyError(f"Unknown parameter {parameter_id!r} on {node.type_id}")
         sanitized = parameter.sanitize_value(value)
@@ -425,7 +425,7 @@ class DocumentSession(QObject):
         parameter_count = 0
         for node_id, node in changed_nodes.items():
             definition = self.registry.require(node.type_id)
-            original_values, _errors = definition.parameter_values(
+            original_values, _errors = definition.execution.parameter_values(
                 original_nodes[node_id].parameters
             )
             parameter_count += sum(
@@ -570,8 +570,8 @@ class DocumentSession(QObject):
         results: list[tuple[NodeDefinition, str]] = []
         for definition in self.registry.definitions():
             if (
-                definition.variadic_input is not None
-                and definition.variadic_input.minimum_count > 1
+                definition.execution.variadic_input is not None
+                and definition.execution.variadic_input.minimum_count > 1
             ):
                 # This dialog creates exactly one connection; a variadic
                 # family whose minimum exceeds one socket (MIDI Merge:
@@ -581,7 +581,8 @@ class DocumentSession(QObject):
                 continue
             temporary = GraphDocument.from_snapshot(self.document.snapshot())
             candidate_id = temporary.add_node(
-                definition.type_id, implementation_version=definition.implementation_version
+                definition.execution.type_id,
+                implementation_version=definition.execution.implementation_version,
             )
             if is_output:
                 # input_ports also yields the effective variadic sockets
@@ -589,13 +590,21 @@ class DocumentSession(QObject):
                 # would offer such nodes solely through connectable
                 # parameters, wiring the source into the wrong socket.
                 candidates = (
-                    *(port.id for port in definition.input_ports(include_next_variadic=True)),
-                    *(parameter.id for parameter in definition.parameters if parameter.connectable),
+                    *(
+                        port.id
+                        for port in definition.execution.input_ports(include_next_variadic=True)
+                    ),
+                    *(
+                        parameter.id
+                        for parameter in definition.execution.parameters
+                        if parameter.connectable
+                    ),
                 )
                 pairs = ((node_id, port_id, candidate_id, candidate) for candidate in candidates)
             else:
                 pairs = (
-                    (candidate_id, output.id, node_id, port_id) for output in definition.outputs
+                    (candidate_id, output.id, node_id, port_id)
+                    for output in definition.execution.outputs
                 )
             endpoints = tuple(pairs)
             compatibilities = self.compiler.connection_compatibilities(
@@ -618,7 +627,7 @@ class DocumentSession(QObject):
     ) -> UUID:
         self.begin_macro(tr("Insert and connect node"))
         try:
-            node_id = self.add_node(definition.type_id, position)
+            node_id = self.add_node(definition.execution.type_id, position)
             if existing_is_output:
                 self.add_connection(existing_node_id, existing_port_id, node_id, new_port_id)
             else:

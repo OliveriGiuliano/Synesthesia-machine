@@ -564,18 +564,21 @@ def test_source_tick_without_declared_outputs_fails_loudly(tmp_path: Path) -> No
     video_definition = next(
         definition
         for definition in create_input_definitions()
-        if definition.type_id == LOAD_VIDEO_TYPE_ID
+        if definition.execution.type_id == LOAD_VIDEO_TYPE_ID
     )
     undetermined = replace(
         video_definition,
-        type_id="test.engine.source_without_contract",
-        source_outputs=None,
+        execution=replace(
+            video_definition.execution,
+            type_id="test.engine.source_without_contract",
+            source_outputs=None,
+        ),
     )
     video = generate_test_video(tmp_path / "no-contract.mp4", frame_count=10)
     document = GraphDocument()
     document.add_node(
         "test.engine.source_without_contract",
-        implementation_version=video_definition.implementation_version,
+        implementation_version=video_definition.execution.implementation_version,
         node_id=SOURCE_A,
         parameters={"file_path": str(video)},
     )

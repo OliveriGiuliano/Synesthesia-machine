@@ -22,6 +22,8 @@ from synesthesia_machine.nodes.base import (
     ExecutionKind,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
+    NodePresentationIntent,
     OutputPortSpec,
     ParameterEditorHint,
     ParameterSpec,
@@ -190,121 +192,133 @@ def channel_histogram_to_midi_state(
 def create_synesthesia_definitions() -> tuple[NodeDefinition, ...]:
     return (
         NodeDefinition(
-            CHANNEL_TO_PITCH_TYPE_ID,
-            1,
-            "Channel to Pitch",
-            "Synesthesia",
-            (
-                "Turns a channel into notes using a histogram of its values. Values that appear "
+            execution=NodeExecutionContract(
+                CHANNEL_TO_PITCH_TYPE_ID,
+                1,
+                ExecutionKind.STATELESS,
+                (
+                    InputPortSpec("value", "Value", PortType.CHANNEL),
+                    InputPortSpec("parameter_a", "Parameter A", PortType.CHANNEL, required=False),
+                    InputPortSpec("parameter_b", "Parameter B", PortType.CHANNEL, required=False),
+                ),
+                (OutputPortSpec("midi", "MIDI state", PortType.MIDI_STATE),),
+                (
+                    *common_musical_parameter_specs(),
+                    ParameterSpec(
+                        "occupancy_threshold_percent",
+                        "Occupancy threshold (%)",
+                        PortType.FLOAT,
+                        0.0,
+                        help_text=(
+                            "A note only sounds when at least this percentage of the accepted "
+                            "pixels "
+                            "falls into its bin."
+                        ),
+                        minimum=0.0,
+                        maximum=100.0,
+                        editor_hint=ParameterEditorHint.SLIDER,
+                    ),
+                    ParameterSpec(
+                        "minimum_a",
+                        "Minimum A",
+                        PortType.FLOAT,
+                        0.0,
+                        help_text="Pixels whose parameter A channel is below this value are "
+                        "ignored.",
+                        connectable=True,
+                        connected_port_type=PortType.FLOAT,
+                    ),
+                    ParameterSpec(
+                        "maximum_a_enabled",
+                        "Enable maximum A",
+                        PortType.BOOL,
+                        False,
+                        help_text=(
+                            "When on, parameter A pixels above the maximum A value are also "
+                            "ignored."
+                        ),
+                    ),
+                    ParameterSpec(
+                        "maximum_a",
+                        "Maximum A",
+                        PortType.FLOAT,
+                        1.0,
+                        help_text=(
+                            "Highest parameter A value counted; only used when Enable maximum A is "
+                            "on."
+                        ),
+                        connectable=True,
+                        connected_port_type=PortType.FLOAT,
+                    ),
+                    ParameterSpec(
+                        "minimum_b",
+                        "Minimum B",
+                        PortType.FLOAT,
+                        0.0,
+                        help_text="Pixels whose parameter B channel is below this value are "
+                        "ignored.",
+                        connectable=True,
+                        connected_port_type=PortType.FLOAT,
+                    ),
+                    ParameterSpec(
+                        "maximum_b_enabled",
+                        "Enable maximum B",
+                        PortType.BOOL,
+                        False,
+                        help_text=(
+                            "When on, parameter B pixels above the maximum B value are also "
+                            "ignored."
+                        ),
+                    ),
+                    ParameterSpec(
+                        "maximum_b",
+                        "Maximum B",
+                        PortType.FLOAT,
+                        1.0,
+                        help_text=(
+                            "Highest parameter B value counted; only used when Enable maximum B is "
+                            "on."
+                        ),
+                        connectable=True,
+                        connected_port_type=PortType.FLOAT,
+                    ),
+                    ParameterSpec(
+                        "ignore_non_finite",
+                        "Ignore non-finite values",
+                        PortType.BOOL,
+                        True,
+                        help_text=(
+                            "When on, non-finite values (such as NaN or infinity) are skipped "
+                            "instead "
+                            "of making the node fail."
+                        ),
+                    ),
+                    ParameterSpec(
+                        "binning_mode",
+                        "Binning mode",
+                        PortType.STRING,
+                        LINEAR_NOMINAL_RANGE,
+                        help_text=(
+                            "Chooses how values are spread across the note bins; only linear "
+                            "binning "
+                            "across the channel's nominal range is available."
+                        ),
+                        choices=(LINEAR_NOMINAL_RANGE,),
+                    ),
+                ),
+                ChannelToPitchRuntime,
+                parameter_validator=_validate_parameters,
+            ),
+            presentation=NodePresentationIntent(
+                "Channel to Pitch",
+                "Synesthesia",
+                "Turns a channel into notes using a histogram of its values. Values that "
+                "appear "
                 "often get louder notes; you choose the root, the scale, and the note range. "
-                "Optional extra channels can filter which pixels are counted."
+                "Optional extra channels can filter which pixels are counted.",
+                aliases=("histogram notes", "channel histogram", "image to midi"),
+                parameter_groups=(COMMON_MUSICAL_PARAMETER_GROUP,),
             ),
-            (
-                InputPortSpec("value", "Value", PortType.CHANNEL),
-                InputPortSpec("parameter_a", "Parameter A", PortType.CHANNEL, required=False),
-                InputPortSpec("parameter_b", "Parameter B", PortType.CHANNEL, required=False),
-            ),
-            (OutputPortSpec("midi", "MIDI state", PortType.MIDI_STATE),),
-            (
-                *common_musical_parameter_specs(),
-                ParameterSpec(
-                    "occupancy_threshold_percent",
-                    "Occupancy threshold (%)",
-                    PortType.FLOAT,
-                    0.0,
-                    help_text=(
-                        "A note only sounds when at least this percentage of the accepted pixels "
-                        "falls into its bin."
-                    ),
-                    minimum=0.0,
-                    maximum=100.0,
-                    editor_hint=ParameterEditorHint.SLIDER,
-                ),
-                ParameterSpec(
-                    "minimum_a",
-                    "Minimum A",
-                    PortType.FLOAT,
-                    0.0,
-                    help_text="Pixels whose parameter A channel is below this value are ignored.",
-                    connectable=True,
-                    connected_port_type=PortType.FLOAT,
-                ),
-                ParameterSpec(
-                    "maximum_a_enabled",
-                    "Enable maximum A",
-                    PortType.BOOL,
-                    False,
-                    help_text=(
-                        "When on, parameter A pixels above the maximum A value are also ignored."
-                    ),
-                ),
-                ParameterSpec(
-                    "maximum_a",
-                    "Maximum A",
-                    PortType.FLOAT,
-                    1.0,
-                    help_text=(
-                        "Highest parameter A value counted; only used when Enable maximum A is on."
-                    ),
-                    connectable=True,
-                    connected_port_type=PortType.FLOAT,
-                ),
-                ParameterSpec(
-                    "minimum_b",
-                    "Minimum B",
-                    PortType.FLOAT,
-                    0.0,
-                    help_text="Pixels whose parameter B channel is below this value are ignored.",
-                    connectable=True,
-                    connected_port_type=PortType.FLOAT,
-                ),
-                ParameterSpec(
-                    "maximum_b_enabled",
-                    "Enable maximum B",
-                    PortType.BOOL,
-                    False,
-                    help_text=(
-                        "When on, parameter B pixels above the maximum B value are also ignored."
-                    ),
-                ),
-                ParameterSpec(
-                    "maximum_b",
-                    "Maximum B",
-                    PortType.FLOAT,
-                    1.0,
-                    help_text=(
-                        "Highest parameter B value counted; only used when Enable maximum B is on."
-                    ),
-                    connectable=True,
-                    connected_port_type=PortType.FLOAT,
-                ),
-                ParameterSpec(
-                    "ignore_non_finite",
-                    "Ignore non-finite values",
-                    PortType.BOOL,
-                    True,
-                    help_text=(
-                        "When on, non-finite values (such as NaN or infinity) are skipped instead "
-                        "of making the node fail."
-                    ),
-                ),
-                ParameterSpec(
-                    "binning_mode",
-                    "Binning mode",
-                    PortType.STRING,
-                    LINEAR_NOMINAL_RANGE,
-                    help_text=(
-                        "Chooses how values are spread across the note bins; only linear binning "
-                        "across the channel's nominal range is available."
-                    ),
-                    choices=(LINEAR_NOMINAL_RANGE,),
-                ),
-            ),
-            ExecutionKind.STATELESS,
-            ChannelToPitchRuntime,
-            aliases=("histogram notes", "channel histogram", "image to midi"),
-            parameter_validator=_validate_parameters,
-            parameter_groups=(COMMON_MUSICAL_PARAMETER_GROUP,),
         ),
     )
 

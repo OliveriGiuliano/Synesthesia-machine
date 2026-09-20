@@ -18,7 +18,10 @@ from synesthesia_machine.nodes import (
     ExpectedNodeError,
     InputPortSpec,
     NodeDefinition,
+    NodeExecutionContract,
     NodeMigration,
+    NodePersistenceDescriptor,
+    NodePresentationIntent,
     OutputPortSpec,
     ResetReason,
     TypeVariable,
@@ -91,19 +94,27 @@ def make_definition(
 
     inputs = () if input_type is None else (InputPortSpec("value", "Value", input_type),)
     return NodeDefinition(
-        type_id=type_id,
-        implementation_version=implementation_version,
-        display_name=type_id,
-        category="Test",
-        description="Test node definition.",
-        inputs=inputs,
-        outputs=(OutputPortSpec("value", "Value", output_type),),
-        parameters=(),
-        execution_kind=execution_kind,
-        runtime_factory=factory,
-        migrations=dict(migrations) if migrations is not None else {},
-        cache_policy=cache_policy,
-        handles_no_data=handles_no_data,
+        execution=NodeExecutionContract(
+            type_id=type_id,
+            implementation_version=implementation_version,
+            execution_kind=execution_kind,
+            inputs=inputs,
+            outputs=(OutputPortSpec("value", "Value", output_type),),
+            parameters=(),
+            runtime_factory=factory,
+            cache_policy=cache_policy,
+            handles_no_data=handles_no_data,
+        ),
+        presentation=NodePresentationIntent(
+            type_id,
+            "Test",
+            "Test node definition.",
+        ),
+        persistence=(
+            NodePersistenceDescriptor(migrations=dict(migrations))
+            if migrations is not None
+            else None
+        ),
     )
 
 
@@ -133,15 +144,20 @@ def make_tv_image_producer(type_id: str = "test.tv_image_producer") -> NodeDefin
         return ProbeRuntime(node_id, {})
 
     return NodeDefinition(
-        type_id=type_id,
-        implementation_version=1,
-        display_name=type_id,
-        category="Test",
-        description="Type-variable image producer.",
-        inputs=(),
-        outputs=(OutputPortSpec("value", "Value", TypeVariable("T", frozenset({PortType.IMAGE}))),),
-        parameters=(),
-        execution_kind=ExecutionKind.SOURCE,
-        runtime_factory=factory,
-        cache_policy=CachePolicy.AUTO,
+        execution=NodeExecutionContract(
+            type_id=type_id,
+            implementation_version=1,
+            execution_kind=ExecutionKind.SOURCE,
+            inputs=(),
+            outputs=(
+                OutputPortSpec("value", "Value", TypeVariable("T", frozenset({PortType.IMAGE}))),
+            ),
+            parameters=(),
+            runtime_factory=factory,
+        ),
+        presentation=NodePresentationIntent(
+            type_id,
+            "Test",
+            "Type-variable image producer.",
+        ),
     )
