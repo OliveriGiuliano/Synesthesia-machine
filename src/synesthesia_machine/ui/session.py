@@ -96,7 +96,6 @@ class DocumentSession(QObject):
         self._device_catalogue = DeviceCatalogue()
         self._compilation: CompilationResult
         self._view_model: GraphViewModel
-        self._revision = 0
         self.undo_stack.cleanChanged.connect(self._on_clean_changed)
         self.undo_stack.setClean()
         self._refresh()
@@ -104,12 +103,6 @@ class DocumentSession(QObject):
     @property
     def is_dirty(self) -> bool:
         return not self.undo_stack.isClean()
-
-    @property
-    def revision(self) -> int:
-        """Monotonic counter bumped by every _refresh, for UI-side caches."""
-
-        return self._revision
 
     @property
     def view_model(self) -> GraphViewModel:
@@ -393,13 +386,14 @@ class DocumentSession(QObject):
         )
 
     def set_connection_preview_visible(self, connection_id: UUID, visible: bool) -> None:
-        # Compare against the published projection so the absent-means-True rule
-        # is interpreted in exactly one place (project_graph).
-        connection_view = next(
-            (view for view in self.view_model.connections if view.connection_id == connection_id),
-            None,
-        )
-        if connection_view is None or connection_view.preview_visible == visible:
+        # Compare against the published projection so the absent-means-True
+        # rule is interpreted in exactly one place (project_graph). A
+        # connection id missing from the projection is stale: the old
+        # projection scan no-op'd here, and the command would reject it.
+        visibilities = self.view_model.derived.preview_visibilities
+        if connection_id not in visibilities:
+            return
+        if visibilities[connection_id] == visible:
             return
         self.push(
             SetConnectionPreviewCommand(
@@ -692,7 +686,6 @@ class DocumentSession(QObject):
     def _refresh(self, *, runtime_changed: bool = True, recompile: bool = True) -> None:
         # Compile and project from the current document state; every command
         # ends with a refresh, so nothing mutates the document in between.
-        self._revision += 1
         if recompile:
             self._compilation = self.compiler.compile(self.document.snapshot())
             self.report = self._compilation.report

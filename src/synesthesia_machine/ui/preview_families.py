@@ -25,6 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from synesthesia_machine.nodes import PreviewDock
 from synesthesia_machine.nodes.visualization import (
     CHANNEL_DISPLAY_TYPE_ID,
     DISPLAY_IMAGE_DATA_TYPE_ID,
@@ -59,15 +60,16 @@ class PreviewFamilySpec:
 
     ``display_visualizer_type_id``/``visualizer_input_port`` name the display
     node whose input port receives the connection when the user asks to
-    inspect it; ``dock`` is the window-owned dock key (``"image"`` or
-    ``"note"``) that also receives live previews of this family. ``pill``
-    marks families rendered as canvas link pills.
+    inspect it; ``dock`` is the ``PreviewDock`` the family's live previews
+    feed — the same enum the display node declarations carry, so the dock
+    classification has one source of truth. ``pill`` marks families rendered
+    as canvas link pills.
     """
 
     type_names: frozenset[str]
     display_visualizer_type_id: str | None = None
     visualizer_input_port: str | None = None
-    dock: str | None = None
+    dock: PreviewDock | None = None
     pill: bool = True
 
 
@@ -77,19 +79,19 @@ FAMILIES: dict[PreviewFamily, PreviewFamilySpec] = {
         frozenset({"IMAGE"}),
         DISPLAY_IMAGE_DATA_TYPE_ID,
         "image",
-        "image",
+        PreviewDock.IMAGE,
     ),
     PreviewFamily.CHANNEL: PreviewFamilySpec(
         frozenset({"CHANNEL"}),
         CHANNEL_DISPLAY_TYPE_ID,
         "channel",
-        "image",
+        PreviewDock.IMAGE,
     ),
     PreviewFamily.NOTE: PreviewFamilySpec(
         frozenset({"MIDI_STATE"}),
         NOTE_VISUALIZER_TYPE_ID,
         "midi",
-        "note",
+        PreviewDock.NOTE,
         pill=False,
     ),
 }
@@ -146,7 +148,11 @@ def display_visualizer(type_name: str) -> tuple[str, str, str] | None:
     spec = FAMILIES[family]
     if spec.display_visualizer_type_id is None or spec.visualizer_input_port is None:
         return None
-    return (spec.display_visualizer_type_id, spec.visualizer_input_port, spec.dock or "")
+    return (
+        spec.display_visualizer_type_id,
+        spec.visualizer_input_port,
+        spec.dock.value if spec.dock is not None else "",
+    )
 
 
 def theme_token(type_name: str) -> str:

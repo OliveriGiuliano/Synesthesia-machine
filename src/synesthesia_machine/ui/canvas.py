@@ -348,17 +348,11 @@ class GraphScene(QGraphicsScene):
             item.set_image_preview(None)
 
     def _connection_preview_visible(self, connection_id: UUID) -> bool:
-        for connection in self.session.view_model.connections:
-            if connection.connection_id == connection_id:
-                return connection.preview_visible
         # Absent connections are treated as visible, mirroring the projection.
-        return True
+        return self.session.view_model.derived.preview_visibilities.get(connection_id, True)
 
     def _sync_connection_preview_visibility(self) -> None:
-        visibilities = {
-            connection.connection_id: connection.preview_visible
-            for connection in self.session.view_model.connections
-        }
+        visibilities = self.session.view_model.derived.preview_visibilities
         for item in self.connection_items.values():
             item.set_preview_visible(visibilities.get(item.view_model.connection_id, True))
 

@@ -6,7 +6,10 @@ settings, themes, and translations.
 ## Ownership and seams
 
 - `DocumentSession` owns the mutable authoring document and undo stack. Widgets project its immutable
-  view model and never mutate `GraphDocument` directly.
+  view model, which now publishes the slices consumers used to re-scan — demand-root ids,
+  preview-dock routings, link-pill producers, and source facts — so the demand policy, preview
+  routing, canvas lookups, and window caches read published values instead of reinterpreting nodes
+  and connections. Widgets never mutate `GraphDocument` directly.
 - `DocumentSession.changed` covers every persisted edit for scene synchronization and autosave;
   `runtimeChanged` is reserved for edits that require a new engine plan or demand-root set. Moving
   nodes and editing groups/comments must not replace the active runtime generation.

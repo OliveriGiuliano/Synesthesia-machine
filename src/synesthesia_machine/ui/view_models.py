@@ -2,14 +2,18 @@
 
 The projection is the single place that interprets editor conventions for
 renderers and the runtime: the absent-means-True ``preview_visible`` rule and
-each node's execution kind. Consumers (scene, window, demand policy) read the
-projection and never re-read raw ``ui_state`` or re-consult the registry.
+each node's execution kind. It also publishes the derived slices consumers
+would otherwise re-derive by re-scanning nodes and connections (source ids,
+demand-root families, preview-dock routing, connection visibilities, source
+file facts). Every refresh publishes a new projection object, so the object's
+identity is the freshness token consumers key on.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from types import MappingProxyType
 from uuid import UUID
 
 from synesthesia_machine.contracts import ParameterValue, PortType, SourceStatus
@@ -31,6 +35,7 @@ from synesthesia_machine.nodes import (
     PreviewDock,
 )
 from synesthesia_machine.ui.connection_state import PREVIEW_VISIBLE_KEY
+from synesthesia_machine.ui.preview_families import pill_type_names
 from synesthesia_machine.ui.translations import tr
 
 
@@ -96,10 +101,48 @@ class ConnectionViewModel:
 
 
 @dataclass(frozen=True, slots=True)
+class DerivedViews:
+    """Derived slices, computed once per projection.
+
+    Every field is a pure function of the projection, published here so
+    consumers read instead of re-scanning ``nodes``/``connections`` with
+    private caches. All id tuples are sorted for deterministic ordering.
+
+    ``image_visualizer_ids`` is the demand-policy notion: any non-note display
+    visualizer is demanded while the image dock is visible.
+    ``image_dock_source_keys`` is the preview-routing notion: only
+    ``PreviewDock.IMAGE`` visualizers receive image-dock previews, so a
+    dock-less display visualizer is demanded but its producer's previews are
+    not routed there.
+    ``source_facts`` pairs each source node's type id with its file-path
+    parameter (empty for source kinds without a file), so caches whose
+    freshness depends on the sources' files key on published facts.
+    """
+
+    source_node_ids: tuple[UUID, ...]
+    sink_node_ids: tuple[UUID, ...]
+    note_visualizer_ids: tuple[UUID, ...]
+    image_visualizer_ids: tuple[UUID, ...]
+    image_dock_source_keys: frozenset[tuple[UUID, str]]
+    pill_producer_ids: tuple[UUID, ...]
+    preview_visibilities: Mapping[UUID, bool]
+    source_facts: tuple[tuple[str, str], ...]
+
+    def __post_init__(self) -> None:
+        # Freeze the visibilities mapping like GraphSnapshot.document_settings:
+        # canvas, session, and window all read the same object, and a frozen
+        # projection must not let any consumer mutate it.
+        object.__setattr__(
+            self, "preview_visibilities", MappingProxyType(dict(self.preview_visibilities))
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class GraphViewModel:
     nodes: tuple[NodeViewModel, ...]
     connections: tuple[ConnectionViewModel, ...]
     groups: tuple[GroupModel, ...]
+    derived: DerivedViews
 
 
 def _projected_parameter_spec(
@@ -262,7 +305,87 @@ def project_graph(
         )
         for connection in snapshot.connections
     )
-    return GraphViewModel(tuple(nodes), connections, tuple(snapshot.groups))
+    # The derived slices are published once per projection so consumers read
+    # them instead of re-scanning nodes and connections with private caches.
+    pill_types = pill_type_names()
+    image_dock_visualizer_ids = {
+        node.node_id for node in nodes if node.preview_dock is PreviewDock.IMAGE
+    }
+    derived = DerivedViews(
+        source_node_ids=tuple(
+            sorted(
+                (node.node_id for node in nodes if node.execution_kind is ExecutionKind.SOURCE),
+                key=str,
+            )
+        ),
+        sink_node_ids=tuple(
+            sorted(
+                (node.node_id for node in nodes if node.execution_kind is ExecutionKind.SINK),
+                key=str,
+            )
+        ),
+        note_visualizer_ids=tuple(
+            sorted(
+                (
+                    node.node_id
+                    for node in nodes
+                    if node.execution_kind is ExecutionKind.VISUALIZER
+                    and node.preview_dock is PreviewDock.NOTE
+                ),
+                key=str,
+            )
+        ),
+        image_visualizer_ids=tuple(
+            sorted(
+                (
+                    node.node_id
+                    for node in nodes
+                    if node.execution_kind is ExecutionKind.VISUALIZER
+                    and node.preview_dock is not PreviewDock.NOTE
+                ),
+                key=str,
+            )
+        ),
+        image_dock_source_keys=frozenset(
+            (connection.source_node_id, connection.source_port_id)
+            for connection in connections
+            if connection.destination_node_id in image_dock_visualizer_ids
+        ),
+        pill_producer_ids=tuple(
+            sorted(
+                {
+                    connection.source_node_id
+                    for connection in connections
+                    if connection.preview_visible and connection.type_name in pill_types
+                },
+                key=str,
+            )
+        ),
+        preview_visibilities={
+            connection.connection_id: connection.preview_visible for connection in connections
+        },
+        source_facts=tuple(
+            sorted(
+                (
+                    (
+                        node.type_id,
+                        next(
+                            (
+                                str(parameter.value)
+                                for parameter in node.parameters
+                                if parameter.spec.id == "file_path"
+                            ),
+                            "",
+                        ),
+                    )
+                    for node in nodes
+                    if node.execution_kind is ExecutionKind.SOURCE
+                ),
+                key=str,
+            )
+        ),
+    )
+    return GraphViewModel(tuple(nodes), connections, tuple(snapshot.groups), derived)
 
 
 def _type_name(

@@ -2,8 +2,9 @@
 
 The view model is the single surface renderers and the demand policy read:
 these tests pin the published fields — the preview-visibility rule, each
-node's execution kind and preview dock, and the group list — so consumers
-never re-interpret raw ui_state or re-scan the document and registry.
+node's execution kind and preview dock, the group list, and the derived
+slices (demand-root ids, dock routings, pill producers, source facts) that
+consumers read instead of re-scanning nodes and connections.
 """
 
 from __future__ import annotations
@@ -97,3 +98,29 @@ def test_groups_are_published_on_the_graph_view() -> None:
     document.remove_group(GROUP_ID)
     view = _view_model(document)
     assert view.groups == ()
+
+
+def test_derived_slices_publish_the_consumer_facts() -> None:
+    document = GraphDocument()
+    video_id = document.add_node(
+        "synmachine.input.load_video", parameters={"file_path": "unused.mp4"}
+    )
+    send_id = document.add_node("synmachine.output.send_midi")
+    image_id = document.add_node("synmachine.visualization.display_image_data")
+    note_id = document.add_node("synmachine.visualization.note_visualizer")
+    connection_id = document.add_connection(video_id, "image", image_id, "image")
+
+    view = _view_model(document)
+    derived = view.derived
+
+    assert derived.source_node_ids == (video_id,)
+    assert derived.sink_node_ids == (send_id,)
+    assert derived.image_visualizer_ids == (image_id,)
+    assert derived.note_visualizer_ids == (note_id,)
+    assert derived.image_dock_source_keys == frozenset({(video_id, "image")})
+    assert derived.pill_producer_ids == (video_id,)
+    # Absent means visible: the rule is published, not re-interpreted.
+    assert derived.preview_visibilities == {connection_id: True}
+    # File-bearing sources publish the deterministic (type_id, file_path)
+    # facts the export-eligibility cache keys on.
+    assert derived.source_facts == (("synmachine.input.load_video", "unused.mp4"),)

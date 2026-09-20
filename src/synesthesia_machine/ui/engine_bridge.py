@@ -53,7 +53,6 @@ from synesthesia_machine.contracts.engine_client import (
     SourceState,
     SourceStatus,
 )
-from synesthesia_machine.nodes import PreviewDock
 from synesthesia_machine.runtime import EngineSession
 from synesthesia_machine.ui.preview_router import PreviewRouter, PumpedPreviews, RoutingResult
 
@@ -178,12 +177,6 @@ class EngineBridge:
         # bridge applies to every pumped batch before the compositor sees
         # it, so the interface only advertises behaviour it performs.
         self._preview_router = PreviewRouter()
-        # The image dock's visualizer-source set, refreshed by projection
-        # object identity: the session republishes the projection on document
-        # change, language switch, and source-status updates, and recomputing
-        # the set after any of them is the correct response.
-        self._preview_view: GraphViewModel | None = None
-        self._image_dock_sources: frozenset[tuple[UUID, str]] = frozenset()
         self._on_previews = on_previews
         self._on_state = on_state
         self._on_status_message = on_status_message
@@ -432,17 +425,12 @@ class EngineBridge:
         pumped while the note dock is hidden, and this step owns the
         routing: the batch is routed with the bridge's preview router before
         the compositor sees it. The image dock's visualizer-source set is
-        derived from the projection and refreshed whenever the window hands
-        over a new projection object (the session republishes it on document
-        change, language switch, and source-status updates). A failed poll
-        (e.g. the engine transport closing) skips the tick without touching
-        any published state.
+        published on the projection itself, so the tick just reads it. A
+        failed poll (e.g. the engine transport closing) skips the tick
+        without touching any published state.
         """
         if self._closed:
             return
-        if view is not self._preview_view:
-            self._preview_view = view
-            self._image_dock_sources = self._image_visualizer_source_keys(view)
         try:
             note_previews = self._session.next_note_previews() if note_visible else ()
             pumped = PumpedPreviews(
@@ -456,21 +444,8 @@ class EngineBridge:
             self._preview_router.route(
                 pumped,
                 image_visible=image_visible,
-                image_dock_sources=self._image_dock_sources,
+                image_dock_sources=view.derived.image_dock_source_keys,
             )
-        )
-
-    @staticmethod
-    def _image_visualizer_source_keys(view: GraphViewModel) -> frozenset[tuple[UUID, str]]:
-        """The source ports that feed a display visualizer: the image dock
-        only shows previews whose source port lands on such a node."""
-        visualizer_ids = {
-            node.node_id for node in view.nodes if node.preview_dock is PreviewDock.IMAGE
-        }
-        return frozenset(
-            (connection.source_node_id, connection.source_port_id)
-            for connection in view.connections
-            if connection.destination_node_id in visualizer_ids
         )
 
     # -- runtime profiling ---------------------------------------------------

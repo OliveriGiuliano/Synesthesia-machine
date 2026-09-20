@@ -109,7 +109,7 @@ from synesthesia_machine.ui.session import DocumentSession
 from synesthesia_machine.ui.theme import DEFAULT_THEME, Theme
 from synesthesia_machine.ui.translations import set_language, tr, trf
 from synesthesia_machine.ui.transport import resolve_transport_target
-from synesthesia_machine.ui.view_models import PortViewModel
+from synesthesia_machine.ui.view_models import GraphViewModel, PortViewModel
 from synesthesia_machine.ui.widgets import (
     InspectorPanel,
     NodeLibrary,
@@ -182,9 +182,7 @@ class MainWindow(QMainWindow):
         )
         self._engine_closed = False
         self._midi_eligibility: tuple[bool, str] | None = None
-        self._midi_eligibility_key: object | None = None
-        self._source_node_ids: tuple[UUID, ...] = ()
-        self._source_node_ids_key: object | None = None
+        self._midi_eligibility_view: GraphViewModel | None = None
         self._midi_export_job: MidiExportJob | None = None
         self._activation_timer = QTimer(self)
         self._activation_timer.setSingleShot(True)
@@ -775,7 +773,7 @@ class MainWindow(QMainWindow):
         self.engine_bridge.restart()
 
     def _transport_target(self) -> UUID | None:
-        sources = tuple(node.node_id for node in self.session.view_model.nodes if node.is_source)
+        sources = self.session.view_model.derived.source_node_ids
         resolution = resolve_transport_target(sources, self.scene.selected_node_ids())
         if resolution.target is None:
             self.statusBar().showMessage(tr(resolution.message), 4000)
@@ -1202,32 +1200,26 @@ class MainWindow(QMainWindow):
         self.action_registry.require("organize_graph").setEnabled(
             len(self.session.document.nodes) >= 2
         )
-        # The source list and the MIDI export eligibility depend only on the
-        # document and its validation report, both of which change atomically
-        # in session._refresh. The report object is replaced on every full
-        # refresh (and kept for presentation-only refreshes, which leave the
-        # document untouched), so its identity is a sound cache key: selection
-        # and clipboard events no longer pay the O(N) scan or the per-video
-        # file-system stats.
-        # A monotonic revision (bumped by every session refresh, full or
-        # presentation-only) is the cache key; object identity would be
-        # unsafe because CPython reuses addresses of freed report objects.
-        cache_key = self.session.revision
-        if self._source_node_ids_key is not cache_key:
-            self._source_node_ids = tuple(
-                node.node_id for node in self.session.view_model.nodes if node.is_source
-            )
+        # The source ids come from the published projection slice. MIDI
+        # export eligibility is not a pure function of the projection (it
+        # stats the video files and walks the full node set), so the window
+        # recomputes it only when the session publishes a new projection
+        # object: every document change projects a new object, and the
+        # window keeps the cached one alive, so object identity is a sound
+        # freshness token — selection and clipboard events pay neither the
+        # O(N) scan nor the per-video file-system stats.
+        view_model = self.session.view_model
+        if self._midi_eligibility_view is not view_model:
             eligible, reason = midi_export_eligibility(
                 self.session.document.snapshot(),
                 self.registry,
                 graph_valid=not self.session.report.errors,
             )
             self._midi_eligibility = (eligible, reason)
-            self._midi_eligibility_key = cache_key
-            self._source_node_ids_key = cache_key
+            self._midi_eligibility_view = view_model
         assert self._midi_eligibility is not None
         eligible, reason = self._midi_eligibility
-        transport = resolve_transport_target(self._source_node_ids, selected_nodes)
+        transport = resolve_transport_target(view_model.derived.source_node_ids, selected_nodes)
         for key, verb in (
             ("play", "Play or resume"),
             ("pause", "Pause"),
