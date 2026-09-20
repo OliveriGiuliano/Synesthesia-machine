@@ -28,6 +28,7 @@ from synesthesia_machine.contracts import (
 )
 from synesthesia_machine.graph import GraphCompiler, GraphDocument
 from synesthesia_machine.nodes import (
+    CachePolicy,
     ExecutionKind,
     InputPortSpec,
     NodeDefinition,
@@ -35,6 +36,8 @@ from synesthesia_machine.nodes import (
     NodePresentationIntent,
     NodeRegistry,
     OutputPortSpec,
+    ParameterSpec,
+    StatelessRuntime,
 )
 from synesthesia_machine.nodes.utility import create_utility_registry
 from synesthesia_machine.runtime import (
@@ -50,6 +53,28 @@ NODE_A = UUID("00000000-0000-0000-0000-00000000000a")
 NODE_B = UUID("00000000-0000-0000-0000-00000000000b")
 NODE_C = UUID("00000000-0000-0000-0000-00000000000c")
 NODE_D = UUID("00000000-0000-0000-0000-00000000000d")
+
+
+class PartialOutputRuntime(StatelessRuntime):
+    """Declares outputs the runtime forgets; counts invocations.
+
+    Stands in for a ``handles_no_data=True`` runtime that omits a declared
+    output port, exercising the scheduler's NoData fill for missing ports.
+    """
+
+    def __init__(self, node_id: UUID, counters: dict[UUID, int]) -> None:
+        super().__init__(node_id)
+        self._counters = counters
+
+    def process(
+        self,
+        inputs: Mapping[str, RuntimeValue],
+        parameters: Mapping[str, ParameterValue],
+        context: FrameContext,
+    ) -> Mapping[str, RuntimeValue]:
+        del inputs, parameters, context
+        self._counters[self.node_id] = self._counters.get(self.node_id, 0) + 1
+        return {"value": 7.0}
 
 
 def test_fan_out_executes_upstream_once_per_tick_and_propagates_no_data() -> None:
@@ -118,6 +143,128 @@ def test_node_that_handles_no_data_is_invoked() -> None:
 
     assert result.invocation_counts == {handler: 1}
     assert result.values[PortKey(handler, "value")] is NoData
+
+
+def test_missing_output_port_is_filled_with_no_data() -> None:
+    """A NoData-handling runtime that omits a declared output publishes NoData for it.
+
+    The fill is deliberate contract, not an accident: a runtime that declares
+    ``handles_no_data=True`` must publish a value for every declared output,
+    because a scheduler-filled ``NoData`` is indistinguishable from an
+    intentional one downstream (see the ``NodeRuntime`` protocol).
+    """
+    counters: dict[UUID, int] = {}
+
+    def factory(node_id: UUID) -> PartialOutputRuntime:
+        return PartialOutputRuntime(node_id, counters)
+
+    definition = NodeDefinition(
+        execution=NodeExecutionContract(
+            type_id="test.partial_publisher",
+            implementation_version=1,
+            execution_kind=ExecutionKind.STATELESS,
+            inputs=(InputPortSpec("value", "Value", PortType.FLOAT),),
+            outputs=(
+                OutputPortSpec("value", "Value", PortType.FLOAT),
+                OutputPortSpec("extra", "Extra", PortType.FLOAT),
+            ),
+            parameters=(),
+            runtime_factory=factory,
+            handles_no_data=True,
+        ),
+        presentation=NodePresentationIntent(
+            display_name="Partial Publisher",
+            category="Test",
+            description="Declares two outputs but publishes only one.",
+        ),
+    )
+    registry = NodeRegistry((make_definition("test.source"), definition))
+    document = GraphDocument()
+    source = document.add_node("test.source", node_id=NODE_A)
+    handler = document.add_node("test.partial_publisher", node_id=NODE_B)
+    document.add_connection(source, "value", handler, "value")
+    plan = GraphCompiler(registry).compile(document.snapshot()).plan
+    assert plan is not None
+
+    result = Scheduler(plan).execute_tick(
+        frame_context(clock_id=source),
+        source_values={PortKey(source, "value"): NoData},
+    )
+
+    assert counters[handler] == 1  # invoked despite the NoData input: handles_no_data
+    assert result.values[PortKey(handler, "value")] == 7.0
+    assert result.values[PortKey(handler, "extra")] is NoData  # scheduler fill, deliberate
+
+
+def test_auto_and_static_policies_are_execution_equivalent() -> None:
+    """AUTO and STATIC compile and execute identically: both are static for a
+    source-independent node, and both serve tick 2 from the static cache.
+
+    STATIC's one real distinction lives in parameter normalization (see
+    ``test_static_policy_suppresses_default_parameter_connectivity``), not in
+    execution — pinning the equivalence here keeps that the only difference.
+    """
+    results: dict[CachePolicy, tuple[object, dict[UUID, RuntimeCounters]]] = {}
+    for policy in (CachePolicy.AUTO, CachePolicy.STATIC):
+        counters: dict[UUID, RuntimeCounters] = {}
+        type_id = f"test.const_{policy.value.lower()}"
+        registry = NodeRegistry(
+            (
+                make_definition(type_id, cache_policy=policy, counters=counters),
+                make_definition("test.sink", input_type=PortType.FLOAT, counters=counters),
+            )
+        )
+        document = GraphDocument()
+        number = document.add_node(type_id, node_id=NODE_A)
+        sink = document.add_node("test.sink", node_id=NODE_B)
+        document.add_connection(number, "value", sink, "value")
+        plan = GraphCompiler(registry).compile(document.snapshot()).plan
+        assert plan is not None
+        scheduler = Scheduler(plan)
+        scheduler.execute_tick(frame_context(clock_id=CLOCK_ID))
+        scheduler.execute_tick(frame_context(clock_id=CLOCK_ID, tick_index=2))
+        results[policy] = (plan, counters)
+
+    for policy in (CachePolicy.AUTO, CachePolicy.STATIC):
+        plan, counters = results[policy]
+        number_node = next(node for node in plan.nodes if node.node_id == NODE_A)
+        assert number_node.is_static is True
+        assert counters[NODE_A].process == 1  # tick 2 served from the static cache
+
+
+def test_static_policy_suppresses_default_parameter_connectivity() -> None:
+    """A LIVE scalar parameter on a STATIC node normalizes to non-connectable
+    while an otherwise identical AUTO twin stays connectable.
+
+    Driving a statically cached node with cable values would contradict the
+    source-independence assertion STATIC makes, so the scaffold removes the
+    default cable surface (an author can still opt in per parameter).
+    """
+
+    def const_definition(policy: CachePolicy) -> NodeDefinition:
+        return NodeDefinition(
+            execution=NodeExecutionContract(
+                type_id="test.const_parameter",
+                implementation_version=1,
+                execution_kind=ExecutionKind.STATELESS,
+                inputs=(),
+                outputs=(OutputPortSpec("value", "Value", PortType.FLOAT),),
+                parameters=(ParameterSpec("gain", "Gain", PortType.FLOAT, 1.0),),
+                runtime_factory=lambda node_id: ProbeRuntime(node_id, {}),
+                cache_policy=policy,
+            ),
+            presentation=NodePresentationIntent(
+                display_name="Const Parameter",
+                category="Test",
+                description="Probe of the static parameter policy.",
+            ),
+        )
+
+    auto_gain = const_definition(CachePolicy.AUTO).execution.parameter("gain")
+    static_gain = const_definition(CachePolicy.STATIC).execution.parameter("gain")
+    assert auto_gain is not None and static_gain is not None
+    assert auto_gain.connectable is True
+    assert static_gain.connectable is False
 
 
 def test_static_cache_survives_ticks_and_new_plan_invalidates_it() -> None:

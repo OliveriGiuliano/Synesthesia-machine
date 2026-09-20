@@ -362,9 +362,9 @@ def test_shared_musical_view_model_and_editor_cover_ranges_custom_mode_and_edits
     projection = project_graph(document.snapshot(), registry, compilation.report)
     node = next(node for node in projection.nodes if node.node_id == node_id)
     assert len(node.parameter_groups) == 1
-    assert tuple(
-        parameter.spec.id for parameter in node.parameter_groups[0].parameters
-    ) == (COMMON_MUSICAL_PARAMETER_IDS)
+    assert tuple(parameter.spec.id for parameter in node.parameter_groups[0].parameters) == (
+        COMMON_MUSICAL_PARAMETER_IDS
+    )
 
     edits: list[tuple[str, object]] = []
     editor = MusicalParameterEditor(

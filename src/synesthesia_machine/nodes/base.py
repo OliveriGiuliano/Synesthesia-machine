@@ -375,12 +375,36 @@ class PreviewDock(StrEnum):
 
 
 class CachePolicy(StrEnum):
+    """How the compiler treats a node's static-ness.
+
+    ``AUTO`` (the default) and ``STATIC`` compile identically: a node is static
+    (its outputs cached for the plan's lifetime) when it is not on a source
+    clock, and live otherwise. ``NEVER`` is the only policy that forces live
+    execution. ``STATIC`` is an authoring assertion that the node's outputs are
+    source-independent: besides the same execution semantics as ``AUTO``, it
+    makes LIVE scalar parameters non-connectable by default, since driving a
+    statically cached node with cable values would contradict the assertion
+    (declare ``connectable=True`` on a specific parameter to allow it).
+    """
+
     AUTO = "AUTO"
     NEVER = "NEVER"
     STATIC = "STATIC"
 
 
 class NodeRuntime(Protocol):
+    """The lifecycle a node author implements for the engine.
+
+    The scheduler enforces the ``NoData`` contract around ``process``: unless
+    the node's execution contract declares ``handles_no_data=True``,
+    ``process`` is never invoked while any input is ``NoData`` — the scheduler
+    publishes ``NoData`` for every declared output instead. A ``process`` that
+    does run must return a value for every declared output port: a port missing
+    from the returned mapping is filled with ``NoData`` by the scheduler,
+    indistinguishable from an intentional ``NoData``, so a runtime that omits
+    a port hides its own failure.
+    """
+
     def process(
         self,
         inputs: Mapping[str, RuntimeValue],
@@ -572,6 +596,9 @@ class NodeExecutionContract:
     variadic_input: VariadicInputSpec | None = None
     cache_policy: CachePolicy = CachePolicy.AUTO
     handles_no_data: bool = False
+    # Opt-in to the NoData input rule stated on the NodeRuntime protocol: with
+    # True, process() may be invoked while inputs are NoData, and it must then
+    # publish a value for every declared output.
     port_type_resolver: PortTypeResolver | None = None
     required_input_resolver: RequiredInputResolver | None = None
     parameter_validator: ParameterValidator | None = None
