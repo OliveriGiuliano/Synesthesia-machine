@@ -15,11 +15,11 @@
 - `tests/support/image_conformance.py`
 
 **Acceptance:**
-- [ ] The NoData input rule and the missing-output behaviour are stated in the scaffold, at the point the author declares `handles_no_data`
-- [ ] The AUTO/STATIC decision is recorded: equivalence pinned + documented, distinction implemented, or the value retired
-- [ ] A missing declared output port is pinned by a test as deliberate contract, not accident
-- [ ] The short-circuit keeps its test surface (one test is not enough: add the `handles_no_data=True` invocation case)
-- [ ] `uv run check` green; no unrelated diff
+- [x] The NoData input rule and the missing-output behaviour are stated in the scaffold, at the point the author declares `handles_no_data`
+- [x] The AUTO/STATIC decision is recorded: equivalence pinned + documented, distinction implemented, or the value retired
+- [x] A missing declared output port is pinned by a test as deliberate contract, not accident
+- [x] The short-circuit keeps its test surface (one test is not enough: add the `handles_no_data=True` invocation case)
+- [x] `uv run check` green; no unrelated diff
 
 ## Comments
 

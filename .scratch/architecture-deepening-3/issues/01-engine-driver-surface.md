@@ -15,12 +15,12 @@
 - `tests/runtime/test_engine_session.py`
 
 **Acceptance:**
-- [ ] The session's public surface is its real behaviours; no protocol method is re-implemented as a forward the reader must verify against the protocol
-- [ ] Exactly one owner of the last-valid-plan memory per transport; the unreachable session fallback is deleted
-- [ ] The connection fold exists once and is not dead over the in-process adapter
-- [ ] A user-initiated restart maps to one reset policy no matter which layer rebuilds the plan
-- [ ] Protocol and driver surfaces agree (a test pins the match)
-- [ ] Targeted tests pass; `uv run check` green; no unrelated diff
+- [x] The session's public surface is its real behaviours; no protocol method is re-implemented as a forward the reader must verify against the protocol
+- [x] Exactly one owner of the last-valid-plan memory per transport; the unreachable session fallback is deleted
+- [x] The connection fold exists once and is not dead over the in-process adapter
+- [x] A user-initiated restart maps to one reset policy no matter which layer rebuilds the plan
+- [x] Protocol and driver surfaces agree (a test pins the match)
+- [x] Targeted tests pass; `uv run check` green; no unrelated diff
 
 ## Comments
 

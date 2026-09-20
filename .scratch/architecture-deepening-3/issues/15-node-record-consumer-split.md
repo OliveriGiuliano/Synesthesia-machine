@@ -18,11 +18,11 @@
 - `src/synesthesia_machine/ui/view_models.py`
 
 **Acceptance:**
-- [ ] Each consumer imports only its record; no consumer reads a field its record does not declare
-- [ ] A node author's definition names only the fields their node kind uses
-- [ ] `realtime_safe` and any other dead residue are deleted
-- [ ] One parameter-value ladder replaces the three methods, with a consistency test asserting sanitize/validate agreement
-- [ ] `uv run check` green; full suite green; no unrelated diff
+- [x] Each consumer imports only its record; no consumer reads a field its record does not declare
+- [x] A node author's definition names only the fields their node kind uses
+- [x] `realtime_safe` and any other dead residue are deleted
+- [x] One parameter-value ladder replaces the three methods, with a consistency test asserting sanitize/validate agreement
+- [x] `uv run check` green; full suite green; no unrelated diff
 
 ## Comments
 
