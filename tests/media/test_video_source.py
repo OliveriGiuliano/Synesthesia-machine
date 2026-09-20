@@ -1320,3 +1320,90 @@ def test_head_swap_gives_up_after_bounded_wait(
         assert source._head_queue is not first, "the retried restage never swapped in"
     finally:
         source.close()
+
+
+def test_resume_after_seek_while_paused_resets_head_protocol(tmp_path: Path) -> None:
+    """A resume that restarts the pass begins a fresh head protocol.
+
+    The paused pass is left with the head flagged in use and its drain
+    event unset (the state a presentation thread parked mid head-drain
+    leaves behind); the restarted pass must not inherit either, or the
+    first loop boundary after the resume stalls on the stale flags
+    (ticket 08).
+    """
+
+    path = generate_test_video(tmp_path / "resume-head.mp4", frame_count=24, fps=12)
+    clock = AdvancingClock()
+    received: list[PresentedVideoFrame] = []
+    paused_at_third = threading.Event()
+    source: VideoSourceService
+
+    def on_frame(packet: PresentedVideoFrame) -> None:
+        received.append(packet)
+        if len(received) == 3:
+            source.pause()
+            paused_at_third.set()
+
+    source = VideoSourceService(SOURCE_ID, path, loop=True, on_frame=on_frame, clock=clock)
+    try:
+        source.play()
+        assert paused_at_third.wait(5.0)
+        # Park the paused pass mid head-drain: the head stays flagged in
+        # use and its drain is never signalled.
+        source._head_in_use = True
+        source._head_free.clear()
+        source.seek(1.5)
+        source.resume()
+        # The restarted pass owns a fresh head protocol: no inherited
+        # flags, drain event armed.
+        with source._lock:
+            assert source._head_in_use is False
+            assert source._head_free.is_set()
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if received and received[-1].image.context.source_time_s >= 1.5:
+                break
+            time.sleep(0.01)
+        assert received[-1].image.context.source_time_s >= 1.5
+        assert source.status().state is SourceState.PLAYING
+    finally:
+        source.close()
+
+
+def test_stop_with_stuck_worker_commits_error_instead_of_raising(tmp_path: Path) -> None:
+    """A worker stuck in a frame callback degrades stop() to a logged ERROR.
+
+    The presentation thread blocks inside the user's frame callback, so
+    the 5 s join times out. ``stop()`` must not tear down the engine
+    command path with a TimeoutError: it commits ERROR naming the
+    surviving worker, and the terminal ``close()`` commits CLOSED once the
+    callback returns (ticket 08).
+    """
+
+    path = generate_test_video(tmp_path / "stuck-worker.mp4", frame_count=24, fps=12)
+    released = threading.Event()
+    stuck = threading.Event()
+
+    def on_frame(packet: PresentedVideoFrame) -> None:
+        stuck.set()
+        released.wait(30.0)
+
+    source = VideoSourceService(SOURCE_ID, path, on_frame=on_frame, clock=AdvancingClock())
+    try:
+        source.play()
+        assert stuck.wait(5.0)
+        # The join of the stuck presentation thread times out after 5 s.
+        source.stop()
+        status = source.status()
+        assert status.state is SourceState.ERROR
+        assert status.last_error is not None
+        assert "video-present" in status.last_error
+        assert "did not stop" in status.last_error
+        released.set()
+        source.close()
+        assert source.status().state is SourceState.CLOSED
+    finally:
+        # Releasing first keeps the terminal close's join from waiting out
+        # the timeout for the still-stuck presentation thread.
+        released.set()
+        source.close()

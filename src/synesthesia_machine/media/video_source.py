@@ -8,10 +8,11 @@ changing the source's PTS-driven playback timeline.
 from __future__ import annotations
 
 import contextlib
+import logging
 import queue
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum, auto
 from math import isfinite
@@ -40,6 +41,11 @@ from synesthesia_machine.media_path import normalize_media_path
 _NANOSECONDS_PER_SECOND = 1_000_000_000
 _DEFAULT_DECODE_QUEUE_SIZE = 2
 _DEFAULT_MAX_DECODE_FAILURES = 3
+_LOGGER = logging.getLogger("synesthesia_machine.engine")
+
+
+def _survivor_message(survivors: Sequence[str]) -> str:
+    return "Video worker(s) did not stop within 5 seconds: " + ", ".join(survivors)
 
 
 class PlaybackClock(Protocol):
@@ -224,7 +230,32 @@ def _total_processed_index(
 
 
 class VideoSourceService:
-    """Lifecycle owner for one compiled Load Video source node."""
+    """Lifecycle owner for one compiled Load Video source node.
+
+    Per-pass state (decode queue, timeline, frame/processed indices, seek
+    filter, head protocol) is reset in exactly one place per lifecycle
+    action: pass start and halt both call ``_reset_pass_counters`` and
+    ``_reset_head_protocol``, so the two paths cannot reset different
+    subsets of the same fields (ticket 08). Seek and loop boundaries reset
+    narrower subsets inline on purpose.
+
+    ``_state`` is committed by one role per transition: the API thread
+    commits READY, PLAYING, PAUSED, STOPPED, CLOSED and region ERROR; the
+    presentation thread commits ENDED at a natural pass end; any worker
+    commits ERROR through ``_fail``. Worker-side commits are guarded by
+    ``_pass_generation`` so a survivor from a superseded pass cannot
+    overwrite a new pass's state; all commits happen under ``self._lock``.
+
+    A worker stuck in a native call (for example a PyAV seek on a broken
+    file) cannot be killed from Python.  The lifecycle calls therefore
+    never raise on it: the source commits ERROR naming the surviving
+    worker (a terminal ``close`` still commits CLOSED), logs the
+    degradation, and never spawns a new pass on top of the survivors.
+    The kept-open containers are left open for the survivors as well:
+    FFmpeg contexts are not thread-safe, so a close from under a stuck
+    native call would be a use-after-free, and the next clean halt
+    releases them. Reloading recovers once the stuck call returns.
+    """
 
     def __init__(
         self,
@@ -356,6 +387,7 @@ class VideoSourceService:
         self._seek_filter_pts: float | None = None
         self._seek_generation = 0
         self._applied_seek_generation = 0
+        self._pass_generation = 0
 
     @property
     def metadata(self) -> VideoMetadata:
@@ -414,39 +446,47 @@ class VideoSourceService:
                 self._state = SourceState.ERROR
                 self._last_error = self._region_error
             return
-        # Stopping (and waking) first lets a paused worker leave its blocked
-        # state wait, so the join below cannot time out; the fresh pass
-        # re-arms both events.
+        # Stopping (and waking) first lets a paused worker leave its
+        # blocked state wait, so the join below cannot time out.
         self._stop_event.set()
         self._wake_event.set()
-        self._join_workers()
+        survivors = self._join_workers()
         self._clear_decode_queue()
+        if survivors:
+            # Workers of the previous pass are stuck in a native call (for
+            # example a PyAV seek on a broken file) and cannot be killed.
+            # Spawning a fresh pass on top of them would run two
+            # presentation threads against the same state, so commit ERROR
+            # and require a reload instead (ticket 08).
+            message = _survivor_message(survivors)
+            with self._lock:
+                self._pass_generation += 1
+                self._state = SourceState.ERROR
+                self._last_error = message
+            _LOGGER.warning("Video source %s: %s", self.node_id, message)
+            return
         self._stop_event.clear()
         self._wake_event.clear()
         with self._lock:
-            self._timeline.reset()
-            self._processed_index = 0
-            self._source_frame_index = None
+            self._reset_pass_counters()
+            self._reset_head_protocol()
+            self._pass_generation += 1
             self._last_error = None
             if self._seek_event.is_set():
-                # A seek issued while the source was not playing restarts the
-                # pass at the requested position instead of the segment start.
-                # A target at or beyond the region end cannot begin a pass
-                # (no frame is presentable there): start at the segment start
-                # instead, or every play would park at the end again.
+                # A seek issued while the source was not playing restarts
+                # the pass at the requested position instead of the
+                # segment start. A target at or beyond the region end
+                # cannot begin a pass (no frame is presentable there):
+                # start at the segment start instead, or every play would
+                # park at the end again.
                 seek_target_s = self._seek_target_s
                 self._seek_event.clear()
                 if self._region_end_s is None or seek_target_s < self._region_end_s:
                     self._pass_start_s = seek_target_s
                 else:
                     self._pass_start_s = self._region_start_s
-                    self._seek_filter_pts = None
             else:
                 self._pass_start_s = self._region_start_s
-                # A fresh pass must not inherit the PTS filter of an earlier
-                # seek: a seek that ended at the region end would otherwise
-                # drop every frame of this pass.
-                self._seek_filter_pts = None
             self._position_s = self._pass_start_s
             # The new presentation thread must not re-apply a seek that
             # _start_pass already honored as its pass start.
@@ -585,25 +625,48 @@ class VideoSourceService:
         with self._lock:
             if self._state is SourceState.CLOSED:
                 return
-        self._halt(SourceState.CLOSED)
+        # A terminal close commits CLOSED even when a worker is stuck; the
+        # degradation is still reported via last_error and the log (ticket 08).
+        self._halt(SourceState.CLOSED, terminal=True)
 
-    def _halt(self, target_state: SourceState) -> None:
+    def _halt(self, target_state: SourceState, *, terminal: bool = False) -> None:
+        """Stop every worker and commit one target state.
+
+        Never raises for a worker that did not join within the timeout: a
+        stuck native call cannot be killed from Python.  The lifecycle
+        degrades instead - the source commits ERROR naming the survivors
+        (a terminal close still commits its target state), logs the event,
+        and a new pass is never spawned on top of the survivors (ticket 08).
+        """
+
         self._stop_event.set()
         self._wake_event.set()
-        self._join_workers()
+        survivors = self._join_workers()
         self._clear_decode_queue()
-        self._release_containers()
-        self._head_in_use = False
-        self._head_trigger.clear()
-        self._head_free.set()
-        self._head_queue = queue.Queue(self._head_frame_budget or 0)
+        if not survivors:
+            # A survivor may still reference the kept-open container from
+            # inside its native call; releasing it out from under the
+            # worker would be a use-after-free at the C level. The
+            # container stays open for the survivor and a later clean
+            # halt releases it.
+            self._release_containers()
         with self._lock:
-            self._timeline.reset()
-            self._source_frame_index = None
-            self._processed_index = 0
-            self._state = target_state
+            # Retire this pass's worker cohort so a late commit from a
+            # survivor (or a worker of the pass being halted) cannot
+            # overwrite the committed state.
+            self._pass_generation += 1
+            self._reset_head_protocol()
+            self._reset_pass_counters()
             self._seek_event.clear()
-            self._seek_filter_pts = None
+            if survivors:
+                # A worker that is stuck keeps the source partially live,
+                # so claiming it stopped (or closed) would lie about the
+                # process state; report ERROR unless the halt is terminal.
+                self._last_error = _survivor_message(survivors)
+                _LOGGER.warning("Video source %s: %s", self.node_id, self._last_error)
+                if not terminal:
+                    target_state = SourceState.ERROR
+            self._state = target_state
             if target_state is SourceState.STOPPED:
                 # Stopping restarts playback at the segment's beginning.
                 self._position_s = self._region_start_s
@@ -613,7 +676,10 @@ class VideoSourceService:
 
         Best-effort: a broken file must not keep the source from stopping or
         closing. ``_halt`` is idempotent - already-released containers are
-        simply ``None`` on a second call.
+        simply ``None`` on a second call. On the degraded (surviving
+        worker) path ``_halt`` skips this call entirely: the containers
+        stay open for the stuck workers and are released by the next
+        clean halt.
         """
 
         for container in (self._live_container, self._head_container):
@@ -623,7 +689,45 @@ class VideoSourceService:
         self._live_container = None
         self._head_container = None
 
-    def _join_workers(self) -> None:
+    def _reset_pass_counters(self) -> None:
+        """Reset per-pass presentation state; call with ``self._lock`` held.
+
+        Shared by pass start and halt so the two lifecycles reset exactly
+        the same fields (ticket 08).  Seek and loop boundaries reset
+        narrower subsets inline on purpose: a seek keeps the PTS filter it
+        just set, and a loop boundary must not clear the decode queue the
+        restarted pass is already filling.
+        """
+
+        self._timeline.reset()
+        self._source_frame_index = None
+        self._processed_index = 0
+        self._seek_filter_pts = None
+
+    def _reset_head_protocol(self) -> None:
+        """Return the loop-head protocol to its initial phase; call with
+        ``self._lock`` held.
+
+        Shared by halt and pass start so a pass restarted from a pause or
+        a seek can never inherit the head flags a dead pass left behind
+        (ticket 08).  Seek and loop boundaries must not call this:
+        ADR-0024 keeps the staged head across both.
+        """
+
+        self._head_in_use = False
+        self._head_free.set()
+        self._head_trigger.clear()
+        self._head_queue = queue.Queue(self._head_frame_budget or 0)
+
+    def _join_workers(self) -> tuple[str, ...]:
+        """Join the worker threads and return the names of any survivors.
+
+        Never raises: a worker stuck in a native call (for example a PyAV
+        seek on a broken file) cannot be killed from Python, and the
+        lifecycle must degrade to a logged ERROR instead of tearing down
+        the engine command path (ticket 08).
+        """
+
         current = threading.current_thread()
         with self._lock:
             threads = (self._decode_thread, self._presentation_thread, self._head_thread)
@@ -631,32 +735,51 @@ class VideoSourceService:
             if thread is not None and thread is not current and thread.is_alive():
                 thread.join(timeout=5.0)
         survivors = tuple(
-            thread
+            thread.name
             for thread in threads
             if thread is not None and thread is not current and thread.is_alive()
         )
-        if survivors:
-            names = ", ".join(thread.name for thread in survivors)
-            raise TimeoutError(f"Video worker(s) did not stop within 5 seconds: {names}")
         with self._lock:
-            if self._decode_thread is not current:
+            # Drop references only for workers that actually exited. A
+            # survivor keeps its reference so a later stop or close can
+            # re-join it once its stuck call returns.
+            if (
+                self._decode_thread is not None
+                and self._decode_thread is not current
+                and not self._decode_thread.is_alive()
+            ):
                 self._decode_thread = None
-            if self._presentation_thread is not current:
+            if (
+                self._presentation_thread is not None
+                and self._presentation_thread is not current
+                and not self._presentation_thread.is_alive()
+            ):
                 self._presentation_thread = None
-            if self._head_thread is not current:
+            if (
+                self._head_thread is not None
+                and self._head_thread is not current
+                and not self._head_thread.is_alive()
+            ):
                 self._head_thread = None
+        return survivors
 
     def _decode_loop(self) -> None:
         consecutive_failures = 0
+        # Captured at entry: a commit by this worker must not outlive the
+        # pass cohort that spawned it (ticket 08).
+        my_generation = self._pass_generation
         while not self._stop_event.is_set():
             try:
-                passed_any = self._decode_once()
+                passed_any = self._decode_once(my_generation)
                 consecutive_failures = 0
             except Exception as error:
                 consecutive_failures += 1
-                self._warn(f"Video decode failed: {error}")
+                self._warn(f"Video decode failed: {error}", my_generation)
                 if consecutive_failures >= self._max_decode_failures:
-                    self._fail(f"Video decode stopped after repeated failures: {error}")
+                    self._fail(
+                        f"Video decode stopped after repeated failures: {error}",
+                        my_generation,
+                    )
                     self._queue_put(_QueueSignal.END)
                     return
                 continue
@@ -681,7 +804,7 @@ class VideoSourceService:
             if not self._queue_put(_QueueSignal.LOOP):
                 return
 
-    def _decode_once(self) -> bool:
+    def _decode_once(self, generation: int) -> bool:
         """Decode one pass from its start to the region's end.
 
         Returns whether the pass range contained any presentable frame. A
@@ -722,7 +845,7 @@ class VideoSourceService:
             consume=consume,
             interrupted=interrupted,
             on_frame_failed=lambda index, error: self._warn(
-                f"Skipped source frame {index}: {error}"
+                f"Skipped source frame {index}: {error}", generation
             ),
         )
         if outcome.skipped_by_selection:
@@ -776,6 +899,9 @@ class VideoSourceService:
         (ADR-0024, ticket 07).
         """
 
+        # Cohort guard like the other workers: this worker's warnings must
+        # not outlive the pass that spawned it (ticket 08).
+        my_generation = self._pass_generation
         while not self._stop_event.is_set():
             # A timeout is not a trigger: the idle worker re-waits at zero
             # CPU; only a set trigger causes exactly one restage, so the
@@ -829,7 +955,7 @@ class VideoSourceService:
             except Exception as error:
                 # A head failure degrades the boundary to the restart cost;
                 # it must never fail the source.
-                self._warn(f"Video loop head pre-decode failed: {error}")
+                self._warn(f"Video loop head pre-decode failed: {error}", my_generation)
                 continue
             if staged.empty():
                 # Nothing stageable (empty region or no decodable frames):
@@ -863,6 +989,7 @@ class VideoSourceService:
         head_queue: queue.Queue[DecodedVideoFrame] = queue.Queue(0)
         using_head = False
         head_upto = -1
+        my_generation = self._pass_generation
         while not self._stop_event.is_set():
             if self._claim_pending_seek():
                 self._apply_seek()
@@ -890,7 +1017,7 @@ class VideoSourceService:
                 else:
                     if not self._passes_seek_filter(head_item.pts_seconds):
                         continue
-                    if not self._present(head_item):
+                    if not self._present(head_item, my_generation):
                         return
                     if head_item.source_frame_index > head_upto:
                         head_upto = head_item.source_frame_index
@@ -904,7 +1031,10 @@ class VideoSourceService:
                 with self._lock:
                     self._head_in_use = False
                     self._head_free.set()
-                    if self._state not in {SourceState.CLOSED, SourceState.ERROR}:
+                    if self._pass_generation == my_generation and self._state not in {
+                        SourceState.CLOSED,
+                        SourceState.ERROR,
+                    }:
                         self._state = SourceState.ENDED
                 # Reset the complete source-clock component at natural EOF. Without this
                 # lifecycle edge, stateful nodes and MIDI/audio sinks can retain the final
@@ -936,7 +1066,7 @@ class VideoSourceService:
                 continue
             if not self._passes_seek_filter(item.pts_seconds):
                 continue
-            if not self._present(item):
+            if not self._present(item, my_generation):
                 return
 
     def _apply_seek(self) -> None:
@@ -981,7 +1111,7 @@ class VideoSourceService:
                 return True
             return False
 
-    def _present(self, frame: DecodedVideoFrame) -> bool:
+    def _present(self, frame: DecodedVideoFrame, generation: int) -> bool:
         target_ns = self._wait_until_due(frame.pts_seconds)
         if target_ns is None:
             return False
@@ -1006,7 +1136,7 @@ class VideoSourceService:
         try:
             self._on_frame(PresentedVideoFrame(image, processed_index))
         except Exception as error:
-            self._fail(f"Video frame publication failed: {error}")
+            self._fail(f"Video frame publication failed: {error}", generation)
             self._stop_event.set()
             self._wake_event.set()
             return False
@@ -1059,13 +1189,24 @@ class VideoSourceService:
             except queue.Empty:
                 return
 
-    def _warn(self, message: str) -> None:
+    def _warn(self, message: str, generation: int | None = None) -> None:
+        # Same cohort guard as ``_fail``: a worker left over from a
+        # superseded pass must not leave a stale warning in ``last_error``
+        # after a new pass or reload committed clean state (ticket 08).
         with self._lock:
+            if generation is not None and generation != self._pass_generation:
+                return
             self._warnings += 1
             self._last_error = message
 
-    def _fail(self, message: str) -> None:
+    def _fail(self, message: str, generation: int | None = None) -> None:
+        # ``generation`` guards worker-side commits: a worker left over from
+        # a superseded pass (a degraded join) must not overwrite the state a
+        # new pass or reload committed. Main-thread callers pass ``None`` and
+        # commit unconditionally (ticket 08).
         with self._lock:
+            if generation is not None and generation != self._pass_generation:
+                return
             self._last_error = message
             self._state = SourceState.ERROR
 
