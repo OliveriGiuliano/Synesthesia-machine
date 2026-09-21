@@ -38,10 +38,25 @@ _TYPE_ID = re.compile(r"^[a-z][a-z0-9_.]*$")
 class TypeVariable:
     name: str
     allowed_types: frozenset[PortType] = frozenset()
+    # Resolution fallback for a variable no connection constrains: it settles
+    # to this type instead of failing with unresolved_generic_type. Without a
+    # default, an unconstrained variable remains an error (e.g. a lone
+    # pass-through still has nothing to pass).
+    default_type: PortType | None = None
 
     def __post_init__(self) -> None:
         if not re.fullmatch(r"[A-Z][A-Z0-9_]*", self.name):
             msg = f"Invalid type-variable name: {self.name!r}"
+            raise ValueError(msg)
+        if (
+            self.default_type is not None
+            and self.allowed_types
+            and self.default_type not in self.allowed_types
+        ):
+            msg = (
+                f"Type variable {self.name!r} default {self.default_type.value} "
+                f"is not among its allowed types"
+            )
             raise ValueError(msg)
 
 

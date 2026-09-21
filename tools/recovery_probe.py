@@ -93,7 +93,7 @@ def _run_crash_child(
     document = GraphDocument.from_snapshot(load_graph(explicit_path, registry))
     document.add_node(
         "synmachine.utility.number",
-        implementation_version=3,
+        implementation_version=4,
         node_id=unsaved_node_id,
         position=(320.0, 160.0),
     )

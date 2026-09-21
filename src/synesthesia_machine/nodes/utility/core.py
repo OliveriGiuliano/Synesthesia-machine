@@ -37,6 +37,9 @@ from synesthesia_machine.nodes.utility.temporal import create_temporal_definitio
 from synesthesia_machine.nodes.utility.transform import create_transform_definitions
 
 T = TypeVariable("T")
+# The Number output resolves from its connections (Integer or Float); a lone
+# node settles to Float so it stays valid without any consumer.
+SCALAR_T = TypeVariable("T", frozenset({PortType.INT, PortType.FLOAT}), PortType.FLOAT)
 
 
 def migrate_number_v0_to_v1(data: JsonObject) -> JsonObject:
@@ -95,6 +98,18 @@ def migrate_number_v2_to_v3(data: JsonObject) -> JsonObject:
     return migrated
 
 
+def migrate_number_v3_to_v4(data: JsonObject) -> JsonObject:
+    """Keep the v3 payload as-is.
+
+    v4 removes the dedicated Integer output and lets ``value`` resolve to
+    Integer or Float from its connections, so no stored field changes; only
+    the version marker moves.
+    """
+    migrated = deepcopy(data)
+    migrated["implementation_version"] = 4
+    return migrated
+
+
 class NumberRuntime(StatelessRuntime):
     def process(
         self,
@@ -104,8 +119,13 @@ class NumberRuntime(StatelessRuntime):
     ) -> Mapping[str, RuntimeValue]:
         del inputs, context
         value = cast(float, parameters["value"])
-        # Truncation toward zero is the documented Integer conversion.
-        return {"value": value, "int_value": int(value)}
+        # A whole literal is emitted as an int so it can fill an
+        # Integer-declared output; a fractional value stays a float and an
+        # Integer context rejects it at the output boundary rather than
+        # silently truncating.
+        if value.is_integer():
+            return {"value": int(value)}
+        return {"value": value}
 
 
 class PassThroughRuntime(StatelessRuntime):
@@ -246,13 +266,10 @@ def create_utility_registry() -> NodeRegistry:
         NodeDefinition(
             execution=NodeExecutionContract(
                 "synmachine.utility.number",
-                3,
+                4,
                 ExecutionKind.STATELESS,
                 (),
-                (
-                    OutputPortSpec("value", "Value", PortType.FLOAT),
-                    OutputPortSpec("int_value", "Integer value", PortType.INT),
-                ),
+                (OutputPortSpec("value", "Value", SCALAR_T),),
                 (
                     ParameterSpec(
                         "value",
@@ -260,9 +277,10 @@ def create_utility_registry() -> NodeRegistry:
                         PortType.FLOAT,
                         0.0,
                         help_text=(
-                            "The number this node outputs. The Value output keeps it as a "
-                            "float; the Integer value output converts it, truncating "
-                            "toward zero."
+                            "The number this node outputs. The output type follows what it is "
+                            "connected to (Integer or Float) and is Float with no connection. "
+                            "Whole numbers feed integer contexts directly; a fractional value "
+                            "cannot, so use Float to Integer for an explicit conversion."
                         ),
                     ),
                 ),
@@ -280,6 +298,7 @@ def create_utility_registry() -> NodeRegistry:
                     0: migrate_number_v0_to_v1,
                     1: migrate_number_v1_to_v2,
                     2: migrate_number_v2_to_v3,
+                    3: migrate_number_v3_to_v4,
                 },
             ),
         ),

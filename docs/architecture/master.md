@@ -286,8 +286,15 @@ The graph also supports compile-time type variables used only by generic nodes:
 - `MIDI_STATE...` for variadic MIDI Merge inputs;
 - `T` / `T[]` for the Buffer value socket and the variadic Statistics `values` sockets, where
   a socket may carry either one element or a Buffer's `ValueArray`.
+- `T` (restricted to Integer/Float, defaulting to Float) for the Number output, so the
+  literal can feed either scalar family from a single output.
 
 Generic ports must resolve to a concrete type during graph validation. `ANY` is not a persisted runtime type.
+
+A type variable may declare a default type, settled when no connection constrains the
+variable; an unconstrained variable without a default remains an `unresolved_generic_type`
+error. The Number output is the one built-in variable with a default (Float), which keeps a
+lone literal valid without any consumer.
 
 ### 7.2 Compatibility and implicit conversion
 
@@ -1390,11 +1397,13 @@ The compiler resolves `T`. Version 1 evaluates upstream branches normally; the n
 
 #### Number
 
-Outputs: `value: FLOAT`, `int_value: INT`.
+Output: `value: T` with `T` in {`INT`, `FLOAT`}, resolved from the node's connections and
+defaulting to `FLOAT` when no connection constrains it.
 
-A single `value` literal parameter feeds both outputs: `value` passes it through
-as a float, and `int_value` converts it to an integer, truncating toward zero.
-This is a static node.
+A single `value` literal parameter feeds the output. Whole values are emitted as integers, so
+they fill an Integer-declared output directly; a fractional value in an Integer context is an
+output-boundary error rather than a silent truncation. An explicit conversion to an integer is
+the Float to Integer node. This is a static node.
 
 #### Pass Through
 

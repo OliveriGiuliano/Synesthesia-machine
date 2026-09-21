@@ -41,6 +41,7 @@ from synesthesia_machine.nodes import (
     NodeExecutionContract,
     NodePresentationIntent,
     OutputPortSpec,
+    TypeVariable,
 )
 from synesthesia_machine.runtime import (
     CompiledNode,
@@ -89,12 +90,17 @@ def _value_preview_plan(
     """Build a plan with a scalar producer whose ``value`` output may feed a consumer.
 
     ``number`` exposes a FLOAT ``value`` output and ``float_to_integer`` exposes an INT
-    one; the producer's declared output type is read from the real definition so the
-    target's ``port_type`` reflects the node it belongs to.
+     one; the producer's declared output type is read from the real definition (a
+     type variable settles to its default, mirroring the compiler) so the
+     target's ``port_type`` reflects the node it belongs to.
     """
 
     producer_definition = _definition(producer_type_id)
     producer_output_type = producer_definition.execution.outputs[0].value_type
+    if isinstance(producer_output_type, TypeVariable):
+        # An unconstrained type variable settles to its default (a lone
+        # Number settles to Float), exactly as the compiler resolves it.
+        producer_output_type = producer_output_type.default_type
     assert isinstance(producer_output_type, PortType)
     producer = CompiledNode(
         node_id=SCALAR_PRODUCER_ID,

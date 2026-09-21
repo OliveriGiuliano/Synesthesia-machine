@@ -49,7 +49,7 @@ def profile_large_graph(node_count: int = 500) -> LargeGraphReport:
     node_ids = tuple(
         document.add_node(
             "synmachine.utility.number",
-            implementation_version=3,
+            implementation_version=4,
             parameters={"value": float(index)},
             position=((index % 25) * 285.0, (index // 25) * 155.0),
         )

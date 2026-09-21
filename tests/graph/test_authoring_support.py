@@ -52,10 +52,10 @@ def test_complete_model_values_can_be_restored_exactly() -> None:
 def test_connection_replacement_failure_is_atomic() -> None:
     document = GraphDocument()
     source_a = document.add_node(
-        "synmachine.utility.number", implementation_version=3, node_id=NODE_A
+        "synmachine.utility.number", implementation_version=4, node_id=NODE_A
     )
     source_b = document.add_node(
-        "synmachine.utility.number", implementation_version=3, node_id=NODE_B
+        "synmachine.utility.number", implementation_version=4, node_id=NODE_B
     )
     destination = document.add_node("synmachine.utility.math", node_id=NODE_C)
     original = document.add_connection(
@@ -88,7 +88,7 @@ def test_connection_query_uses_widening_generics_and_rejects_incompatibility() -
     document = GraphDocument()
     integer = document.add_node(
         "synmachine.utility.number",
-        implementation_version=3,
+        implementation_version=4,
         node_id=NODE_A,
         parameters={"value": 1.0},
     )
@@ -154,7 +154,7 @@ def test_batch_connection_query_validates_shared_baseline_once() -> None:
     document = GraphDocument()
     source = document.add_node(
         "synmachine.utility.number",
-        implementation_version=3,
+        implementation_version=4,
         parameters={"value": 1.0},
     )
     destination = document.add_node("synmachine.utility.math")
@@ -211,7 +211,7 @@ def test_clear_parameter_restores_the_definition_default() -> None:
     document = GraphDocument()
     node_id = document.add_node(
         "synmachine.utility.number",
-        implementation_version=3,
+        implementation_version=4,
         node_id=NODE_A,
         parameters={"value": 7.0},
     )
@@ -232,10 +232,10 @@ def test_clear_parameter_restores_the_definition_default() -> None:
 def test_restore_connection_repoints_same_id_like_add_connection() -> None:
     document = GraphDocument()
     source_a = document.add_node(
-        "synmachine.utility.number", implementation_version=3, node_id=NODE_A
+        "synmachine.utility.number", implementation_version=4, node_id=NODE_A
     )
     source_b = document.add_node(
-        "synmachine.utility.number", implementation_version=3, node_id=NODE_B
+        "synmachine.utility.number", implementation_version=4, node_id=NODE_B
     )
     destination = document.add_node("synmachine.utility.math", node_id=NODE_C)
     document.add_connection(source_a, "value", destination, "a", connection_id=CONNECTION)
@@ -254,10 +254,10 @@ def test_restore_connection_repoints_same_id_like_add_connection() -> None:
 def test_restore_connection_rejects_same_id_collision_when_destination_differs() -> None:
     document = GraphDocument()
     source_a = document.add_node(
-        "synmachine.utility.number", implementation_version=3, node_id=NODE_A
+        "synmachine.utility.number", implementation_version=4, node_id=NODE_A
     )
     source_b = document.add_node(
-        "synmachine.utility.number", implementation_version=3, node_id=NODE_B
+        "synmachine.utility.number", implementation_version=4, node_id=NODE_B
     )
     destination = document.add_node("synmachine.utility.math", node_id=NODE_C)
     document.add_connection(source_a, "value", destination, "a", connection_id=CONNECTION)

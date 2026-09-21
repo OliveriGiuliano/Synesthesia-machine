@@ -89,13 +89,24 @@ class _TypeGroups:
         self._parent: dict[tuple[UUID, str], tuple[UUID, str]] = {}
         self._candidates: dict[tuple[UUID, str], set[PortType]] = defaultdict(set)
         self._allowed: dict[tuple[UUID, str], set[PortType]] = {}
+        # Per-variable resolution defaults, merged across a group so a lone
+        # default can settle a whole unconstrained chain of type variables
+        # (e.g. a defaulting Number output feeding generic sockets).
+        self._defaults: dict[tuple[UUID, str], set[PortType]] = {}
 
-    def add(self, key: tuple[UUID, str], allowed_types: frozenset[PortType]) -> None:
+    def add(
+        self,
+        key: tuple[UUID, str],
+        allowed_types: frozenset[PortType],
+        default_type: PortType | None = None,
+    ) -> None:
         self._parent.setdefault(key, key)
         if allowed_types:
             current = self._allowed.get(key)
             allowed = set(allowed_types)
             self._allowed[key] = allowed if current is None else current & allowed
+        if default_type is not None:
+            self._defaults.setdefault(key, set()).add(default_type)
 
     def find(self, key: tuple[UUID, str]) -> tuple[UUID, str]:
         parent = self._parent[key]
@@ -112,6 +123,10 @@ class _TypeGroups:
         root, child = sorted((left_root, right_root), key=lambda item: (str(item[0]), item[1]))
         self._parent[child] = root
         self._candidates[root].update(self._candidates.pop(child, set()))
+        left_defaults = self._defaults.pop(root, set())
+        right_defaults = self._defaults.pop(child, set())
+        if left_defaults or right_defaults:
+            self._defaults[root] = left_defaults | right_defaults
         left_allowed = self._allowed.pop(root, None)
         right_allowed = self._allowed.pop(child, None)
         if left_allowed is None and right_allowed is not None:
@@ -130,6 +145,11 @@ class _TypeGroups:
         if allowed is not None and not candidates <= allowed:
             return None
         if not candidates:
+            defaults = self._defaults.get(self.find(key), set())
+            if len(defaults) == 1:
+                (default,) = defaults
+                if allowed is None or default in allowed:
+                    return default
             return None
         if len(candidates) == 1:
             return next(iter(candidates))
@@ -618,7 +638,11 @@ class GraphCompiler:
                 if port.id not in base_ids:
                     next_only.add((node_id, port.id, False))
                 if isinstance(expression, (TypeVariable, ArrayTypeVariable)):
-                    groups.add((node_id, expression.name), expression.allowed_types)
+                    groups.add(
+                        (node_id, expression.name),
+                        expression.allowed_types,
+                        expression.default_type if isinstance(expression, TypeVariable) else None,
+                    )
             for parameter in definition.execution.parameters:
                 if not parameter.connectable or parameter.connected_port_type is None:
                     continue
@@ -629,7 +653,11 @@ class GraphCompiler:
                 )
                 expressions[(node_id, port.id, True)] = expression
                 if isinstance(expression, (TypeVariable, ArrayTypeVariable)):
-                    groups.add((node_id, expression.name), expression.allowed_types)
+                    groups.add(
+                        (node_id, expression.name),
+                        expression.allowed_types,
+                        expression.default_type if isinstance(expression, TypeVariable) else None,
+                    )
 
         for connection in connections:
             source = expressions[(connection.source_node_id, connection.source_port_id, True)]
@@ -668,6 +696,9 @@ class GraphCompiler:
                     )
                 resolved[port_key] = None
             elif value_type is None:
+                # A variable with a default already settled through the group's
+                # default set (checked against the merged allowed set); anything
+                # still unresolved has no default and no constraint.
                 if port_key not in next_only:
                     issues.append(
                         _error(

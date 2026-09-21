@@ -272,7 +272,7 @@ def test_static_cache_survives_ticks_and_new_plan_invalidates_it() -> None:
     document = GraphDocument()
     number = document.add_node(
         "synmachine.utility.number",
-        implementation_version=3,
+        implementation_version=4,
         node_id=NODE_A,
         parameters={"value": 2.0},
     )
@@ -297,13 +297,13 @@ def test_connection_change_invalidates_static_cache() -> None:
     document = GraphDocument()
     first_number = document.add_node(
         "synmachine.utility.number",
-        implementation_version=3,
+        implementation_version=4,
         node_id=NODE_A,
         parameters={"value": 2.0},
     )
     second_number = document.add_node(
         "synmachine.utility.number",
-        implementation_version=3,
+        implementation_version=4,
         node_id=NODE_B,
         parameters={"value": 8.0},
     )
@@ -327,13 +327,13 @@ def test_expected_error_becomes_no_data_without_terminating_tick() -> None:
     document = GraphDocument()
     numerator = document.add_node(
         "synmachine.utility.number",
-        implementation_version=3,
+        implementation_version=4,
         node_id=NODE_A,
         parameters={"value": 1.0},
     )
     denominator = document.add_node(
         "synmachine.utility.number",
-        implementation_version=3,
+        implementation_version=4,
         node_id=NODE_B,
         parameters={"value": 0.0},
     )
@@ -396,13 +396,13 @@ def test_power_domain_error_stays_within_float_runtime_contract() -> None:
     document = GraphDocument()
     negative = document.add_node(
         "synmachine.utility.number",
-        implementation_version=3,
+        implementation_version=4,
         node_id=NODE_A,
         parameters={"value": -1.0},
     )
     exponent = document.add_node(
         "synmachine.utility.number",
-        implementation_version=3,
+        implementation_version=4,
         node_id=NODE_B,
         parameters={"value": 0.5},
     )
@@ -425,13 +425,13 @@ def test_utility_graph_is_deterministic_across_synthetic_ticks() -> None:
     document = GraphDocument()
     left = document.add_node(
         "synmachine.utility.number",
-        implementation_version=3,
+        implementation_version=4,
         node_id=NODE_A,
         parameters={"value": 2.0},
     )
     right = document.add_node(
         "synmachine.utility.number",
-        implementation_version=3,
+        implementation_version=4,
         node_id=NODE_B,
         parameters={"value": 3.5},
     )
@@ -455,13 +455,13 @@ def test_compare_logic_and_conditional_nodes_execute_together() -> None:
     document = GraphDocument()
     high = document.add_node(
         "synmachine.utility.number",
-        implementation_version=3,
+        implementation_version=4,
         node_id=NODE_A,
         parameters={"value": 5.0},
     )
     low = document.add_node(
         "synmachine.utility.number",
-        implementation_version=3,
+        implementation_version=4,
         node_id=NODE_B,
         parameters={"value": 3.0},
     )
@@ -502,13 +502,13 @@ def test_engine_facade_commits_partial_plan_for_partially_invalid_graph() -> Non
     remainder's plan replaces the old one."""
     facade = EngineFacade(create_utility_registry())
     valid = GraphDocument()
-    valid.add_node("synmachine.utility.number", implementation_version=3, node_id=NODE_A)
+    valid.add_node("synmachine.utility.number", implementation_version=4, node_id=NODE_A)
     activation = facade.activate(valid.snapshot())
     assert activation.plan is not None
     old_plan = facade.active_plan
 
     broken = GraphDocument()
-    broken.add_node("synmachine.utility.number", implementation_version=3, node_id=NODE_A)
+    broken.add_node("synmachine.utility.number", implementation_version=4, node_id=NODE_A)
     broken.add_node("unknown.node", node_id=NODE_B)
     partial = facade.activate(broken.snapshot())
 
@@ -653,3 +653,43 @@ def test_scheduler_rejects_wrong_unknown_and_clock_mismatched_outputs() -> None:
     assert clock_result.errors[0].code == "invalid_node_output"
     assert "uses clock" in clock_result.errors[0].message
     assert clock_result.values[PortKey(clock_node, "value")] is NoData
+
+
+def test_number_rejects_fractional_value_in_integer_context() -> None:
+    # v4 resolves the literal's output from its connections: when that context
+    # is Integer, a fractional literal must fail at the output boundary instead
+    # of truncating (the pre-v4 int_value port used to truncate silently).
+    registry = create_utility_registry()
+    number = CompiledNode(
+        node_id=NODE_A,
+        definition=registry.require("synmachine.utility.number").execution,
+        parameters={"value": 2.5},
+        output_types={"value": PortType.INT},
+    )
+    plan = ExecutionPlan(
+        document_id=CLOCK_ID,
+        graph_revision=1,
+        nodes=(number,),
+        demand_roots=frozenset({NODE_A}),
+    )
+    result = Scheduler(plan).execute_tick(frame_context(clock_id=CLOCK_ID))
+
+    assert [error.code for error in result.errors] == ["invalid_node_output"]
+    assert result.values[PortKey(NODE_A, "value")] is NoData
+
+    whole = CompiledNode(
+        node_id=NODE_A,
+        definition=registry.require("synmachine.utility.number").execution,
+        parameters={"value": 4.0},
+        output_types={"value": PortType.INT},
+    )
+    whole_plan = ExecutionPlan(
+        document_id=CLOCK_ID,
+        graph_revision=1,
+        nodes=(whole,),
+        demand_roots=frozenset({NODE_A}),
+    )
+    whole_result = Scheduler(whole_plan).execute_tick(frame_context(clock_id=CLOCK_ID))
+
+    assert whole_result.errors == ()
+    assert whole_result.values[PortKey(NODE_A, "value")] == 4

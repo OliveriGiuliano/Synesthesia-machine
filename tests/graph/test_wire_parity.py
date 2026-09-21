@@ -52,7 +52,7 @@ def test_payload_round_trip_preserves_every_wired_field() -> None:
     document = GraphDocument()
     source = document.add_node(
         "synmachine.utility.number",
-        implementation_version=3,
+        implementation_version=4,
         parameters={"value": 3.0},
         position=(10.0, 20.0),
     )

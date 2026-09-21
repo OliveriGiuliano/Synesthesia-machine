@@ -560,7 +560,6 @@ _FRENCH: dict[str, str] = {
     # Common ports and parameter labels
     "Value": "Valeur",
     "Values": "Valeurs",
-    "Integer value": "Valeur entière",
     "Mask": "Masque",
     "Luminance": "Luminance",
     "Processed index": "Indice traité",
@@ -1046,10 +1045,14 @@ _FRENCH: dict[str, str] = {
     "Strength of the sharpen; higher values emphasize detail more.": "Force de la netteté ; les valeurs plus élevées accentuent davantage le détail.",
     "Target height of the image in pixels.": "Hauteur cible de l’image, en pixels.",
     "Target width of the image in pixels.": "Largeur cible de l’image, en pixels.",
-    "The number this node outputs. The Value output keeps it as a float; "
-    "the Integer value output converts it, truncating toward zero.": (
-        "Le nombre que ce nœud sort. La sortie Valeur le garde en décimal ; "
-        "la sortie Valeur entière le convertit, en tronquant vers zéro."
+    "The number this node outputs. The output type follows what it is connected to "
+    "(Integer or Float) and is Float with no connection. Whole numbers feed integer "
+    "contexts directly; a fractional value cannot, so use Float to Integer for an "
+    "explicit conversion.": (
+        "Le nombre que ce nœud sort. Le type de sortie suit ce à quoi il est connecté "
+        "(Entier ou Décimal) et est Décimal sans connexion. Les nombres entiers alimentent "
+        "directement les contextes entiers ; une valeur fractionnaire ne le peut pas, "
+        "alors utilisez Flottant vers entier pour une conversion explicite."
     ),
     "Tolerance used by the Approx comparison: two values match if they differ by no more than this amount.": "Tolérance de la comparaison Approximative : deux valeurs correspondent si leur différence ne dépasse pas ce montant.",
     "Tolerance used by the Approx comparison: two values match if they differ by no more than this fraction of the other value.": "Tolérance de la comparaison Approximative : deux valeurs correspondent si leur différence ne dépasse pas cette fraction de l’autre valeur.",
