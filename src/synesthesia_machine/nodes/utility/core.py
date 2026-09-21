@@ -81,6 +81,20 @@ def migrate_number_v1_to_v2(data: JsonObject) -> JsonObject:
     return migrated
 
 
+def migrate_number_v2_to_v3(data: JsonObject) -> JsonObject:
+    """Drop the redundant ``number_type`` selection.
+
+    v3 exposes both outputs at once (``value`` as Float, ``int_value`` as
+    Integer), so the saved type choice no longer carries meaning. The
+    ``value`` literal is kept as-is.
+    """
+    migrated = deepcopy(data)
+    parameters = migration_parameters(migrated)
+    parameters.pop("number_type", None)
+    migrated["implementation_version"] = 3
+    return migrated
+
+
 class NumberRuntime(StatelessRuntime):
     def process(
         self,
@@ -90,10 +104,8 @@ class NumberRuntime(StatelessRuntime):
     ) -> Mapping[str, RuntimeValue]:
         del inputs, context
         value = cast(float, parameters["value"])
-        if parameters["number_type"] == "INT":
-            # Truncation toward zero is the documented Integer conversion.
-            return {"value": int(value)}
-        return {"value": value}
+        # Truncation toward zero is the documented Integer conversion.
+        return {"value": value, "int_value": int(value)}
 
 
 class PassThroughRuntime(StatelessRuntime):
@@ -223,13 +235,6 @@ class MathRuntime(StatelessRuntime):
             ) from error
 
 
-def _number_port_type(
-    port_id: str, is_output: bool, parameters: Mapping[str, ParameterValue]
-) -> PortType:
-    del port_id, is_output
-    return PortType.INT if parameters["number_type"] == "INT" else PortType.FLOAT
-
-
 def _math_required(parameters: Mapping[str, ParameterValue]) -> Sequence[str]:
     unary = {"ABS", "NEGATE", "FLOOR", "CEIL", "ROUND", "SIN", "COS", "TAN"}
     return ("a",) if parameters["operation"] in unary else ("a", "b")
@@ -241,35 +246,28 @@ def create_utility_registry() -> NodeRegistry:
         NodeDefinition(
             execution=NodeExecutionContract(
                 "synmachine.utility.number",
-                2,
+                3,
                 ExecutionKind.STATELESS,
                 (),
-                (OutputPortSpec("value", "Value", PortType.FLOAT),),
                 (
-                    ParameterSpec(
-                        "number_type",
-                        "Type",
-                        PortType.STRING,
-                        "FLOAT",
-                        help_text=(
-                            "Chooses the type of number this node outputs: Float or Integer."
-                        ),
-                        choices=("FLOAT", "INT"),
-                    ),
+                    OutputPortSpec("value", "Value", PortType.FLOAT),
+                    OutputPortSpec("int_value", "Integer value", PortType.INT),
+                ),
+                (
                     ParameterSpec(
                         "value",
                         "Value",
                         PortType.FLOAT,
                         0.0,
                         help_text=(
-                            "The number this node outputs. A Float type outputs it unchanged; "
-                            "an Integer type converts it, truncating toward zero."
+                            "The number this node outputs. The Value output keeps it as a "
+                            "float; the Integer value output converts it, truncating "
+                            "toward zero."
                         ),
                     ),
                 ),
                 NumberRuntime,
                 cache_policy=CachePolicy.STATIC,
-                port_type_resolver=_number_port_type,
             ),
             presentation=NodePresentationIntent(
                 "Number",
@@ -278,7 +276,11 @@ def create_utility_registry() -> NodeRegistry:
                 aliases=("constant", "literal", "scalar"),
             ),
             persistence=NodePersistenceDescriptor(
-                migrations={0: migrate_number_v0_to_v1, 1: migrate_number_v1_to_v2},
+                migrations={
+                    0: migrate_number_v0_to_v1,
+                    1: migrate_number_v1_to_v2,
+                    2: migrate_number_v2_to_v3,
+                },
             ),
         ),
         NodeDefinition(

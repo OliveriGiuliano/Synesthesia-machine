@@ -81,15 +81,15 @@ def test_compiler_resolves_generic_and_inserts_int_to_float_conversion() -> None
     document = GraphDocument(document_id=DOCUMENT_ID)
     source = document.add_node(
         "synmachine.utility.number",
-        implementation_version=2,
+        implementation_version=3,
         node_id=NODE_A,
-        parameters={"number_type": "INT", "value": 4.0},
+        parameters={"value": 4.0},
     )
     passthrough = document.add_node("synmachine.utility.pass_through", node_id=NODE_B)
     math_node = document.add_node(
         "synmachine.utility.math", node_id=NODE_C, parameters={"operation": "ABS"}
     )
-    document.add_connection(source, "value", passthrough, "value")
+    document.add_connection(source, "int_value", passthrough, "value")
     document.add_connection(passthrough, "value", math_node, "a")
 
     result = GraphCompiler(create_utility_registry()).compile(document.snapshot())
@@ -115,18 +115,18 @@ def test_compiler_reports_unresolved_and_conflicting_generics() -> None:
     conflict = GraphDocument(document_id=DOCUMENT_ID)
     integer = conflict.add_node(
         "synmachine.utility.number",
-        implementation_version=2,
+        implementation_version=3,
         node_id=NODE_A,
-        parameters={"number_type": "INT", "value": 1.0},
+        parameters={"value": 1.0},
     )
     generic = conflict.add_node("synmachine.utility.conditional", node_id=NODE_B)
     boolean = conflict.add_node("test.bool_source", node_id=NODE_C)
     float_node_id = UUID("00000000-0000-0000-0000-00000000000d")
     float_source = conflict.add_node(
         "synmachine.utility.number",
-        implementation_version=2,
+        implementation_version=3,
         node_id=float_node_id,
-        parameters={"number_type": "FLOAT", "value": 1.0},
+        parameters={"value": 1.0},
     )
     conflict.add_connection(boolean, "value", generic, "condition")
     conflict.add_connection(integer, "value", generic, "if_true")
@@ -145,7 +145,7 @@ def test_compiler_reports_unresolved_and_conflicting_generics() -> None:
     conflict = GraphDocument(document_id=DOCUMENT_ID)
     bool_source = conflict.add_node("test.bool_source", node_id=NODE_A)
     float_source = conflict.add_node(
-        "synmachine.utility.number", implementation_version=2, node_id=NODE_B
+        "synmachine.utility.number", implementation_version=3, node_id=NODE_B
     )
     string_source = conflict.add_node("test.string_source", node_id=NODE_C)
     conditional = conflict.add_node(
@@ -409,15 +409,15 @@ def test_statistics_combines_multiple_connected_scalars() -> None:
     document = GraphDocument(document_id=DOCUMENT_ID)
     first = document.add_node(
         "synmachine.utility.number",
-        implementation_version=2,
+        implementation_version=3,
         node_id=STATS_SOURCE_A,
-        parameters={"number_type": "FLOAT", "value": 1.0},
+        parameters={"value": 1.0},
     )
     second = document.add_node(
         "synmachine.utility.number",
-        implementation_version=2,
+        implementation_version=3,
         node_id=STATS_SOURCE_B,
-        parameters={"number_type": "FLOAT", "value": 3.0},
+        parameters={"value": 3.0},
     )
     statistics = document.add_node(
         "synmachine.utility.statistics",
@@ -445,9 +445,9 @@ def test_statistics_family_minimum_is_met_by_any_connected_socket() -> None:
     document = GraphDocument(document_id=DOCUMENT_ID)
     second = document.add_node(
         "synmachine.utility.number",
-        implementation_version=2,
+        implementation_version=3,
         node_id=STATS_SOURCE_A,
-        parameters={"number_type": "FLOAT", "value": 3.0},
+        parameters={"value": 3.0},
     )
     statistics = document.add_node(
         "synmachine.utility.statistics",
@@ -468,9 +468,9 @@ def test_statistics_accepts_a_buffer_output() -> None:
     document = GraphDocument(document_id=DOCUMENT_ID)
     source = document.add_node(
         "synmachine.utility.number",
-        implementation_version=2,
+        implementation_version=3,
         node_id=STATS_SOURCE_A,
-        parameters={"number_type": "FLOAT", "value": 2.0},
+        parameters={"value": 2.0},
     )
     buffer = document.add_node(
         "synmachine.utility.buffer",
@@ -499,9 +499,9 @@ def test_statistics_mixes_direct_and_buffered_scalars() -> None:
     document = GraphDocument(document_id=DOCUMENT_ID)
     source = document.add_node(
         "synmachine.utility.number",
-        implementation_version=2,
+        implementation_version=3,
         node_id=STATS_SOURCE_A,
-        parameters={"number_type": "FLOAT", "value": 2.0},
+        parameters={"value": 2.0},
     )
     buffer = document.add_node(
         "synmachine.utility.buffer",
@@ -533,15 +533,15 @@ def test_statistics_mixed_int_and_float_scalars_resolve_to_float() -> None:
     document = GraphDocument(document_id=DOCUMENT_ID)
     integer = document.add_node(
         "synmachine.utility.number",
-        implementation_version=2,
+        implementation_version=3,
         node_id=STATS_SOURCE_A,
-        parameters={"number_type": "INT", "value": 5.0},
+        parameters={"value": 5.0},
     )
     fractional = document.add_node(
         "synmachine.utility.number",
-        implementation_version=2,
+        implementation_version=3,
         node_id=STATS_SOURCE_B,
-        parameters={"number_type": "FLOAT", "value": 2.5},
+        parameters={"value": 2.5},
     )
     statistics = document.add_node(
         "synmachine.utility.statistics",
@@ -549,7 +549,7 @@ def test_statistics_mixed_int_and_float_scalars_resolve_to_float() -> None:
         implementation_version=2,
         parameters={"statistic": "MINIMUM"},
     )
-    document.add_connection(integer, "value", statistics, "values_1")
+    document.add_connection(integer, "int_value", statistics, "values_1")
     document.add_connection(fractional, "value", statistics, "values_2")
 
     result = GraphCompiler(create_utility_registry()).compile(document.snapshot())

@@ -88,7 +88,7 @@ def _graph_round_trip(root: Path) -> str:
     node_id = document.add_node(
         definition.execution.type_id,
         implementation_version=definition.execution.implementation_version,
-        parameters={"number_type": "FLOAT", "value": 42.0},
+        parameters={"value": 42.0},
     )
     graph_path = root / "release-smoke.synmachine.json"
     save_graph(graph_path, document.snapshot())

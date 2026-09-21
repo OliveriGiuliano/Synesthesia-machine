@@ -28,8 +28,8 @@ def test_complete_model_values_can_be_restored_exactly() -> None:
     node = NodeModel(
         NODE_A,
         "synmachine.utility.number",
-        2,
-        parameters={"number_type": "INT", "value": 7.0},
+        3,
+        parameters={"value": 7.0},
         position=(10.0, 20.0),
         size=(240.0, 120.0),
         user_label="Seven",
@@ -52,10 +52,10 @@ def test_complete_model_values_can_be_restored_exactly() -> None:
 def test_connection_replacement_failure_is_atomic() -> None:
     document = GraphDocument()
     source_a = document.add_node(
-        "synmachine.utility.number", implementation_version=2, node_id=NODE_A
+        "synmachine.utility.number", implementation_version=3, node_id=NODE_A
     )
     source_b = document.add_node(
-        "synmachine.utility.number", implementation_version=2, node_id=NODE_B
+        "synmachine.utility.number", implementation_version=3, node_id=NODE_B
     )
     destination = document.add_node("synmachine.utility.math", node_id=NODE_C)
     original = document.add_connection(
@@ -88,9 +88,9 @@ def test_connection_query_uses_widening_generics_and_rejects_incompatibility() -
     document = GraphDocument()
     integer = document.add_node(
         "synmachine.utility.number",
-        implementation_version=2,
+        implementation_version=3,
         node_id=NODE_A,
-        parameters={"number_type": "INT", "value": 1.0},
+        parameters={"value": 1.0},
     )
     generic = document.add_node("synmachine.utility.pass_through", node_id=NODE_B)
     conditional = document.add_node("synmachine.utility.conditional", node_id=NODE_C)
@@ -154,8 +154,8 @@ def test_batch_connection_query_validates_shared_baseline_once() -> None:
     document = GraphDocument()
     source = document.add_node(
         "synmachine.utility.number",
-        implementation_version=2,
-        parameters={"number_type": "FLOAT", "value": 1.0},
+        implementation_version=3,
+        parameters={"value": 1.0},
     )
     destination = document.add_node("synmachine.utility.math")
     candidates = (
@@ -211,31 +211,31 @@ def test_clear_parameter_restores_the_definition_default() -> None:
     document = GraphDocument()
     node_id = document.add_node(
         "synmachine.utility.number",
-        implementation_version=2,
+        implementation_version=3,
         node_id=NODE_A,
-        parameters={"number_type": "INT", "value": 7.0},
+        parameters={"value": 7.0},
     )
     document.set_parameter(node_id, "value", 9.0)
-    assert document.node(node_id).parameters == {"number_type": "INT", "value": 9.0}  # type: ignore[union-attr]
+    assert document.node(node_id).parameters == {"value": 9.0}  # type: ignore[union-attr]
 
     document.clear_parameter(node_id, "value")
-    assert document.node(node_id).parameters == {"number_type": "INT"}  # type: ignore[union-attr]
+    assert document.node(node_id).parameters == {}  # type: ignore[union-attr]
 
     # Clearing a parameter that was never stored is a no-op: no new revision,
     # no node rewrite, so undo state is untouched.
     revision = document.revision
     document.clear_parameter(node_id, "never_stored")
     assert document.revision == revision
-    assert document.node(node_id).parameters == {"number_type": "INT"}  # type: ignore[union-attr]
+    assert document.node(node_id).parameters == {}  # type: ignore[union-attr]
 
 
 def test_restore_connection_repoints_same_id_like_add_connection() -> None:
     document = GraphDocument()
     source_a = document.add_node(
-        "synmachine.utility.number", implementation_version=2, node_id=NODE_A
+        "synmachine.utility.number", implementation_version=3, node_id=NODE_A
     )
     source_b = document.add_node(
-        "synmachine.utility.number", implementation_version=2, node_id=NODE_B
+        "synmachine.utility.number", implementation_version=3, node_id=NODE_B
     )
     destination = document.add_node("synmachine.utility.math", node_id=NODE_C)
     document.add_connection(source_a, "value", destination, "a", connection_id=CONNECTION)
@@ -254,10 +254,10 @@ def test_restore_connection_repoints_same_id_like_add_connection() -> None:
 def test_restore_connection_rejects_same_id_collision_when_destination_differs() -> None:
     document = GraphDocument()
     source_a = document.add_node(
-        "synmachine.utility.number", implementation_version=2, node_id=NODE_A
+        "synmachine.utility.number", implementation_version=3, node_id=NODE_A
     )
     source_b = document.add_node(
-        "synmachine.utility.number", implementation_version=2, node_id=NODE_B
+        "synmachine.utility.number", implementation_version=3, node_id=NODE_B
     )
     destination = document.add_node("synmachine.utility.math", node_id=NODE_C)
     document.add_connection(source_a, "value", destination, "a", connection_id=CONNECTION)

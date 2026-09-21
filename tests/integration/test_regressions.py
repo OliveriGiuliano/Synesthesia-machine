@@ -422,8 +422,8 @@ def test_random_graphs_are_complete_and_valid_across_seeds() -> None:
 def test_parameter_randomization_is_seeded_and_scoped_to_selected_nodes() -> None:
     registry = create_application_registry()
     document = GraphDocument()
-    first = document.add_node("synmachine.utility.number", implementation_version=2)
-    second = document.add_node("synmachine.utility.number", implementation_version=2)
+    first = document.add_node("synmachine.utility.number", implementation_version=3)
+    second = document.add_node("synmachine.utility.number", implementation_version=3)
     before = document.snapshot()
 
     randomized = randomize_graph_parameters(before, registry, {first}, seed=41)
@@ -543,13 +543,13 @@ def test_statistics_all_int_output_widens_to_float_at_the_scheduler_boundary() -
     document = GraphDocument()
     first = document.add_node(
         "synmachine.utility.number",
-        implementation_version=2,
-        parameters={"number_type": "INT", "value": 5.0},
+        implementation_version=3,
+        parameters={"value": 5.0},
     )
     second = document.add_node(
         "synmachine.utility.number",
-        implementation_version=2,
-        parameters={"number_type": "INT", "value": 3.0},
+        implementation_version=3,
+        parameters={"value": 3.0},
     )
     statistics = document.add_node(
         "synmachine.utility.statistics",
@@ -558,12 +558,12 @@ def test_statistics_all_int_output_widens_to_float_at_the_scheduler_boundary() -
     )
     offset = document.add_node(
         "synmachine.utility.number",
-        implementation_version=2,
-        parameters={"number_type": "FLOAT", "value": 1.5},
+        implementation_version=3,
+        parameters={"value": 1.5},
     )
     math_node = document.add_node("synmachine.utility.math")
-    document.add_connection(first, "value", statistics, "values_1")
-    document.add_connection(second, "value", statistics, "values_2")
+    document.add_connection(first, "int_value", statistics, "values_1")
+    document.add_connection(second, "int_value", statistics, "values_2")
     document.add_connection(statistics, "value", math_node, "a")
     document.add_connection(offset, "value", math_node, "b")
 
@@ -613,13 +613,13 @@ def test_statistics_non_whole_mean_of_ints_fails_as_expected_error_in_scheduler(
     document = GraphDocument()
     first = document.add_node(
         "synmachine.utility.number",
-        implementation_version=2,
-        parameters={"number_type": "INT", "value": 1.0},
+        implementation_version=3,
+        parameters={"value": 1.0},
     )
     second = document.add_node(
         "synmachine.utility.number",
-        implementation_version=2,
-        parameters={"number_type": "INT", "value": 2.0},
+        implementation_version=3,
+        parameters={"value": 2.0},
     )
     statistics = document.add_node(
         "synmachine.utility.statistics",
@@ -627,8 +627,8 @@ def test_statistics_non_whole_mean_of_ints_fails_as_expected_error_in_scheduler(
         parameters={"statistic": "MEAN"},
     )
     consumer = document.add_node("synmachine.utility.pass_through")
-    document.add_connection(first, "value", statistics, "values_1")
-    document.add_connection(second, "value", statistics, "values_2")
+    document.add_connection(first, "int_value", statistics, "values_1")
+    document.add_connection(second, "int_value", statistics, "values_2")
     document.add_connection(statistics, "value", consumer, "value")
 
     result = GraphCompiler(registry).compile(document.snapshot(), demand_roots={consumer})

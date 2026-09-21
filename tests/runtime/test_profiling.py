@@ -61,7 +61,7 @@ def test_runtime_profiler_aggregates_accuracy_errors_outputs_and_bounded_window(
 def test_scheduler_without_hooks_does_not_read_timing_clock(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     registry = create_utility_registry()
     document = GraphDocument()
-    document.add_node("synmachine.utility.number", implementation_version=2, node_id=NODE_ID)
+    document.add_node("synmachine.utility.number", implementation_version=3, node_id=NODE_ID)
     plan = GraphCompiler(registry).compile(document.snapshot()).plan
     assert plan is not None
     calls: list[int] = []

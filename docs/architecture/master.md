@@ -1390,7 +1390,11 @@ The compiler resolves `T`. Version 1 evaluates upstream branches normally; the n
 
 #### Number
 
-Output type is selected as Float or Integer. Value is a literal parameter. This is a static node.
+Outputs: `value: FLOAT`, `int_value: INT`.
+
+A single `value` literal parameter feeds both outputs: `value` passes it through
+as a float, and `int_value` converts it to an integer, truncating toward zero.
+This is a static node.
 
 #### Pass Through
 

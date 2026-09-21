@@ -560,6 +560,7 @@ _FRENCH: dict[str, str] = {
     # Common ports and parameter labels
     "Value": "Valeur",
     "Values": "Valeurs",
+    "Integer value": "Valeur entière",
     "Mask": "Masque",
     "Luminance": "Luminance",
     "Processed index": "Indice traité",
@@ -933,7 +934,6 @@ _FRENCH: dict[str, str] = {
     "Chooses the resampling used when pixels are mixed. Automatic picks the best method for the size change; Nearest keeps hard edges, and Cubic and Lanczos are smoother but slower.": "Choisit le rééchantillonnage utilisé quand les pixels sont mélangés. Automatique choisit la meilleure méthode pour le changement de taille ; Plus proche garde des bords nets, et Cubique et Lanczos sont plus lisses mais plus lents.",
     "Chooses the set of notes the mapped values snap to, from chromatic to pentatonic and the modes.": "Choisit l’ensemble des notes auxquelles les valeurs mappées se rattachent, du chromatique au pentatonique et aux modes.",
     "Chooses the shape of the structuring element: Rectangle, Ellipse, or Cross.": "Choisit la forme de l’élément structurant : Rectangle, Ellipse ou Croix.",
-    "Chooses the type of number this node outputs: Float or Integer.": "Choisit le type de nombre en sortie du nœud : Décimal ou Entier.",
     "Chooses the value that summarizes the samples: Mean, Median, Minimum, Maximum, Standard deviation, or Percentile.": "Choisit la valeur qui résume les échantillons : Moyenne, Médiane, Minimum, Maximum, Écart-type ou Percentile.",
     "Chooses what happens when the box extends past the image: Clamp cuts it to the image, Pad fills the rest with the pad colour, and Error makes the node fail.": "Choisit ce qui se passe quand la zone dépasse l’image : Limiter la coupe à l’image, Remplir comble le reste avec la couleur de remplissage, et Erreur fait échouer le nœud.",
     "Chooses which channels receive the change: Colour affects the colour channels, All channels affects every channel, and Channel 1 to 3 affect only that channel.": "Choisit les canaux qui reçoivent le changement : Couleur affecte les canaux de couleur, Tous les canaux affecte chaque canal, et Canal 1 à 3 n’affecte que ce canal.",
@@ -1046,9 +1046,11 @@ _FRENCH: dict[str, str] = {
     "Strength of the sharpen; higher values emphasize detail more.": "Force de la netteté ; les valeurs plus élevées accentuent davantage le détail.",
     "Target height of the image in pixels.": "Hauteur cible de l’image, en pixels.",
     "Target width of the image in pixels.": "Largeur cible de l’image, en pixels.",
-    "The number this node outputs. A Float type outputs it unchanged; "
-    "an Integer type converts it, truncating toward zero.": "Le nombre produit par ce nœud. "
-    "Le type Décimal le produit tel quel ; le type Entier le convertit en entier, en tronquant vers zéro.",
+    "The number this node outputs. The Value output keeps it as a float; "
+    "the Integer value output converts it, truncating toward zero.": (
+        "Le nombre que ce nœud sort. La sortie Valeur le garde en décimal ; "
+        "la sortie Valeur entière le convertit, en tronquant vers zéro."
+    ),
     "Tolerance used by the Approx comparison: two values match if they differ by no more than this amount.": "Tolérance de la comparaison Approximative : deux valeurs correspondent si leur différence ne dépasse pas ce montant.",
     "Tolerance used by the Approx comparison: two values match if they differ by no more than this fraction of the other value.": "Tolérance de la comparaison Approximative : deux valeurs correspondent si leur différence ne dépasse pas cette fraction de l’autre valeur.",
     "Top edge of the crop box, in the units of the Coordinates setting.": "Bord supérieur de la zone de recadrage, dans l’unité du réglage Coordonnées.",

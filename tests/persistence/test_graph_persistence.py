@@ -37,9 +37,9 @@ def test_json_round_trip_is_deterministic_and_preserves_semantics() -> None:
     document = GraphDocument(document_id=DOCUMENT_ID)
     source = document.add_node(
         "synmachine.utility.number",
-        implementation_version=2,
+        implementation_version=3,
         node_id=NODE_B,
-        parameters={"number_type": "FLOAT", "value": 2.5},
+        parameters={"value": 2.5},
         position=(12.5, 30.0),
     )
     passthrough = document.add_node("synmachine.utility.pass_through", node_id=NODE_A)
@@ -109,14 +109,14 @@ def test_loader_rejects_malformed_numeric_matrices(
     [
         ("schema_version", 999, "migration_failed"),
         ("node_type", "unknown.node", "unknown_node_type"),
-        ("node_version", 3, "unsupported_node_version"),
+        ("node_version", 4, "unsupported_node_version"),
     ],
 )
 def test_loader_rejects_unknown_schema_type_and_node_version(
     field: str, value: int | str, code: str
 ) -> None:
     document = GraphDocument(document_id=DOCUMENT_ID)
-    document.add_node("synmachine.utility.number", implementation_version=2, node_id=NODE_A)
+    document.add_node("synmachine.utility.number", implementation_version=3, node_id=NODE_A)
     data = graph_to_data(document.snapshot())
     if field == "schema_version":
         data["schema_version"] = int(value)
@@ -161,7 +161,7 @@ def test_v1_connection_payload_migrates_to_v2_and_round_trips() -> None:
     registry = create_utility_registry()
     document = GraphDocument(document_id=DOCUMENT_ID)
     source = document.add_node(
-        "synmachine.utility.number", implementation_version=2, node_id=NODE_B
+        "synmachine.utility.number", implementation_version=3, node_id=NODE_B
     )
     target = document.add_node("synmachine.utility.pass_through", node_id=NODE_A)
     document.add_connection(source, "value", target, "value")
@@ -192,7 +192,7 @@ def test_v1_connection_payload_migrates_to_v2_and_round_trips() -> None:
 def test_atomic_save_load_and_backup(tmp_path: Path) -> None:
     document = GraphDocument(document_id=DOCUMENT_ID)
     number = document.add_node(
-        "synmachine.utility.number", implementation_version=2, node_id=NODE_A
+        "synmachine.utility.number", implementation_version=3, node_id=NODE_A
     )
     path = tmp_path / "graph.synmachine.json"
     save_graph(path, document.snapshot())
@@ -228,7 +228,7 @@ def test_graph_loader_rejects_excess_cardinality_and_dangling_connections(
     registry = create_utility_registry()
     document = GraphDocument(document_id=DOCUMENT_ID)
     source = document.add_node(
-        "synmachine.utility.number", implementation_version=2, node_id=NODE_A
+        "synmachine.utility.number", implementation_version=3, node_id=NODE_A
     )
     target = document.add_node("synmachine.utility.pass_through", node_id=NODE_B)
     document.add_connection(source, "value", target, "value")
@@ -251,15 +251,15 @@ def test_serialized_graph_loads_compiles_and_executes() -> None:
     document = GraphDocument(document_id=DOCUMENT_ID)
     first = document.add_node(
         "synmachine.utility.number",
-        implementation_version=2,
+        implementation_version=3,
         node_id=NODE_A,
-        parameters={"number_type": "INT", "value": 4.0},
+        parameters={"value": 4.0},
     )
     second = document.add_node(
         "synmachine.utility.number",
-        implementation_version=2,
+        implementation_version=3,
         node_id=NODE_B,
-        parameters={"number_type": "FLOAT", "value": 1.5},
+        parameters={"value": 1.5},
     )
     math_id = UUID("00000000-0000-0000-0000-00000000000c")
     math_node = document.add_node(
