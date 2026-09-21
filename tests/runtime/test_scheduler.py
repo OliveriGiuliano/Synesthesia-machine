@@ -485,7 +485,10 @@ def test_compare_logic_and_conditional_nodes_execute_together() -> None:
     assert result.values[PortKey(conditional, "value")] == 5.0
 
 
-def test_engine_facade_keeps_old_plan_when_recompile_fails() -> None:
+def test_engine_facade_commits_partial_plan_for_partially_invalid_graph() -> None:
+    """A partially invalid document activates a plan over the valid remainder
+    (ADR-0029): the broken parts are simply absent from the plan, and the
+    remainder's plan replaces the old one."""
     facade = EngineFacade(create_utility_registry())
     valid = GraphDocument()
     valid.add_node("synmachine.utility.number", node_id=NODE_A)
@@ -493,11 +496,18 @@ def test_engine_facade_keeps_old_plan_when_recompile_fails() -> None:
     assert activation.plan is not None
     old_plan = facade.active_plan
 
-    invalid = GraphDocument()
-    invalid.add_node("unknown.node", node_id=NODE_B)
-    failed = facade.activate(invalid.snapshot())
-    assert failed.plan is None
-    assert facade.active_plan is old_plan
+    broken = GraphDocument()
+    broken.add_node("synmachine.utility.number", node_id=NODE_A)
+    broken.add_node("unknown.node", node_id=NODE_B)
+    partial = facade.activate(broken.snapshot())
+
+    # The unknown node is excluded from the plan; the number node still
+    # compiles, and its plan replaces the old one.
+    assert partial.report.is_valid is False
+    assert partial.plan is not None
+    assert set(partial.plan.topological_node_ids) == {NODE_A}
+    assert facade.active_plan is not old_plan
+    assert set(facade.active_plan.topological_node_ids) == {NODE_A}
 
 
 def test_timing_hook_and_immutable_inputs_are_exposed_at_runtime_boundary() -> None:

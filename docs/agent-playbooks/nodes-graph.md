@@ -36,8 +36,10 @@
 - Validation should produce stable, navigable issue codes rather than UI dialogs or generic strings.
 - Compilation must be deterministic: stable ordering, type resolution, cycle rejection, clock-domain
   analysis, demand reachability, and execution-plan construction should not depend on dict/set order.
-- Preserve atomic live-edit behavior. Invalid graph revisions remain editable in the UI but must not
-  replace the last valid active runtime.
+- Preserve atomic live-edit behavior. Invalid graph revisions remain editable in the UI;
+  activating one replaces the active runtime with the maximal valid remainder of the
+  document — invalid parts are excluded from the plan and do not propagate signal
+  (ADR 0029). Only a document whose valid remainder contains no source stops the engine.
 - When changing state-retention keys or plan replacement, test both reusable and invalidated runtime
   paths, including factory/reset/close failures.
 - Add focused domain tests and relevant in-process/process integration coverage. Scheduler changes

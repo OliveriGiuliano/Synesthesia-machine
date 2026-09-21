@@ -384,6 +384,9 @@ _FRENCH: dict[str, str] = {
     "{verb} the {target} source": "{verb} la source {target}",
     "Engine activation failed: {error}": "Échec de l’activation du moteur : {error}",
     "Activated graph revision {revision}": "Révision {revision} du graphe activée",
+    "Activated graph revision {revision}; {count} error(s) isolated": (
+        "Révision {revision} du graphe activée ; {count} erreur(s) isolée(s)"
+    ),
     "Graph has {count} error(s); engine stopped": "Le graphe comporte {count} erreur(s) ; le moteur est arrêté",
     "no source": "aucune source",
     "Unknown source error": "Erreur de source inconnue",

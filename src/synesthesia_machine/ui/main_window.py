@@ -1285,13 +1285,23 @@ class MainWindow(QMainWindow):
         # next status tick re-learns the real state.
         if activation.activated:
             self._clear_runtime_previews()
-            self.statusBar().showMessage(
-                trf(
+            errors = len(activation.report.errors)
+            if errors:
+                # The engine is running the valid remainder of the document;
+                # the isolated parts do not propagate signal (ADR-0029), so
+                # the panel keeps listing the errors while the status says
+                # the engine stayed up.
+                message = trf(
+                    "Activated graph revision {revision}; {count} error(s) isolated",
+                    revision=activation.graph_revision,
+                    count=errors,
+                )
+            else:
+                message = trf(
                     "Activated graph revision {revision}",
                     revision=activation.graph_revision,
-                ),
-                3000,
-            )
+                )
+            self.statusBar().showMessage(message, 3000)
             return
         count = len(activation.report.errors)
         self._clear_runtime_previews()

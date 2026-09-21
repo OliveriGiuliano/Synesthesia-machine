@@ -24,6 +24,7 @@ from synesthesia_machine.nodes.utility import create_utility_registry
 NODE_A = UUID("00000000-0000-0000-0000-00000000000a")
 NODE_B = UUID("00000000-0000-0000-0000-00000000000b")
 NODE_C = UUID("00000000-0000-0000-0000-00000000000c")
+NODE_D = UUID("00000000-0000-0000-0000-00000000000d")
 CONNECTION_A = UUID("00000000-0000-0000-0000-00000000001a")
 CONNECTION_B = UUID("00000000-0000-0000-0000-00000000001b")
 DOCUMENT_ID = UUID("00000000-0000-0000-0000-000000000100")
@@ -235,7 +236,11 @@ def test_compiler_rejects_clock_mismatch_and_orders_deterministically() -> None:
     document.add_connection(earlier_source, "value", merge, "other")
     result = GraphCompiler(registry).compile(document.snapshot())
     assert "clock_mismatch" in _codes(result)
-    assert result.plan is None
+    # The mismatching merge is excluded from the plan; the two sources keep
+    # running on their own (partial compilation, ADR-0029).
+    plan = result.plan
+    assert plan is not None
+    assert set(plan.topological_node_ids) == {NODE_A, NODE_B}
 
     independent = GraphDocument(document_id=DOCUMENT_ID)
     independent.add_node("test.source", node_id=NODE_B)
@@ -245,9 +250,41 @@ def test_compiler_rejects_clock_mismatch_and_orders_deterministically() -> None:
     assert ordered.plan.topological_node_ids == (NODE_A, NODE_B)
 
 
+def test_excluded_producer_cascades_to_its_consumers() -> None:
+    """Exclusion is re-validated to a fixed point (ADR-0029): a consumer whose
+    only producer is excluded is itself excluded (required input missing),
+    while an independent valid branch stays in the plan."""
+    registry = NodeRegistry(
+        (
+            make_definition("test.source", execution_kind=ExecutionKind.SOURCE),
+            make_definition("test.sink", input_type=PortType.FLOAT),
+        )
+    )
+    document = GraphDocument(document_id=DOCUMENT_ID)
+    broken = document.add_node("unknown.node", node_id=NODE_A)
+    consumer = document.add_node("test.sink", node_id=NODE_B)
+    document.add_connection(broken, "value", consumer, "value")
+    source = document.add_node("test.source", node_id=NODE_C)
+    independent = document.add_node("test.sink", node_id=NODE_D)
+    document.add_connection(source, "value", independent, "value")
+
+    result = GraphCompiler(registry).compile(document.snapshot())
+
+    assert result.report.is_valid is False
+    assert "unknown_node_type" in _codes(result)
+    assert "required_input_missing" in _codes(result)
+    # NODE_A carries a direct error; NODE_B only loses its required input
+    # once NODE_A is gone, so it falls out in the cascade pass. The
+    # independent source->sink branch keeps running.
+    plan = result.plan
+    assert plan is not None
+    assert set(plan.topological_node_ids) == {NODE_C, NODE_D}
+
+
 def test_compiler_exposes_resolved_types_for_invalid_graphs() -> None:
     """A type-variable port keeps its resolved type in the result even when an unrelated
-    floating node makes the graph invalid (plan is None), so dependents (e.g. the view-model
+    floating node makes the graph invalid: partial compilation (ADR-0029) plans the valid
+    remainder and keeps the full resolved-type table, so dependents (e.g. the view-model
     projection and its link pills) do not lose the port's resolved identity."""
     registry = NodeRegistry(
         (
@@ -275,8 +312,11 @@ def test_compiler_exposes_resolved_types_for_invalid_graphs() -> None:
     invalid.add_node("test.floaty", node_id=NODE_C)
     invalid_result = GraphCompiler(registry).compile(invalid.snapshot())
     assert invalid_result.report.is_valid is False
-    assert invalid_result.plan is None
     assert "required_input_missing" in _codes(invalid_result)
+    # The floating node is excluded from the plan; the producer->sink path
+    # still compiles (partial compilation, ADR-0029).
+    assert invalid_result.plan is not None
+    assert set(invalid_result.plan.topological_node_ids) == {NODE_A, NODE_B}
     # The producer's type-variable output stays resolved to IMAGE despite the invalid graph.
     assert invalid_result.resolved_types[(NODE_A, "value", True)] is PortType.IMAGE
 

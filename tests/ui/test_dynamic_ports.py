@@ -285,7 +285,10 @@ def test_variadic_compiler_requires_minimum_and_binds_numeric_order() -> None:
     assert connection is not None
     incomplete.remove_connection(connection.id)
     missing = GraphCompiler(registry).compile(incomplete.snapshot())
-    assert missing.plan is None
+    # The merge is excluded from the plan; the producers keep compiling on
+    # their own (partial compilation, ADR-0029).
+    assert missing.plan is not None
+    assert set(missing.plan.topological_node_ids) == {SOURCE_A, SOURCE_B, SOURCE_C}
     # The two-socket minimum is enforced at family level: freeing item_2
     # leaves one of two required sockets, so the single issue is raised on
     # the family prefix, not on the specific freed socket.
@@ -400,7 +403,10 @@ def test_common_validation_feedback_reaches_compiler_report() -> None:
         parameters={"midi_minimum": 72, "midi_maximum": 60},
     )
     result = GraphCompiler(registry).compile(document.snapshot())
-    assert result.plan is None
+    # The invalid node is excluded from the plan (partial compilation,
+    # ADR-0029), but the validation feedback still reaches the report.
+    assert result.plan is not None
+    assert result.plan.nodes == ()
     assert any(
         issue.node_id == node_id
         and issue.code == "invalid_parameter"

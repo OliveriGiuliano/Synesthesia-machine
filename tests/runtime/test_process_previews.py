@@ -160,7 +160,14 @@ def test_reactivation_replaces_generation_and_unlinks_previous_slot(
     video_path = generate_test_video(tmp_path / "resized-preview.mp4", fps=60)
     document, source_id, resize_id, _ = _video_preview_document(video_path)
     first = _render_preview(process_client, document, source_id, resize_id)
+    # Slot announcements arrive on the client's event thread; wait for both
+    # announced targets instead of asserting a single instant (the same
+    # pattern as the generation-2 check below).
+    deadline = time.monotonic() + 3.0
     first_names = process_client.preview_shared_memory_names()
+    while len(first_names) < 2 and time.monotonic() < deadline:
+        time.sleep(0.02)
+        first_names = process_client.preview_shared_memory_names()
     assert len(first_names) == 2
 
     document.set_parameter(resize_id, "width", 16)

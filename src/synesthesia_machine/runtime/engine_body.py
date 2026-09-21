@@ -683,11 +683,14 @@ class EngineBody:
                 reset_reason=reset_reason,
             )
             plan = prepared.plan
-            if plan is None:
-                # A graph that no longer compiles stops the engine: the previous
-                # plan must not keep producing output from a broken document.
+            if plan is None or not self._plan_has_source(plan):
+                # The activated document can no longer carry signal — nothing
+                # compiled at all, or every source fell out of the valid
+                # remainder (ADR-0013, relaxed to partial graphs by
+                # ADR-0029) — so the engine stops: the previous plan must not
+                # keep producing output no source can sustain.
                 prepared.close()
-                self._stop_runtime_for_invalid_graph()
+                self._stop_runtime_without_signal()
                 return EngineActivation(snapshot.revision, prepared.result.report, False)
             try:
                 preview_configuration = self._preview_broker.prepare(plan)
@@ -785,10 +788,11 @@ class EngineBody:
                             source.resume() if node_id in reusable_sources else source.play()
             interrupted = self._interrupted_playing_source_ids
             if interrupted:
-                # The previous valid plan was torn down by a broken graph
-                # (ADR-0013): sources are fresh in READY, so the sources that
-                # were playing when the stop happened play again without a
-                # user gesture (ADR-0020). Positions are not preserved.
+                # The previous plan was torn down because the activated
+                # document carried no signal (ADR-0029): sources are fresh in
+                # READY, so the sources that were playing when the stop
+                # happened play again without a user gesture (ADR-0020).
+                # Positions are not preserved.
                 self._interrupted_playing_source_ids = frozenset()
                 for node_id, source in sources.items():
                     if node_id in interrupted:
@@ -1137,6 +1141,11 @@ class EngineBody:
             )
 
     @staticmethod
+    def _plan_has_source(plan: ExecutionPlan) -> bool:
+        """True when the plan contains at least one source that can tick the runtime."""
+        return any(node.definition.execution_kind is ExecutionKind.SOURCE for node in plan.nodes)
+
+    @staticmethod
     def _reusable_source_ids(
         old_plan: ExecutionPlan | None,
         new_plan: ExecutionPlan,
@@ -1186,9 +1195,10 @@ class EngineBody:
         else:
             self._state = EngineState.STOPPED
 
-    def _stop_runtime_for_invalid_graph(self) -> None:
-        """Stop and tear down the runtime after a broken graph (the body stays open)."""
-
+    def _stop_runtime_without_signal(self) -> None:
+        """Stop and tear down the runtime after a document that carries no signal (the body
+        stays open).
+        """
         # Remember which sources were playing so the next valid activation can
         # resume them (ADR-0020). Re-capture only while live sources exist: a
         # second consecutive broken activation must not wipe the memory.

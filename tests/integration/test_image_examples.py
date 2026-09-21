@@ -40,7 +40,9 @@ def test_compatibility_catalogue_preserves_each_historical_definition_once() -> 
     assert not snapshot.connections
 
     compilation = GraphCompiler(registry).compile(snapshot)
-    assert compilation.plan is None
+    # Self-contained valid nodes survive partial compilation even though the
+    # catalogue as a whole is invalid (ADR-0029).
+    assert compilation.plan is not None
     assert {issue.code for issue in compilation.report.errors} <= {
         "required_input_missing",
         "unresolved_generic_type",

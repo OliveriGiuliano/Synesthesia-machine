@@ -195,14 +195,63 @@ class GraphCompiler:
         *,
         demand_roots: Iterable[UUID] | None = None,
     ) -> CompilationResult:
-        analysis = self._analyze(snapshot, demand_roots)
-        if not analysis.report.is_valid:
+        """Validate the snapshot and compile a plan for its valid parts.
+
+        A fully valid snapshot compiles exactly as before. When the report
+        contains errors, the invalid parts are isolated — excluded nodes and
+        connections, re-validated to a fixed point — and the plan is built
+        for the maximal valid remainder, so the engine can keep running the
+        parts that are still sound (ADR-0029). The returned report is always
+        the one for the whole document: every issue stays visible, including
+        the ones in parts the plan does not use. ``plan`` is ``None`` only
+        when no valid remainder exists at all.
+        """
+        requested = None if demand_roots is None else tuple(demand_roots)
+        full = self._analyze(snapshot, requested)
+        if full.report.is_valid:
             return CompilationResult(
-                report=analysis.report,
-                plan=None,
-                resolved_types=analysis.resolved_types,
+                report=full.report,
+                plan=self._build_plan(snapshot, full),
+                resolved_types=full.resolved_types,
             )
 
+        current = snapshot
+        analysis = full
+        while True:
+            reduced = self._reduced_snapshot(current, analysis)
+            if reduced is current:
+                # Nothing more can be excluded. The remaining errors may all
+                # be demand roots the document cannot supply: re-check with
+                # the roots filtered to the surviving nodes before giving up.
+                surviving = self._surviving_roots(requested, current)
+                if surviving != requested:
+                    final = self._analyze(current, surviving)
+                    if final.report.is_valid:
+                        return CompilationResult(
+                            report=full.report,
+                            plan=self._build_plan(snapshot, final),
+                            resolved_types=full.resolved_types,
+                        )
+                return CompilationResult(
+                    report=full.report, plan=None, resolved_types=full.resolved_types
+                )
+            current = reduced
+            analysis = self._analyze(current, self._surviving_roots(requested, current))
+            if analysis.report.is_valid:
+                return CompilationResult(
+                    report=full.report,
+                    plan=self._build_plan(snapshot, analysis),
+                    resolved_types=full.resolved_types,
+                )
+
+    def _build_plan(self, snapshot: GraphSnapshot, analysis: _Analysis) -> ExecutionPlan:
+        """Build the execution plan for ``analysis`` under the snapshot's identity.
+
+        ``analysis`` may describe a reduced subgraph (partial compilation,
+        ADR-0029): the plan then keeps the original document id and revision
+        so revisions and acknowledgements track the user's document, not the
+        compiler's intermediate snapshots.
+        """
         compiled_nodes = tuple(
             self._compile_node(
                 analysis.nodes[node_id],
@@ -215,16 +264,64 @@ class GraphCompiler:
             )
             for node_id in analysis.order
         )
-        return CompilationResult(
-            report=analysis.report,
-            plan=ExecutionPlan(
-                document_id=snapshot.document_id,
-                graph_revision=snapshot.revision,
-                nodes=compiled_nodes,
-                demand_roots=analysis.roots,
-            ),
-            resolved_types=analysis.resolved_types,
+        return ExecutionPlan(
+            document_id=snapshot.document_id,
+            graph_revision=snapshot.revision,
+            nodes=compiled_nodes,
+            demand_roots=analysis.roots,
         )
+
+    @staticmethod
+    def _reduced_snapshot(snapshot: GraphSnapshot, analysis: _Analysis) -> GraphSnapshot:
+        """Exclude the invalid parts identified by ``analysis``.
+
+        Nodes are dropped when an error attaches to them or any of their
+        ports stayed unsettled by type resolution; connections are dropped
+        when an error attaches to them or an endpoint is dropped. The input
+        is returned unchanged when nothing can be removed, which marks the
+        end of the reduction loop.
+        """
+        node_ids = {node.id for node in snapshot.nodes}
+        dropped_nodes: set[UUID] = set()
+        dropped_connections: set[UUID] = set()
+        for issue in analysis.report.issues:
+            if issue.severity is not ValidationSeverity.ERROR:
+                continue
+            if issue.node_id is not None:
+                dropped_nodes.add(issue.node_id)
+            if issue.connection_id is not None:
+                dropped_connections.add(issue.connection_id)
+        for (node_id, _port_id, _is_output), value in analysis.resolved_types.items():
+            if value is None:
+                dropped_nodes.add(node_id)
+        dropped_nodes &= node_ids
+        kept_nodes = tuple(node for node in snapshot.nodes if node.id not in dropped_nodes)
+        kept_connections = tuple(
+            connection
+            for connection in snapshot.connections
+            if connection.id not in dropped_connections
+            and connection.source_node_id not in dropped_nodes
+            and connection.destination_node_id not in dropped_nodes
+        )
+        if not dropped_nodes and len(kept_connections) == len(snapshot.connections):
+            return snapshot
+        return replace(snapshot, nodes=kept_nodes, connections=kept_connections)
+
+    @staticmethod
+    def _surviving_roots(
+        requested: tuple[UUID, ...] | None, snapshot: GraphSnapshot
+    ) -> tuple[UUID, ...] | None:
+        """Explicitly requested demand roots that still exist in ``snapshot``.
+
+        A reduction pass can remove a node the caller explicitly demanded
+        (for example a pinned preview on a broken branch); demanding the
+        ghost id would only raise ``unknown_demand_root`` and pin the
+        reduction loop without excluding anything.
+        """
+        if requested is None:
+            return None
+        present = {node.id for node in snapshot.nodes}
+        return tuple(root for root in requested if root in present)
 
     def validate(
         self,

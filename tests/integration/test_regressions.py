@@ -184,7 +184,9 @@ def test_view_model_keeps_resolved_link_type_when_graph_is_invalid() -> None:
 
     result = GraphCompiler(registry).compile(document.snapshot())
     assert result.report.is_valid is False
-    assert result.plan is None
+    # The floating node is excluded from the plan; the producer->sink path
+    # keeps running (partial compilation, ADR-0029).
+    assert result.plan is not None
 
     view = project_graph(document.snapshot(), registry, result.report)
     (connection,) = view.connections

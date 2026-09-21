@@ -309,11 +309,14 @@ def test_definition_exposes_exact_ports_and_approved_defaults() -> None:
         ),
     ],
 )
-def test_cross_parameter_errors_fail_graph_compilation(
+def test_cross_parameter_errors_exclude_node_from_plan(
     parameters: dict[str, LiteralValue], message: str
 ) -> None:
     document = GraphDocument()
     document.add_node(CHANNEL_TO_PITCH_TYPE_ID, parameters=parameters)
     result = GraphCompiler(create_application_registry()).compile(document.snapshot())
-    assert result.plan is None
     assert any(message in issue.message for issue in result.report.errors)
+    # The invalid node is excluded from the plan (partial compilation,
+    # ADR-0029): no valid remainder survives, but a plan is still built.
+    assert result.plan is not None
+    assert result.plan.nodes == ()

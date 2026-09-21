@@ -5,12 +5,14 @@ from __future__ import annotations
 import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import cast
 from uuid import UUID
 
 import mido
 import pytest
 from tests.support.graph_factories import frame_context, make_definition
+from tools.generate_test_video import generate_test_video
 
 from synesthesia_machine.contracts import (
     MidiNoteKey,
@@ -1349,13 +1351,17 @@ def test_server_midi_status_query_returns_compact_typed_response() -> None:
     assert response == MidiOutputStatusResponse("midi-status", 7, (expected,))
 
 
-def test_spawned_child_midi_status_query_with_no_output_node_touches_no_hardware() -> None:
+def test_spawned_child_midi_status_query_with_no_output_node_touches_no_hardware(
+    tmp_path: Path,
+) -> None:
+    video = generate_test_video(tmp_path / "no-hardware.mp4", frame_count=4, fps=2)
     client = ProcessEngineClient(request_timeout_s=1.5, close_timeout_s=0.5)
     try:
         document = GraphDocument()
         document.add_node(
-            "synmachine.utility.number",
-            parameters={"number_type": "FLOAT", "float_value": 0.5},
+            "synmachine.input.load_video",
+            implementation_version=2,
+            parameters={"file_path": str(video)},
         )
         assert client.activate(document.snapshot()).activated
         assert client.midi_output_status() == ()

@@ -140,8 +140,16 @@ def test_protocol_mismatch_is_rejected_and_child_is_reaped() -> None:
 
 def test_process_activation_metrics_and_concurrent_request_correlation(
     process_client: ProcessEngineClient,
+    tmp_path: Path,
 ) -> None:
-    snapshot = _scalar_document().snapshot()
+    video = generate_test_video(tmp_path / "metrics.mp4", frame_count=4, fps=2)
+    document = GraphDocument()
+    document.add_node(
+        "synmachine.input.load_video",
+        implementation_version=2,
+        parameters={"file_path": str(video)},
+    )
+    snapshot = document.snapshot()
 
     activation = process_client.activate(snapshot)
 
@@ -153,7 +161,7 @@ def test_process_activation_metrics_and_concurrent_request_correlation(
     assert all(item.graph_revision == snapshot.revision for item in metrics)
     child_process_id = process_client.status().child_process_id
     assert all(item.supervisor.child_process_id == child_process_id for item in metrics)
-    assert process_client.source_status() == ()
+    assert process_client.source_status()[0].state is SourceState.READY
 
 
 def test_process_device_catalogue_response_is_routed_without_disconnecting(
@@ -204,22 +212,31 @@ def test_process_metrics_transport_structured_runtime_errors(
     )
 
 
-def test_invalid_candidate_does_not_replace_active_revision(
+def test_partially_invalid_candidate_replaces_active_revision(
     process_client: ProcessEngineClient,
+    tmp_path: Path,
 ) -> None:
-    document = _scalar_document()
+    """A partially invalid candidate activates a plan over the valid remainder
+    (ADR-0029): the broken parts are excluded from the plan, the remainder keeps
+    running, and the candidate's revision becomes the active one."""
+    video = generate_test_video(tmp_path / "partial-revision.mp4", frame_count=10, fps=1)
+    document = GraphDocument()
+    document.add_node(
+        "synmachine.input.load_video",
+        implementation_version=2,
+        parameters={"file_path": str(video)},
+    )
     valid_snapshot = document.snapshot()
     assert process_client.activate(valid_snapshot).activated
 
     document.add_node("unknown.node")
-    invalid_snapshot = document.snapshot()
-    rejected = process_client.activate(invalid_snapshot)
+    partial_snapshot = document.snapshot()
+    partial = process_client.activate(partial_snapshot)
 
-    assert not rejected.activated
-    assert not rejected.report.is_valid
-    assert rejected.graph_revision == invalid_snapshot.revision
-    assert process_client.status().graph_revision == valid_snapshot.revision
-    assert process_client.metrics().graph_revision == valid_snapshot.revision
+    assert partial.activated
+    assert not partial.report.is_valid
+    assert process_client.status().graph_revision == partial_snapshot.revision
+    assert process_client.metrics().graph_revision == partial_snapshot.revision
 
 
 def test_invalid_candidate_stops_the_engine_and_valid_candidate_restarts_it(
@@ -238,9 +255,11 @@ def test_invalid_candidate_stops_the_engine_and_valid_candidate_restarts_it(
     process_client.play(source_id)
     assert _wait_until(lambda: process_client.metrics().state is EngineState.RUNNING)
 
-    # A broken document stops the child engine's runtime instead of keeping
-    # the previous plan producing output.
-    document.add_node("unknown.node")
+    # A document whose valid remainder carries no signal stops the child
+    # engine's runtime instead of keeping the previous plan producing output
+    # (ADR-0029).
+    document.set_parameter(source_id, "loop_start_s", 10.0)
+    document.set_parameter(source_id, "loop_end_s", 5.0)
     rejected = process_client.activate(document.snapshot())
 
     assert not rejected.activated
@@ -302,8 +321,16 @@ def test_looping_source_runs_seamlessly_in_the_spawned_process(
 
 def test_forced_crash_fails_boundedly_and_restart_rebuilds_latest_valid_graph(
     process_client: ProcessEngineClient,
+    tmp_path: Path,
 ) -> None:
-    snapshot = _scalar_document().snapshot()
+    video = generate_test_video(tmp_path / "crash-restart.mp4", frame_count=10, fps=1)
+    document = GraphDocument()
+    document.add_node(
+        "synmachine.input.load_video",
+        implementation_version=2,
+        parameters={"file_path": str(video)},
+    )
+    snapshot = document.snapshot()
     assert process_client.activate(snapshot).activated
     original_process_id = process_client.status().child_process_id
     assert original_process_id is not None

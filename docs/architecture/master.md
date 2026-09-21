@@ -584,7 +584,9 @@ Validation runs in this order:
 10. sink reachability and warnings.
 11. topological ordering and execution-plan construction.
 
-Errors block engine activation. Warnings do not.
+Errors exclude the affected nodes and connections from the execution plan (partial
+compilation, ADR 0029); the engine keeps running the maximal valid remainder and stops
+only when no source can carry signal any more. Warnings do not.
 
 ### 9.4 Clock-domain rules
 
@@ -607,11 +609,13 @@ Structural edits are debounced for approximately 100 ms, then the UI sends a new
 5. closes removed runtimes;
 6. reports success or validation errors.
 
-If compilation of the new snapshot fails, the engine stops (sources stop, MIDI
-outputs panic, previews clear, state `STOPPED`) instead of keeping the previous
-plan running; it resumes automatically when the graph becomes valid again
-(ADR 0013), and sources that were playing when the stop happened play again from
-the start of their playback (ADR 0020).
+When the new snapshot contains errors, the engine compiles and runs the maximal valid
+remainder: the invalid parts are excluded from the plan and simply do not propagate
+signal, so a minimally valid graph keeps playing (ADR 0029). The engine stops (sources
+stop, MIDI outputs panic, previews clear, state `STOPPED`) only when no source can
+carry signal any more — nothing compiles, or every source fell out of the valid
+remainder — and it resumes automatically on the next activation; sources that were
+playing when the stop happened play again from the start of their playback (ADR 0020).
 
 ### 9.6 Demand roots
 
@@ -2170,7 +2174,7 @@ Mitigation: state-frame abstraction, centralized diffing, explicit tracked notes
 
 ### Risk 4 — UI graph and engine graph diverge during live edits
 
-Mitigation: immutable graph revisions, compile-then-atomic-swap, acknowledgements with revision IDs, engine auto-stop when a broken graph is activated (ADR 0013), and commands as the only graph mutation path.
+Mitigation: immutable graph revisions, compile-then-atomic-swap, acknowledgements with revision IDs, partial activation that keeps the valid remainder running and engine auto-stop only when the activated graph carries no signal (ADR 0013/0029), and commands as the only graph mutation path.
 
 ### Risk 5 — Windows device APIs are inconsistent
 

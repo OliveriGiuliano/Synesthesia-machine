@@ -309,9 +309,12 @@ def test_broken_graph_stops_the_runtime_and_a_valid_graph_restarts_it(
         client.play(source_id)
         assert client.metrics().state is EngineState.RUNNING
 
-        # Breaking the document stops the engine: sources are torn down, the
-        # previous plan no longer produces output, and the client stays open.
-        document.add_node("unknown.node")
+        # Breaking the document so that no source can carry signal stops the
+        # engine: sources are torn down, the previous plan no longer produces
+        # output, and the client stays open. (ADR-0029: a partially valid
+        # graph keeps the valid remainder running instead.)
+        document.set_parameter(source_id, "loop_start_s", 10.0)
+        document.set_parameter(source_id, "loop_end_s", 5.0)
         rejected = client.activate(document.snapshot())
 
         assert not rejected.activated
@@ -349,7 +352,8 @@ def test_playing_sources_auto_resume_after_broken_graph_stop(tmp_path: Path) -> 
 
         # A broken stop captures the playing source; a second consecutive
         # broken activation must not wipe the captured memory.
-        broken = document.add_node("unknown.node")
+        document.set_parameter(source_id, "loop_start_s", 10.0)
+        document.set_parameter(source_id, "loop_end_s", 5.0)
         rejected = client.activate(document.snapshot())
         assert not rejected.activated
         assert client.metrics().state is EngineState.STOPPED
@@ -357,7 +361,8 @@ def test_playing_sources_auto_resume_after_broken_graph_stop(tmp_path: Path) -> 
         assert client.metrics().state is EngineState.STOPPED
 
         # Fixing the graph in place resumes the previously playing source.
-        document.remove_node(broken)
+        document.set_parameter(source_id, "loop_start_s", 0.0)
+        document.set_parameter(source_id, "loop_end_s", 0.0)
         assert client.activate(document.snapshot()).activated
         assert client.source_status(source_id)[0].state is SourceState.PLAYING
         assert client.metrics().state is EngineState.RUNNING
@@ -381,13 +386,15 @@ def test_paused_sources_are_not_auto_played_after_broken_graph_stop(tmp_path: Pa
         client.pause(source_id)
         assert client.metrics().state is EngineState.PAUSED
 
-        broken = document.add_node("unknown.node")
+        document.set_parameter(source_id, "loop_start_s", 10.0)
+        document.set_parameter(source_id, "loop_end_s", 5.0)
         rejected = client.activate(document.snapshot())
         assert not rejected.activated
         assert client.metrics().state is EngineState.STOPPED
 
         # The user paused this source, so the auto-resume must not play it.
-        document.remove_node(broken)
+        document.set_parameter(source_id, "loop_start_s", 0.0)
+        document.set_parameter(source_id, "loop_end_s", 0.0)
         assert client.activate(document.snapshot()).activated
         assert client.source_status(source_id)[0].state is SourceState.READY
         assert client.metrics().state is EngineState.STOPPED

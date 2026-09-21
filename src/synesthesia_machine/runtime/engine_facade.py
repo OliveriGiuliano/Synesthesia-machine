@@ -117,8 +117,9 @@ class EngineFacade:
     def stop(self, reason: ResetReason = ResetReason.PLAN_REPLACED) -> None:
         """Tear down the active runtime: panic MIDI outputs, then close node runtimes.
 
-        Used when a graph no longer compiles: the engine stops instead of
-        keeping a previous plan running. Idempotent and safe after close.
+        Used when the activated document can no longer carry signal: the engine
+        stops instead of keeping a previous plan running. Idempotent and safe
+        after close.
         """
 
         scheduler = self._scheduler

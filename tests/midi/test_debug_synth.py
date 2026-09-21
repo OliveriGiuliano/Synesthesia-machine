@@ -44,6 +44,7 @@ from synesthesia_machine.nodes import (
     NodeDefinition,
     NodeExecutionContract,
     NodePresentationIntent,
+    OutputPortSpec,
     ResetReason,
 )
 from synesthesia_machine.nodes.output import (
@@ -930,12 +931,58 @@ def _panic_probe_definition(instances: list[PanicProbeRuntime]) -> NodeDefinitio
     )
 
 
+class _PanicProbeSourceRuntime:
+    """A tickable source that emits nothing; it keeps the engine runnable for
+    panic tests without adding a probe instance."""
+
+    def __init__(self, node_id: UUID) -> None:
+        del node_id
+
+    def process(
+        self,
+        inputs: Mapping[str, RuntimeValue],
+        parameters: Mapping[str, ParameterValue],
+        context: FrameContext,
+    ) -> Mapping[str, RuntimeValue]:
+        del inputs, parameters, context
+        return {}
+
+    def reset(self, reason: ResetReason) -> None:
+        del reason
+
+    def close(self) -> None:
+        return
+
+
+def _probe_source_definition() -> NodeDefinition:
+    return NodeDefinition(
+        execution=NodeExecutionContract(
+            type_id="test.panic_source",
+            implementation_version=1,
+            inputs=(),
+            outputs=(OutputPortSpec("value", "Value", PortType.FLOAT),),
+            parameters=(),
+            execution_kind=ExecutionKind.SOURCE,
+            runtime_factory=_PanicProbeSourceRuntime,
+        ),
+        presentation=NodePresentationIntent(
+            display_name="Probe Source",
+            category="Test",
+            description="Keeps the engine tickable for panic propagation tests.",
+        ),
+    )
+
+
 @pytest.mark.parametrize("boundary", ["scheduler", "facade", "client"])
 def test_global_panic_propagates_through_every_runtime_boundary(boundary: str) -> None:
     instances: list[PanicProbeRuntime] = []
-    registry = NodeRegistry((_panic_probe_definition(instances),))
+    registry = NodeRegistry((_panic_probe_definition(instances), _probe_source_definition()))
     document = GraphDocument()
     document.add_node("test.panic_sink", node_id=PANIC_NODE_ID)
+    # The client boundary keeps the engine running only while a source can
+    # carry signal (ADR-0029): the probe source ticks, the sink is where
+    # panic lands.
+    document.add_node("test.panic_source")
 
     if boundary == "scheduler":
         plan = GraphCompiler(registry).compile(document.snapshot()).plan

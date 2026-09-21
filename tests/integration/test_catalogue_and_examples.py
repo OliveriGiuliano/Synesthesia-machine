@@ -125,7 +125,10 @@ def test_catalogue_is_the_exact_current_64_definition_registry() -> None:
     assert not snapshot.connections
 
     compilation = GraphCompiler(registry).compile(snapshot)
-    assert compilation.plan is None
+    # Self-contained valid nodes (a plain Number, …) survive partial
+    # compilation even though the catalogue as a whole is invalid
+    # (ADR-0029).
+    assert compilation.plan is not None
     assert {issue.code for issue in compilation.report.errors} <= {
         "required_input_missing",
         "unresolved_generic_type",
