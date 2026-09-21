@@ -781,6 +781,7 @@ class GraphScene(QGraphicsScene):
 
 class GraphView(QGraphicsView):
     requestSearch = Signal(object)
+    transportToggleRequested = Signal()
     openGraphFileRequested = Signal(Path)
 
     def __init__(self, scene: GraphScene, theme: Theme) -> None:
@@ -862,7 +863,10 @@ class GraphView(QGraphicsView):
             self._space_pressed = False
             self.setCursor(Qt.CursorShape.ArrowCursor)
             if not self._space_pan_used:
-                self.requestSearch.emit(self.mapToScene(self.viewport().rect().center()))
+                # A Space tap (press + release without a left-drag) toggles the
+                # targeted source between play and pause. A Space held long
+                # enough to pan the canvas stays a pure modifier.
+                self.transportToggleRequested.emit()
             event.accept()
             return
         super().keyReleaseEvent(event)

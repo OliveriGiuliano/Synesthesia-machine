@@ -491,6 +491,14 @@ class MainWindow(QMainWindow):
         create(ActionSpec("reload", "&Reload", "Reload the targeted source", "F8"), self.reload)
         create(
             ActionSpec(
+                "play_pause",
+                "&Play/Pause",
+                "Play or pause the targeted source (Space on the canvas)",
+            ),
+            self.play_or_pause,
+        )
+        create(
+            ActionSpec(
                 "panic",
                 "&Silence All Outputs",
                 "Immediately stop all MIDI notes and generated audio",
@@ -650,7 +658,7 @@ class MainWindow(QMainWindow):
         arrange_menu.addSeparator()
         arrange_menu.addAction(self.action_registry.require("tidy_selection"))
         graph_menu.addSeparator()
-        for key in ("play", "pause", "stop", "reload"):
+        for key in ("play", "pause", "play_pause", "stop", "reload"):
             graph_menu.addAction(self.action_registry.require(key))
         graph_menu.addSeparator()
         graph_menu.addAction(self.action_registry.require("restart_engine"))
@@ -692,6 +700,7 @@ class MainWindow(QMainWindow):
         self.scene.connectionDroppedOnEmpty.connect(self._search_compatible_node)
         self.scene.connectionInspectRequested.connect(self._inspect_connection)
         self.view.requestSearch.connect(self._search_nodes)
+        self.view.transportToggleRequested.connect(self.play_or_pause)
         # Dropping a saved graph file opens it with the exact File > Open flow
         # (dirty-document confirmation, recovery handling, recent files, status).
         self.view.openGraphFileRequested.connect(self._open_graph_file_from_drop)
@@ -728,6 +737,16 @@ class MainWindow(QMainWindow):
         if target is None:
             return
         self.engine_bridge.pause(target)
+
+    @Slot()
+    def play_or_pause(self) -> None:
+        # Space tap on the canvas (its old add-node shortcut). The target is
+        # resolved on the UI thread; the state lookup and the command run on
+        # the engine task pool (see EngineBridge.toggle_play_pause).
+        target = self._transport_target()
+        if target is None:
+            return
+        self.engine_bridge.toggle_play_pause(target)
 
     @Slot()
     def stop(self) -> None:
@@ -1222,6 +1241,7 @@ class MainWindow(QMainWindow):
         transport = resolve_transport_target(view_model.derived.source_node_ids, selected_nodes)
         for key, verb in (
             ("play", "Play or resume"),
+            ("play_pause", "Play or pause"),
             ("pause", "Pause"),
             ("stop", "Stop"),
             ("reload", "Reload"),

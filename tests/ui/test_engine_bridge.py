@@ -29,6 +29,7 @@ from synesthesia_machine.contracts.engine_client import (
     NodeMemoryDiagnostic,
     NodeProfile,
     NotePreview,
+    SourceState,
     SourceStatus,
     ValuePreview,
 )
@@ -101,6 +102,7 @@ class _FakeClient:
         self.restart_count = 0
         self.image_preview: ImagePreview | None = None
         self.value_previews: tuple[ValuePreview, ...] = ()
+        self.statuses: dict[UUID, SourceStatus] = {}
 
     # -- transport ---------------------------------------------------------
 
@@ -142,7 +144,10 @@ class _FakeClient:
     # -- status ------------------------------------------------------------
 
     def source_status(self, source_node_id: UUID | None = None) -> tuple[SourceStatus, ...]:
-        return ()
+        if source_node_id is not None:
+            status = self.statuses.get(source_node_id)
+            return () if status is None else (status,)
+        return tuple(self.statuses[key] for key in sorted(self.statuses, key=str))
 
     def midi_output_status(
         self, output_node_id: UUID | None = None
@@ -502,6 +507,33 @@ def test_transport_commands_dispatch() -> None:
         ("seek", target),
     ]
     assert client.panics == 1
+
+
+def test_toggle_play_pause_branches_on_target_state() -> None:
+    """The Space gesture pauses a playing target and plays any other state."""
+
+    client = _FakeClient()
+    harness = _harness(client)
+    playing, ready, paused = uuid4(), uuid4(), uuid4()
+    client.statuses[playing] = SourceStatus(playing, SourceState.PLAYING, "a.mp4")
+    client.statuses[ready] = SourceStatus(ready, SourceState.READY, "b.mp4")
+    client.statuses[paused] = SourceStatus(paused, SourceState.PAUSED, "c.mp4")
+
+    harness.bridge.toggle_play_pause(playing)
+    assert client.transport == [("pause", playing)]
+    assert harness.states[-1].last_transport.verb == "Paused"
+
+    harness.bridge.toggle_play_pause(ready)
+    assert client.transport == [("pause", playing), ("play", ready)]
+    assert harness.states[-1].last_transport.verb == "Playing"
+
+    harness.bridge.toggle_play_pause(paused)
+    assert client.transport == [
+        ("pause", playing),
+        ("play", ready),
+        ("resume", paused),
+    ]
+    assert harness.states[-1].last_transport.verb == "Resumed"
 
 
 # --- status / telemetry ----------------------------------------------------

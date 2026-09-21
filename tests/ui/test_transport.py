@@ -11,7 +11,7 @@ from uuid import UUID
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import QPoint, QSettings, Qt
 from PySide6.QtGui import QFontMetricsF, QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QToolButton
@@ -339,6 +339,114 @@ def test_transport_auto_targets_sole_source_resumes_paused_and_never_fans_out(
     window.scene.select_node_ids({source_a, source_b})
     count = len(client.calls)
     window.pause()
+    assert len(client.calls) == count
+
+
+def test_space_tap_toggles_play_pause_of_the_targeted_source(
+    runtime_window: tuple[MainWindow, _RecordingEngineClient],
+    qapp: QApplication,
+) -> None:
+    """A Space tap on the canvas (its old add-node shortcut) now toggles the
+    targeted source instead of opening the node search."""
+
+    window, client = runtime_window
+    source = window.session.add_node("synmachine.input.load_video", (0.0, 0.0))
+    client.statuses[source] = _source_status(source)
+    # Wait until the source is in the published projection (target
+    # resolution) and the add-node activation has settled, so neither can
+    # interleave with the transport assertions below.
+    deadline = time.monotonic() + 2.0
+    while source not in window.session.view_model.derived.source_node_ids:
+        if time.monotonic() > deadline:
+            pytest.fail("view model never published the source node")
+        QTest.qWait(10)
+    _wait_for_engine_tasks(window)
+
+    searches: list[object] = []
+    window.view.requestSearch.connect(searches.append)
+
+    client.statuses[source] = _source_status(source)
+    QTest.keyClick(window.view, Qt.Key.Key_Space)
+    QTest.qWait(20)
+    _wait_for_engine_tasks(window)
+    assert client.calls[-1] == ("play", source)
+
+    client.statuses[source] = _source_status(source, SourceState.PLAYING)
+    QTest.keyClick(window.view, Qt.Key.Key_Space)
+    QTest.qWait(20)
+    _wait_for_engine_tasks(window)
+    assert client.calls[-1] == ("pause", source)
+
+    client.statuses[source] = _source_status(source, SourceState.PAUSED)
+    QTest.keyClick(window.view, Qt.Key.Key_Space)
+    QTest.qWait(20)
+    _wait_for_engine_tasks(window)
+    assert client.calls[-1] == ("resume", source)
+
+    assert searches == [], "a Space tap must no longer open the node search"
+
+
+def test_space_pan_does_not_toggle_transport(
+    runtime_window: tuple[MainWindow, _RecordingEngineClient],
+    qapp: QApplication,
+) -> None:
+    """Space held long enough to pan the canvas stays a pure modifier: the
+    gesture ends in a moved canvas and no transport command."""
+
+    window, client = runtime_window
+    source = window.session.add_node("synmachine.input.load_video", (0.0, 0.0))
+    client.statuses[source] = _source_status(source, SourceState.PLAYING)
+    QTest.qWait(140)
+    _wait_for_engine_tasks(window)
+
+    view = window.view
+    view.setFocus()
+    qapp.processEvents()
+    QTest.keyEvent(QTest.KeyAction.Press, view, Qt.Key.Key_Space)
+    qapp.processEvents()
+    assert view.cursor().shape() is Qt.CursorShape.OpenHandCursor
+
+    viewport = view.viewport()
+    start = viewport.rect().center()
+    end = start + QPoint(60, 30)
+    # The canvas pans by moving the scrollbars, not the view transform.
+    before = (view.horizontalScrollBar().value(), view.verticalScrollBar().value())
+    count = len(client.calls)
+    QTest.mousePress(viewport, Qt.MouseButton.LeftButton, pos=start)
+    qapp.processEvents()
+    QTest.mouseMove(viewport, end)
+    qapp.processEvents()
+    QTest.mouseRelease(viewport, Qt.MouseButton.LeftButton, pos=end)
+    QTest.keyEvent(QTest.KeyAction.Release, view, Qt.Key.Key_Space)
+    qapp.processEvents()
+
+    after = (view.horizontalScrollBar().value(), view.verticalScrollBar().value())
+    assert after != before, "Space+left-drag must pan the canvas"
+    assert len(client.calls) == count
+
+
+def test_space_tap_with_multiple_sources_and_no_selection_issues_no_command(
+    runtime_window: tuple[MainWindow, _RecordingEngineClient],
+) -> None:
+    window, client = runtime_window
+    source_a = window.session.add_node("synmachine.input.load_video", (0.0, 0.0))
+    source_b = window.session.add_node("synmachine.input.load_video", (300.0, 0.0))
+    client.statuses[source_a] = _source_status(source_a, SourceState.PLAYING)
+    client.statuses[source_b] = _source_status(source_b)
+    # Wait until both sources are in the published projection so the target
+    # resolution (no selection, several sources) is deterministic, and let
+    # the debounced activation settle before the gesture.
+    deadline = time.monotonic() + 2.0
+    while set(window.session.view_model.derived.source_node_ids) != {source_a, source_b}:
+        if time.monotonic() > deadline:
+            pytest.fail("view model never published both source nodes")
+        QTest.qWait(10)
+    _wait_for_engine_tasks(window)
+
+    count = len(client.calls)
+    QTest.keyClick(window.view, Qt.Key.Key_Space)
+    QTest.qWait(20)
+    _wait_for_engine_tasks(window)
     assert len(client.calls) == count
 
 

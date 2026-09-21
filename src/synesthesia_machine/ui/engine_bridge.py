@@ -283,6 +283,22 @@ class EngineBridge:
         self._session.play(target)
         return TransportOutcome("Playing", target)
 
+    def toggle_play_pause(self, source_node_id: UUID) -> None:
+        """Toggle the targeted source between play and pause (Space gesture).
+
+        The play-or-pause decision depends on the source's state, so the state
+        lookup and the command run together on the task pool (a slow or hung
+        child cannot block the UI event thread). A playing target pauses; any
+        other state plays (a paused target resumes).
+        """
+        self._submit("transport", lambda: self._load_toggle(source_node_id))
+
+    def _load_toggle(self, target: UUID) -> TransportOutcome:
+        statuses = self._session.client.source_status(target)
+        if statuses and statuses[0].state is SourceState.PLAYING:
+            return self._transport_command("pause", "Paused", target)
+        return self._load_play(target)
+
     def pause(self, source_node_id: UUID | None = None) -> None:
         if source_node_id is None:
             self._submit("transport", lambda: self._session.pause(source_node_id))

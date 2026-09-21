@@ -161,6 +161,10 @@ _FRENCH: dict[str, str] = {
     "Play or resume the targeted source": "Lire ou reprendre la source ciblée",
     "P&ause": "P&ause",
     "Pause the targeted source": "Mettre la source ciblée en pause",
+    "&Play/Pause": "&Lecture/Pause",
+    "Play or pause the targeted source (Space on the canvas)": (
+        "Lecture ou pause de la source ciblée (espace sur le canevas)"
+    ),
     "&Stop": "&Arrêter",
     "Stop the targeted source": "Arrêter la source ciblée",
     "&Reload": "&Recharger",
@@ -376,6 +380,7 @@ _FRENCH: dict[str, str] = {
     "{nodes} node(s) · {cables} cable(s) · {groups} group/comment(s)": "{nodes} nœud(s) · {cables} câble(s) · {groups} groupe(s)/commentaire(s)",
     "{errors} error(s) · {warnings} warning(s)": "{errors} erreur(s) · {warnings} avertissement(s)",
     "Play or resume": "Lire ou reprendre",
+    "Play or pause": "Lire ou mettre en pause",
     "Pause": "Mettre en pause",
     "Stop": "Arrêter",
     "Reload": "Recharger",

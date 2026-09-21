@@ -964,6 +964,7 @@ Node graphics and domain state are separate. The scene item observes a `NodeView
 ### 13.5 Canvas interaction
 
 - middle mouse or Space+left-drag pans;
+- Space tap (press and release without a left-drag) toggles play/pause of the targeted source;
 - wheel zooms under cursor;
 - marquee selection;
 - Delete removes selection;
@@ -985,14 +986,14 @@ Nodes can be created by:
 - drag from the left library;
 - drop a video file from the operating system;
 - double-click or Enter from the library;
-- right-click/Space on empty graph to open fuzzy search;
+- right-click on empty graph to open fuzzy search;
 - dropping a connection on empty graph to open type-filtered search.
 
 Search indexes display name, category, aliases, and description keywords.
 
 ### 13.7 Transport ownership
 
-Transport buttons operate on selected source nodes. If exactly one source exists, it is automatically targeted. If several exist and none is selected, the UI requests a source selection rather than controlling all unexpectedly.
+Transport buttons operate on selected source nodes. If exactly one source exists, it is automatically targeted. If several exist and none is selected, the UI requests a source selection rather than controlling all unexpectedly. The Space gesture on the graph canvas applies the same targeting policy: a Space tap toggles the targeted source between play and pause (Space+left-drag remains the canvas pan modifier).
 
 ### 13.8 UI update throttling
 
