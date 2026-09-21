@@ -44,7 +44,7 @@ def test_incremental_scene_sync_reuses_unchanged_items(
     first_item = scene.node_items[first]
     second_item = scene.node_items[second]
 
-    session.set_parameter(first, "float_value", 42.0)
+    session.set_parameter(first, "value", 42.0)
 
     assert scene.node_items[first] is not first_item
     assert scene.node_items[second] is second_item

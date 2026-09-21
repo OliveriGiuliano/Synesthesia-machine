@@ -49,7 +49,8 @@ def profile_large_graph(node_count: int = 500) -> LargeGraphReport:
     node_ids = tuple(
         document.add_node(
             "synmachine.utility.number",
-            parameters={"number_type": "FLOAT", "float_value": float(index)},
+            implementation_version=2,
+            parameters={"number_type": "FLOAT", "value": float(index)},
             position=((index % 25) * 285.0, (index // 25) * 155.0),
         )
         for index in range(node_count)
@@ -73,7 +74,7 @@ def profile_large_graph(node_count: int = 500) -> LargeGraphReport:
         unaffected_id = node_ids[-1]
         unaffected_item = scene.node_items[unaffected_id]
         started = time.perf_counter_ns()
-        session.set_parameter(node_ids[0], "float_value", -1.0)
+        session.set_parameter(node_ids[0], "value", -1.0)
         qapp.processEvents()
         incremental_edit_ms = (time.perf_counter_ns() - started) / 1_000_000.0
         identity_preserved = scene.node_items[unaffected_id] is unaffected_item

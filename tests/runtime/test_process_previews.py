@@ -234,7 +234,9 @@ def test_spawned_engine_delivers_scalar_value_preview_for_synesthesia_param(
     luminance_id = document.add_node("synmachine.image.to_luminance")
     pitch_id = document.add_node("synmachine.synesthesia.channel_to_pitch")
     note_id = document.add_node(NOTE_VISUALIZER_TYPE_ID)
-    number_id = document.add_node("synmachine.utility.number", parameters={"float_value": 0.5})
+    number_id = document.add_node(
+        "synmachine.utility.number", implementation_version=2, parameters={"value": 0.5}
+    )
     document.add_connection(source_id, "image", luminance_id, "image")
     document.add_connection(luminance_id, "channel", pitch_id, "value")
     document.add_connection(pitch_id, "midi", note_id, "midi")

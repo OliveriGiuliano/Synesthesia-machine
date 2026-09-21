@@ -51,9 +51,9 @@ def test_legacy_graph_and_number_node_fixture_migrate_without_mutation() -> None
     snapshot = graph_from_json(text, create_application_registry())
 
     assert json.loads(text) == original
-    assert snapshot.nodes[0].implementation_version == 1
+    assert snapshot.nodes[0].implementation_version == 2
     assert snapshot.nodes[0].parameters["number_type"] == "FLOAT"
-    assert snapshot.nodes[0].parameters["float_value"] == 7.5
+    assert snapshot.nodes[0].parameters["value"] == 7.5
 
 
 def test_legacy_load_video_parameter_is_migrated() -> None:
@@ -213,7 +213,7 @@ def test_validator_reports_fixture_migrations_and_invalid_file(tmp_path: Path) -
     assert report.migrated_files == 2
     legacy = next(result for result in report.results if "legacy_number" in result.path)
     assert legacy.graph_migration_steps == 4
-    assert legacy.node_migration_steps == 1
+    assert legacy.node_migration_steps == 2
 
 
 STAT_SOURCE_ID = "70000000-0000-0000-0000-000000000301"

@@ -272,8 +272,9 @@ def test_static_cache_survives_ticks_and_new_plan_invalidates_it() -> None:
     document = GraphDocument()
     number = document.add_node(
         "synmachine.utility.number",
+        implementation_version=2,
         node_id=NODE_A,
-        parameters={"number_type": "FLOAT", "float_value": 2.0},
+        parameters={"number_type": "FLOAT", "value": 2.0},
     )
     passthrough = document.add_node("synmachine.utility.pass_through", node_id=NODE_B)
     document.add_connection(number, "value", passthrough, "value")
@@ -284,7 +285,7 @@ def test_static_cache_survives_ticks_and_new_plan_invalidates_it() -> None:
     assert first.values[PortKey(passthrough, "value")] == 2.0
     assert second.invocation_counts == {}
 
-    document.set_parameter(number, "float_value", 5.0)
+    document.set_parameter(number, "value", 5.0)
     assert facade.activate(document.snapshot()).plan is not None
     changed = facade.tick(frame_context(clock_id=CLOCK_ID, tick_index=3))
     assert changed.values[PortKey(passthrough, "value")] == 5.0
@@ -296,13 +297,15 @@ def test_connection_change_invalidates_static_cache() -> None:
     document = GraphDocument()
     first_number = document.add_node(
         "synmachine.utility.number",
+        implementation_version=2,
         node_id=NODE_A,
-        parameters={"number_type": "FLOAT", "float_value": 2.0},
+        parameters={"number_type": "FLOAT", "value": 2.0},
     )
     second_number = document.add_node(
         "synmachine.utility.number",
+        implementation_version=2,
         node_id=NODE_B,
-        parameters={"number_type": "FLOAT", "float_value": 8.0},
+        parameters={"number_type": "FLOAT", "value": 8.0},
     )
     passthrough = document.add_node("synmachine.utility.pass_through", node_id=NODE_C)
     document.add_connection(first_number, "value", passthrough, "value")
@@ -324,13 +327,15 @@ def test_expected_error_becomes_no_data_without_terminating_tick() -> None:
     document = GraphDocument()
     numerator = document.add_node(
         "synmachine.utility.number",
+        implementation_version=2,
         node_id=NODE_A,
-        parameters={"number_type": "FLOAT", "float_value": 1.0},
+        parameters={"number_type": "FLOAT", "value": 1.0},
     )
     denominator = document.add_node(
         "synmachine.utility.number",
+        implementation_version=2,
         node_id=NODE_B,
-        parameters={"number_type": "FLOAT", "float_value": 0.0},
+        parameters={"number_type": "FLOAT", "value": 0.0},
     )
     divide = document.add_node(
         "synmachine.utility.math", node_id=NODE_C, parameters={"operation": "DIVIDE"}
@@ -391,13 +396,15 @@ def test_power_domain_error_stays_within_float_runtime_contract() -> None:
     document = GraphDocument()
     negative = document.add_node(
         "synmachine.utility.number",
+        implementation_version=2,
         node_id=NODE_A,
-        parameters={"number_type": "FLOAT", "float_value": -1.0},
+        parameters={"number_type": "FLOAT", "value": -1.0},
     )
     exponent = document.add_node(
         "synmachine.utility.number",
+        implementation_version=2,
         node_id=NODE_B,
-        parameters={"number_type": "FLOAT", "float_value": 0.5},
+        parameters={"number_type": "FLOAT", "value": 0.5},
     )
     power = document.add_node(
         "synmachine.utility.math", node_id=NODE_C, parameters={"operation": "POWER"}
@@ -418,13 +425,15 @@ def test_utility_graph_is_deterministic_across_synthetic_ticks() -> None:
     document = GraphDocument()
     left = document.add_node(
         "synmachine.utility.number",
+        implementation_version=2,
         node_id=NODE_A,
-        parameters={"number_type": "INT", "int_value": 2},
+        parameters={"number_type": "INT", "value": 2.0},
     )
     right = document.add_node(
         "synmachine.utility.number",
+        implementation_version=2,
         node_id=NODE_B,
-        parameters={"number_type": "FLOAT", "float_value": 3.5},
+        parameters={"number_type": "FLOAT", "value": 3.5},
     )
     add = document.add_node(
         "synmachine.utility.math", node_id=NODE_C, parameters={"operation": "ADD"}
@@ -446,13 +455,15 @@ def test_compare_logic_and_conditional_nodes_execute_together() -> None:
     document = GraphDocument()
     high = document.add_node(
         "synmachine.utility.number",
+        implementation_version=2,
         node_id=NODE_A,
-        parameters={"number_type": "FLOAT", "float_value": 5.0},
+        parameters={"number_type": "FLOAT", "value": 5.0},
     )
     low = document.add_node(
         "synmachine.utility.number",
+        implementation_version=2,
         node_id=NODE_B,
-        parameters={"number_type": "FLOAT", "float_value": 3.0},
+        parameters={"number_type": "FLOAT", "value": 3.0},
     )
     greater = document.add_node(
         "synmachine.utility.compare", node_id=NODE_C, parameters={"operation": "GT"}
@@ -491,13 +502,13 @@ def test_engine_facade_commits_partial_plan_for_partially_invalid_graph() -> Non
     remainder's plan replaces the old one."""
     facade = EngineFacade(create_utility_registry())
     valid = GraphDocument()
-    valid.add_node("synmachine.utility.number", node_id=NODE_A)
+    valid.add_node("synmachine.utility.number", implementation_version=2, node_id=NODE_A)
     activation = facade.activate(valid.snapshot())
     assert activation.plan is not None
     old_plan = facade.active_plan
 
     broken = GraphDocument()
-    broken.add_node("synmachine.utility.number", node_id=NODE_A)
+    broken.add_node("synmachine.utility.number", implementation_version=2, node_id=NODE_A)
     broken.add_node("unknown.node", node_id=NODE_B)
     partial = facade.activate(broken.snapshot())
 

@@ -88,13 +88,13 @@ def _graph_round_trip(root: Path) -> str:
     node_id = document.add_node(
         definition.execution.type_id,
         implementation_version=definition.execution.implementation_version,
-        parameters={"number_type": "FLOAT", "float_value": 42.0},
+        parameters={"number_type": "FLOAT", "value": 42.0},
     )
     graph_path = root / "release-smoke.synmachine.json"
     save_graph(graph_path, document.snapshot())
     loaded = load_graph(graph_path, registry)
     node = loaded.node(node_id)
-    if node is None or node.parameters.get("float_value") != 42.0:
+    if node is None or node.parameters.get("value") != 42.0:
         raise RuntimeError("saved graph did not round-trip")
     compilation = GraphCompiler(registry).compile(loaded)
     if not compilation.report.is_valid or compilation.plan is None:

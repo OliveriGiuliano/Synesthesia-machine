@@ -1121,11 +1121,10 @@
     {
       "collapsed": false,
       "id": "65000000-0000-0000-0000-000000000057",
-      "implementation_version": 1,
+      "implementation_version": 2,
       "parameters": {
-        "float_value": 0.0,
-        "int_value": 0,
-        "number_type": "FLOAT"
+        "number_type": "FLOAT",
+        "value": 0.0
       },
       "position": [
         320.0,

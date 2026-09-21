@@ -421,13 +421,13 @@ def test_scene_parameter_edit_duplicate_copy_paste_and_undo(
     assert isinstance(item, NodeGraphicsItem)
     assert (item.pos().x(), item.pos().y()) == (80.0, 120.0)
 
-    proxy = item.parameter_editors["float_value"]
+    proxy = item.parameter_editors["value"]
     editor = proxy.widget()
     assert isinstance(editor, QDoubleSpinBox)
     editor.setValue(6.5)
     editor.editingFinished.emit()
     qapp.processEvents()
-    assert window.session.document.node(node_id).parameters["float_value"] == 6.5  # type: ignore[union-attr]
+    assert window.session.document.node(node_id).parameters["value"] == 6.5  # type: ignore[union-attr]
 
     window.scene.select_node_ids({node_id})
     window.duplicate_selection()
@@ -988,7 +988,7 @@ def test_pressing_enter_in_embedded_numeric_editor_commits_without_destroying_si
     qapp: QApplication,
 ) -> None:
     node_id = window.session.add_node("synmachine.utility.number", (80.0, 120.0))
-    editor = window.scene.node_items[node_id].parameter_editors["float_value"].widget()
+    editor = window.scene.node_items[node_id].parameter_editors["value"].widget()
     assert isinstance(editor, QDoubleSpinBox)
     editor.setFocus()
     editor.selectAll()
@@ -996,8 +996,8 @@ def test_pressing_enter_in_embedded_numeric_editor_commits_without_destroying_si
     QTest.keyClick(editor, Qt.Key.Key_Return)
     qapp.processEvents()
 
-    assert window.session.document.node(node_id).parameters["float_value"] == 12.5  # type: ignore[union-attr]
-    replacement = window.scene.node_items[node_id].parameter_editors["float_value"].widget()
+    assert window.session.document.node(node_id).parameters["value"] == 12.5  # type: ignore[union-attr]
+    replacement = window.scene.node_items[node_id].parameter_editors["value"].widget()
     assert replacement is not None and replacement is not editor
 
 
@@ -1006,8 +1006,8 @@ def test_embedded_spinbox_arrow_buttons_commit_both_directions(
     qapp: QApplication,
 ) -> None:
     node_id = window.session.add_node("synmachine.utility.number", (80.0, 120.0))
-    editor = window.scene.node_items[node_id].parameter_editors["int_value"].widget()
-    assert isinstance(editor, QSpinBox)
+    editor = window.scene.node_items[node_id].parameter_editors["value"].widget()
+    assert isinstance(editor, QDoubleSpinBox)
     original = editor.value()
 
     QTest.mouseClick(
@@ -1016,17 +1016,17 @@ def test_embedded_spinbox_arrow_buttons_commit_both_directions(
         pos=QPoint(editor.width() - 8, 5),
     )
     qapp.processEvents()
-    assert window.session.document.node(node_id).parameters["int_value"] == original + 1  # type: ignore[union-attr]
+    assert window.session.document.node(node_id).parameters["value"] == original + 1  # type: ignore[union-attr]
 
-    replacement = window.scene.node_items[node_id].parameter_editors["int_value"].widget()
-    assert isinstance(replacement, QSpinBox)
+    replacement = window.scene.node_items[node_id].parameter_editors["value"].widget()
+    assert isinstance(replacement, QDoubleSpinBox)
     QTest.mouseClick(
         replacement,
         Qt.MouseButton.LeftButton,
         pos=QPoint(replacement.width() - 8, replacement.height() - 5),
     )
     qapp.processEvents()
-    assert window.session.document.node(node_id).parameters["int_value"] == original  # type: ignore[union-attr]
+    assert window.session.document.node(node_id).parameters["value"] == original  # type: ignore[union-attr]
 
 
 def test_node_parameter_rows_have_contextual_hover_help(window: MainWindow) -> None:
@@ -1034,10 +1034,10 @@ def test_node_parameter_rows_have_contextual_hover_help(window: MainWindow) -> N
     item = window.scene.node_items[node_id]
 
     node_help = item._tooltip_for_position(QPointF(20.0, 10.0))
-    parameter_help = item._tooltip_for_position(QPointF(20.0, item._parameter_rows["float_value"]))
+    parameter_help = item._tooltip_for_position(QPointF(20.0, item._parameter_rows["value"]))
 
     assert node_help == item.view_model.description
-    assert "float value" in parameter_help.lower()
+    assert "number this node outputs" in parameter_help.lower()
     assert parameter_help != node_help
 
 

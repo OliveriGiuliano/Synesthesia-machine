@@ -73,7 +73,7 @@ def test_add_set_and_multi_move_commands_restore_exact_state() -> None:
     cycle(stack, document, before_move, moved)
 
     before_parameter = semantic_state(document)
-    stack.push(SetParameterCommand(document, NODE_A, "float_value", 8.5))
+    stack.push(SetParameterCommand(document, NODE_A, "value", 8.5))
     changed = semantic_state(document)
     cycle(stack, document, before_parameter, changed)
 

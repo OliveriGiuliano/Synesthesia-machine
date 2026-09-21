@@ -57,6 +57,30 @@ def migrate_number_v0_to_v1(data: JsonObject) -> JsonObject:
     return migrated
 
 
+def migrate_number_v1_to_v2(data: JsonObject) -> JsonObject:
+    """Fold the v1 float/integer value pair into the single v2 ``value``.
+
+    Only the v1 value selected by ``number_type`` survives: the v1 runtime
+    ignored the other field, so copying it would change the node's output.
+    A missing field means the v1 default (0), which equals the v2 default, so
+    nothing is stored.
+    """
+    migrated = deepcopy(data)
+    parameters = migration_parameters(migrated)
+    number_type = parameters.get("number_type")
+    legacy = (
+        parameters.pop("int_value", None)
+        if number_type == "INT"
+        else parameters.pop("float_value", None)
+    )
+    parameters.pop("int_value", None)
+    parameters.pop("float_value", None)
+    if legacy is not None and isinstance(legacy, (int, float)) and not isinstance(legacy, bool):
+        parameters["value"] = float(legacy)
+    migrated["implementation_version"] = 2
+    return migrated
+
+
 class NumberRuntime(StatelessRuntime):
     def process(
         self,
@@ -65,9 +89,11 @@ class NumberRuntime(StatelessRuntime):
         context: FrameContext,
     ) -> Mapping[str, RuntimeValue]:
         del inputs, context
+        value = cast(float, parameters["value"])
         if parameters["number_type"] == "INT":
-            return {"value": cast(int, parameters["int_value"])}
-        return {"value": cast(float, parameters["float_value"])}
+            # Truncation toward zero is the documented Integer conversion.
+            return {"value": int(value)}
+        return {"value": value}
 
 
 class PassThroughRuntime(StatelessRuntime):
@@ -215,7 +241,7 @@ def create_utility_registry() -> NodeRegistry:
         NodeDefinition(
             execution=NodeExecutionContract(
                 "synmachine.utility.number",
-                1,
+                2,
                 ExecutionKind.STATELESS,
                 (),
                 (OutputPortSpec("value", "Value", PortType.FLOAT),),
@@ -231,19 +257,14 @@ def create_utility_registry() -> NodeRegistry:
                         choices=("FLOAT", "INT"),
                     ),
                     ParameterSpec(
-                        "float_value",
-                        "Float value",
+                        "value",
+                        "Value",
                         PortType.FLOAT,
                         0.0,
-                        help_text="The float value this node outputs; used when the type is Float.",
-                    ),
-                    ParameterSpec(
-                        "int_value",
-                        "Integer value",
-                        PortType.INT,
-                        0,
-                        help_text="The integer value this node outputs; used when the type is "
-                        "Integer.",
+                        help_text=(
+                            "The number this node outputs. A Float type outputs it unchanged; "
+                            "an Integer type converts it, truncating toward zero."
+                        ),
                     ),
                 ),
                 NumberRuntime,
@@ -257,7 +278,7 @@ def create_utility_registry() -> NodeRegistry:
                 aliases=("constant", "literal", "scalar"),
             ),
             persistence=NodePersistenceDescriptor(
-                migrations={0: migrate_number_v0_to_v1},
+                migrations={0: migrate_number_v0_to_v1, 1: migrate_number_v1_to_v2},
             ),
         ),
         NodeDefinition(

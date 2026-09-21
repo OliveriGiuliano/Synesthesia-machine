@@ -749,8 +749,6 @@ _FRENCH: dict[str, str] = {
     "Input maximum": "Maximum d’entrée",
     "Output minimum": "Minimum de sortie",
     "Output maximum": "Maximum de sortie",
-    "Float value": "Valeur flottante",
-    "Integer value": "Valeur entière",
     "Statistic": "Statistique",
     "Semitones": "Demi-tons",
     "Value display": "Affichage des valeurs",
@@ -1048,8 +1046,9 @@ _FRENCH: dict[str, str] = {
     "Strength of the sharpen; higher values emphasize detail more.": "Force de la netteté ; les valeurs plus élevées accentuent davantage le détail.",
     "Target height of the image in pixels.": "Hauteur cible de l’image, en pixels.",
     "Target width of the image in pixels.": "Largeur cible de l’image, en pixels.",
-    "The float value this node outputs; used when the type is Float.": "Valeur décimale en sortie du nœud ; utilisée quand le type est Décimal.",
-    "The integer value this node outputs; used when the type is Integer.": "Valeur entière en sortie du nœud ; utilisée quand le type est Entier.",
+    "The number this node outputs. A Float type outputs it unchanged; "
+    "an Integer type converts it, truncating toward zero.": "Le nombre produit par ce nœud. "
+    "Le type Décimal le produit tel quel ; le type Entier le convertit en entier, en tronquant vers zéro.",
     "Tolerance used by the Approx comparison: two values match if they differ by no more than this amount.": "Tolérance de la comparaison Approximative : deux valeurs correspondent si leur différence ne dépasse pas ce montant.",
     "Tolerance used by the Approx comparison: two values match if they differ by no more than this fraction of the other value.": "Tolérance de la comparaison Approximative : deux valeurs correspondent si leur différence ne dépasse pas cette fraction de l’autre valeur.",
     "Top edge of the crop box, in the units of the Coordinates setting.": "Bord supérieur de la zone de recadrage, dans l’unité du réglage Coordonnées.",

@@ -15,7 +15,8 @@ def _document(value: float) -> GraphDocument:
     document = GraphDocument()
     document.add_node(
         "synmachine.utility.number",
-        parameters={"number_type": "FLOAT", "float_value": value},
+        implementation_version=2,
+        parameters={"number_type": "FLOAT", "value": value},
     )
     return document
 

@@ -38,7 +38,7 @@ def run_forced_crash(workspace: Path) -> ForcedCrashReport:
     recovery_directory = workspace / "recovery"
     explicit_path = workspace / "explicit.synmachine.json"
     document = GraphDocument()
-    document.add_node("synmachine.utility.number", position=(10.0, 20.0))
+    document.add_node("synmachine.utility.number", implementation_version=2, position=(10.0, 20.0))
     save_graph(explicit_path, document.snapshot())
     unsaved_node_id = uuid4()
     command = [
@@ -93,6 +93,7 @@ def _run_crash_child(
     document = GraphDocument.from_snapshot(load_graph(explicit_path, registry))
     document.add_node(
         "synmachine.utility.number",
+        implementation_version=2,
         node_id=unsaved_node_id,
         position=(320.0, 160.0),
     )

@@ -78,7 +78,7 @@ def test_compatible_definitions_offer_variadic_input_sockets() -> None:
     source = session.add_node(
         "synmachine.utility.number",
         (0.0, 0.0),
-        parameters={"number_type": "FLOAT", "float_value": 1.0},
+        parameters={"number_type": "FLOAT", "value": 1.0},
     )
 
     offered = {
@@ -235,7 +235,7 @@ def test_save_open_and_recovery_preserve_values_and_clean_state(tmp_path: Path) 
     session = DocumentSession(registry)
     node_id = session.add_node("synmachine.utility.number", (123.5, -44.0))
     session.set_parameter(node_id, "number_type", "FLOAT")
-    session.set_parameter(node_id, "float_value", 7.25)
+    session.set_parameter(node_id, "value", 7.25)
     path = tmp_path / "roundtrip.synmachine.json"
 
     session.save(path)
@@ -246,7 +246,7 @@ def test_save_open_and_recovery_preserve_values_and_clean_state(tmp_path: Path) 
     node = reopened.document.node(node_id)
     assert node is not None
     assert node.position == (123.5, -44.0)
-    assert node.parameters["float_value"] == 7.25
+    assert node.parameters["value"] == 7.25
     assert not reopened.is_dirty
     assert reopened.undo_stack.count() == 0
 

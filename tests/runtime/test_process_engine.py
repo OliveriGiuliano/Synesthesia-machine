@@ -56,7 +56,8 @@ def _scalar_document() -> GraphDocument:
     document = GraphDocument()
     document.add_node(
         "synmachine.utility.number",
-        parameters={"number_type": "FLOAT", "float_value": 0.5},
+        implementation_version=2,
+        parameters={"number_type": "FLOAT", "value": 0.5},
     )
     return document
 
