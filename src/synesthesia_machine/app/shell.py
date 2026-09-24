@@ -92,6 +92,7 @@ def create_app_shell(
 
 def process_client_factory(
     *,
+    startup_timeout_s: float | None = None,
     request_timeout_s: float | None = None,
     activation_timeout_s: float | None = None,
     heartbeat_timeout_s: float | None = None,
@@ -107,6 +108,8 @@ def process_client_factory(
     def factory(*, registry: NodeRegistry, paths: ApplicationPaths) -> ProcessEngineClient:
         del registry
         kwargs: dict[str, object] = {"crash_log_path": paths.logs / "engine-crash.log"}
+        if startup_timeout_s is not None:
+            kwargs["startup_timeout_s"] = startup_timeout_s
         if request_timeout_s is not None:
             kwargs["request_timeout_s"] = request_timeout_s
         if activation_timeout_s is not None:

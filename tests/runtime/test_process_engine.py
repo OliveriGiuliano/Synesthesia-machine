@@ -139,6 +139,36 @@ def test_protocol_mismatch_is_rejected_and_child_is_reaped() -> None:
     assert _wait_until(lambda: _child_process_ids() <= children_before)
 
 
+def test_startup_handshake_uses_startup_budget_not_request_budget() -> None:
+    # Regression (ADR 0031): the handshake used to borrow request_timeout_s,
+    # so a tight request budget could time out a healthy child whose
+    # spawn-and-import legitimately takes longer (Windows, antivirus, cold
+    # page cache) with "Timed out waiting for Handshake".
+    client = ProcessEngineClient(request_timeout_s=0.01, close_timeout_s=0.5)
+    try:
+        assert client.status().connection_state is EngineConnectionState.CONNECTED
+    finally:
+        client.close()
+
+
+def test_explicit_startup_timeout_bounds_the_handshake() -> None:
+    # No platform can spawn, import, and answer a handshake within 10 ms, so
+    # a healthy child deterministically misses a 10 ms startup deadline: this
+    # pins the knob to the handshake rather than to the request budget.
+    client = ProcessEngineClient(
+        auto_start=False,
+        startup_timeout_s=0.01,
+        close_timeout_s=0.5,
+    )
+    try:
+        with pytest.raises(TimeoutError, match="Timed out waiting for Handshake"):
+            client.start()
+        assert client.status().connection_state is EngineConnectionState.CRASHED
+        assert "startup failed" in (client.status().last_error or "")
+    finally:
+        client.close()
+
+
 def test_process_activation_metrics_and_concurrent_request_correlation(
     process_client: ProcessEngineClient,
     tmp_path: Path,

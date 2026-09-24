@@ -82,6 +82,13 @@ from synesthesia_machine.runtime.preview_channel import PreviewSlotKey, SharedMe
 DEFAULT_REQUEST_TIMEOUT_S = 3.0
 DEFAULT_ACTIVATION_TIMEOUT_S = 10.0
 DEFAULT_CLOSE_TIMEOUT_S = 2.0
+# The handshake is a startup operation, not a runtime request: the spawned
+# child must boot the interpreter, import the full node stack (NumPy,
+# OpenCV, PyAV, RTMidi, sounddevice), and initialise the server before it
+# can answer. On Windows a cold page cache plus antivirus scanning of the
+# child and its DLLs can push that past any request budget, so the
+# handshake gets its own deadline instead of borrowing request_timeout_s.
+DEFAULT_STARTUP_TIMEOUT_S = 15.0
 
 _WINDOWS_EXIT_CODES = {
     0xC0000005: "Windows access violation in native code",
@@ -142,6 +149,7 @@ class ProcessEngineClient:
         *,
         auto_start: bool = True,
         protocol_version: int = ENGINE_PROTOCOL_VERSION,
+        startup_timeout_s: float = DEFAULT_STARTUP_TIMEOUT_S,
         request_timeout_s: float = DEFAULT_REQUEST_TIMEOUT_S,
         activation_timeout_s: float = DEFAULT_ACTIVATION_TIMEOUT_S,
         heartbeat_timeout_s: float = DEFAULT_HEARTBEAT_TIMEOUT_S,
@@ -150,6 +158,7 @@ class ProcessEngineClient:
     ) -> None:
         self._context: SpawnContext = get_context("spawn")
         self._protocol_version = protocol_version
+        self._startup_timeout_s = startup_timeout_s
         self._request_timeout_s = request_timeout_s
         self._activation_timeout_s = activation_timeout_s
         self._heartbeat_timeout_s = heartbeat_timeout_s
@@ -257,6 +266,7 @@ class ProcessEngineClient:
                     protocol_version=self._protocol_version,
                 ),
                 HandshakeAcknowledged,
+                timeout_s=self._startup_timeout_s,
             )
         except Exception as error:
             self._stop_current_process(graceful=False, mark_crashed=True)
