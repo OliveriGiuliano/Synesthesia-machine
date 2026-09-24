@@ -1,6 +1,7 @@
 """Application filesystem locations without Qt dependencies."""
 
 import os
+import posixpath
 from dataclasses import dataclass
 from os import environ
 from pathlib import Path
@@ -21,10 +22,17 @@ def data_base() -> str:
             return local_app_data
         return str(Path.home() / "AppData" / "Local")
     xdg_data_home = environ.get("XDG_DATA_HOME")
-    # The XDG spec: an empty or relative $XDG_DATA_HOME must be interpreted as
-    # being relative to $HOME (fall back to the default).
+    # The XDG spec: an empty or relative $XDG_DATA_HOME must be interpreted
+    # as being relative to $HOME (fall back to the default).
     if xdg_data_home and os.path.isabs(xdg_data_home):
         return xdg_data_home
+    # The XDG default is $HOME/.local/share. Read $HOME as a plain string so
+    # host-logic tests can simulate a POSIX host on any platform without
+    # instantiating platform-specific pathlib types; the pathlib fallback only
+    # runs on real POSIX hosts where $HOME is unset.
+    home = environ.get("HOME")
+    if home:
+        return posixpath.join(home, ".local", "share")
     return str(Path.home() / ".local" / "share")
 
 
