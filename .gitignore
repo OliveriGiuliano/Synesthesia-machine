@@ -186,6 +186,6 @@ logs/
 # LSP config files
 pyrightconfig.json
 
-./scratch/*
+.scratch/
 
 # End of https://www.toptal.com/developers/gitignore/api/python
